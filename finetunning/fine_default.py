@@ -370,11 +370,5 @@ def test_finetuned_model(model_path="./exaone-lora-results-2"):
     print(response)
 
 if __name__ == "__main__":
-    # 훈련 실행
     main()
     
-    # 파인튜닝된 모델 테스트 (선택사항)
-    # test_finetuned_model()
-
-# 실제 사용 시 필요한 패키지 설치:
-# pip install transformers peft datasets torch accelerate bitsandbytes
