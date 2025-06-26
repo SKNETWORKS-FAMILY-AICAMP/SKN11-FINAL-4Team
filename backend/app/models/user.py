@@ -1,5 +1,6 @@
 from sqlalchemy import Column, String, DateTime, Text
 from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
 from app.database import Base
 import uuid
 
@@ -23,4 +24,12 @@ class User(Base):
         server_default=func.now(),
         onupdate=func.now(),
         comment="사용자 정보 수정일시",
+    )
+
+    # Relationships
+    user_groups = relationship(
+        "UserGroup", back_populates="user", cascade="all, delete-orphan"
+    )
+    system_logs = relationship(
+        "SystemLog", back_populates="user", cascade="all, delete-orphan"
     )

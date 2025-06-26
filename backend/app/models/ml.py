@@ -28,3 +28,4 @@ class ML(Base):
     group = relationship("Group", back_populates="models")
     mbti = relationship("ModelMBTI", back_populates="models")
     boards = relationship("Board", back_populates="model")
+    apis = relationship("MLAPI", back_populates="model")

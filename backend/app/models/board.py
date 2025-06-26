@@ -10,7 +10,9 @@ class Board(Base):
 
     board_uuid = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     group_uuid = Column(String(36), ForeignKey("GROUP.group_uuid"), nullable=False)
-    model_uuid = Column(String(36), ForeignKey("ML.model_uuid"), nullable=False)
+    model_uuid = Column(
+        String(36), ForeignKey("ML.model_uuid", ondelete="CASCADE"), nullable=False
+    )
     board_topic = Column(String(100), nullable=False)
     board_description = Column(Text, nullable=True)
     board_platform = Column(Integer, nullable=False)

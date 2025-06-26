@@ -23,5 +23,12 @@ class Group(Base):
     )
 
     # Relationships
-    models = relationship("ML", back_populates="group")
-    boards = relationship("Board", back_populates="group")
+    models = relationship("ML", back_populates="group", cascade="all, delete-orphan")
+    boards = relationship("Board", back_populates="group", cascade="all, delete-orphan")
+    apis = relationship("MLAPI", back_populates="group", cascade="all, delete-orphan")
+    hf_tokens = relationship(
+        "HFTokenManage", back_populates="group", cascade="all, delete-orphan"
+    )
+    user_groups = relationship(
+        "UserGroup", back_populates="group", cascade="all, delete-orphan"
+    )
