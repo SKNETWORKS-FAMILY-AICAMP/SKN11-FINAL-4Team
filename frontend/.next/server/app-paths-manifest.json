@@ -1,9 +1,0 @@
-{
-  "/page": "app/page.js",
-  "/test-model/page": "app/test-model/page.js",
-  "/dashboard/page": "app/dashboard/page.js",
-  "/model/[id]/page": "app/model/[id]/page.js",
-  "/login/page": "app/login/page.js",
-  "/post_list/page": "app/post_list/page.js",
-  "/administrator/page": "app/administrator/page.js"
-}
