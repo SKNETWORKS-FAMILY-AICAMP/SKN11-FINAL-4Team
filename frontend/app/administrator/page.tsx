@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import { Navigation } from "@/components/navigation"
+import { RequireAdmin } from "@/components/auth/protected-route"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -101,10 +102,11 @@ export default function AdministratorPage() {
         name: newGroupName,
         description: "",
         users: [],
-        tokenAliases: groupTokenAliases,
+        tokenAliases: [],
       },
     ])
     setNewGroupName("")
+    setGroupTokenAliases([])
   }
 
   // 그룹 삭제
@@ -125,25 +127,31 @@ export default function AdministratorPage() {
 
   // 드래그앤드롭 로직
   const handleDragStart = (userId: number) => setDragUserId(userId)
+  
   const handleDropToGroup = () => {
     if (dragUserId && selectedGroupId) {
-      setGroups(prev => prev.map(g =>
-        g.id === selectedGroupId && !g.users.includes(dragUserId)
-          ? { ...g, users: [...g.users, dragUserId] }
-          : g
-      ))
+      // 다른 그룹에서 해당 사용자 제거
+      setGroups(prev => prev.map(g => ({
+        ...g,
+        users: g.id === selectedGroupId && !g.users.includes(dragUserId)
+          ? [...g.users, dragUserId]
+          : g.users.filter(uid => uid !== dragUserId)
+      })))
     }
     setDragUserId(null)
+    setSelectedGroupId(null)
   }
+  
   const handleDropToAll = () => {
-    if (dragUserId && selectedGroupId) {
-      setGroups(prev => prev.map(g =>
-        g.id === selectedGroupId
-          ? { ...g, users: g.users.filter(uid => uid !== dragUserId) }
-          : g
-      ))
+    if (dragUserId) {
+      // 모든 그룹에서 해당 사용자 제거
+      setGroups(prev => prev.map(g => ({
+        ...g,
+        users: g.users.filter(uid => uid !== dragUserId)
+      })))
     }
     setDragUserId(null)
+    setSelectedGroupId(null)
   }
 
   // 그룹/사용자 정보
@@ -153,141 +161,14 @@ export default function AdministratorPage() {
   const otherUsers = allUsersMock.filter(u => !groupUserIds.includes(u.id))
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <Navigation />
+    <RequireAdmin>
+      <div className="min-h-screen bg-gray-50">
+        <Navigation />
 
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-gray-900">관리자 설정</h1>
-          <p className="text-gray-600 mt-2">계정 정보를 관리하세요</p>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* 프로필 카드 */}
-          <div className="lg:col-span-1">
-            <Card>
-              <CardHeader className="text-center">
-                <div className="flex justify-center mb-4">
-                  <Avatar className="h-24 w-24">
-                    <AvatarFallback className="text-2xl">
-                      <User className="h-8 w-8" />
-                    </AvatarFallback>
-                  </Avatar>
-                </div>
-                <CardTitle className="text-xl">{userInfo.name}</CardTitle>
-                <CardDescription>{userInfo.position}</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  <div className="flex items-center text-sm text-gray-600">
-                    <Mail className="h-4 w-4 mr-2" />
-                    {userInfo.email}
-                  </div>
-                  <div className="flex items-center text-sm text-gray-600">
-                    <Phone className="h-4 w-4 mr-2" />
-                    {userInfo.phone}
-                  </div>
-                  <div className="flex items-center text-sm text-gray-600">
-                    <Calendar className="h-4 w-4 mr-2" />
-                    가입일: {userInfo.joinDate}
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* 정보 편집 카드 */}
-          <div className="lg:col-span-2">
-            <Card>
-              <CardHeader>
-                <div className="flex justify-between items-center">
-                  <div>
-                    <CardTitle className="flex items-center">
-                      <Settings className="h-5 w-5 mr-2" />
-                      계정 정보
-                    </CardTitle>
-                    <CardDescription>개인 정보를 수정할 수 있습니다</CardDescription>
-                  </div>
-                  {!isEditing ? (
-                    <Button onClick={() => setIsEditing(true)} variant="outline">
-                      편집
-                    </Button>
-                  ) : (
-                    <div className="flex space-x-2">
-                      <Button onClick={() => setIsEditing(false)} variant="outline">
-                        취소
-                      </Button>
-                      <Button onClick={handleSave}>
-                        <Save className="h-4 w-4 mr-2" />
-                        저장
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <Label htmlFor="name">이름</Label>
-                      <Input
-                        id="name"
-                        value={userInfo.name}
-                        onChange={(e) => setUserInfo({ ...userInfo, name: e.target.value })}
-                        disabled={!isEditing}
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="email">이메일</Label>
-                      <Input
-                        id="email"
-                        type="email"
-                        value={userInfo.email}
-                        onChange={(e) => setUserInfo({ ...userInfo, email: e.target.value })}
-                        disabled={!isEditing}
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="phone">전화번호</Label>
-                      <Input
-                        id="phone"
-                        value={userInfo.phone}
-                        onChange={(e) => setUserInfo({ ...userInfo, phone: e.target.value })}
-                        disabled={!isEditing}
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="company">회사</Label>
-                      <Input
-                        id="company"
-                        value={userInfo.company}
-                        onChange={(e) => setUserInfo({ ...userInfo, company: e.target.value })}
-                        disabled={!isEditing}
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="position">직책</Label>
-                      <Input
-                        id="position"
-                        value={userInfo.position}
-                        onChange={(e) => setUserInfo({ ...userInfo, position: e.target.value })}
-                        disabled={!isEditing}
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="joinDate">가입일</Label>
-                      <Input
-                        id="joinDate"
-                        value={userInfo.joinDate}
-                        disabled
-                        className="bg-gray-50"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
+          <p className="text-gray-600 mt-2">시스템 설정을 관리하세요</p>
         </div>
 
         <div className="mt-8">
@@ -295,120 +176,198 @@ export default function AdministratorPage() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Users className="h-5 w-5 text-blue-600" />
-                권한 그룹
+                권한 그룹 관리
               </CardTitle>
+              <CardDescription>
+                사용자를 드래그하여 그룹에 추가하거나 제거할 수 있습니다.
+              </CardDescription>
             </CardHeader>
             <CardContent>
-              <ul className="mb-4 divide-y">
-                {groups.map(group => (
-                  <li
-                    key={group.id}
-                    className={`flex items-center justify-between py-2 cursor-pointer rounded px-2 ${selectedGroupId === group.id ? "bg-blue-50" : "hover:bg-gray-50"}`}
-                    onClick={() => openGroupModal(group.id)}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* 전체 사용자 목록 */}
+                <Card className="shadow-sm">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base font-semibold flex items-center gap-2">
+                      <Users className="h-4 w-4" />
+                      전체 사용자
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent 
+                    className={`min-h-[300px] transition-colors ${
+                      dragOverBox === 'all' ? 'bg-blue-50 border-blue-300' : ''
+                    }`}
+                    onDragOver={e => { e.preventDefault(); setDragOverBox('all'); }}
+                    onDragLeave={() => setDragOverBox(null)}
+                    onDrop={handleDropToAll}
                   >
-                    <div className="flex flex-col md:flex-row md:items-center md:justify-between w-full">
-                      <div>
-                        <span className="font-semibold">{group.name}</span>
-                        <span className="ml-2 text-xs text-gray-400">({group.users.length}명)</span>
-                      </div>
-                      <div className="flex flex-wrap gap-1 items-center mt-2 md:mt-0">
-                        {editingTokenGroupId === group.id ? (
-                          <>
-                            <Command className="rounded-md border min-w-[180px]">
-                              <CommandInput placeholder="토큰 검색..." />
-                              <CommandList>
-                                <CommandEmpty>토큰 없음</CommandEmpty>
-                                {hfTokens.map(token => (
-                                  <CommandItem
-                                    key={token.alias}
-                                    value={token.alias}
-                                    onSelect={() => {
-                                      if (editingTokenAliases.includes(token.alias)) {
-                                        setEditingTokenAliases(prev => prev.filter(a => a !== token.alias));
-                                      } else {
-                                        setEditingTokenAliases(prev => [...prev, token.alias]);
-                                      }
-                                    }}
-                                    className={editingTokenAliases.includes(token.alias) ? "bg-blue-50 text-blue-700" : ""}
-                                  >
-                                    <span>{token.alias}</span>
-                                    {editingTokenAliases.includes(token.alias) && <Check className="ml-auto h-4 w-4" />}
-                                  </CommandItem>
-                                ))}
-                              </CommandList>
-                            </Command>
-                            <Button size="sm" className="ml-2 bg-blue-600 text-white" onClick={e => { e.stopPropagation(); setGroups(groups => groups.map(g => g.id === group.id ? { ...g, tokenAliases: editingTokenAliases } : g)); setEditingTokenGroupId(null); }}>
-                              저장
-                            </Button>
-                            <Button size="sm" variant="outline" className="ml-1" onClick={e => { e.stopPropagation(); setEditingTokenGroupId(null); }}>
-                              취소
-                            </Button>
-                          </>
-                        ) : (
-                          <>
-                            {group.tokenAliases && group.tokenAliases.length > 0 ? (
-                              group.tokenAliases.map(alias => (
-                                <Badge key={alias} className="bg-yellow-100 text-yellow-700">{alias}</Badge>
-                              ))
-                            ) : (
-                              <Badge className="bg-gray-100 text-gray-400">미지정</Badge>
-                            )}
-                            <Button size="sm" variant="outline" className="ml-2" onClick={e => { e.stopPropagation(); setEditingTokenGroupId(group.id); setEditingTokenAliases(group.tokenAliases || []); }}>
-                              토큰 편집
-                            </Button>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                    <Button size="icon" variant="ghost" onClick={e => { e.stopPropagation(); handleDeleteGroup(group.id) }} title="그룹 삭제">
-                      <Trash2 className="h-4 w-4 text-red-500" />
-                    </Button>
-                  </li>
-                ))}
-              </ul>
-              <div className="flex gap-2 items-end">
-                <div className="flex-1">
-                  <Input
-                    placeholder="새 그룹명"
-                    value={newGroupName}
-                    onChange={e => setNewGroupName(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && handleAddGroup()}
-                  />
-                </div>
-                <div className="flex-1 min-w-[200px]">
-                  <div className="mb-2 text-xs font-semibold text-gray-600">연결할 토큰</div>
-                  <Command className="rounded-md border">
-                    <CommandInput placeholder="토큰 검색..." />
-                    <CommandList>
-                      <CommandEmpty>토큰 없음</CommandEmpty>
-                      {hfTokens.map(token => (
-                        <CommandItem
-                          key={token.alias}
-                          value={token.alias}
-                          onSelect={() => {
-                            if (groupTokenAliases.includes(token.alias)) {
-                              setGroupTokenAliases(prev => prev.filter(a => a !== token.alias));
-                            } else {
-                              setGroupTokenAliases(prev => [...prev, token.alias]);
-                            }
-                          }}
-                          className={groupTokenAliases.includes(token.alias) ? "bg-blue-50 text-blue-700" : ""}
+                    <Input
+                      placeholder="이름 또는 이메일로 검색"
+                      className="mb-3"
+                      value={searchTerm}
+                      onChange={e => setSearchTerm(e.target.value)}
+                    />
+                    <div className="space-y-2 max-h-60 overflow-y-auto">
+                      {allUsersMock
+                        .filter(user => !groups.some(g => g.users.includes(user.id)))
+                        .filter(user => 
+                          user.name.includes(searchTerm) || user.email.includes(searchTerm)
+                        )
+                        .map(user => (
+                        <div
+                          key={user.id}
+                          className={`flex items-center gap-3 p-2 rounded-lg cursor-move transition-all ${
+                            dragUserId === user.id 
+                              ? 'opacity-50 transform scale-95' 
+                              : 'hover:bg-gray-50 hover:shadow-sm'
+                          }`}
+                          draggable
+                          onDragStart={() => handleDragStart(user.id)}
+                          onDragEnd={() => setDragUserId(null)}
                         >
-                          <span>{token.alias}</span>
-                          {groupTokenAliases.includes(token.alias) && <Check className="ml-auto h-4 w-4" />}
-                        </CommandItem>
+                          <Avatar className="h-8 w-8">
+                            <AvatarFallback className="bg-gray-200 text-gray-600 text-xs">
+                              {user.name.charAt(0)}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium text-sm truncate">{user.name}</p>
+                            <p className="text-xs text-gray-500 truncate">{user.email}</p>
+                          </div>
+                          <div className="text-gray-400">
+                            <User className="h-4 w-4" />
+                          </div>
+                        </div>
                       ))}
-                    </CommandList>
-                  </Command>
-                  <div className="flex flex-wrap gap-2 mt-2">
-                    {groupTokenAliases.map(alias => (
-                      <Badge key={alias} className="bg-blue-100 text-blue-700">{alias}</Badge>
-                    ))}
-                  </div>
+                      {allUsersMock
+                        .filter(user => !groups.some(g => g.users.includes(user.id)))
+                        .filter(user => 
+                          user.name.includes(searchTerm) || user.email.includes(searchTerm)
+                        ).length === 0 && (
+                        <div className="text-center py-8 text-gray-500">
+                          <Users className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                          <p className="text-sm">할당되지 않은 사용자가 없습니다.</p>
+                        </div>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* 권한 그룹들 */}
+                <div className="lg:col-span-2 space-y-4">
+                  {groups.map(group => (
+                    <Card 
+                      key={group.id} 
+                      className={`shadow-sm transition-all ${
+                        dragOverBox === `group-${group.id}` ? 'bg-green-50 border-green-300 shadow-md' : ''
+                      }`}
+                    >
+                      <CardHeader className="pb-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <div className={`w-3 h-3 rounded-full ${
+                              group.name === 'Admin' ? 'bg-red-500' :
+                              group.name === 'Editor' ? 'bg-blue-500' : 'bg-green-500'
+                            }`}></div>
+                            <div>
+                              <CardTitle className="text-base font-semibold">{group.name}</CardTitle>
+                              <p className="text-sm text-gray-500">
+                                {group.description || `${group.users.length}명의 사용자`}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Badge variant="secondary" className="text-xs">
+                              {group.users.length}명
+                            </Badge>
+                            <Button 
+                              size="icon" 
+                              variant="ghost" 
+                              onClick={() => handleDeleteGroup(group.id)}
+                              className="h-8 w-8"
+                            >
+                              <Trash2 className="h-4 w-4 text-red-500" />
+                            </Button>
+                          </div>
+                        </div>
+                      </CardHeader>
+                      <CardContent
+                        className={`min-h-[120px] transition-colors`}
+                        onDragOver={e => { 
+                          e.preventDefault(); 
+                          setDragOverBox(`group-${group.id}`); 
+                          setSelectedGroupId(group.id);
+                        }}
+                        onDragLeave={() => setDragOverBox(null)}
+                        onDrop={() => {
+                          handleDropToGroup();
+                          setDragOverBox(null);
+                        }}
+                      >
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          {allUsersMock
+                            .filter(user => group.users.includes(user.id))
+                            .map(user => (
+                            <div
+                              key={user.id}
+                              className={`flex items-center gap-2 p-2 rounded-lg cursor-move transition-all ${
+                                dragUserId === user.id 
+                                  ? 'opacity-50 transform scale-95' 
+                                  : 'hover:bg-white hover:shadow-sm border border-gray-100'
+                              }`}
+                              draggable
+                              onDragStart={() => {
+                                handleDragStart(user.id);
+                                setSelectedGroupId(group.id);
+                              }}
+                              onDragEnd={() => setDragUserId(null)}
+                            >
+                              <Avatar className="h-6 w-6">
+                                <AvatarFallback className="bg-blue-100 text-blue-600 text-xs">
+                                  {user.name.charAt(0)}
+                                </AvatarFallback>
+                              </Avatar>
+                              <div className="flex-1 min-w-0">
+                                <p className="font-medium text-xs truncate">{user.name}</p>
+                                <p className="text-xs text-gray-500 truncate">{user.email}</p>
+                              </div>
+                            </div>
+                          ))}
+                          {group.users.length === 0 && (
+                            <div className="col-span-2 text-center py-4 text-gray-400 border-2 border-dashed border-gray-200 rounded-lg">
+                              <p className="text-sm">사용자를 여기에 드래그하세요</p>
+                            </div>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
                 </div>
-                <Button variant="outline" className="h-10" onClick={handleAddGroup}>
-                  <Plus className="h-4 w-4" />
-                </Button>
+              </div>
+              
+              {/* 새 그룹 추가 섹션 */}
+              <div className="mt-6 pt-6 border-t">
+                <h4 className="font-medium text-gray-900 mb-4">새 그룹 추가</h4>
+                <div className="flex gap-3 items-end">
+                  <div className="flex-1 max-w-xs">
+                    <Label htmlFor="new-group-name" className="text-sm font-medium">그룹명</Label>
+                    <Input
+                      id="new-group-name"
+                      placeholder="새 그룹명 입력"
+                      value={newGroupName}
+                      onChange={e => setNewGroupName(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && handleAddGroup()}
+                      className="mt-1"
+                    />
+                  </div>
+                  <Button 
+                    onClick={handleAddGroup}
+                    disabled={!newGroupName.trim()}
+                    className="bg-blue-600 hover:bg-blue-700"
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    그룹 추가
+                  </Button>
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -602,6 +561,7 @@ export default function AdministratorPage() {
           </div>
         </DialogContent>
       </Dialog>
-    </div>
+      </div>
+    </RequireAdmin>
   )
 } 

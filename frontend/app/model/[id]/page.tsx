@@ -35,6 +35,7 @@ import {
   Clock,
   Trash2,
   Upload,
+  MessageSquare,
 } from "lucide-react"
 import type { AIModel } from "@/lib/types"
 import {
@@ -177,6 +178,9 @@ export default function ModelDetailPage() {
   const [selectedPost, setSelectedPost] = useState<ContentPost | null>(null)
   const [showApiKey, setShowApiKey] = useState(false)
   const [isUpdating, setIsUpdating] = useState(false)
+  
+  // 환경 변수에서 채팅 기능 활성화 여부 확인
+  const isChatEnabled = process.env.NEXT_PUBLIC_ENABLE_CHAT === 'true'
 
   const handleUpdateModel = async () => {
     setIsUpdating(true)
@@ -630,13 +634,22 @@ export default function ModelDetailPage() {
                 <span className="text-sm text-gray-500">생성일: {model.createdAt}</span>
               </div>
             </div>
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <Button variant="destructive" size="sm">
-                  <Trash2 className="h-4 w-4 mr-2" />
-                  모델 삭제
-                </Button>
-              </AlertDialogTrigger>
+            <div className="flex space-x-2">
+              {isChatEnabled && (
+                <Link href={`/chat/${model.id}`}>
+                  <Button variant="outline" size="sm">
+                    <MessageSquare className="h-4 w-4 mr-2" />
+                    채팅 페이지 생성
+                  </Button>
+                </Link>
+              )}
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="destructive" size="sm">
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    모델 삭제
+                  </Button>
+                </AlertDialogTrigger>
               <AlertDialogContent>
                 <AlertDialogHeader>
                   <AlertDialogTitle>모델 삭제 확인</AlertDialogTitle>
@@ -659,6 +672,7 @@ export default function ModelDetailPage() {
                 </AlertDialogFooter>
               </AlertDialogContent>
             </AlertDialog>
+            </div>
           </div>
         </div>
 
@@ -1012,78 +1026,7 @@ export default function ModelDetailPage() {
                 </CardContent>
               </Card>
 
-              {/* 미디어 라이브러리 */}
-              <Card className="lg:col-span-2">
-                <CardHeader>
-                  <CardTitle>미디어 라이브러리</CardTitle>
-                  <CardDescription>게시글에 사용할 이미지와 로고를 관리하세요</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-6">
-                  {/* 배경 이미지 */}
-                  <div>
-                    <h4 className="font-medium text-gray-900 mb-3">배경 이미지</h4>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                      <div className="aspect-video bg-gray-100 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center hover:border-gray-400 transition-colors cursor-pointer">
-                        <div className="text-center">
-                          <Upload className="h-6 w-6 text-gray-400 mx-auto mb-1" />
-                          <p className="text-xs text-gray-600">추가</p>
-                        </div>
-                      </div>
-                      <div className="relative group">
-                        <img
-                          src="/placeholder.svg?height=200&width=300"
-                          alt="Background 1"
-                          className="aspect-video object-cover rounded-lg border"
-                        />
-                        <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-50 transition-all rounded-lg flex items-center justify-center">
-                          <div className="opacity-0 group-hover:opacity-100 transition-opacity flex space-x-1">
-                            <Button size="sm" variant="secondary">
-                              <Eye className="h-3 w-3" />
-                            </Button>
-                            <Button size="sm" variant="destructive">
-                              <Trash2 className="h-3 w-3" />
-                            </Button>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                    <p className="text-xs text-gray-500 mt-2">권장: 1920x1080px, JPG/PNG/WebP, 최대 10MB</p>
-                  </div>
 
-                  {/* 브랜드 로고 */}
-                  <div>
-                    <h4 className="font-medium text-gray-900 mb-3">브랜드 로고</h4>
-                    <div className="grid grid-cols-4 md:grid-cols-6 gap-4">
-                      <div className="aspect-square bg-gray-100 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center hover:border-gray-400 transition-colors cursor-pointer">
-                        <div className="text-center">
-                          <Upload className="h-5 w-5 text-gray-400 mx-auto mb-1" />
-                          <p className="text-xs text-gray-600">추가</p>
-                        </div>
-                      </div>
-                      <div className="relative group">
-                        <div className="aspect-square bg-white rounded-lg border flex items-center justify-center">
-                          <img
-                            src="/placeholder.svg?height=100&width=100"
-                            alt="Brand Logo 1"
-                            className="max-w-full max-h-full object-contain p-2"
-                          />
-                        </div>
-                        <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-50 transition-all rounded-lg flex items-center justify-center">
-                          <div className="opacity-0 group-hover:opacity-100 transition-opacity flex space-x-1">
-                            <Button size="sm" variant="secondary">
-                              <Eye className="h-3 w-3" />
-                            </Button>
-                            <Button size="sm" variant="destructive">
-                              <Trash2 className="h-3 w-3" />
-                            </Button>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                    <p className="text-xs text-gray-500 mt-2">권장: 512x512px, PNG (투명 배경), 최대 2MB</p>
-                  </div>
-                </CardContent>
-              </Card>
             </div>
           </TabsContent>
         </Tabs>

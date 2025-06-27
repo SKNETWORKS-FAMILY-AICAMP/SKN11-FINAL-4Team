@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Upload, ArrowLeft, Lightbulb } from "lucide-react"
 import Link from "next/link"
 
@@ -21,6 +22,9 @@ export default function CreateModelPage() {
     personality: "",
     tone: "",
     customTone: "",
+    mbti: "",
+    gender: "",
+    age: "",
   })
   const [files, setFiles] = useState({
     imageSamples: null as File[] | null,
@@ -129,6 +133,62 @@ export default function CreateModelPage() {
                   rows={3}
                   required
                 />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <Label htmlFor="mbti">MBTI</Label>
+                  <Select value={formData.mbti} onValueChange={(value) => handleInputChange("mbti", value)}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="MBTI 선택" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ENFP">ENFP - 재기발랄한 활동가</SelectItem>
+                      <SelectItem value="ENFJ">ENFJ - 정의로운 사회운동가</SelectItem>
+                      <SelectItem value="ENTP">ENTP - 뜨거운 논쟁을 즐기는 변론가</SelectItem>
+                      <SelectItem value="ENTJ">ENTJ - 대담한 통솔자</SelectItem>
+                      <SelectItem value="ESFP">ESFP - 자유로운 영혼의 연예인</SelectItem>
+                      <SelectItem value="ESFJ">ESFJ - 사교적인 외교관</SelectItem>
+                      <SelectItem value="ESTP">ESTP - 모험을 즐기는 사업가</SelectItem>
+                      <SelectItem value="ESTJ">ESTJ - 엄격한 관리자</SelectItem>
+                      <SelectItem value="INFP">INFP - 열정적인 중재자</SelectItem>
+                      <SelectItem value="INFJ">INFJ - 선의의 옹호자</SelectItem>
+                      <SelectItem value="INTP">INTP - 논리적인 사색가</SelectItem>
+                      <SelectItem value="INTJ">INTJ - 용의주도한 전략가</SelectItem>
+                      <SelectItem value="ISFP">ISFP - 호기심 많은 예술가</SelectItem>
+                      <SelectItem value="ISFJ">ISFJ - 용감한 수호자</SelectItem>
+                      <SelectItem value="ISTP">ISTP - 만능 재주꾼</SelectItem>
+                      <SelectItem value="ISTJ">ISTJ - 현실주의자</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <Label htmlFor="gender">성별</Label>
+                  <Select value={formData.gender} onValueChange={(value) => handleInputChange("gender", value)}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="성별 선택" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="male">남성</SelectItem>
+                      <SelectItem value="female">여성</SelectItem>
+                      <SelectItem value="other">기타</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <Label htmlFor="age">나이</Label>
+                  <Input
+                    id="age"
+                    type="number"
+                    placeholder="나이 입력"
+                    value={formData.age}
+                    onChange={(e) => handleInputChange("age", e.target.value)}
+                    min="1"
+                    max="100"
+                  />
+                </div>
               </div>
             </CardContent>
           </Card>

@@ -1,8 +1,9 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useMemo } from "react"
 import Link from "next/link"
 import { Navigation } from "@/components/navigation"
+import { RequireAuth, RequirePermission } from "@/components/auth/protected-route"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -19,9 +20,10 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import { Plus, Search, Settings, Trash2 } from "lucide-react"
+import { usePermission } from "@/hooks/use-auth"
 import type { AIModel } from "@/lib/types"
 
-// 샘플 데이터
+// 샘플 데이터 (권한별 그룹 정보 추가)
 const sampleModels: AIModel[] = [
   {
     id: "1",
@@ -32,6 +34,8 @@ const sampleModels: AIModel[] = [
     status: "ready",
     createdAt: "2024-01-15",
     trainingData: { textSamples: 1500, voiceSamples: 200, imageSamples: 300 },
+    allowedGroups: ["fashion", "marketing"],
+    ownerId: "user1",
   },
   {
     id: "2",
@@ -42,6 +46,8 @@ const sampleModels: AIModel[] = [
     status: "training",
     createdAt: "2024-01-20",
     trainingData: { textSamples: 2000, voiceSamples: 150, imageSamples: 250 },
+    allowedGroups: ["beauty", "marketing"],
+    ownerId: "user2",
   },
   {
     id: "3",
@@ -52,21 +58,47 @@ const sampleModels: AIModel[] = [
     status: "ready",
     createdAt: "2024-01-10",
     trainingData: { textSamples: 1200, voiceSamples: 180, imageSamples: 220 },
+    allowedGroups: ["fitness", "health"],
+    ownerId: "user1",
+  },
+  {
+    id: "4",
+    name: "기업 전용 AI",
+    description: "관리자만 접근 가능한 기업 전용 AI 모델",
+    personality: "전문적이고 공식적인",
+    tone: "정중하고 비즈니스적인",
+    status: "ready",
+    createdAt: "2024-01-25",
+    trainingData: { textSamples: 3000, voiceSamples: 300, imageSamples: 400 },
+    allowedGroups: ["admin"],
+    ownerId: "admin",
   },
 ]
 
 export default function DashboardPage() {
   const [models, setModels] = useState<AIModel[]>(sampleModels)
   const [searchTerm, setSearchTerm] = useState("")
+  const { canAccessModel, hasPermission, user } = usePermission()
 
-  const filteredModels = models.filter(
+  const accessibleModels = useMemo(() => {
+    return models.filter(model => canAccessModel(model.allowedGroups))
+  }, [models, canAccessModel])
+
+  const filteredModels = accessibleModels.filter(
     (model) =>
       model.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       model.description.toLowerCase().includes(searchTerm.toLowerCase()),
   )
 
   const handleDeleteModel = (modelId: string) => {
-    setModels((prev) => prev.filter((model) => model.id !== modelId))
+    const model = models.find(m => m.id === modelId)
+    if (model && (hasPermission('model', 'delete') || model.ownerId === user?.id)) {
+      setModels((prev) => prev.filter((model) => model.id !== modelId))
+    }
+  }
+
+  const canDeleteModel = (model: AIModel) => {
+    return hasPermission('model', 'delete') || model.ownerId === user?.id
   }
 
   const getStatusBadge = (status: AIModel["status"]) => {
@@ -83,22 +115,26 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <Navigation />
+    <RequireAuth>
+      <div className="min-h-screen bg-gray-50">
+        <Navigation />
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <RequirePermission resource="model" action="read">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="mb-8">
           <div className="flex justify-between items-center mb-6">
             <div>
               <h1 className="text-3xl font-bold text-gray-900">AI 모델 대시보드</h1>
               <p className="text-gray-600 mt-2">생성된 AI 인플루언서 모델을 관리하세요</p>
             </div>
-            <Link href="/create-model">
-              <Button className="flex items-center space-x-2">
-                <Plus className="h-4 w-4" />
-                <span>새 모델 생성</span>
-              </Button>
-            </Link>
+            {hasPermission('model', 'create') && (
+              <Link href="/create-model">
+                <Button className="flex items-center space-x-2">
+                  <Plus className="h-4 w-4" />
+                  <span>새 모델 생성</span>
+                </Button>
+              </Link>
+            )}
           </div>
 
           <div className="relative max-w-md mb-6">
@@ -115,8 +151,8 @@ export default function DashboardPage() {
             <Card>
               <CardContent className="p-6">
                 <div className="text-center">
-                  <p className="text-3xl font-bold text-blue-600">{models.length}</p>
-                  <p className="text-sm text-gray-600 mt-1">전체 모델</p>
+                  <p className="text-3xl font-bold text-blue-600">{accessibleModels.length}</p>
+                  <p className="text-sm text-gray-600 mt-1">접근 가능한 모델</p>
                 </div>
               </CardContent>
             </Card>
@@ -124,7 +160,7 @@ export default function DashboardPage() {
               <CardContent className="p-6">
                 <div className="text-center">
                   <p className="text-3xl font-bold text-yellow-600">
-                    {models.filter((model) => model.status === "training").length}
+                    {accessibleModels.filter((model) => model.status === "training").length}
                   </p>
                   <p className="text-sm text-gray-600 mt-1">학습 중</p>
                 </div>
@@ -134,7 +170,7 @@ export default function DashboardPage() {
               <CardContent className="p-6">
                 <div className="text-center">
                   <p className="text-3xl font-bold text-green-600">
-                    {models.filter((model) => model.status === "ready").length}
+                    {accessibleModels.filter((model) => model.status === "ready").length}
                   </p>
                   <p className="text-sm text-gray-600 mt-1">사용 가능</p>
                 </div>
@@ -154,12 +190,13 @@ export default function DashboardPage() {
                   </div>
                   <div className="flex items-center space-x-2">
                     {getStatusBadge(model.status)}
-                    <AlertDialog>
-                      <AlertDialogTrigger asChild>
-                        <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-800 hover:bg-red-50">
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </AlertDialogTrigger>
+                    {canDeleteModel(model) && (
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-800 hover:bg-red-50">
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </AlertDialogTrigger>
                       <AlertDialogContent>
                         <AlertDialogHeader>
                           <AlertDialogTitle>모델 삭제</AlertDialogTitle>
@@ -185,6 +222,7 @@ export default function DashboardPage() {
                         </AlertDialogFooter>
                       </AlertDialogContent>
                     </AlertDialog>
+                    )}
                   </div>
                 </div>
               </CardHeader>
@@ -229,6 +267,8 @@ export default function DashboardPage() {
           </div>
         )}
       </div>
-    </div>
+        </RequirePermission>
+      </div>
+    </RequireAuth>
   )
 }
