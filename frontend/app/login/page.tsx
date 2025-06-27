@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
+import { useAuth } from "@/hooks/use-auth"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Bot } from "lucide-react"
@@ -9,14 +10,23 @@ import { Bot } from "lucide-react"
 export default function LoginPage() {
   const [isLoading, setIsLoading] = useState<string | null>(null)
   const router = useRouter()
+  const { login } = useAuth()
 
   const handleOAuthLogin = async (provider: "google" | "naver") => {
     setIsLoading(provider)
 
     // 실제 OAuth 로그인/회원가입 로직 시뮬레이션
     setTimeout(() => {
-      setIsLoading(null)
-      router.push("/dashboard")
+      try {
+        // 모킹 토큰으로 로그인 처리
+        const mockToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwiZW1haWwiOiJ0ZXN0QGdtYWlsLmNvbSIsIm5hbWUiOiJUZXN0IFVzZXIiLCJjb21wYW55IjoiVGVzdCBDb21wYW55IiwiZ3JvdXBzIjpbImFkbWluIiwidXNlciJdLCJwZXJtaXNzaW9ucyI6WyIqOioiXSwiZXhwIjoxNzU2NjQ2ODAwfQ.qMgTUwDXMXJkAxNVKkvOcECH8Ys8HYY8C9r8bLu5XQo'
+        login(mockToken)
+        router.push("/dashboard")
+      } catch (error) {
+        console.error('로그인 실패:', error)
+      } finally {
+        setIsLoading(null)
+      }
     }, 1500)
   }
 

@@ -4,16 +4,22 @@ const TOKEN_KEY = 'auth_token'
 const USER_KEY = 'user_data'
 
 const MOCK_TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwiZW1haWwiOiJ0ZXN0QGdtYWlsLmNvbSIsIm5hbWUiOiJUZXN0IFVzZXIiLCJjb21wYW55IjoiVGVzdCBDb21wYW55IiwiZ3JvdXBzIjpbImFkbWluIiwidXNlciJdLCJwZXJtaXNzaW9ucyI6WyIqOioiXSwiZXhwIjoxNzU2NjQ2ODAwfQ.qMgTUwDXMXJkAxNVKkvOcECH8Ys8HYY8C9r8bLu5XQo'
+const LOGGED_OUT_KEY = 'logged_out'
 
 export const tokenUtils = {
   setToken: (token: string): void => {
     if (typeof window !== 'undefined') {
       localStorage.setItem(TOKEN_KEY, token)
+      localStorage.removeItem(LOGGED_OUT_KEY)
     }
   },
 
   getToken: (): string | null => {
     if (typeof window !== 'undefined') {
+      const isLoggedOut = localStorage.getItem(LOGGED_OUT_KEY)
+      if (isLoggedOut) {
+        return null
+      }
       return localStorage.getItem(TOKEN_KEY) || MOCK_TOKEN
     }
     return MOCK_TOKEN
@@ -23,6 +29,7 @@ export const tokenUtils = {
     if (typeof window !== 'undefined') {
       localStorage.removeItem(TOKEN_KEY)
       localStorage.removeItem(USER_KEY)
+      localStorage.setItem(LOGGED_OUT_KEY, 'true')
     }
   },
 

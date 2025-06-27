@@ -19,6 +19,7 @@ export default function CreateModelPage() {
   const [formData, setFormData] = useState({
     name: "",
     description: "",
+    modelType: "", // "character" 또는 "human"
     personality: "",
     tone: "",
     customTone: "",
@@ -135,59 +136,84 @@ export default function CreateModelPage() {
                 />
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div>
-                  <Label htmlFor="mbti">MBTI</Label>
-                  <Select value={formData.mbti} onValueChange={(value) => handleInputChange("mbti", value)}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="MBTI 선택" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="ENFP">ENFP - 재기발랄한 활동가</SelectItem>
-                      <SelectItem value="ENFJ">ENFJ - 정의로운 사회운동가</SelectItem>
-                      <SelectItem value="ENTP">ENTP - 뜨거운 논쟁을 즐기는 변론가</SelectItem>
-                      <SelectItem value="ENTJ">ENTJ - 대담한 통솔자</SelectItem>
-                      <SelectItem value="ESFP">ESFP - 자유로운 영혼의 연예인</SelectItem>
-                      <SelectItem value="ESFJ">ESFJ - 사교적인 외교관</SelectItem>
-                      <SelectItem value="ESTP">ESTP - 모험을 즐기는 사업가</SelectItem>
-                      <SelectItem value="ESTJ">ESTJ - 엄격한 관리자</SelectItem>
-                      <SelectItem value="INFP">INFP - 열정적인 중재자</SelectItem>
-                      <SelectItem value="INFJ">INFJ - 선의의 옹호자</SelectItem>
-                      <SelectItem value="INTP">INTP - 논리적인 사색가</SelectItem>
-                      <SelectItem value="INTJ">INTJ - 용의주도한 전략가</SelectItem>
-                      <SelectItem value="ISFP">ISFP - 호기심 많은 예술가</SelectItem>
-                      <SelectItem value="ISFJ">ISFJ - 용감한 수호자</SelectItem>
-                      <SelectItem value="ISTP">ISTP - 만능 재주꾼</SelectItem>
-                      <SelectItem value="ISTJ">ISTJ - 현실주의자</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+              <div>
+                <Label htmlFor="modelType">모델 유형</Label>
+                <Select value={formData.modelType} onValueChange={(value) => handleInputChange("modelType", value)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="모델 유형을 선택하세요" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="character">캐릭터형 (애니메이션, 만화 스타일)</SelectItem>
+                    <SelectItem value="human">사람형 (실제 사람과 유사한 형태)</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-gray-500 mt-1">
+                  💡 캐릭터형은 애니메이션이나 만화 스타일로, 사람형은 실제 사람과 유사하게 생성됩니다
+                </p>
+              </div>
 
-                <div>
-                  <Label htmlFor="gender">성별</Label>
-                  <Select value={formData.gender} onValueChange={(value) => handleInputChange("gender", value)}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="성별 선택" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="male">남성</SelectItem>
-                      <SelectItem value="female">여성</SelectItem>
-                      <SelectItem value="other">기타</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+              <div className="space-y-4">
+                <h4 className="font-medium text-gray-900">추가 설정 (선택사항)</h4>
+                <p className="text-sm text-gray-600">
+                  아래 설정들은 모두 선택사항입니다. 필요한 경우에만 설정하세요.
+                </p>
+                
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <Label htmlFor="mbti">MBTI (선택사항)</Label>
+                    <Select value={formData.mbti} onValueChange={(value) => handleInputChange("mbti", value)}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="MBTI 선택 (선택사항)" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">선택 안함</SelectItem>
+                        <SelectItem value="ENFP">ENFP - 재기발랄한 활동가</SelectItem>
+                        <SelectItem value="ENFJ">ENFJ - 정의로운 사회운동가</SelectItem>
+                        <SelectItem value="ENTP">ENTP - 뜨거운 논쟁을 즐기는 변론가</SelectItem>
+                        <SelectItem value="ENTJ">ENTJ - 대담한 통솔자</SelectItem>
+                        <SelectItem value="ESFP">ESFP - 자유로운 영혼의 연예인</SelectItem>
+                        <SelectItem value="ESFJ">ESFJ - 사교적인 외교관</SelectItem>
+                        <SelectItem value="ESTP">ESTP - 모험을 즐기는 사업가</SelectItem>
+                        <SelectItem value="ESTJ">ESTJ - 엄격한 관리자</SelectItem>
+                        <SelectItem value="INFP">INFP - 열정적인 중재자</SelectItem>
+                        <SelectItem value="INFJ">INFJ - 선의의 옹호자</SelectItem>
+                        <SelectItem value="INTP">INTP - 논리적인 사색가</SelectItem>
+                        <SelectItem value="INTJ">INTJ - 용의주도한 전략가</SelectItem>
+                        <SelectItem value="ISFP">ISFP - 호기심 많은 예술가</SelectItem>
+                        <SelectItem value="ISFJ">ISFJ - 용감한 수호자</SelectItem>
+                        <SelectItem value="ISTP">ISTP - 만능 재주꾼</SelectItem>
+                        <SelectItem value="ISTJ">ISTJ - 현실주의자</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
 
-                <div>
-                  <Label htmlFor="age">나이</Label>
-                  <Input
-                    id="age"
-                    type="number"
-                    placeholder="나이 입력"
-                    value={formData.age}
-                    onChange={(e) => handleInputChange("age", e.target.value)}
-                    min="1"
-                    max="100"
-                  />
+                  <div>
+                    <Label htmlFor="gender">성별 (선택사항)</Label>
+                    <Select value={formData.gender} onValueChange={(value) => handleInputChange("gender", value)}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="성별 선택 (선택사항)" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">선택 안함</SelectItem>
+                        <SelectItem value="male">남성</SelectItem>
+                        <SelectItem value="female">여성</SelectItem>
+                        <SelectItem value="other">기타</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <Label htmlFor="age">나이 (선택사항)</Label>
+                    <Input
+                      id="age"
+                      type="number"
+                      placeholder="나이 입력 (선택사항)"
+                      value={formData.age}
+                      onChange={(e) => handleInputChange("age", e.target.value)}
+                      min="1"
+                      max="100"
+                    />
+                  </div>
                 </div>
               </div>
             </CardContent>
@@ -309,7 +335,10 @@ export default function CreateModelPage() {
                 취소
               </Button>
             </Link>
-            <Button type="submit" disabled={isLoading}>
+            <Button 
+              type="submit" 
+              disabled={isLoading || !formData.name || !formData.description || !formData.modelType}
+            >
               {isLoading ? "생성 중..." : "AI 모델 생성"}
             </Button>
           </div>
