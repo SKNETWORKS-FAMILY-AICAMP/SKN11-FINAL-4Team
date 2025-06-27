@@ -1,2 +1,1 @@
-# Pydantic Schemas
-from . import mbti
+# Pydantic schemas package

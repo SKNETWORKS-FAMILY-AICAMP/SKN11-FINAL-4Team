@@ -65,9 +65,25 @@ class Settings(BaseSettings):
     # 캐시 설정
     CACHE_TTL: int = int(os.getenv("CACHE_TTL", "300"))  # 5 minutes
 
+    # 추가 환경 변수들 (누락된 것들)
+    ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
+    APP_NAME: str = os.getenv("APP_NAME", "AIMEX Backend")
+    APP_VERSION: str = os.getenv("APP_VERSION", "1.0.0")
+    HOST: str = os.getenv("HOST", "0.0.0.0")
+    PORT: int = int(os.getenv("PORT", "8000"))
+    ALLOWED_ORIGINS: str = os.getenv(
+        "ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000"
+    )
+    CORS_ALLOW_CREDENTIALS: bool = (
+        os.getenv("CORS_ALLOW_CREDENTIALS", "True").lower() == "true"
+    )
+    RELOAD: bool = os.getenv("RELOAD", "True").lower() == "true"
+    ENABLE_DOCS: bool = os.getenv("ENABLE_DOCS", "True").lower() == "true"
+
     class Config:
         env_file = ".env"
         case_sensitive = True
+        extra = "allow"  # 추가 환경 변수 허용
 
     def validate_settings(self):
         """설정 유효성 검증"""

@@ -1,1 +1,0 @@
-# AIMEX FastAPI Backend Application

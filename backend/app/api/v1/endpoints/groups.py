@@ -1,233 +1,387 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from typing import List
+from pydantic import BaseModel
+
 from app.database import get_db
-from app.models.group import Group
-from app.models.user import User
-from app.models.user_group import UserGroup
-from app.models.hf_token_manage import HFTokenManage
-from app.schemas.group import GroupCreate, GroupResponse
-from app.schemas.user_group import UserGroupCreate, UserGroupResponse
-from app.schemas.hf_token import HFTokenCreate, HFTokenResponse
+from app.models.user import Group, User
+from app.schemas.user import (
+    GroupCreate,
+    GroupUpdate,
+    Group as GroupSchema,
+    GroupWithUsers,
+)
+from app.api.v1.endpoints.auth import get_current_user
 
 router = APIRouter()
 
 
-@router.get("/", response_model=List[GroupResponse])
-def get_groups(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    """그룹 목록 조회"""
+class BulkUserOperation(BaseModel):
+    """일괄 사용자 작업을 위한 스키마"""
+
+    user_ids: List[str]
+
+
+def check_admin_permission(current_user: User, db: Session):
+    """관리자 권한 체크 - 그룹 0번에 속한 사용자를 관리자로 간주"""
+    # 그룹 0번이 관리자 그룹이라고 가정
+    admin_group = db.query(Group).filter(Group.group_id == 0).first()
+    if admin_group:
+        # 현재 사용자가 관리자 그룹에 속해있는지 확인
+        user_in_admin_group = (
+            db.query(Group)
+            .join(Group.users)
+            .filter(Group.group_id == 0, User.user_id == str(current_user.user_id))
+            .first()
+        )
+        if user_in_admin_group:
+            return True
+    return False
+
+
+@router.get("/", response_model=List[GroupSchema])
+async def get_groups(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=100),
+    db: Session = Depends(get_db),
+    # current_user: User = Depends(get_current_user),  # 임시로 주석 처리
+):
+    """그룹 목록 조회 (임시로 인증 없이 접근 가능)"""
+    # 관리자는 모든 그룹 조회 가능, 일반 사용자는 자신이 속한 그룹만 조회
+    # if check_admin_permission(current_user, db):  # 임시로 주석 처리
     groups = db.query(Group).offset(skip).limit(limit).all()
+    # else:  # 임시로 주석 처리
+    #     groups = (
+    #         db.query(Group)
+    #         .join(Group.users)
+    #         .filter(User.user_id == str(current_user.user_id))
+    #         .offset(skip)
+    #         .limit(limit)
+    #         .all()
+    #     )
+
     return groups
 
 
-@router.get("/{group_uuid}", response_model=GroupResponse)
-def get_group(group_uuid: str, db: Session = Depends(get_db)):
+@router.get("/{group_id}", response_model=GroupWithUsers)
+async def get_group(
+    group_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """특정 그룹 조회"""
-    group = db.query(Group).filter(Group.group_uuid == group_uuid).first()
+    group = db.query(Group).filter(Group.group_id == group_id).first()
     if group is None:
-        raise HTTPException(status_code=404, detail="Group not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Group not found"
+        )
+
+    # 관리자가 아니고 해당 그룹에 속하지 않은 경우 접근 거부
+    if not check_admin_permission(current_user, db) and current_user not in group.users:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this group",
+        )
+
     return group
 
 
-@router.post("/", response_model=GroupResponse)
-def create_group(group: GroupCreate, db: Session = Depends(get_db)):
-    """새 그룹 생성"""
-    db_group = Group(**group.model_dump())
-    db.add(db_group)
-    db.commit()
-    db.refresh(db_group)
-    return db_group
-
-
-@router.post("/{group_uuid}/users", response_model=UserGroupResponse)
-def add_user_to_group(
-    group_uuid: str, user_group: UserGroupCreate, db: Session = Depends(get_db)
+@router.post("/", response_model=GroupSchema)
+async def create_group(
+    group_data: GroupCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """특정 그룹에 사용자 추가"""
-    # 그룹 존재 확인
-    group = db.query(Group).filter(Group.group_uuid == group_uuid).first()
-    if group is None:
-        raise HTTPException(status_code=404, detail="Group not found")
+    """새 그룹 생성 (관리자만 가능)"""
+    if not check_admin_permission(current_user, db):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators can create groups",
+        )
 
-    # 사용자 존재 확인
-    user = db.query(User).filter(User.user_uuid == user_group.user_uuid).first()
+    group = Group(**group_data.dict())
+    db.add(group)
+    db.commit()
+    db.refresh(group)
+
+    return group
+
+
+@router.put("/{group_id}", response_model=GroupSchema)
+async def update_group(
+    group_id: int,
+    group_update: GroupUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """그룹 정보 수정 (관리자만 가능)"""
+    if not check_admin_permission(current_user, db):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators can update groups",
+        )
+
+    group = db.query(Group).filter(Group.group_id == group_id).first()
+    if group is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Group not found"
+        )
+
+    # 관리자 그룹(0번)은 수정 불가
+    if group_id == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot modify admin group (group_id: 0)",
+        )
+
+    # 업데이트할 필드들
+    update_data = group_update.dict(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(group, field, value)
+
+    db.commit()
+    db.refresh(group)
+    return group
+
+
+@router.delete("/{group_id}")
+async def delete_group(
+    group_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """그룹 삭제 (관리자만 가능)"""
+    if not check_admin_permission(current_user, db):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators can delete groups",
+        )
+
+    group = db.query(Group).filter(Group.group_id == group_id).first()
+    if group is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Group not found"
+        )
+
+    # 관리자 그룹(0번)은 삭제 불가
+    if group_id == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot delete admin group (group_id: 0)",
+        )
+
+    db.delete(group)
+    db.commit()
+
+    return {"message": "Group deleted successfully"}
+
+
+@router.post("/{group_id}/users/{user_id}")
+async def add_user_to_group(
+    group_id: int,
+    user_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """그룹에 사용자 추가 (관리자만 가능)"""
+    if not check_admin_permission(current_user, db):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators can add users to groups",
+        )
+
+    group = db.query(Group).filter(Group.group_id == group_id).first()
+    if group is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Group not found"
+        )
+
+    user = db.query(User).filter(User.user_id == user_id).first()
     if user is None:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    # 이미 그룹에 속해있는지 확인
-    existing_user_group = (
-        db.query(UserGroup)
-        .filter(
-            UserGroup.user_uuid == user_group.user_uuid,
-            UserGroup.group_uuid == group_uuid,
-        )
-        .first()
-    )
-    if existing_user_group:
-        raise HTTPException(status_code=400, detail="User is already in this group")
-
-    # 사용자를 그룹에 추가
-    db_user_group = UserGroup(user_uuid=user_group.user_uuid, group_uuid=group_uuid)
-    db.add(db_user_group)
-    db.commit()
-    db.refresh(db_user_group)
-    return db_user_group
-
-
-@router.delete("/{group_uuid}/users/{user_uuid}")
-def remove_user_from_group(
-    group_uuid: str, user_uuid: str, db: Session = Depends(get_db)
-):
-    """그룹에서 사용자 제거"""
-    user_group = (
-        db.query(UserGroup)
-        .filter(UserGroup.user_uuid == user_uuid, UserGroup.group_uuid == group_uuid)
-        .first()
-    )
-    if user_group is None:
-        raise HTTPException(status_code=404, detail="User not found in this group")
-
-    db.delete(user_group)
-    db.commit()
-    return {"message": "User removed from group successfully"}
-
-
-@router.get("/{group_uuid}/users", response_model=List[dict])
-def get_group_users(group_uuid: str, db: Session = Depends(get_db)):
-    """그룹에 속한 사용자 목록 조회"""
-    # 그룹 존재 확인
-    group = db.query(Group).filter(Group.group_uuid == group_uuid).first()
-    if group is None:
-        raise HTTPException(status_code=404, detail="Group not found")
-
-    # 그룹에 속한 사용자들 조회
-    user_groups = db.query(UserGroup).filter(UserGroup.group_uuid == group_uuid).all()
-    users = []
-    for user_group in user_groups:
-        user = db.query(User).filter(User.user_uuid == user_group.user_uuid).first()
-        if user:
-            users.append(
-                {
-                    "user_uuid": user.user_uuid,
-                    "user_name": user.user_name,
-                    "email": user.email,
-                }
-            )
-    return users
-
-
-@router.post("/{group_uuid}/hf-tokens", response_model=HFTokenResponse)
-def add_hf_token_to_group(
-    group_uuid: str, hf_token: HFTokenCreate, db: Session = Depends(get_db)
-):
-    """특정 그룹에 허깅페이스 토큰 부여"""
-    # 그룹 존재 확인
-    group = db.query(Group).filter(Group.group_uuid == group_uuid).first()
-    if group is None:
-        raise HTTPException(status_code=404, detail="Group not found")
-
-    # 토큰 닉네임 중복 확인
-    existing_token = (
-        db.query(HFTokenManage)
-        .filter(
-            HFTokenManage.group_uuid == group_uuid,
-            HFTokenManage.hf_token_nickname == hf_token.hf_token_nickname,
-        )
-        .first()
-    )
-    if existing_token:
         raise HTTPException(
-            status_code=400, detail="Token nickname already exists for this group"
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
 
-    # 허깅페이스 토큰 생성
-    db_hf_token = HFTokenManage(
-        group_uuid=group_uuid,
-        hf_token_value=hf_token.hf_token_value,
-        hf_token_nickname=hf_token.hf_token_nickname,
-        hf_user_name=hf_token.hf_user_name,
-    )
-    db.add(db_hf_token)
-    db.commit()
-    db.refresh(db_hf_token)
-    return db_hf_token
-
-
-@router.post("/{group_uuid}/hf-tokens/{hf_manage_uuid}/assign")
-def assign_hf_token_to_group(
-    group_uuid: str, hf_manage_uuid: str, db: Session = Depends(get_db)
-):
-    """기존 허깅페이스 토큰을 그룹에 할당"""
-    # 그룹 존재 확인
-    group = db.query(Group).filter(Group.group_uuid == group_uuid).first()
-    if group is None:
-        raise HTTPException(status_code=404, detail="Group not found")
-
-    # 토큰 존재 확인
-    hf_token = (
-        db.query(HFTokenManage)
-        .filter(HFTokenManage.hf_manage_uuid == hf_manage_uuid)
-        .first()
-    )
-    if hf_token is None:
-        raise HTTPException(status_code=404, detail="HF Token not found")
-
-    # 이미 다른 그룹에 할당되어 있는지 확인
-    if hf_token.group_uuid is not None:
+    if user in group.users:
         raise HTTPException(
-            status_code=400, detail="Token is already assigned to another group"
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User is already in this group",
         )
 
-    # 토큰을 그룹에 할당
-    setattr(hf_token, "group_uuid", group_uuid)
+    group.users.append(user)
     db.commit()
-    db.refresh(hf_token)
+
+    return {"message": "User added to group successfully"}
+
+
+@router.post("/{group_id}/users/bulk-add")
+async def bulk_add_users_to_group(
+    group_id: int,
+    user_operation: BulkUserOperation,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """그룹에 여러 사용자 일괄 추가 (관리자만 가능)"""
+    if not check_admin_permission(current_user, db):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators can add users to groups",
+        )
+
+    group = db.query(Group).filter(Group.group_id == group_id).first()
+    if group is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Group not found"
+        )
+
+    added_users = []
+    already_in_group = []
+    not_found_users = []
+
+    for user_id in user_operation.user_ids:
+        user = db.query(User).filter(User.user_id == user_id).first()
+        if user is None:
+            not_found_users.append(user_id)
+        elif user in group.users:
+            already_in_group.append(user_id)
+        else:
+            group.users.append(user)
+            added_users.append(user_id)
+
+    db.commit()
 
     return {
-        "message": "HF Token assigned to group successfully",
-        "hf_manage_uuid": hf_manage_uuid,
+        "message": "Bulk user operation completed",
+        "added_users": added_users,
+        "already_in_group": already_in_group,
+        "not_found_users": not_found_users,
     }
 
 
-@router.delete("/{group_uuid}/hf-tokens/{hf_manage_uuid}/unassign")
-def unassign_hf_token_from_group(
-    group_uuid: str, hf_manage_uuid: str, db: Session = Depends(get_db)
+@router.delete("/{group_id}/users/{user_id}")
+async def remove_user_from_group(
+    group_id: int,
+    user_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """그룹에서 허깅페이스 토큰 할당 해제"""
-    # 그룹 존재 확인
-    group = db.query(Group).filter(Group.group_uuid == group_uuid).first()
-    if group is None:
-        raise HTTPException(status_code=404, detail="Group not found")
-
-    # 토큰 존재 확인
-    hf_token = (
-        db.query(HFTokenManage)
-        .filter(
-            HFTokenManage.hf_manage_uuid == hf_manage_uuid,
-            HFTokenManage.group_uuid == group_uuid,
+    """그룹에서 사용자 제거 (관리자만 가능)"""
+    if not check_admin_permission(current_user, db):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators can remove users from groups",
         )
-        .first()
-    )
-    if hf_token is None:
-        raise HTTPException(status_code=404, detail="HF Token not found in this group")
 
-    # 토큰 할당 해제
-    setattr(hf_token, "group_uuid", None)
+    group = db.query(Group).filter(Group.group_id == group_id).first()
+    if group is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Group not found"
+        )
+
+    user = db.query(User).filter(User.user_id == user_id).first()
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
+
+    if user not in group.users:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="User is not in this group"
+        )
+
+    # 관리자 그룹(0번)에서 마지막 관리자를 제거할 수 없음
+    if group_id == 0 and len(group.users) == 1:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot remove the last administrator from admin group",
+        )
+
+    group.users.remove(user)
     db.commit()
 
-    return {"message": "HF Token unassigned from group successfully"}
+    return {"message": "User removed from group successfully"}
 
 
-@router.get("/{group_uuid}/hf-tokens", response_model=List[HFTokenResponse])
-def get_group_hf_tokens(group_uuid: str, db: Session = Depends(get_db)):
-    """그룹의 허깅페이스 토큰 목록 조회"""
-    # 그룹 존재 확인
-    group = db.query(Group).filter(Group.group_uuid == group_uuid).first()
+@router.post("/{group_id}/users/bulk-remove")
+async def bulk_remove_users_from_group(
+    group_id: int,
+    user_operation: BulkUserOperation,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """그룹에서 여러 사용자 일괄 제거 (관리자만 가능)"""
+    if not check_admin_permission(current_user, db):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators can remove users from groups",
+        )
+
+    group = db.query(Group).filter(Group.group_id == group_id).first()
     if group is None:
-        raise HTTPException(status_code=404, detail="Group not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Group not found"
+        )
 
-    # 그룹의 허깅페이스 토큰들 조회
-    hf_tokens = (
-        db.query(HFTokenManage).filter(HFTokenManage.group_uuid == group_uuid).all()
-    )
-    return hf_tokens
+    removed_users = []
+    not_in_group = []
+    not_found_users = []
+
+    for user_id in user_operation.user_ids:
+        user = db.query(User).filter(User.user_id == user_id).first()
+        if user is None:
+            not_found_users.append(user_id)
+        elif user not in group.users:
+            not_in_group.append(user_id)
+        else:
+            # 관리자 그룹(0번)에서 마지막 관리자를 제거할 수 없음
+            if group_id == 0 and len(group.users) == 1:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Cannot remove the last administrator from admin group",
+                )
+
+            group.users.remove(user)
+            removed_users.append(user_id)
+
+    db.commit()
+
+    return {
+        "message": "Bulk user removal completed",
+        "removed_users": removed_users,
+        "not_in_group": not_in_group,
+        "not_found_users": not_found_users,
+    }
+
+
+@router.get("/{group_id}/users/", response_model=List[dict])
+async def get_group_users(
+    group_id: int,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=100),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """그룹의 사용자 목록 조회"""
+    group = db.query(Group).filter(Group.group_id == group_id).first()
+    if group is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Group not found"
+        )
+
+    # 관리자가 아니고 해당 그룹에 속하지 않은 경우 접근 거부
+    if not check_admin_permission(current_user, db) and current_user not in group.users:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this group",
+        )
+
+    users = group.users[skip : skip + limit]
+    return [
+        {
+            "user_id": user.user_id,
+            "user_name": user.user_name,
+            "email": user.email,
+            "provider": user.provider,
+        }
+        for user in users
+    ]

@@ -5,11 +5,14 @@ from alembic import context
 import os
 import sys
 
-# Add the parent directory to the Python path
+# 프로젝트 루트 디렉토리를 Python 경로에 추가
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Import your models
-from app.models import Base
+# 모델들을 import하여 Alembic이 감지할 수 있도록 함
+from app.models.base import Base
+from app.models.user import User, Group, HFTokenManage, SystemLog
+from app.models.influencer import AIInfluencer, ModelMBTI, StylePreset, BatchKey
+from app.models.board import Board
 from app.core.config import settings
 
 # this is the Alembic Config object, which provides
@@ -32,6 +35,7 @@ target_metadata = Base.metadata
 
 
 def get_url():
+    """데이터베이스 URL을 설정에서 가져옴"""
     return settings.DATABASE_URL
 
 
@@ -53,6 +57,8 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        compare_type=True,
+        compare_server_default=True,
     )
 
     with context.begin_transaction():
@@ -66,18 +72,22 @@ def run_migrations_online() -> None:
     and associate a connection with the context.
 
     """
-    configuration = config.get_section(config.config_ini_section)
-    if configuration is None:
-        configuration = {}
-    configuration["sqlalchemy.url"] = get_url()
+    # alembic.ini의 sqlalchemy.url을 동적으로 설정
+    config.set_main_option("sqlalchemy.url", get_url())
+
     connectable = engine_from_config(
-        configuration,
+        config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
     )
 
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            compare_type=True,
+            compare_server_default=True,
+        )
 
         with context.begin_transaction():
             context.run_migrations()

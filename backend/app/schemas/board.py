@@ -1,18 +1,22 @@
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
+from app.schemas.base import BaseSchema, TimestampSchema
 
 
+# Board 스키마
 class BoardBase(BaseModel):
-    group_uuid: str
-    model_uuid: str
+    influencer_id: str
+    user_id: str
+    group_id: int
     board_topic: str
     board_description: Optional[str] = None
     board_platform: int
-    board_hash_tag: Optional[List[str]] = None
+    board_hash_tag: Optional[str] = None
+    board_status: int = 0
+    image_url: str
     reservation_at: Optional[datetime] = None
-    board_status: int
-    image_url: Optional[List[str]] = None
+    pulished_at: Optional[datetime] = None
 
 
 class BoardCreate(BoardBase):
@@ -23,17 +27,16 @@ class BoardUpdate(BaseModel):
     board_topic: Optional[str] = None
     board_description: Optional[str] = None
     board_platform: Optional[int] = None
-    board_hash_tag: Optional[List[str]] = None
-    reservation_at: Optional[datetime] = None
+    board_hash_tag: Optional[str] = None
     board_status: Optional[int] = None
-    image_url: Optional[List[str]] = None
-
-
-class BoardResponse(BoardBase):
-    board_uuid: str
-    created_at: datetime
-    updated_at: datetime
+    image_url: Optional[str] = None
+    reservation_at: Optional[datetime] = None
     pulished_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+
+class Board(BoardBase, TimestampSchema):
+    board_id: str
+
+
+class BoardWithInfluencer(Board):
+    influencer_name: Optional[str] = None
