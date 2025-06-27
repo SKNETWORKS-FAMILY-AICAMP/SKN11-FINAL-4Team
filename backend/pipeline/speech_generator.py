@@ -125,28 +125,30 @@ class SpeechGenerator:
         """
         requests = []
         
-        # 3가지 랜덤 어조 변형
+        # 3가지 어조 변형, 각각 5개씩 생성
         tone_numbers = [1, 2, 3]
         tone_names = ["어조1", "어조2", "어조3"]
         
         for i, message in enumerate(user_messages):
             for j, (tone_num, tone_name) in enumerate(zip(tone_numbers, tone_names)):
-                system_prompt = self.create_character_prompt_for_random_tone(character, tone_num)
-                request = {
-                    "custom_id": f"msg_{i}_tone_{j}_{tone_name}_{character.name}",
-                    "method": "POST",
-                    "url": "/v1/chat/completions",
-                    "body": {
-                        "model": "gpt-4o-mini",
-                        "messages": [
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": message}
-                        ],
-                        "max_tokens": 1000,
-                        "temperature": 0.9
+                # 각 어조마다 5개 응답 생성
+                for k in range(5):
+                    system_prompt = self.create_character_prompt_for_random_tone(character, tone_num)
+                    request = {
+                        "custom_id": f"msg_{i}_tone_{j}_{tone_name}_{k+1}_{character.name}",
+                        "method": "POST",
+                        "url": "/v1/chat/completions",
+                        "body": {
+                            "model": "gpt-4o-mini",
+                            "messages": [
+                                {"role": "system", "content": system_prompt},
+                                {"role": "user", "content": message}
+                            ],
+                            "max_tokens": 1000,
+                            "temperature": 0.9
+                        }
                     }
-                }
-                requests.append(request)
+                    requests.append(request)
         
         return requests
 
@@ -384,7 +386,11 @@ class SpeechGenerator:
                 if msg_idx not in results:
                     results[msg_idx] = {}
                 if data.get('response') and data['response'].get('body'):
-                    content = data['response']['body']['choices'][0]['message']['content']
+                    choices = data['response']['body'].get('choices', [])
+                    if isinstance(choices, list) and len(choices) > 0:
+                        content = choices[0]['message']['content']
+                    else:
+                        content = "오류: 응답 생성에 실패했습니다."
                     results[msg_idx][key] = {
                         "text": content,
                         "tone_info": {
@@ -458,8 +464,12 @@ class SpeechGenerator:
                 
                 # 응답에서 텍스트 추출
                 if data.get('response') and data['response'].get('body'):
-                    content = data['response']['body']['choices'][0]['message']['content']
-                    results[msg_idx][key] = content
+                    choices = data['response']['body'].get('choices', [])
+                    if isinstance(choices, list) and len(choices) > 0:
+                        content = choices[0]['message']['content']
+                        results[msg_idx][key] = content
+                    else:
+                        results[msg_idx][key] = "오류: 응답 생성에 실패했습니다."
                 else:
                     results[msg_idx][key] = "Error: No response generated"
         
@@ -482,31 +492,35 @@ class SpeechGenerator:
         for i, message in enumerate(messages):
             results[i] = {}
             for tone_num, tone_name in zip(tone_numbers, tone_names):
-                system_prompt = self.create_character_prompt_for_random_tone(character, tone_num)
-                response = self.client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": message}
-                    ],
-                    max_tokens=1000,
-                    temperature=0.9
-                )
-                content = response.choices[0].message.content
-                results[i][tone_name] = {
-                    "text": content,
-                    "tone_info": {
-                        "name": tone_name,
-                        "description": tone_descriptions.get(tone_name, "랜덤 생성된 어조")
-                    },
-                    "character_info": {
-                        "name": character.name,
-                        "age": character.age,
-                        "gender": character.gender.value,
-                        "personality": character.personality,
-                        "mbti": character.mbti
-                    }
-                }
+                # 각 어조마다 5개 응답 생성
+                results[i][tone_name] = []
+                for k in range(5):
+                    system_prompt = self.create_character_prompt_for_random_tone(character, tone_num)
+                    response = self.client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": message}
+                        ],
+                        max_tokens=1000,
+                        temperature=0.9
+                    )
+                    content = response.choices[0].message.content
+                    results[i][tone_name].append({
+                        "text": content,
+                        "tone_info": {
+                            "name": tone_name,
+                            "description": tone_descriptions.get(tone_name, "랜덤 생성된 어조"),
+                            "variation": k + 1
+                        },
+                        "character_info": {
+                            "name": character.name,
+                            "age": character.age,
+                            "gender": character.gender.value,
+                            "personality": character.personality,
+                            "mbti": character.mbti
+                        }
+                    })
         return results
 
 
