@@ -5,6 +5,7 @@ from passlib.context import CryptContext
 from fastapi import HTTPException, status, Request, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import logging
+from typing import Dict
 from app.core.config import settings
 
 # 로깅 설정
@@ -83,10 +84,29 @@ def verify_token(token: str) -> Optional[dict]:
         return None
 
 
-# 현재 사용자 가져오기
+# 현재 사용자 가져오기 (Enhanced with full payload support)
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
-):
+) -> Dict:
+    """현재 인증된 사용자 정보 반환 (전체 JWT 페이로드 포함)"""
+    token = credentials.credentials
+    payload = verify_token(token)
+
+    if payload is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    return payload
+
+
+# 사용자 ID만 필요한 경우를 위한 함수
+async def get_current_user_id(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+) -> str:
+    """현재 인증된 사용자 ID 반환"""
     token = credentials.credentials
     payload = verify_token(token)
 
@@ -182,6 +202,46 @@ class SecurityMonitor:
         # 예: 비정상적인 IP에서의 접근
 
         return False
+
+
+# JWT payload generation for social auth
+def generate_jwt_payload(user_info: Dict, provider: str) -> Dict:
+    """Generate JWT payload with social auth features"""
+    is_business = False
+    business_features = {}
+    
+    if provider == "instagram":
+        account_type = user_info.get("account_type", "PERSONAL")
+        is_business = account_type in ["BUSINESS", "CREATOR"]
+        business_features = {
+            "insights": is_business,
+            "content_publishing": is_business,
+            "message_management": is_business,
+            "comment_management": True
+        }
+    
+    payload = {
+        "sub": user_info.get("id"),
+        "email": user_info.get("email"),
+        "name": user_info.get("name"),
+        "provider": provider,
+        "company": f"{provider.title()} Business User" if is_business else f"{provider.title()} User",
+        "groups": ["business", "user"] if is_business else ["user"],
+        "permissions": [
+            "post:read", "post:write", "model:read", "model:write", 
+            "insights:read", "business:manage"
+        ] if is_business else ["post:read", "model:read"],
+    }
+    
+    if provider == "instagram":
+        payload["instagram"] = {
+            "username": user_info.get("username"),
+            "account_type": user_info.get("account_type"),
+            "is_business_verified": is_business,
+            "business_features": business_features
+        }
+    
+    return payload
 
 
 # 전역 보안 모니터 인스턴스

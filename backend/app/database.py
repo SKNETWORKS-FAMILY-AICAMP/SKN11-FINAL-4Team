@@ -14,7 +14,7 @@ engine = create_engine(
     pool_size=settings.DATABASE_POOL_SIZE,
     max_overflow=settings.DATABASE_MAX_OVERFLOW,
     pool_timeout=settings.DATABASE_POOL_TIMEOUT,
-    echo=settings.DEBUG,  # 개발 환경에서만 SQL 로그 출력
+    echo=False,  # SQL 로그 비활성화
 )
 
 # 세션 팩토리 생성

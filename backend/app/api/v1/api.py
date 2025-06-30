@@ -9,6 +9,7 @@ from app.api.v1.endpoints import (
     chat,
     analytics,
     system,
+    instagram,
 )
 
 api_router = APIRouter()
@@ -38,3 +39,6 @@ api_router.include_router(analytics.router, prefix="/analytics", tags=["Analytic
 
 # 시스템 관리 API
 api_router.include_router(system.router, prefix="/system", tags=["System"])
+
+# 인스타그램 연동 API
+api_router.include_router(instagram.router, prefix="/instagram", tags=["Instagram Integration"])

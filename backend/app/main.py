@@ -18,6 +18,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# 외부 라이브러리 로그 비활성화
+logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
+logging.getLogger('sqlalchemy.pool').setLevel(logging.WARNING)
+logging.getLogger('sqlalchemy.dialects').setLevel(logging.WARNING)
+logging.getLogger('httpx').setLevel(logging.WARNING)
+logging.getLogger('httpcore').setLevel(logging.WARNING)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -27,11 +34,10 @@ async def lifespan(app: FastAPI):
 
     # 데이터베이스 연결 테스트
     if not test_database_connection():
-        logger.error("❌ Database connection failed during startup")
+        logger.error("❌ Database connection failed")
         raise Exception("Database connection failed")
 
-    logger.info("✅ Database connection established")
-    logger.info("✅ AIMEX API Server started successfully")
+    logger.info("✅ AIMEX API Server ready")
 
     yield
 
@@ -52,16 +58,17 @@ app = FastAPI(
 # CORS 미들웨어 설정
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.BACKEND_CORS_ORIGINS,
+    allow_origins=settings.BACKEND_CORS_ORIGINS + ["*"],  # 개발 환경에서 모든 origin 허용
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 # 신뢰할 수 있는 호스트 미들웨어 (보안 강화)
 app.add_middleware(
     TrustedHostMiddleware,
-    allowed_hosts=["*"] if settings.DEBUG else ["localhost", "127.0.0.1"],
+    allowed_hosts=["*"]
 )
 
 
@@ -166,6 +173,10 @@ async def root():
 
 # API 라우터 등록
 app.include_router(api_router, prefix=settings.API_V1_STR)
+
+# 버전 없는 라우터 추가 (하위 호환성)
+from app.api.v1.endpoints.auth import router as auth_router
+app.include_router(auth_router, prefix="/api/auth", tags=["Authentication (Legacy)"])
 
 
 # 개발 환경에서만 추가 정보 출력
