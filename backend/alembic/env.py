@@ -10,7 +10,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # 모델들을 import하여 Alembic이 감지할 수 있도록 함
 from app.models.base import Base
-from app.models.user import User, Group, HFTokenManage, SystemLog
+from app.models.user import User, Team, HFTokenManage, SystemLog
 from app.models.influencer import AIInfluencer, ModelMBTI, StylePreset, BatchKey
 from app.models.board import Board
 from app.core.config import settings

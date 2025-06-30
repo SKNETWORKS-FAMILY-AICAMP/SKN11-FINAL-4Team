@@ -10,6 +10,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 from app.models.base import Base, TimestampMixin
+from app.models.board import Board
 import uuid
 
 
@@ -80,7 +81,7 @@ class AIInfluencer(Base, TimestampMixin):
     )
     group_id = Column(
         Integer,
-        ForeignKey("GROUP.group_id"),
+        ForeignKey("TEAM.group_id"),
         nullable=False,
         comment="그룹 고유 식별자",
     )
@@ -95,6 +96,9 @@ class AIInfluencer(Base, TimestampMixin):
     )
     influencer_name = Column(
         String(100), nullable=False, unique=True, comment="AI 인플루언서 이름"
+    )
+    influencer_description = Column(
+        Text, comment="AI 인플루언서 설명"
     )
     image_url = Column(
         Text,
@@ -133,13 +137,19 @@ class AIInfluencer(Base, TimestampMixin):
 
     # 관계
     user = relationship("User", back_populates="ai_influencers")
-    group = relationship("Group", back_populates="ai_influencers")
+    group = relationship("Team", back_populates="ai_influencers")
     style_preset = relationship("StylePreset", back_populates="ai_influencers")
     mbti = relationship("ModelMBTI", back_populates="ai_influencers")
     batch_keys = relationship("BatchKey", back_populates="influencer")
     chat_messages = relationship("ChatMessage", back_populates="influencer")
     influencer_apis = relationship("InfluencerAPI", back_populates="influencer")
     boards = relationship("Board", back_populates="influencer")
+
+    influencer_personality = Column(Text, comment="AI 인플루언서 성격")
+    influencer_tone = Column(Text, comment="AI 인플루언서 말투/톤")
+    influencer_age_group = Column(Integer, comment="AI 인플루언서 연령대")
+    voice_option = Column(Boolean, default=False, comment="음성 생성 옵션")
+    image_option = Column(Boolean, default=False, comment="이미지 생성 옵션")
 
 
 class BatchKey(Base):
@@ -252,8 +262,8 @@ class APICallAggregation(Base):
     # 복합 외래키 제약조건 (INFLUENCER_API 테이블 참조)
     __table_args__ = (
         ForeignKeyConstraint(
-            ["api_id", "influencer_id"],
-            ["INFLUENCER_API.api_id", "INFLUENCER_API.influencer_id"],
+            ["api_id"],
+            ["INFLUENCER_API.api_id"],
             ondelete="CASCADE",
             onupdate="CASCADE",
         ),

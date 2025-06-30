@@ -4,7 +4,7 @@ from typing import List, Optional
 import uuid
 
 from app.database import get_db
-from app.models.user import User, Group
+from app.models.user import User, Team
 from app.schemas.user import (
     UserCreate,
     UserUpdate,
@@ -18,16 +18,16 @@ router = APIRouter()
 def check_admin_permission(current_user: User, db: Session):
     """관리자 권한 체크 - 그룹 0번에 속한 사용자를 관리자로 간주"""
     # 그룹 0번이 관리자 그룹이라고 가정
-    admin_group = db.query(Group).filter(Group.group_id == 0).first()
-    if admin_group:
+    admin_team = db.query(Team).filter(Team.group_id == 0).first()
+    if admin_team:
         # 현재 사용자가 관리자 그룹에 속해있는지 확인
-        user_in_admin_group = (
-            db.query(Group)
-            .join(Group.users)
-            .filter(Group.group_id == 0, User.user_id == str(current_user.user_id))
+        user_in_admin_team = (
+            db.query(Team)
+            .join(Team.users)
+            .filter(Team.group_id == 0, User.user_id == str(current_user.user_id))
             .first()
         )
-        if user_in_admin_group:
+        if user_in_admin_team:
             return True
     return False
 
@@ -185,12 +185,12 @@ async def delete_user(
     return {"message": "User deleted successfully"}
 
 
-# 그룹 관련 API
-@router.get("/groups/", response_model=List[dict])
-async def get_user_groups(
+# 팀 관련 API
+@router.get("/teams/", response_model=List[dict])
+async def get_user_teams(
     db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
 ):
-    """현재 사용자의 그룹 목록 조회"""
+    """현재 사용자의 팀 목록 조회"""
     user = db.query(User).filter(User.user_id == current_user.user_id).first()
     if user is None:
         raise HTTPException(
@@ -198,25 +198,25 @@ async def get_user_groups(
         )
     return [
         {
-            "group_id": group.group_id,
-            "group_name": group.group_name,
-            "group_description": group.group_description,
+            "group_id": team.group_id,
+            "group_name": team.group_name,
+            "group_description": team.group_description,
         }
-        for group in user.groups
+        for team in user.groups
     ]
 
 
-@router.get("/{user_id}/groups/", response_model=List[dict])
-async def get_user_groups_by_id(
+@router.get("/{user_id}/teams/", response_model=List[dict])
+async def get_user_teams_by_id(
     user_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """특정 사용자의 그룹 목록 조회 (관리자만 가능)"""
+    """특정 사용자의 팀 목록 조회 (관리자만 가능)"""
     if not check_admin_permission(current_user, db):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only administrators can view other users' groups",
+            detail="Only administrators can view other users' teams",
         )
 
     user = db.query(User).filter(User.user_id == user_id).first()
@@ -226,9 +226,9 @@ async def get_user_groups_by_id(
         )
     return [
         {
-            "group_id": group.group_id,
-            "group_name": group.group_name,
-            "group_description": group.group_description,
+            "group_id": team.group_id,
+            "group_name": team.group_name,
+            "group_description": team.group_description,
         }
-        for group in user.groups
+        for team in user.groups
     ]

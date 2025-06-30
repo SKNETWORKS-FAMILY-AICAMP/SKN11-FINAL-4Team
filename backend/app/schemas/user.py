@@ -29,35 +29,34 @@ class User(UserBase):
         from_attributes = True
 
 
-# Group 스키마
-class GroupBase(BaseModel):
+# Team 스키마
+class TeamBase(BaseModel):
     group_name: str
     group_description: Optional[str] = None
 
 
-class GroupCreate(GroupBase):
+class TeamCreate(TeamBase):
     pass
 
 
-class GroupUpdate(BaseModel):
+class TeamUpdate(BaseModel):
     group_name: Optional[str] = None
     group_description: Optional[str] = None
 
 
-class Group(GroupBase):
+class Team(TeamBase):
     group_id: int
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
 
 
-class GroupWithUsers(Group):
+class TeamWithUsers(Team):
     users: List[User] = []
 
-    class Config:
-        from_attributes = True
+
+class UserWithTeams(User):
+    groups: List[Team] = []
 
 
 # HFToken 스키마

@@ -11,14 +11,15 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 from app.models.base import Base, TimestampMixin
+from app.models.influencer import AIInfluencer
 import uuid
 
-# User-Group 다대다 관계 테이블
+# User-Team 다대다 관계 테이블
 user_group = Table(
     "USER_GROUP",
     Base.metadata,
     Column("user_id", String(255), ForeignKey("USER.user_id"), primary_key=True),
-    Column("group_id", Integer, ForeignKey("GROUP.group_id"), primary_key=True),
+    Column("group_id", Integer, ForeignKey("TEAM.group_id"), primary_key=True),
 )
 
 
@@ -44,15 +45,15 @@ class User(Base, TimestampMixin):
     email = Column(String(50), nullable=False, unique=True, comment="사용자 이메일")
 
     # 관계
-    groups = relationship("Group", secondary=user_group, back_populates="users")
+    groups = relationship("Team", secondary=user_group, back_populates="users")
     system_logs = relationship("SystemLog", back_populates="user")
     ai_influencers = relationship("AIInfluencer", back_populates="user")
 
 
-class Group(Base, TimestampMixin):
+class Team(Base, TimestampMixin):
     """그룹 모델"""
 
-    __tablename__ = "GROUP"
+    __tablename__ = "TEAM"
 
     group_id = Column(
         Integer, primary_key=True, autoincrement=True, comment="그룹 고유 식별자"
@@ -79,7 +80,7 @@ class HFTokenManage(Base, TimestampMixin):
     )
     group_id = Column(
         Integer,
-        ForeignKey("GROUP.group_id"),
+        ForeignKey("TEAM.group_id"),
         nullable=False,
         comment="그룹 고유 식별자",
     )
@@ -94,7 +95,7 @@ class HFTokenManage(Base, TimestampMixin):
     )
 
     # 관계
-    group = relationship("Group", back_populates="hf_tokens")
+    group = relationship("Team", back_populates="hf_tokens")
 
 
 class SystemLog(Base):

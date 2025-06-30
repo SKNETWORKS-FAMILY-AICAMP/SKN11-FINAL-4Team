@@ -35,7 +35,7 @@ def init_database():
     try:
         # 모든 모델 임포트
         from app.models.base import Base
-        from app.models.user import User, Group, HFTokenManage, SystemLog
+        from app.models.user import User, Team, HFTokenManage, SystemLog
         from app.models.influencer import (
             ModelMBTI,
             StylePreset,

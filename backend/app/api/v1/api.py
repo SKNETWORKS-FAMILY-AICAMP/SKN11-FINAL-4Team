@@ -3,7 +3,7 @@ from fastapi import APIRouter
 from app.api.v1.endpoints import (
     auth,
     users,
-    groups,
+    teams,
     influencers,
     boards,
     chat,
@@ -21,7 +21,7 @@ api_router.include_router(auth.router, prefix="/auth", tags=["Authentication"])
 api_router.include_router(users.router, prefix="/users", tags=["Users"])
 
 # 그룹 관리 API
-api_router.include_router(groups.router, prefix="/groups", tags=["Groups"])
+api_router.include_router(teams.router, prefix="/teams", tags=["Teams"])
 
 # AI 인플루언서 관리 API
 api_router.include_router(
@@ -41,4 +41,4 @@ api_router.include_router(analytics.router, prefix="/analytics", tags=["Analytic
 api_router.include_router(system.router, prefix="/system", tags=["System"])
 
 # 인스타그램 연동 API
-api_router.include_router(instagram.router, prefix="/instagram", tags=["Instagram Integration"])
+api_router.include_router(instagram.router, prefix="/instagram", tags=["Instagram"])
