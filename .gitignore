@@ -4,3 +4,6 @@ frontend/.next
 frontend/out
 .DS_Store
 .claude
+frontend/.env.local
+frontend/package-lock.json
+frontend/certificates
