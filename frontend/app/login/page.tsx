@@ -1,33 +1,86 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import { useAuth } from "@/hooks/use-auth"
+import { signIn } from "next-auth/react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Bot } from "lucide-react"
+import { socialLogin } from "@/lib/social-auth"
+import { useAuth } from "@/hooks/use-auth"
 
 export default function LoginPage() {
   const [isLoading, setIsLoading] = useState<string | null>(null)
   const router = useRouter()
-  const { login } = useAuth()
+  const { login, isAuthenticated, isLoading: authLoading } = useAuth()
+
+  // 이미 로그인된 사용자는 대시보드로 리다이렉트
+  useEffect(() => {
+    if (!authLoading && isAuthenticated) {
+      router.push('/dashboard')
+    }
+  }, [isAuthenticated, authLoading, router])
 
   const handleOAuthLogin = async (provider: "google" | "naver") => {
     setIsLoading(provider)
 
-    // 실제 OAuth 로그인/회원가입 로직 시뮬레이션
-    setTimeout(() => {
-      try {
-        // 모킹 토큰으로 로그인 처리
-        const mockToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwiZW1haWwiOiJ0ZXN0QGdtYWlsLmNvbSIsIm5hbWUiOiJUZXN0IFVzZXIiLCJjb21wYW55IjoiVGVzdCBDb21wYW55IiwiZ3JvdXBzIjpbImFkbWluIiwidXNlciJdLCJwZXJtaXNzaW9ucyI6WyIqOioiXSwiZXhwIjoxNzU2NjQ2ODAwfQ.qMgTUwDXMXJkAxNVKkvOcECH8Ys8HYY8C9r8bLu5XQo'
-        login(mockToken)
-        router.push("/dashboard")
-      } catch (error) {
-        console.error('로그인 실패:', error)
-      } finally {
-        setIsLoading(null)
+    try {
+      if (provider === "google") {
+        // Google은 authorization code 방식으로 처리
+        const result = await socialLogin(provider)
+        
+        if (result.success && result.data) {
+          // 백엔드 API 호출해서 JWT 토큰 받기
+          const { BackendAuthService } = await import('@/lib/backend-auth')
+          const backendResponse = await BackendAuthService.exchangeCodeForToken(
+            provider,
+            result.data.code,
+            result.data.redirect_uri
+          )
+          
+          if (backendResponse.access_token) {
+            login(backendResponse.access_token)
+            router.push("/dashboard")
+          } else {
+            throw new Error('No backend token received')
+          }
+        } else {
+          throw new Error(result.error || 'Google login failed')
+        }
+      } else {
+        // 다른 소셜 로그인 (네이버 등) - 백엔드로 사용자 정보 전달
+        const result = await socialLogin(provider)
+        
+        if (result.success && result.data) {
+          // 백엔드 API 호출해서 JWT 토큰 받기
+          const { BackendAuthService } = await import('@/lib/backend-auth')
+          const backendResponse = await BackendAuthService.authenticateWithUserInfo(provider, result.data)
+          
+          if (backendResponse.access_token) {
+            login(backendResponse.access_token)
+            router.push("/dashboard")
+          } else {
+            throw new Error('No backend token received')
+          }
+        } else {
+          throw new Error(result.error || 'Social login failed')
+        }
       }
-    }, 1500)
+    } catch (error) {
+      console.error('로그인 실패:', error)
+      alert('로그인에 실패했습니다. 다시 시도해주세요.')
+    } finally {
+      setIsLoading(null)
+    }
+  }
+
+  // 인증 로딩 중이거나 이미 로그인된 상태라면 로딩 표시
+  if (authLoading || isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
+        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
+      </div>
+    )
   }
 
   return (
@@ -43,9 +96,14 @@ export default function LoginPage() {
         <CardContent className="space-y-4">
           <div className="text-center mb-6">
             <p className="text-sm text-gray-600 mb-2">소셜 계정으로 간편하게 시작하세요</p>
-            <p className="text-xs text-blue-600 bg-blue-50 px-3 py-2 rounded-lg">
-              💡 처음 로그인하면 자동으로 계정이 생성됩니다
-            </p>
+            <div className="space-y-2">
+              <p className="text-xs text-blue-600 bg-blue-50 px-3 py-2 rounded-lg">
+                💡 처음 로그인하면 자동으로 계정이 생성됩니다
+              </p>
+              <p className="text-xs text-orange-600 bg-orange-50 px-3 py-2 rounded-lg">
+                🏢 비즈니스 계정 권한으로 콘텐츠 관리 및 인사이트를 확인하세요
+              </p>
+            </div>
           </div>
 
           {/* 구글 로그인 버튼 */}
