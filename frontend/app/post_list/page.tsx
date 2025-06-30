@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, Suspense } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
 import Link from "next/link"
 import { Navigation } from "@/components/navigation"
@@ -128,7 +128,7 @@ const samplePosts: Post[] = [
   }
 ]
 
-export default function PostListPage() {
+function PostListContent() {
   const [posts, setPosts] = useState<Post[]>(samplePosts)
   const [searchTerm, setSearchTerm] = useState("")
   const [statusFilter, setStatusFilter] = useState<string>("all")
@@ -930,5 +930,13 @@ export default function PostListPage() {
         </Dialog>
       </div>
     </div>
+  )
+}
+
+export default function PostListPage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <PostListContent />
+    </Suspense>
   )
 } 

@@ -80,6 +80,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     const interval = setInterval(() => {
       const token = tokenUtils.getToken()
       if (token && tokenUtils.isTokenExpired(token)) {
+        console.log('Token expired, logging out...')
         logout()
       }
     }, 60000)
@@ -107,7 +108,18 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   }, [])
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
+    try {
+      // 소셜 로그인 세션도 정리 (NextAuth)
+      if (typeof window !== 'undefined') {
+        const { signOut } = await import('next-auth/react')
+        await signOut({ redirect: false })
+      }
+    } catch (error) {
+      console.warn('NextAuth signout failed:', error)
+    }
+
+    // 로컬 토큰 및 상태 정리
     tokenUtils.removeToken()
     setAuthState({
       user: null,
@@ -115,6 +127,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       isAuthenticated: false,
       isLoading: false
     })
+
+    // 로그인 페이지로 리다이렉트
     router.push('/login')
   }, [router])
 
