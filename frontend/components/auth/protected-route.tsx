@@ -31,7 +31,7 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   renderFallback
 }) => {
   const { isAuthenticated, isLoading, user } = useAuth()
-  const { hasPermission, hasGroup, hasAnyGroup, isAdmin } = usePermission()
+  const { hasGroup, hasAnyGroup, isAdmin } = usePermission()
 
   if (isLoading) {
     return (
@@ -59,7 +59,7 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     )
   }
 
-  if (requireAdmin && !isAdmin()) {
+  if (requireAdmin && !user?.teams?.some(team => team.group_id === 1)) {
     if (renderFallback) {
       return renderFallback()
     }
@@ -67,7 +67,7 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
       <div className="flex items-center justify-center min-h-screen">
         <div className="text-center">
           <h2 className="text-2xl font-bold text-gray-900 mb-4">접근 권한이 없습니다</h2>
-          <p className="text-gray-600">관리자 권한이 필요합니다.</p>
+          <p className="text-gray-600">관리자 권한이 필요합니다. (group_id: 1)</p>
         </div>
       </div>
     )

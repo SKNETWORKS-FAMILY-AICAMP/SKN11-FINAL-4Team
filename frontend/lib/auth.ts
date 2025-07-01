@@ -126,7 +126,8 @@ export const hasAnyGroup = (user: User | null, groupNames: string[]): boolean =>
 }
 
 export const isAdmin = (user: User | null): boolean => {
-  return hasGroup(user, 'admin') || hasPermission(user, '*', '*')
+  if (!user || !user.teams) return false
+  return user.teams.some(team => team.group_id === 1)
 }
 
 export const canAccessModel = (user: User | null, modelAllowedGroups?: string[]): boolean => {

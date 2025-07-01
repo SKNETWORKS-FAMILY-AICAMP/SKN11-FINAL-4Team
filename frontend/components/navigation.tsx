@@ -43,7 +43,6 @@ export function Navigation() {
           </div>
 
           <div className="hidden md:flex md:space-x-8 -ml-5">
-            {hasPermission('model', 'read') && (
               <Link
                 href="/dashboard"
                 className={`inline-flex items-center px-1 pt-1 text-sm font-medium ${
@@ -55,8 +54,7 @@ export function Navigation() {
                 <List className="h-4 w-4 mr-2" />
                 모델 목록
               </Link>
-            )}
-            {hasPermission('model', 'test') && (
+            
               <Link
                 href="/test-model"
                 className={`inline-flex items-center px-1 pt-1 text-sm font-medium ${
@@ -68,8 +66,7 @@ export function Navigation() {
                 <TestTube className="h-4 w-4 mr-2" />
                 모델 테스트
               </Link>
-            )}
-            {hasPermission('post', 'read') && (
+            
               <Link
                 href="/post_list"
                 className={`inline-flex items-center px-1 pt-1 text-sm font-medium ${
@@ -81,7 +78,7 @@ export function Navigation() {
                 <PenTool className="h-4 w-4 mr-2" />
                 게시글 목록
               </Link>
-            )}
+            
           </div>
 
           <div className="flex items-center">
@@ -108,10 +105,10 @@ export function Navigation() {
                   <User className="mr-2 h-4 w-4" />
                   <span>이메일 변경</span>
                 </DropdownMenuItem>
-                {isAdmin() && (
+                {user?.teams?.some(team => team.group_id === 1) && (
                   <Link href="/administrator">
                     <DropdownMenuItem>
-                      <User className="mr-2 h-4 w-4" />
+                      <Shield className="mr-2 h-4 w-4" />
                       <span>관리자 설정</span>
                     </DropdownMenuItem>
                   </Link>
