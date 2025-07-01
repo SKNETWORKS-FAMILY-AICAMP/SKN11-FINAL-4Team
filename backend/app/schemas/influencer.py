@@ -78,6 +78,7 @@ class AIInfluencerUpdate(BaseModel):
     style_preset_id: Optional[str] = None
     mbti_id: Optional[int] = None
     influencer_name: Optional[str] = None
+    influencer_description: Optional[str] = None
     image_url: Optional[str] = None
     influencer_data_url: Optional[str] = None
     learning_status: Optional[int] = None

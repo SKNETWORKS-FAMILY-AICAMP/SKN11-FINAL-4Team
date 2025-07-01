@@ -79,8 +79,13 @@ def verify_token(token: str) -> Optional[dict]:
         payload = jwt.decode(
             token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
         )
+        logger.info(f"Token verification successful for user: {payload.get('sub', 'unknown')}")
         return payload
-    except JWTError:
+    except JWTError as e:
+        logger.error(f"JWT verification failed: {str(e)}")
+        logger.error(f"Token prefix: {token[:20]}..." if len(token) > 20 else f"Token: {token}")
+        logger.error(f"SECRET_KEY configured: {'Yes' if settings.SECRET_KEY else 'No'}")
+        logger.error(f"Algorithm: {settings.ALGORITHM}")
         return None
 
 

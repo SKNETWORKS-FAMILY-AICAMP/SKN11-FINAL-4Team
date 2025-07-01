@@ -115,24 +115,21 @@ class AIInfluencer(Base, TimestampMixin):
     )
     chatbot_option = Column(Boolean, nullable=False, comment="챗봇 생성 여부")
     
-    # Instagram 계정 연동 정보
+    # Instagram 계정 연동 정보 (필수 필드만)
     instagram_id = Column(
         String(255), comment="연동된 인스타그램 계정 ID"
     )
-    instagram_username = Column(
-        String(100), comment="인스타그램 사용자명"
-    )
     instagram_access_token = Column(
         Text, comment="인스타그램 액세스 토큰"
-    )
-    instagram_account_type = Column(
-        String(50), comment="인스타그램 계정 타입 (PERSONAL, BUSINESS, CREATOR)"
     )
     instagram_connected_at = Column(
         TIMESTAMP, comment="인스타그램 계정 연동 일시"
     )
     instagram_is_active = Column(
         Boolean, default=False, comment="인스타그램 연동 활성화 여부"
+    )
+    instagram_token_expires_at = Column(
+        TIMESTAMP, comment="인스타그램 액세스 토큰 만료 일시"
     )
 
     # 관계

@@ -90,13 +90,26 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       })
     } catch (error) {
       console.error('Failed to verify token:', error)
-      tokenUtils.removeToken()
-      setAuthState({
-        user: null,
-        token: null,
-        isAuthenticated: false,
-        isLoading: false
-      })
+      // Instagram API 오류 등으로 인한 일시적 실패 시 토큰을 제거하지 않음
+      // 실제 인증 실패인 경우만 토큰 제거
+      const errorStatus = (error as any)?.status
+      if (errorStatus === 401 || errorStatus === 403) {
+        tokenUtils.removeToken()
+        setAuthState({
+          user: null,
+          token: null,
+          isAuthenticated: false,
+          isLoading: false
+        })
+      } else {
+        // 네트워크 오류 등 일시적 문제는 토큰 유지
+        setAuthState({
+          user: null,
+          token,
+          isAuthenticated: false,
+          isLoading: false
+        })
+      }
     }
   }, [])
 
@@ -129,7 +142,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       })
     } catch (error) {
       console.error('Login failed:', error)
-      tokenUtils.removeToken()
+      // 로그인 실패 시에만 토큰 제거
+      const errorStatus = (error as any)?.status
+      if (errorStatus === 401 || errorStatus === 403) {
+        tokenUtils.removeToken()
+      }
       throw error
     }
   }, [])
