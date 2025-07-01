@@ -9,6 +9,13 @@ export interface BackendAuthResponse {
 
 export class BackendAuthService {
   static async exchangeCodeForToken(provider: string, code: string, redirectUri?: string): Promise<BackendAuthResponse> {
+    console.log('백엔드 API 호출:', {
+      url: `${BACKEND_URL}/api/auth/social-login`,
+      provider,
+      code: code?.substring(0, 20) + '...',
+      redirectUri
+    })
+
     const response = await fetch(`${BACKEND_URL}/api/auth/social-login`, {
       method: 'POST',
       headers: {
@@ -21,12 +28,25 @@ export class BackendAuthService {
       })
     })
 
+    console.log('백엔드 응답 상태:', response.status, response.statusText)
+
     if (!response.ok) {
-      const error = await response.json()
+      const errorText = await response.text()
+      console.error('백엔드 에러 응답:', errorText)
+      
+      let error
+      try {
+        error = JSON.parse(errorText)
+      } catch {
+        error = { detail: errorText || 'Backend authentication failed' }
+      }
+      
       throw new Error(error.detail || 'Backend authentication failed')
     }
 
-    return response.json()
+    const result = await response.json()
+    console.log('백엔드 성공 응답:', result)
+    return result
   }
 
   static async verifyToken(token: string): Promise<any> {
