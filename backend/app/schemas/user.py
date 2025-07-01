@@ -51,12 +51,12 @@ class Team(TeamBase):
         from_attributes = True
 
 
-class TeamWithUsers(Team):
-    users: List[User] = []
-
-
 class UserWithTeams(User):
     groups: List[Team] = []
+
+
+class TeamWithUsers(Team):
+    users: List[User] = []
 
 
 # HFToken 스키마

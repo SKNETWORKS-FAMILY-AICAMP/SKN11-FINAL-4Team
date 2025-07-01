@@ -7,7 +7,7 @@ from app.schemas.base import BaseSchema, TimestampSchema
 # ModelMBTI 스키마
 class ModelMBTIBase(BaseModel):
     mbti_name: str
-    mbti_chara: str
+    mbti_traits: str
     mbti_speech: str
 
 
@@ -17,7 +17,7 @@ class ModelMBTICreate(ModelMBTIBase):
 
 class ModelMBTIUpdate(BaseModel):
     mbti_name: Optional[str] = None
-    mbti_chara: Optional[str] = None
+    mbti_traits: Optional[str] = None
     mbti_speech: Optional[str] = None
 
 

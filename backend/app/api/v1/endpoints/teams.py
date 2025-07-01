@@ -10,6 +10,7 @@ from app.schemas.user import (
     TeamUpdate,
     Team as TeamSchema,
     TeamWithUsers,
+    UserWithTeams,
 )
 from app.core.security import get_current_user
 
@@ -42,14 +43,14 @@ class BulkUserOperation(BaseModel):
     user_ids: List[str]
 
 
-@router.get("/", response_model=List[TeamSchema])
+@router.get("/", response_model=List[TeamWithUsers])
 async def get_teams(
     skip: int = 0,
     limit: int = 100,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """팀 목록 조회"""
+    """팀 목록 조회 (사용자 정보 포함)"""
     # 관리자 그룹 확인
     admin_team = db.query(Team).filter(Team.group_id == 0).first()
     if admin_team:
@@ -366,7 +367,7 @@ async def bulk_remove_users_from_team(
     }
 
 
-@router.get("/{group_id}/users/", response_model=List[dict])
+@router.get("/{group_id}/users/", response_model=List[UserWithTeams])
 async def get_team_users(
     group_id: int,
     skip: int = Query(0, ge=0),
@@ -374,7 +375,7 @@ async def get_team_users(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """팀의 사용자 목록 조회"""
+    """팀의 사용자 목록 조회 (그룹 정보 포함)"""
     team = db.query(Team).filter(Team.group_id == group_id).first()
     if team is None:
         raise HTTPException(
@@ -389,12 +390,4 @@ async def get_team_users(
         )
 
     users = team.users[skip : skip + limit]
-    return [
-        {
-            "user_id": user.user_id,
-            "user_name": user.user_name,
-            "email": user.email,
-            "provider": user.provider,
-        }
-        for user in users
-    ]
+    return users

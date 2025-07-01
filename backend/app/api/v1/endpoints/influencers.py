@@ -15,7 +15,7 @@ from app.schemas.influencer import (
     StylePreset as StylePresetSchema,
     ModelMBTI as ModelMBTISchema,
 )
-from app.api.v1.endpoints.auth import get_current_user
+from app.core.security import get_current_user
 
 router = APIRouter()
 
@@ -25,16 +25,35 @@ async def get_influencers(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=100),
     db: Session = Depends(get_db),
-    # current_user: User = Depends(get_current_user),  # 임시로 주석 처리
+    current_user: dict = Depends(get_current_user),
 ):
-    """AI 인플루언서 목록 조회 (임시로 인증 없이 접근 가능)"""
-    influencers = (
-        db.query(AIInfluencer)
-        # .filter(AIInfluencer.user_id == current_user.user_id)  # 임시로 주석 처리
-        .offset(skip)
-        .limit(limit)
-        .all()
-    )
+    """사용자별 AI 인플루언서 목록 조회"""
+    user_id = current_user.get("sub")
+    
+    # 사용자 정보 가져오기
+    user = db.query(User).filter(User.user_id == user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found"
+        )
+    
+    # 사용자의 팀에 속한 모델들 조회
+    user_group_ids = [group.group_id for group in user.groups]
+    
+    print(user_group_ids)
+    query = db.query(AIInfluencer)
+    if user_group_ids:
+        # 팀이 있는 경우: 팀에 속한 모델들 + 본인이 생성한 모델들
+        query = query.filter(
+            (AIInfluencer.group_id.in_(user_group_ids)) |
+            (AIInfluencer.user_id == user_id)
+        )
+    else:
+        # 팀이 없는 경우: 본인이 생성한 모델들만
+        query = query.filter(AIInfluencer.user_id == user_id)
+    
+    influencers = query.offset(skip).limit(limit).all()
     return influencers
 
 
@@ -42,17 +61,34 @@ async def get_influencers(
 async def get_influencer(
     influencer_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
     """특정 AI 인플루언서 조회"""
-    influencer = (
-        db.query(AIInfluencer)
-        .filter(
-            AIInfluencer.influencer_id == influencer_id,
-            AIInfluencer.user_id == current_user.user_id,
+    user_id = current_user.get("sub")
+    
+    # 사용자 정보 가져오기
+    user = db.query(User).filter(User.user_id == user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found"
         )
-        .first()
-    )
+    print(user)
+    # 사용자의 팀에 속한 모델들 조회
+    user_group_ids = [group.group_id for group in user.groups]
+    
+    query = db.query(AIInfluencer).filter(AIInfluencer.influencer_id == influencer_id)
+    if user_group_ids:
+        # 팀이 있는 경우: 팀에 속한 모델들 + 본인이 생성한 모델들
+        query = query.filter(
+            (AIInfluencer.group_id.in_(user_group_ids)) |
+            (AIInfluencer.user_id == user_id)
+        )
+    else:
+        # 팀이 없는 경우: 본인이 생성한 모델들만
+        query = query.filter(AIInfluencer.user_id == user_id)
+    
+    influencer = query.first()
 
     if influencer is None:
         raise HTTPException(
@@ -65,9 +101,11 @@ async def get_influencer(
 async def create_influencer(
     influencer_data: AIInfluencerCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
     """새 AI 인플루언서 생성"""
+    user_id = current_user.get("sub")
+    
     # 스타일 프리셋 존재 확인
     style_preset = (
         db.query(StylePreset)
@@ -93,7 +131,7 @@ async def create_influencer(
 
     influencer = AIInfluencer(
         influencer_id=str(uuid.uuid4()),
-        user_id=current_user.user_id,
+        user_id=user_id,
         **influencer_data.dict()
     )
 

@@ -6,7 +6,7 @@ import uuid
 
 from app.database import get_db
 from app.models.user import User
-from app.schemas.user import User as UserSchema
+from app.schemas.user import User as UserSchema, UserWithTeams
 from app.schemas.auth import SocialLoginRequest, TokenResponse, UserInfo
 from app.core.config import settings
 from app.core.security import create_access_token, generate_jwt_payload, get_current_user
@@ -105,9 +105,13 @@ async def social_login(request: SocialLoginRequest, db: Session = Depends(get_db
                             detail=f"Failed to create user: {str(db_error)}"
                         )
         
-        # Generate JWT payload with social auth features
+        # Generate JWT payload with social auth features and team information
         jwt_payload = generate_jwt_payload(user_info, request.provider)
         jwt_payload["sub"] = user.user_id  # Use database user_id as subject
+        
+        # Add team information to JWT payload
+        team_names = [team.group_name for team in user.groups]
+        jwt_payload["groups"] = team_names if team_names else ["default"]
         
         # Create access token
         access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
@@ -132,11 +136,11 @@ async def social_login(request: SocialLoginRequest, db: Session = Depends(get_db
 
 
 
-@router.get("/me", response_model=UserSchema)
+@router.get("/me", response_model=UserWithTeams)
 async def get_current_user_info(
     current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)
 ):
-    """현재 로그인한 사용자 정보 조회 (DB에서)"""
+    """현재 로그인한 사용자 정보 조회 (DB에서, 팀 정보 포함)"""
     user_id = current_user.get("sub")
     user = db.query(User).filter(User.user_id == user_id).first()
     
@@ -160,3 +164,9 @@ async def social_login_options():
 async def get_current_user_enhanced(current_user: dict = Depends(get_current_user)):
     """현재 로그인한 사용자 정보 조회 (소셜 로그인 정보 포함)"""
     return current_user
+
+
+@router.post("/logout")
+async def logout(current_user: dict = Depends(get_current_user)):
+    """사용자 로그아웃"""
+    return {"message": "Logout successful"}

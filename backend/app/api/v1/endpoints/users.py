@@ -9,6 +9,7 @@ from app.schemas.user import (
     UserCreate,
     UserUpdate,
     User as UserSchema,
+    UserWithTeams,
 )
 from app.api.v1.endpoints.auth import get_current_user
 
@@ -78,14 +79,14 @@ async def create_user(
     return user
 
 
-@router.get("/", response_model=List[UserSchema])
+@router.get("/", response_model=List[UserWithTeams])
 async def get_users(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=100),
     db: Session = Depends(get_db),
     # current_user: User = Depends(get_current_user),  # 임시로 주석 처리
 ):
-    """사용자 목록 조회 (임시로 인증 없이 접근 가능)"""
+    """사용자 목록 조회 (그룹 정보 포함, 임시로 인증 없이 접근 가능)"""
     # if not check_admin_permission(current_user, db):  # 임시로 주석 처리
     #     raise HTTPException(
     #         status_code=status.HTTP_403_FORBIDDEN,
@@ -96,13 +97,13 @@ async def get_users(
     return users
 
 
-@router.get("/{user_id}", response_model=UserSchema)
+@router.get("/{user_id}", response_model=UserWithTeams)
 async def get_user(
     user_id: str,
     db: Session = Depends(get_db),
     # current_user: User = Depends(get_current_user),  # 임시로 주석 처리
 ):
-    """특정 사용자 조회 (임시로 인증 없이 접근 가능)"""
+    """특정 사용자 조회 (그룹 정보 포함, 임시로 인증 없이 접근 가능)"""
     # 본인이거나 관리자인 경우만 조회 가능
     # if str(current_user.user_id) != user_id and not check_admin_permission(
     #     current_user, db
