@@ -46,9 +46,9 @@ async def social_login(request: SocialLoginRequest, db: Session = Depends(get_db
                 
                 if existing_user_by_email:
                     # 기존 사용자가 있으면 해당 사용자 정보 업데이트
-                    existing_user_by_email.provider_id = user_info["id"]
-                    existing_user_by_email.provider = request.provider
-                    existing_user_by_email.user_name = user_info.get("name") or user_info.get("username", existing_user_by_email.user_name)
+                    setattr(existing_user_by_email, 'provider_id', user_info["id"])
+                    setattr(existing_user_by_email, 'provider', request.provider)
+                    setattr(existing_user_by_email, 'user_name', user_info.get("name") or user_info.get("username", existing_user_by_email.user_name))
                     db.commit()
                     db.refresh(existing_user_by_email)
                     user = existing_user_by_email
@@ -151,7 +151,20 @@ async def get_current_user_info(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    return user
+    # UserWithTeams 스키마에 맞게 teams 필드로 변환
+    print(f"DEBUG: User {user.user_id} groups: {[(g.group_id, g.group_name) for g in user.groups]}")
+    user_dict = {
+        "user_id": user.user_id,
+        "provider_id": user.provider_id,
+        "provider": user.provider,
+        "user_name": user.user_name,
+        "email": user.email,
+        "created_at": user.created_at,
+        "updated_at": user.updated_at,
+        "teams": user.groups  # groups를 teams로 매핑
+    }
+    
+    return user_dict
 
 
 @router.options("/social-login")

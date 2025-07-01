@@ -114,14 +114,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     return () => clearInterval(interval)
   }, [initializeAuth, logout])
 
-  const login = useCallback((token: string) => {
+  const login = useCallback(async (token: string) => {
     try {
-      const user = getUserFromToken(token)
-      if (!user) {
-        throw new Error('Invalid token')
-      }
-
       tokenUtils.setToken(token)
+      
+      // 백엔드에서 사용자 정보 가져오기 (팀 정보 포함)
+      const user = await BackendAuthService.verifyToken()
+      
       setAuthState({
         user,
         token,
@@ -130,6 +129,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       })
     } catch (error) {
       console.error('Login failed:', error)
+      tokenUtils.removeToken()
       throw error
     }
   }, [])

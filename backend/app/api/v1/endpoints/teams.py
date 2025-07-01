@@ -16,20 +16,21 @@ from app.core.security import get_current_user
 
 router = APIRouter()
 
-# 관리자 그룹 ID (0번은 관리자 그룹으로 예약)
-ADMIN_GROUP_ID = 0
+# 관리자 그룹 ID (1번은 관리자 그룹으로 예약)
+ADMIN_GROUP_ID = 1
 
 
-def check_admin_permission(current_user: User, db: Session):
-    """관리자 권한 체크 - 그룹 0번에 속한 사용자를 관리자로 간주"""
-    # 그룹 0번이 관리자 그룹이라고 가정
-    admin_team = db.query(Team).filter(Team.group_id == 0).first()
+def check_admin_permission(current_user: dict, db: Session):
+    """관리자 권한 체크 - 그룹 1번에 속한 사용자를 관리자로 간주"""
+    user_id = current_user.get("sub")
+    # 그룹 1번이 관리자 그룹이라고 가정
+    admin_team = db.query(Team).filter(Team.group_id == 1).first()
     if admin_team:
         # 현재 사용자가 관리자 그룹에 속해있는지 확인
         user_in_admin_team = (
             db.query(Team)
             .join(Team.users)
-            .filter(Team.group_id == 0, User.user_id == str(current_user.user_id))
+            .filter(Team.group_id == 1, User.user_id == user_id)
             .first()
         )
         if user_in_admin_team:
@@ -47,17 +48,19 @@ class BulkUserOperation(BaseModel):
 async def get_teams(
     skip: int = 0,
     limit: int = 100,
-    current_user: User = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """팀 목록 조회 (사용자 정보 포함)"""
+    user_id = current_user.get("sub")
+    
     # 관리자 그룹 확인
-    admin_team = db.query(Team).filter(Team.group_id == 0).first()
+    admin_team = db.query(Team).filter(Team.group_id == 1).first()
     if admin_team:
         user_in_admin_team = (
             db.query(Team)
             .join(Team.users)
-            .filter(Team.group_id == 0, User.user_id == str(current_user.user_id))
+            .filter(Team.group_id == 1, User.user_id == user_id)
             .first()
         )
         if user_in_admin_team:
@@ -68,7 +71,7 @@ async def get_teams(
             teams = (
                 db.query(Team)
                 .join(Team.users)
-                .filter(User.user_id == str(current_user.user_id))
+                .filter(User.user_id == user_id)
                 .offset(skip)
                 .limit(limit)
                 .all()
@@ -82,7 +85,7 @@ async def get_teams(
 @router.get("/{group_id}", response_model=TeamWithUsers)
 async def get_team(
     group_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """특정 팀 조회"""
@@ -92,7 +95,10 @@ async def get_team(
             status_code=status.HTTP_404_NOT_FOUND, detail="Team not found"
         )
 
-    if not check_admin_permission(current_user, db) and current_user not in team.users:
+    user_id = current_user.get("sub")
+    user = db.query(User).filter(User.user_id == user_id).first()
+    
+    if not check_admin_permission(current_user, db) and user not in team.users:
         raise HTTPException(
             detail="Not authorized to access this team",
             status_code=status.HTTP_403_FORBIDDEN,
@@ -104,7 +110,7 @@ async def get_team(
 @router.post("/", response_model=TeamSchema)
 async def create_team(
     team_data: TeamCreate,
-    current_user: User = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """팀 생성 (관리자만 가능)"""
@@ -126,7 +132,7 @@ async def create_team(
 async def update_team(
     group_id: int,
     team_update: TeamUpdate,
-    current_user: User = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """팀 정보 수정 (관리자만 가능)"""
@@ -162,7 +168,7 @@ async def update_team(
 async def delete_team(
     group_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
     """팀 삭제 (관리자만 가능)"""
     if not check_admin_permission(current_user, db):
@@ -195,7 +201,7 @@ async def add_user_to_team(
     group_id: int,
     user_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
     """팀에 사용자 추가 (관리자만 가능)"""
     if not check_admin_permission(current_user, db):
@@ -233,7 +239,7 @@ async def bulk_add_users_to_team(
     group_id: int,
     user_operation: BulkUserOperation,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
     """팀에 여러 사용자 일괄 추가 (관리자만 가능)"""
     if not check_admin_permission(current_user, db):
@@ -277,7 +283,7 @@ async def remove_user_from_team(
     group_id: int,
     user_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
     """팀에서 사용자 제거 (관리자만 가능)"""
     if not check_admin_permission(current_user, db):
@@ -321,7 +327,7 @@ async def bulk_remove_users_from_team(
     group_id: int,
     user_operation: BulkUserOperation,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
     """팀에서 여러 사용자 일괄 제거 (관리자만 가능)"""
     if not check_admin_permission(current_user, db):
@@ -373,7 +379,7 @@ async def get_team_users(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=100),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
     """팀의 사용자 목록 조회 (그룹 정보 포함)"""
     team = db.query(Team).filter(Team.group_id == group_id).first()
@@ -383,7 +389,10 @@ async def get_team_users(
         )
 
     # 관리자가 아니고 해당 팀에 속하지 않은 경우 접근 거부
-    if not check_admin_permission(current_user, db) and current_user not in team.users:
+    user_id = current_user.get("sub")
+    user = db.query(User).filter(User.user_id == user_id).first()
+    
+    if not check_admin_permission(current_user, db) and user not in team.users:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to access this team",

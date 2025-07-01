@@ -52,7 +52,7 @@ class Team(TeamBase):
 
 
 class UserWithTeams(User):
-    groups: List[Team] = []
+    teams: List[Team] = []
 
 
 class TeamWithUsers(Team):

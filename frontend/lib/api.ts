@@ -38,9 +38,9 @@ class APIClient {
 
     const url = `${this.baseURL}${endpoint}`
     
-    const headers: HeadersInit = {
+    const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      ...customHeaders
+      ...(customHeaders as Record<string, string>)
     }
 
     // 인증이 필요한 경우 토큰 추가

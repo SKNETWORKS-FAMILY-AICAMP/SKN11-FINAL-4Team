@@ -57,7 +57,7 @@ function GoogleCallbackContent() {
         console.log('백엔드 응답 성공:', backendResponse)
 
         // AuthContext의 login 함수를 사용하여 인증 상태 업데이트
-        login(backendResponse.access_token)
+        await login(backendResponse.access_token)
         
         // localStorage에서 소셜 인증 관련 데이터 정리
         localStorage.removeItem('social_auth_return_url')
