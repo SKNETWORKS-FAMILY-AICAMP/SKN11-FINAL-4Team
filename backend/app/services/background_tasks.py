@@ -48,13 +48,15 @@ class BackgroundTaskManager:
                 task_id = self.qa_generator.start_qa_generation(influencer_id, db)
                 
                 # 지속적 모니터링 시작
+                logger.info(f"🚀 지속적 모니터링 작업 생성 중: task_id={task_id}")
                 monitor_task = asyncio.create_task(
                     self._continuous_monitor_qa_generation(task_id)
                 )
                 self.monitoring_tasks[task_id] = monitor_task
                 self.running_tasks[task_id] = monitor_task
                 
-                logger.info(f"QA 생성 작업 및 지속적 모니터링 시작 완료: task_id={task_id}")
+                logger.info(f"✅ QA 생성 작업 및 지속적 모니터링 시작 완료: task_id={task_id}")
+                logger.info(f"📝 현재 실행 중인 모니터링 작업 수: {len(self.monitoring_tasks)}")
                 
             finally:
                 db.close()
@@ -76,11 +78,12 @@ class BackgroundTaskManager:
             
             max_wait_time = timedelta(hours=26)  # 최대 26시간 대기 (여유시간 포함)
             start_time = datetime.now()
-            check_interval = 60  # 1분마다 상태 확인 (더 빈번한 모니터링)
+            check_interval = 420  # 7분마다 상태 확인 (7분 = 420초)
             
             while datetime.now() - start_time < max_wait_time:
                 try:
                     # 작업 상태 업데이트
+                    logger.info(f"🔄 주기적 상태 확인 중: task_id={task_id} (7분마다)")
                     self.qa_generator.update_task_status(task_id)
                     task = self.qa_generator.get_task_status(task_id)
                     
@@ -88,7 +91,7 @@ class BackgroundTaskManager:
                         logger.error(f"작업을 찾을 수 없습니다: task_id={task_id}")
                         break
                     
-                    logger.debug(f"작업 상태 확인: task_id={task_id}, status={task.status.value}")
+                    logger.info(f"📊 작업 상태: task_id={task_id}, status={task.status.value}, batch_id={task.batch_id}")
                     
                     if task.status == QAGenerationStatus.BATCH_COMPLETED:
                         # 배치 완료 시 결과 처리 및 S3 업로드
@@ -114,6 +117,7 @@ class BackgroundTaskManager:
                         break
                     
                     # 지정된 간격만큼 대기
+                    logger.info(f"⏰ 다음 확인까지 7분 대기: task_id={task_id}")
                     await asyncio.sleep(check_interval)
                     
                 except Exception as e:
@@ -150,7 +154,8 @@ class BackgroundTaskManager:
             if task_id in self.running_tasks:
                 del self.running_tasks[task_id]
                 
-            logger.info(f"지속적 모니터링 종료: task_id={task_id}")
+            logger.info(f"🏁 지속적 모니터링 종료: task_id={task_id}")
+            logger.info(f"📝 남은 모니터링 작업 수: {len(self.monitoring_tasks)}")
 
     async def _process_and_upload_results(self, task_id: str, db: Session) -> bool:
         """
@@ -384,7 +389,17 @@ class BackgroundTaskManager:
         Returns:
             작업 상태 정보
         """
-        return self.qa_generator.get_task_status(task_id)
+        logger.debug(f"작업 상태 조회 요청: task_id={task_id}")
+        logger.debug(f"현재 저장된 작업 수: {len(self.qa_generator.tasks)}")
+        logger.debug(f"저장된 작업 ID들: {list(self.qa_generator.tasks.keys())}")
+        
+        task = self.qa_generator.get_task_status(task_id)
+        if task:
+            logger.debug(f"작업 찾음: task_id={task_id}, status={task.status.value}")
+        else:
+            logger.warning(f"작업을 찾을 수 없음: task_id={task_id}")
+        
+        return task
     
     def get_all_qa_tasks(self) -> Dict[str, QAGenerationTask]:
         """

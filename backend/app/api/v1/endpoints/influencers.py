@@ -223,6 +223,14 @@ async def get_qa_generation_status(
             from fastapi import HTTPException
             raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다")
         
+        # 실시간 OpenAI 배치 상태 확인
+        openai_batch_status = None
+        if task.batch_id:
+            try:
+                openai_batch_status = task_manager.qa_generator.check_batch_status(task.batch_id)
+            except Exception as e:
+                openai_batch_status = {"error": f"OpenAI 상태 조회 실패: {str(e)}"}
+        
         return {
             "task_id": task.task_id,
             "influencer_id": task.influencer_id,
@@ -234,7 +242,8 @@ async def get_qa_generation_status(
             "s3_urls": task.s3_urls,
             "created_at": task.created_at,
             "updated_at": task.updated_at,
-            "is_running": task_manager.is_task_running(task.task_id)
+            "is_running": task_manager.is_task_running(task.task_id),
+            "openai_batch_status": openai_batch_status  # 실제 OpenAI 상태 추가
         }
     else:
         # 해당 인플루언서의 모든 작업 조회

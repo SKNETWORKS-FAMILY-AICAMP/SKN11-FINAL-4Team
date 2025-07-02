@@ -333,6 +333,9 @@ class InfluencerQAGenerator:
             status=QAGenerationStatus.PENDING
         )
         self.tasks[task_id] = task
+        print(f"작업 메모리에 저장: task_id={task_id}")
+        print(f"현재 저장된 작업 수: {len(self.tasks)}")
+        print(f"저장된 작업 ID들: {list(self.tasks.keys())}")
         
         try:
             # 인플루언서 데이터 가져오기
@@ -379,7 +382,17 @@ class InfluencerQAGenerator:
     
     def get_task_status(self, task_id: str) -> Optional[QAGenerationTask]:
         """작업 상태 조회"""
-        return self.tasks.get(task_id)
+        print(f"작업 상태 조회: task_id={task_id}")
+        print(f"현재 저장된 작업 수: {len(self.tasks)}")
+        print(f"저장된 작업 ID들: {list(self.tasks.keys())}")
+        
+        task = self.tasks.get(task_id)
+        if task:
+            print(f"작업 찾음: status={task.status.value}")
+        else:
+            print(f"작업을 찾을 수 없음")
+        
+        return task
     
     def update_task_status(self, task_id: str):
         """작업 상태 업데이트 (배치 상태 확인)"""
