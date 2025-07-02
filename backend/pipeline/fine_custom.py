@@ -8,13 +8,27 @@ from transformers import (
     TrainingArguments, 
     Trainer,
     DataCollatorForLanguageModeling,
-    EarlyStoppingCallback,
-    BitsAndBytesConfig
+    EarlyStoppingCallback
 )
-from peft import LoraConfig, get_peft_model, TaskType, prepare_model_for_kbit_training
+from peft import LoraConfig, get_peft_model, TaskType
 from datasets import Dataset
 from huggingface_hub import HfApi
 import os
+
+# Windows에서 bitsandbytes 문제 해결
+try:
+    from transformers import BitsAndBytesConfig
+    from peft import prepare_model_for_kbit_training
+    BITSANDBYTES_AVAILABLE = True
+    print("✅ QLoRA (4비트 양자화) 사용 가능")
+except (ImportError, ModuleNotFoundError) as e:
+    print(f"⚠️ BitsAndBytesConfig 불가능: {e}")
+    print("💡 QLoRA 대신 일반 LoRA로 진행합니다")
+    BITSANDBYTES_AVAILABLE = False
+except Exception as e:
+    print(f"⚠️ BitsAndBytesConfig 로딩 오류: {e}")
+    print("💡 QLoRA 대신 일반 LoRA로 진행합니다")
+    BITSANDBYTES_AVAILABLE = False
 
 # GPU 설정 확인
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -115,7 +129,10 @@ def find_all_linear_names(model):
     return list(lora_module_names)
 
 def create_qlora_config():
-    """QLoRA를 위한 4비트 양자화 설정 생성"""
+    """QLoRA를 위한 4비트 양자화 설정 생성 (bitsandbytes 사용 가능한 경우에만)"""
+    if not BITSANDBYTES_AVAILABLE:
+        return None
+    
     bnb_config = BitsAndBytesConfig(
         load_in_4bit=True,                      # 4비트 양자화 활성화
         bnb_4bit_use_double_quant=True,         # 이중 양자화로 더 높은 정밀도
@@ -125,8 +142,11 @@ def create_qlora_config():
     return bnb_config
 
 def load_model_and_tokenizer(model_name="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct"):
-    """QLoRA를 위한 모델과 토크나이저 로드"""
-    print("QLoRA 4비트 양자화 모델과 토크나이저 로딩 중...")
+    """모델과 토크나이저 로드 (QLoRA 또는 일반 LoRA)"""
+    if BITSANDBYTES_AVAILABLE:
+        print("🚀 QLoRA 4비트 양자화 모델과 토크나이저 로딩 중...")
+    else:
+        print("🚀 일반 LoRA 모델과 토크나이저 로딩 중...")
     
     # 토크나이저 로드
     tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -136,27 +156,59 @@ def load_model_and_tokenizer(model_name="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct"):
         tokenizer.pad_token = tokenizer.eos_token
         tokenizer.pad_token_id = tokenizer.eos_token_id
     
-    # QLoRA를 위한 4비트 양자화 설정
-    bnb_config = create_qlora_config()
+    # 모델 로드 파라미터 설정
+    model_kwargs = {
+        "torch_dtype": torch.bfloat16,
+        "trust_remote_code": True,
+        "use_cache": False,  # 그래디언트 체크포인팅과 호환성을 위해
+    }
     
-    # 4비트 양자화된 모델 로드
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name,
-        quantization_config=bnb_config,         # 4비트 양자화 적용
-        torch_dtype=torch.bfloat16,
-        trust_remote_code=True,
-        device_map="auto",                      # GPU 메모리에 맞게 자동 배치
-        use_cache=False,                        # 그래디언트 체크포인팅과 호환성을 위해
-    )
+    # QLoRA 사용 가능한 경우
+    if BITSANDBYTES_AVAILABLE:
+        try:
+            bnb_config = create_qlora_config()
+            model_kwargs.update({
+                "quantization_config": bnb_config,  # 4비트 양자화 적용
+                "device_map": "auto",               # GPU 메모리에 맞게 자동 배치
+            })
+            print("🚀 QLoRA 양자화 설정 적용됨")
+        except Exception as e:
+            print(f"⚠️ QLoRA 설정 적용 실패: {e}")
+            print("💡 일반 LoRA로 대체합니다")
+            BITSANDBYTES_AVAILABLE = False
+            model_kwargs["device_map"] = "auto" if torch.cuda.is_available() else None
+    else:
+        # 일반 모드에서는 GPU로 직접 이동
+        model_kwargs["device_map"] = "auto" if torch.cuda.is_available() else None
     
-    # QLoRA 훈련을 위한 모델 준비
-    model = prepare_model_for_kbit_training(
-        model, 
-        use_gradient_checkpointing=True         # 메모리 효율성을 위한 그래디언트 체크포인팅
-    )
+    # 모델 로드
+    model = AutoModelForCausalLM.from_pretrained(model_name, **model_kwargs)
     
-    print(f"모델 로드 완료 - 4비트 양자화 적용")
-    print(f"모델 메모리 사용량: {model.get_memory_footprint() / 1024**3:.2f} GB")
+    # QLoRA 훈련을 위한 모델 준비 (bitsandbytes 사용 가능한 경우에만)
+    if BITSANDBYTES_AVAILABLE:
+        try:
+            model = prepare_model_for_kbit_training(
+                model, 
+                use_gradient_checkpointing=True  # 메모리 효율성을 위한 그래디언트 체크포인팅
+            )
+            print(f"✅ 모델 로드 완료 - QLoRA 4비트 양자화 적용")
+            if hasattr(model, 'get_memory_footprint'):
+                print(f"📊 모델 메모리 사용량: {model.get_memory_footprint() / 1024**3:.2f} GB")
+        except Exception as e:
+            print(f"⚠️ QLoRA 모델 준비 실패: {e}")
+            print("💡 일반 LoRA로 대체합니다")
+            BITSANDBYTES_AVAILABLE = False
+            # 일반 LoRA 모드로 대체
+            model.gradient_checkpointing_enable()
+            print(f"✅ 모델 로드 완료 - 일반 LoRA 모드 (대체)")
+            if hasattr(model, 'get_memory_footprint'):
+                print(f"📊 모델 메모리 사용량: {model.get_memory_footprint() / 1024**3:.2f} GB")
+    else:
+        # 일반 LoRA 모드에서도 그래디언트 체크포인팅 활성화
+        model.gradient_checkpointing_enable()
+        print(f"✅ 모델 로드 완료 - 일반 LoRA 모드")
+        if hasattr(model, 'get_memory_footprint'):
+            print(f"📊 모델 메모리 사용량: {model.get_memory_footprint() / 1024**3:.2f} GB")
     
     return model, tokenizer
 
@@ -326,24 +378,39 @@ def upload_to_huggingface(output_dir):
         print(f"❌ 업로드 실패: {e}")
 
 def main():
-    """QLoRA 4비트 양자화 파인튜닝 메인 함수"""
+    """QLoRA 4비트 양자화 파인튜닝 메인 함수 (Windows 호환)"""
     
     # 환경 변수 설정
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
     
-    print("=== QLoRA 4비트 양자화 파인튜닝 시작 ===")
+    if BITSANDBYTES_AVAILABLE:
+        print("=== QLoRA 4비트 양자화 파인튜닝 시작 ===")
+    else:
+        print("=== 일반 LoRA 파인튜닝 시작 (Windows 호환 모드) ===")
     
-    # 1. QLoRA 모델과 토크나이저 로드
-    model, tokenizer = load_model_and_tokenizer()
+    try:
+        # 1. 모델과 토크나이저 로드
+        model, tokenizer = load_model_and_tokenizer()
+        
+        # 2. 모델 구조 확인
+        print("모델 구조 확인 중...")
+        print(f"모델 타입: {type(model)}")
+        if BITSANDBYTES_AVAILABLE:
+            print(f"4비트 양자화 적용됨: {hasattr(model, 'quantization_config')}")
+        else:
+            print("일반 LoRA 모드로 진행")
+        
+        # 3. LoRA 설정 및 적용
+        lora_config = setup_qlora_config(model)  # QLoRA 설정이지만 bitsandbytes 없으면 일반 LoRA로 동작
+        model = get_peft_model(model, lora_config)
     
-    # 2. 모델 구조 확인
-    print("QLoRA 모델 구조 확인 중...")
-    print(f"모델 타입: {type(model)}")
-    print(f"4비트 양자화 적용됨: {hasattr(model, 'quantization_config')}")
-    
-    # 3. QLoRA 설정 및 적용
-    qlora_config = setup_qlora_config(model)
-    model = get_peft_model(model, qlora_config)
+    except Exception as e:
+        print(f"❌ 모델 로딩 중 오류: {e}")
+        print("💡 오류 해결 방법:")
+        print("  1. requirements.txt의 패키지들이 모두 설치되었는지 확인")
+        print("  2. Windows에서는 bitsandbytes 대신 일반 LoRA를 사용합니다")
+        print("  3. GPU 메모리가 충분한지 확인하세요")
+        raise
     
     # 4. LoRA 적용 후 gradient checkpointing 다시 활성화
     if hasattr(model, 'enable_input_require_grads'):

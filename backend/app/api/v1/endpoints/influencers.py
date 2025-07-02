@@ -33,8 +33,10 @@ from app.services.background_tasks import (
     get_background_task_manager,
     BackgroundTaskManager
 )
-from app.services.influencers.qa_generator import QAGenerationTask
+from fastapi import Request
+from app.services.influencers.qa_generator import QAGenerationTask, QAGenerationStatus
 from app.services.finetuning_service import get_finetuning_service, InfluencerFineTuningService
+from datetime import datetime
 
 router = APIRouter()
 
@@ -407,3 +409,81 @@ async def get_all_finetuning_tasks_status(
             for task in all_tasks.values()
         ]
     }
+
+
+@router.post("/webhooks/openai/batch-complete")
+async def handle_openai_batch_webhook(
+    request: Request,
+    db: Session = Depends(get_db),
+    task_manager: BackgroundTaskManager = Depends(get_background_task_manager),
+):
+    """OpenAI 배치 작업 완료 웹훅 처리"""
+    try:
+        # 웹훅 데이터 파싱
+        webhook_data = await request.json()
+        
+        # 배치 ID와 상태 추출
+        batch_id = webhook_data.get("data", {}).get("id")
+        batch_status = webhook_data.get("data", {}).get("status")
+        
+        if not batch_id:
+            return {"error": "배치 ID가 없습니다"}
+        
+        print(f"🎯 OpenAI 웹훅 수신: batch_id={batch_id}, status={batch_status}")
+        
+        # 해당 배치 ID를 가진 작업 찾기
+        all_tasks = task_manager.get_all_qa_tasks()
+        matching_task = None
+        task_id = None
+        
+        for tid, task in all_tasks.items():
+            if task.batch_id == batch_id:
+                matching_task = task
+                task_id = tid
+                break
+        
+        if not matching_task:
+            print(f"⚠️ 해당 배치 ID를 가진 작업을 찾을 수 없음: batch_id={batch_id}")
+            return {"error": "작업을 찾을 수 없습니다"}
+        
+        print(f"✅ 작업 발견: task_id={task_id}, influencer_id={matching_task.influencer_id}")
+        
+        # 배치 완료 시 즉시 처리
+        if batch_status == "completed":
+            print(f"🚀 배치 완료, 즉시 결과 처리 시작: task_id={task_id}")
+            
+            # 상태 업데이트
+            matching_task.status = QAGenerationStatus.BATCH_COMPLETED
+            matching_task.updated_at = datetime.now()
+            
+            # 백그라운드에서 결과 처리 및 S3 업로드 실행
+            import asyncio
+            from app.database import get_db
+            
+            async def process_webhook_result():
+                """웹훅 결과 처리를 위한 별도 DB 세션 사용"""
+                webhook_db = next(get_db())
+                try:
+                    await task_manager._process_and_upload_results(task_id, webhook_db)
+                finally:
+                    webhook_db.close()
+            
+            asyncio.create_task(process_webhook_result())
+            
+            return {"message": "배치 완료 웹훅 처리 시작", "task_id": task_id}
+        
+        elif batch_status == "failed":
+            print(f"❌ 배치 실패: task_id={task_id}")
+            matching_task.status = QAGenerationStatus.FAILED
+            matching_task.error_message = "OpenAI 배치 작업 실패"
+            matching_task.updated_at = datetime.now()
+            
+            return {"message": "배치 실패 처리 완료", "task_id": task_id}
+        
+        return {"message": "웹훅 수신", "batch_id": batch_id, "status": batch_status}
+        
+    except Exception as e:
+        print(f"❌ 웹훅 처리 중 오류: {str(e)}")
+        import traceback
+        print(f"상세 오류: {traceback.format_exc()}")
+        return {"error": f"웹훅 처리 실패: {str(e)}"}

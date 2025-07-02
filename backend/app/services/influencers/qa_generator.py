@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.services.influencers.crud import get_influencer_by_id
+from app.services.batch_job_service import get_batch_job_service
 from pipeline.speech_generator import CharacterProfile, Gender, SpeechGenerator
 
 
@@ -61,6 +62,8 @@ class InfluencerQAGenerator:
         """
         self.client = OpenAI(api_key=api_key or os.getenv('OPENAI_API_KEY'))
         self.speech_generator = SpeechGenerator(api_key)
+        self.batch_service = get_batch_job_service()
+        # 메모리 기반 tasks는 웹훅 모드에서만 사용 (하위 호환성)
         self.tasks: Dict[str, QAGenerationTask] = {}
         
     def influencer_to_character_profile(self, influencer_data: dict, style_preset: dict = None, mbti: dict = None) -> CharacterProfile:
@@ -219,16 +222,29 @@ class InfluencerQAGenerator:
         
         print(f"파일 업로드 완료: {batch_input_file.id}")
         
-        # 배치 작업 생성
-        batch = self.client.batches.create(
-            input_file_id=batch_input_file.id,
-            endpoint="/v1/chat/completions",
-            completion_window="24h",
-            metadata={
+        # 모니터링 방식 확인
+        use_webhook = os.getenv('OPENAI_USE_WEBHOOK', 'true').lower() == 'true'
+        
+        batch_create_params = {
+            "input_file_id": batch_input_file.id,
+            "endpoint": "/v1/chat/completions",
+            "completion_window": "24h",
+            "metadata": {
                 "description": f"Influencer QA pairs generation - Task ID: {task_id}",
                 "task_id": task_id
             }
-        )
+        }
+        
+        # 웹훅 모드일 때만 웹훅 URL 추가
+        if use_webhook:
+            webhook_url = os.getenv('OPENAI_WEBHOOK_URL', 'http://localhost:8000/api/v1/influencers/webhooks/openai/batch-complete')
+            batch_create_params["metadata"]["webhook_url"] = webhook_url
+            print(f"🎯 웹훅 모드로 배치 작업 생성 중...")
+        else:
+            print(f"🔄 폴링 모드로 배치 작업 생성 중...")
+        
+        # 배치 작업 생성
+        batch = self.client.batches.create(**batch_create_params)
         
         print(f"배치 작업 생성 완료: {batch.id}")
         return batch.id
@@ -326,16 +342,16 @@ class InfluencerQAGenerator:
         # 작업 ID 생성
         task_id = f"qa_{influencer_id}_{int(time.time())}"
         
-        # 작업 상태 초기화
-        task = QAGenerationTask(
-            task_id=task_id,
-            influencer_id=influencer_id,
-            status=QAGenerationStatus.PENDING
-        )
-        self.tasks[task_id] = task
-        print(f"작업 메모리에 저장: task_id={task_id}")
-        print(f"현재 저장된 작업 수: {len(self.tasks)}")
-        print(f"저장된 작업 ID들: {list(self.tasks.keys())}")
+        # 웹훅 모드에서는 메모리에도 저장 (하위 호환성)
+        use_webhook = os.getenv('OPENAI_USE_WEBHOOK', 'true').lower() == 'true'
+        if use_webhook:
+            task = QAGenerationTask(
+                task_id=task_id,
+                influencer_id=influencer_id,
+                status=QAGenerationStatus.PENDING
+            )
+            self.tasks[task_id] = task
+            print(f"웹훅 모드: 메모리에 작업 저장: task_id={task_id}")
         
         try:
             # 인플루언서 데이터 가져오기
@@ -353,7 +369,9 @@ class InfluencerQAGenerator:
             )
             
             # 배치 요청 생성
-            task.status = QAGenerationStatus.PROCESSING
+            if use_webhook:
+                task.status = QAGenerationStatus.PROCESSING
+            
             requests = self.create_qa_batch_requests(character, 2000)
             
             # 배치 파일 저장
@@ -362,21 +380,36 @@ class InfluencerQAGenerator:
             # 배치 작업 제출
             batch_id = self.submit_batch_job(batch_file_path, task_id)
             
-            # 작업 상태 업데이트
-            task.batch_id = batch_id
-            task.status = QAGenerationStatus.BATCH_SUBMITTED
-            task.updated_at = datetime.now()
+            # DB에 배치 작업 저장
+            batch_job = self.batch_service.create_batch_job(
+                db=db,
+                task_id=task_id,
+                influencer_id=influencer_id,
+                openai_batch_id=batch_id,
+                input_file_id=batch_file_path  # 입력 파일 경로 저장
+            )
+            
+            # 웹훅 모드에서는 메모리 상태도 업데이트
+            if use_webhook:
+                task.batch_id = batch_id
+                task.status = QAGenerationStatus.BATCH_SUBMITTED
+                task.updated_at = datetime.now()
             
             print(f"QA 생성 작업 시작됨 - Task ID: {task_id}, Batch ID: {batch_id}")
             return task_id
             
         except Exception as e:
-            task.status = QAGenerationStatus.FAILED
-            task.error_message = str(e)
-            task.updated_at = datetime.now()
-            print(f"QA 생성 작업 실패: {e}")
+            error_msg = str(e)
+            print(f"QA 생성 작업 실패: {error_msg}")
             import traceback
             print(f"상세 에러 정보: {traceback.format_exc()}")
+            
+            # 웹훅 모드에서는 메모리 상태도 업데이트
+            if use_webhook and task_id in self.tasks:
+                self.tasks[task_id].status = QAGenerationStatus.FAILED
+                self.tasks[task_id].error_message = error_msg
+                self.tasks[task_id].updated_at = datetime.now()
+            
             # QA 생성 작업에서는 예외를 re-raise하지 않음
             return task_id
     

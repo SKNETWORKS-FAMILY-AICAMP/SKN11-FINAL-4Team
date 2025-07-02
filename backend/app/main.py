@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 from app.core.config import settings
 from app.database import init_database, test_database_connection
 from app.api.v1.api import api_router
+from app.services.startup_service import run_startup_tasks
 
 # 로깅 설정
 logging.basicConfig(
@@ -36,6 +37,12 @@ async def lifespan(app: FastAPI):
     if not test_database_connection():
         logger.error("❌ Database connection failed")
         raise Exception("Database connection failed")
+
+    # 시작시 작업 실행 (QA 데이터 있지만 파인튜닝 시작 안된 작업들 자동 재시작)
+    try:
+        await run_startup_tasks()
+    except Exception as e:
+        logger.warning(f"⚠️ Startup tasks failed, but continuing: {e}")
 
     logger.info("✅ AIMEX API Server ready")
 
