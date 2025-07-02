@@ -413,6 +413,62 @@ class InfluencerFineTuningService:
             task for task in self.tasks.values() 
             if task.influencer_id == influencer_id
         ]
+    
+    async def start_finetuning_for_influencer(self, influencer_id: str, s3_qa_file_url: str, db) -> bool:
+        """
+        인플루언서를 위한 파인튜닝 시작 (startup service용)
+        Args:
+            influencer_id: 인플루언서 ID  
+            s3_qa_file_url: S3 QA 파일 URL
+            db: 데이터베이스 세션
+        Returns:
+            성공 여부
+        """
+        try:
+            # 인플루언서 정보 가져오기
+            from app.services.influencers.crud import get_influencer_by_id
+            
+            user_id = "system"  # 시스템 작업으로 처리
+            influencer_data = get_influencer_by_id(db, user_id, influencer_id)
+            
+            if not influencer_data:
+                logger.error(f"인플루언서를 찾을 수 없습니다: {influencer_id}")
+                return False
+            
+            # 인플루언서 데이터를 딕셔너리로 변환
+            influencer_dict = {
+                'influencer_name': influencer_data.influencer_name,
+                'personality': getattr(influencer_data, 'influencer_personality', '친근하고 활발한 성격'),
+                'style_info': getattr(influencer_data, 'influencer_description', '')
+            }
+            
+            # 파인튜닝 작업 시작
+            task_id = self.start_finetuning_task(
+                influencer_id=influencer_id,
+                qa_task_id=f"startup_restart_{influencer_id}",
+                s3_qa_url=s3_qa_file_url,
+                influencer_data=influencer_dict
+            )
+            
+            # 파인튜닝 실행 (백그라운드에서)
+            import asyncio
+            from functools import partial
+            
+            # 동기 함수를 비동기로 실행
+            loop = asyncio.get_event_loop()
+            execute_task = partial(self.execute_finetuning_task, task_id, influencer_dict)
+            success = await loop.run_in_executor(None, execute_task)
+            
+            if success:
+                logger.info(f"✅ 인플루언서 파인튜닝 자동 시작 성공: {influencer_id}")
+            else:
+                logger.error(f"❌ 인플루언서 파인튜닝 자동 시작 실패: {influencer_id}")
+            
+            return success
+            
+        except Exception as e:
+            logger.error(f"❌ 인플루언서 파인튜닝 시작 중 오류: {influencer_id}, {str(e)}")
+            return False
 
 
 # 전역 파인튜닝 서비스 인스턴스

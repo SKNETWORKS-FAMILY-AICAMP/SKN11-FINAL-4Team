@@ -7,7 +7,7 @@ from sqlalchemy import Column, String, Integer, DateTime, Text, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from datetime import datetime
 
-from app.database import Base
+from app.models.base import Base
 
 
 class BatchJob(Base):

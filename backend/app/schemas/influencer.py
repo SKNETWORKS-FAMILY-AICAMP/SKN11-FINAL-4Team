@@ -71,7 +71,7 @@ class AIInfluencerBase(BaseModel):
     chatbot_option: bool
 
 
-class AIInfluencerCreate(BaseModel):
+class AIInfluencerCreate(BaseSchema):
     user_id: str
     group_id: int
     style_preset_id: Optional[str] = None  # 프리셋이 없으면 자동 생성
