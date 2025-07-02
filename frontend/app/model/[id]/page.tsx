@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { AlertCircle } from "lucide-react"
 import React from "react"
 import { useParams, useSearchParams } from "next/navigation"
 import Link from "next/link"
@@ -181,7 +182,7 @@ const samplePosts: ContentPost[] = [
 export default function ModelDetailPage() {
   const params = useParams()
   const searchParams = useSearchParams()
-  const [model, setModel] = useState<AIModel>(sampleModel)
+  const [model, setModel] = useState<any>(sampleModel)
   const [isModelLoading, setIsModelLoading] = useState(true)
   const [posts] = useState<ContentPost[]>(samplePosts)
   const [selectedPost, setSelectedPost] = useState<ContentPost | null>(null)
@@ -227,12 +228,10 @@ export default function ModelDetailPage() {
       if (response.ok) {
         const data = await response.json()
         setModel({
+          ...data,
           id: data.influencer_id,
           name: data.influencer_name,
           description: data.influencer_description || '',
-          personality: data.influencer_personality || '',
-          tone: data.influencer_tone || '',
-          status: data.learning_status === 1 ? 'ready' : 'training',
           createdAt: data.created_at?.split('T')[0] || '',
           apiKey: sampleModel.apiKey, // API 키는 별도 조회
           trainingData: sampleModel.trainingData, // 훈련 데이터는 별도 조회
@@ -251,8 +250,6 @@ export default function ModelDetailPage() {
     return searchParams.get('tab') || 'analytics'
   })
   
-  // 환경 변수에서 채팅 기능 활성화 여부 확인
-  const isChatEnabled = process.env.NEXT_PUBLIC_ENABLE_CHAT === 'true'
 
   const handleUpdateModel = async () => {
     setIsUpdating(true)
@@ -271,7 +268,7 @@ export default function ModelDetailPage() {
 
       if (response.ok) {
         const updatedData = await response.json()
-        setModel(prev => ({
+        setModel((prev: any) => ({
           ...prev,
           name: updatedData.influencer_name,
           description: updatedData.influencer_description || '',
@@ -305,7 +302,7 @@ export default function ModelDetailPage() {
 
   const generateNewApiKey = () => {
     const newKey = "ai_inf_" + Math.random().toString(36).substring(2, 18)
-    setModel((prev) => ({ ...prev, apiKey: newKey }))
+    setModel((prev: any) => ({ ...prev, apiKey: newKey }))
   }
 
   // Instagram 연동 관련 함수들
@@ -875,18 +872,28 @@ export default function ModelDetailPage() {
               <h1 className="text-3xl font-bold text-gray-900">{model.name}</h1>
               <p className="text-gray-600 mt-2">{model.description}</p>
               <div className="flex items-center space-x-4 mt-4">
-                <Badge className="bg-green-100 text-green-800">사용 가능</Badge>
+                                <Badge className={
+                  model.learning_status === 1 ? "bg-green-100 text-green-800" : 
+                  model.learning_status === 0 ? "bg-yellow-100 text-yellow-800" : 
+                  "bg-red-100 text-red-800"
+                }>
+                  {model.learning_status === 1 ? "사용 가능" : 
+                   model.learning_status === 0 ? "생성 중" : 
+                   "오류"}
+                </Badge>
                 <span className="text-sm text-gray-500">생성일: {model.createdAt}</span>
               </div>
             </div>
             <div className="flex space-x-2">
-              {isChatEnabled && (
-                <Link href={`/chat/${model.id}`}>
-                  <Button variant="outline" size="sm">
-                    <MessageSquare className="h-4 w-4 mr-2" />
-                    채팅 페이지 생성
-                  </Button>
-                </Link>
+              {model.learning_status === 1 && (
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => window.open(`/chat/${model.id}`, '_blank')}
+                >
+                  <MessageSquare className="h-4 w-4 mr-2" />
+                  {model.chatbot_option ? "챗봇 페이지 이동" : "챗봇 생성"}
+                </Button>
               )}
               <AlertDialog>
                 <AlertDialogTrigger asChild>
@@ -1355,7 +1362,7 @@ export default function ModelDetailPage() {
                           <span className="text-sm font-medium text-gray-900">광고 및 마케팅 최적화</span>
                         </div>
 
-                        {instagramStatus.accountType === 'BUSINESS' && (
+                        {instagramStatus.instagram_info?.account_type === 'BUSINESS' && (
                           <div className="flex items-center space-x-3">
                             <CheckCircle className="h-5 w-5 text-blue-500 flex-shrink-0" />
                             <span className="text-sm font-medium text-gray-900">비즈니스 전용 고급 인사이트</span>
@@ -1494,7 +1501,7 @@ export default function ModelDetailPage() {
                           <Input
                             id="model-name"
                             value={isModelLoading ? "로딩 중..." : model.name}
-                            onChange={(e) => setModel((prev) => ({ ...prev, name: e.target.value }))}
+                            onChange={(e) => setModel((prev: any) => ({ ...prev, name: e.target.value }))}
                             placeholder="AI 인플루언서 이름을 입력하세요"
                             className="border-gray-300 focus:border-blue-500 focus:ring-blue-500"
                             disabled={isModelLoading}
@@ -1507,7 +1514,7 @@ export default function ModelDetailPage() {
                           <Textarea
                             id="model-description"
                             value={isModelLoading ? "로딩 중..." : model.description}
-                            onChange={(e) => setModel((prev) => ({ ...prev, description: e.target.value }))}
+                            onChange={(e) => setModel((prev: any) => ({ ...prev, description: e.target.value }))}
                             rows={4}
                             placeholder="AI 인플루언서에 대한 설명을 입력하세요"
                             className="border-gray-300 focus:border-blue-500 focus:ring-blue-500 resize-none"

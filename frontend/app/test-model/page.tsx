@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Navigation } from "@/components/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -12,37 +12,8 @@ import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import { MessageSquare, Send, Bot, User } from "lucide-react"
 import type { AIModel } from "@/lib/types"
-
-// 샘플 모델 데이터
-const availableModels: AIModel[] = [
-  {
-    id: "1",
-    name: "패션 인플루언서 AI",
-    description: "20대 여성 타겟의 패션 트렌드 전문 AI 인플루언서",
-    personality: "친근하고 트렌디한",
-    tone: "캐주얼하고 친밀한",
-    status: "ready",
-    createdAt: "2024-01-15",
-  },
-  {
-    id: "2",
-    name: "뷰티 전문가 AI",
-    description: "화장품 리뷰 및 뷰티 팁 전문 AI 인플루언서",
-    personality: "전문적이고 신뢰할 수 있는",
-    tone: "정중하고 전문적인",
-    status: "ready",
-    createdAt: "2024-01-20",
-  },
-  {
-    id: "3",
-    name: "피트니스 코치 AI",
-    description: "운동 및 건강 관리 전문 AI 인플루언서",
-    personality: "동기부여하고 에너지 넘치는",
-    tone: "격려하고 활기찬",
-    status: "ready",
-    createdAt: "2024-01-10",
-  },
-]
+import { ModelService, type AIInfluencer } from "@/lib/services/model.service"
+import { tokenUtils } from "@/lib/auth"
 
 interface ChatMessage {
   id: string
@@ -88,6 +59,8 @@ export default function TestModelPage() {
   const [message, setMessage] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([])
+  const [availableModels, setAvailableModels] = useState<AIInfluencer[]>([])
+  const [modelsLoading, setModelsLoading] = useState(true)
 
   const handleModelToggle = (modelId: string) => {
     setSelectedModels((prev) => (prev.includes(modelId) ? prev.filter((id) => id !== modelId) : [...prev, modelId]))
@@ -110,7 +83,7 @@ export default function TestModelPage() {
     // 각 선택된 모델에 대해 응답 생성
     setTimeout(() => {
       const aiMessages: ChatMessage[] = selectedModels.map((modelId, index) => {
-        const model = availableModels.find((m) => m.id === modelId)
+        const model = availableModels.find((m) => m.influencer_id === modelId)
         const response = getModelResponses(modelId, userMessage.content)
 
         return {
@@ -119,7 +92,7 @@ export default function TestModelPage() {
           content: response,
           timestamp: new Date().toLocaleTimeString(),
           modelId,
-          modelName: model?.name || "Unknown Model",
+          modelName: model?.influencer_name || "Unknown Model",
         }
       })
 
@@ -135,7 +108,24 @@ export default function TestModelPage() {
     }
   }
 
-  const selectedModelData = availableModels.filter((model) => selectedModels.includes(model.id))
+  // 모델 데이터 로드
+  useEffect(() => {
+    const fetchModels = async () => {
+      try {
+        setModelsLoading(true)
+        const data = await ModelService.getInfluencers()
+        setAvailableModels(data)
+      } catch (error) {
+        console.error('Failed to fetch models:', error)
+      } finally {
+        setModelsLoading(false)
+      }
+    }
+
+    fetchModels()
+  }, [])
+
+  const selectedModelData = availableModels.filter((model) => selectedModels.includes(model.influencer_id))
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -159,27 +149,46 @@ export default function TestModelPage() {
                 <CardDescription>테스트할 AI 모델들을 선택하세요 (다중 선택 가능)</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
+                {modelsLoading ? (
+                  <div className="text-center py-8">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mx-auto"></div>
+                    <p className="text-sm text-gray-600 mt-2">모델을 불러오는 중...</p>
+                  </div>
+                ) : (
                 <div className="space-y-3">
-                  {availableModels.map((model) => (
-                    <div key={model.id} className="flex items-start space-x-3 p-3 border rounded-lg hover:bg-gray-50">
-                      <Checkbox
-                        id={model.id}
-                        checked={selectedModels.includes(model.id)}
-                        onCheckedChange={() => handleModelToggle(model.id)}
-                        className="mt-1"
-                      />
-                      <div className="flex-1 min-w-0">
-                        <Label htmlFor={model.id} className="text-sm font-medium cursor-pointer">
-                          {model.name}
-                        </Label>
-                        <p className="text-xs text-gray-600 mt-1">{model.description}</p>
-                        <div className="flex items-center space-x-2 mt-2">
-                          <Badge className="bg-green-100 text-green-800 text-xs">준비완료</Badge>
+                  {availableModels.map((model) => {
+                    const isAvailable = model.learning_status === 1
+                    return (
+                      <div key={model.influencer_id} className={`flex items-start space-x-3 p-3 border rounded-lg ${isAvailable ? 'hover:bg-gray-50' : 'opacity-50 bg-gray-100'}`}>
+                        <Checkbox
+                          id={model.influencer_id}
+                          checked={selectedModels.includes(model.influencer_id)}
+                          onCheckedChange={() => isAvailable && handleModelToggle(model.influencer_id)}
+                          className="mt-1"
+                          disabled={!isAvailable}
+                        />
+                        <div className="flex-1 min-w-0">
+                          <Label 
+                            htmlFor={model.influencer_id} 
+                            className={`text-sm font-medium ${isAvailable ? 'cursor-pointer' : 'cursor-not-allowed'}`}
+                          >
+                            {model.influencer_name}
+                          </Label>
+                          <p className="text-xs text-gray-600 mt-1">AI 인플루언서 모델</p>
+                          <div className="flex items-center space-x-2 mt-2">
+                            <Badge className={isAvailable ? "bg-green-100 text-green-800 text-xs" : "bg-yellow-100 text-yellow-800 text-xs"}>
+                              {isAvailable ? "사용 가능" : "생성 중"}
+                            </Badge>
+                            {!isAvailable && (
+                              <span className="text-xs text-gray-500">선택 불가</span>
+                            )}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
+                )}
 
                 {selectedModelData.length > 0 && (
                   <div className="pt-4 border-t">
@@ -188,10 +197,10 @@ export default function TestModelPage() {
                     </h4>
                     <div className="space-y-2">
                       {selectedModelData.map((model) => (
-                        <div key={model.id} className="p-2 bg-blue-50 rounded text-xs">
-                          <p className="font-medium text-blue-900">{model.name}</p>
-                          <p className="text-blue-700">성격: {model.personality}</p>
-                          <p className="text-blue-700">말투: {model.tone}</p>
+                        <div key={model.influencer_id} className="p-2 bg-blue-50 rounded text-xs">
+                          <p className="font-medium text-blue-900">{model.influencer_name}</p>
+                          <p className="text-blue-700">AI 인플루언서 모델</p>
+                          <p className="text-blue-700">상태: {model.learning_status === 1 ? '사용 가능' : '생성 중'}</p>
                         </div>
                       ))}
                     </div>
@@ -249,13 +258,13 @@ export default function TestModelPage() {
                   {isLoading && (
                     <div className="space-y-3">
                       {selectedModels.map((modelId) => {
-                        const model = availableModels.find((m) => m.id === modelId)
+                        const model = availableModels.find((m) => m.influencer_id === modelId)
                         return (
                           <div key={modelId} className="flex justify-start">
                             <div className="bg-white border border-gray-200 rounded-lg px-4 py-2">
                               <div className="flex items-center space-x-2">
                                 <Bot className="h-4 w-4" />
-                                <span className="text-xs text-gray-600">{model?.name}</span>
+                                <span className="text-xs text-gray-600">{model?.influencer_name}</span>
                                 <div className="flex space-x-1">
                                   <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
                                   <div

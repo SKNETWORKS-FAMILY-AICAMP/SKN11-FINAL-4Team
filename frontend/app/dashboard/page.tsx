@@ -76,8 +76,8 @@ export default function DashboardPage() {
       case 1:
         return <Badge className="bg-green-100 text-green-800">사용 가능</Badge>
       case 0:
-        return <Badge className="bg-yellow-100 text-yellow-800">생성중</Badge>
-      case -1:
+        return <Badge className="bg-yellow-100 text-yellow-800">생성 중</Badge>
+      case 2:
         return <Badge className="bg-red-100 text-red-800">오류</Badge>
       default:
         return <Badge variant="secondary">알 수 없음</Badge>
@@ -216,21 +216,19 @@ export default function DashboardPage() {
                           <div>
                             <p className="text-sm font-medium text-gray-700">성격</p>
                             <p className="text-sm text-gray-600">
-                              {influencer.style_preset?.influencer_personality || '설정되지 않음'}
+                              {influencer.style_preset?.influencer_personality || '-'}
                             </p>
                           </div>
                           <div>
                             <p className="text-sm font-medium text-gray-700">말투</p>
                             <p className="text-sm text-gray-600">
-                              {influencer.style_preset?.influencer_speech || '설정되지 않음'}
+                              {influencer.style_preset?.influencer_speech || '-'}
                             </p>
                           </div>
-                          {influencer.mbti && (
-                            <div>
-                              <p className="text-sm font-medium text-gray-700">MBTI</p>
-                              <p className="text-sm text-gray-600">{influencer.mbti.mbti_name}</p>
-                            </div>
-                          )}
+                          <div>
+                            <p className="text-sm font-medium text-gray-700">MBTI</p>
+                            <p className="text-sm text-gray-600">{influencer.mbti?.mbti_name || '-'}</p>
+                          </div>
                           <div>
                             <p className="text-sm font-medium text-gray-700">챗봇 옵션</p>
                             <p className="text-sm text-gray-600">
