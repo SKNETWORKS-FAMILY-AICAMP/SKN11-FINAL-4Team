@@ -8,6 +8,8 @@ import { Navigation } from "@/components/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { ModelService } from "@/lib/services/model.service"
+import { useAuth } from "@/hooks/use-auth"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
@@ -39,6 +41,7 @@ export default function CreateModelPage() {
   const [showCustomInput, setShowCustomInput] = useState(false)
   const [toneTab, setToneTab] = useState("recommend")
   const router = useRouter()
+  const { user } = useAuth()
 
   const handleInputChange = (field: string, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }))
@@ -77,11 +80,47 @@ export default function CreateModelPage() {
     
     setIsLoading(true)
 
-    // 실제 모델 생성 로직 시뮬레이션
-    setTimeout(() => {
+    try {
+      // 사용자 인증 확인
+      if (!user || !user.teams || user.teams.length === 0) {
+        alert("❌ 인플루언서 생성 권한이 없습니다.\n\n팀에 소속되어야 인플루언서를 생성할 수 있습니다.")
+        setIsLoading(false)
+        return
+      }
+
+      // 백엔드 API 호출 데이터 준비
+      const createInfluencerData = {
+        user_id: user.user_id,
+        group_id: user.teams[0].group_id, // 첫 번째 팀의 group_id 사용
+        style_preset_id: formData.modelType || "default", 
+        mbti_id: formData.mbti ? parseInt(formData.mbti) : null,
+        influencer_name: formData.name,
+        influencer_description: formData.description,
+        image_url: formData.imageUrl || null,
+        influencer_data_url: null,
+        learning_status: 0, // 초기 상태
+        influencer_model_repo: "",
+        chatbot_option: true
+      }
+
+      // 실제 인플루언서 생성 API 호출
+      const response = await ModelService.createInfluencer(createInfluencerData)
+      
+      console.log('인플루언서 생성 성공:', response)
+      
+      // 성공 알림 표시
+      alert(`🎉 AI 인플루언서 "${formData.name}"가 생성되었습니다!\n\n다음 작업이 백그라운드에서 자동으로 진행됩니다:\n• 2,000개 QA 쌍 생성\n• S3에 데이터 업로드\n• QLoRA 4비트 양자화 파인튜닝\n• Hugging Face에 모델 업로드\n\n완료 시 이메일과 웹 알림을 받으실 수 있습니다.`)
+      
       setIsLoading(false)
       router.push("/dashboard")
-    }, 2000)
+      
+    } catch (error) {
+      console.error('인플루언서 생성 실패:', error)
+      setIsLoading(false)
+      
+      // 에러 알림 표시
+      alert(`❌ 인플루언서 생성에 실패했습니다.\n\n오류: ${error instanceof Error ? error.message : '알 수 없는 오류'}\n\n다시 시도해주세요.`)
+    }
   }
 
   // 성격 기반 대화 예시 생성
