@@ -92,15 +92,25 @@ export default function CreateModelPage() {
       const createInfluencerData = {
         user_id: user.user_id,
         group_id: user.teams[0].group_id, // 첫 번째 팀의 group_id 사용
-        style_preset_id: formData.modelType || "default", 
-        mbti_id: formData.mbti ? parseInt(formData.mbti) : null,
+        style_preset_id: null, // 프리셋 자동 생성을 위해 null로 설정
+        mbti_id: null,
         influencer_name: formData.name,
         influencer_description: formData.description,
-        image_url: formData.imageUrl || null,
+        image_url: null,
         influencer_data_url: null,
         learning_status: 0, // 초기 상태
         influencer_model_repo: "",
-        chatbot_option: true
+        chatbot_option: true,
+        
+        // 프리셋 자동 생성을 위한 추가 데이터
+        personality: formData.personality,
+        tone: formData.tone || formData.customTone,
+        model_type: formData.modelType,
+        mbti: formData.mbti,
+        gender: formData.gender,
+        age: formData.age,
+        hair_style: formData.hairStyle,
+        mood: formData.mood
       }
 
       // 실제 인플루언서 생성 API 호출
