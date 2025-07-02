@@ -8,6 +8,7 @@ import json
 import os
 import time
 import random
+import tempfile
 from typing import List, Dict, Optional
 from openai import OpenAI
 from datetime import datetime
@@ -191,12 +192,18 @@ class InfluencerQAGenerator:
     def save_batch_file(self, requests: List[Dict], task_id: str) -> str:
         """배치 요청을 JSONL 파일로 저장"""
         filename = f"influencer_qa_batch_{task_id}.jsonl"
-        filepath = os.path.join("/tmp", filename)
+        # OS에 맞는 임시 디렉토리 사용
+        temp_dir = tempfile.gettempdir()
+        filepath = os.path.join(temp_dir, filename)
+        
+        # 디렉토리가 존재하는지 확인하고 생성
+        os.makedirs(temp_dir, exist_ok=True)
         
         with open(filepath, 'w', encoding='utf-8') as f:
             for request in requests:
                 f.write(json.dumps(request, ensure_ascii=False) + '\n')
         
+        print(f"배치 파일 저장 완료: {filepath}")
         return filepath
     
     def submit_batch_job(self, batch_file_path: str, task_id: str) -> str:
@@ -253,7 +260,8 @@ class InfluencerQAGenerator:
         
         # 결과 파일 다운로드
         result_file_name = f"influencer_qa_results_{task_id}.jsonl"
-        result_file_path = os.path.join("/tmp", result_file_name)
+        temp_dir = tempfile.gettempdir()
+        result_file_path = os.path.join(temp_dir, result_file_name)
         
         file_response = self.client.files.content(batch.output_file_id)
         
@@ -298,7 +306,8 @@ class InfluencerQAGenerator:
         # TODO: QA 쌍을 저장할 테이블이 필요 (예: influencer_qa_pairs)
         # 현재는 JSON 파일로 임시 저장
         filename = f"influencer_{influencer_id}_qa_pairs.json"
-        filepath = os.path.join("/tmp", filename)
+        temp_dir = tempfile.gettempdir()
+        filepath = os.path.join(temp_dir, filename)
         
         with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(qa_pairs, f, ensure_ascii=False, indent=2)
