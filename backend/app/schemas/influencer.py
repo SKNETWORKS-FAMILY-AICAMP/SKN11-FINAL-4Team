@@ -63,6 +63,7 @@ class AIInfluencerBase(BaseModel):
     style_preset_id: str
     mbti_id: Optional[int] = None
     influencer_name: str
+    influencer_description: Optional[str] = None
     image_url: Optional[str] = None
     influencer_data_url: Optional[str] = None
     learning_status: int
@@ -71,7 +72,7 @@ class AIInfluencerBase(BaseModel):
 
 
 class AIInfluencerCreate(AIInfluencerBase):
-    pass
+    influencer_description: Optional[str] = None
 
 
 class AIInfluencerUpdate(BaseModel):
