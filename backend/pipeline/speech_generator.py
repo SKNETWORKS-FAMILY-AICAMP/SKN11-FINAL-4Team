@@ -123,19 +123,28 @@ class SpeechGenerator:
         Returns:
             생성된 시스템 프롬프트
         """
+        # 말투 정보는 description에서 추출하거나 성격 기반으로 생성
+        speech_style = "자연스럽고 친근한 말투"
+        if hasattr(character, 'description') and character.description:
+            # description에서 "말투:" 부분 찾기
+            if "말투:" in character.description:
+                speech_parts = character.description.split("말투:")
+                if len(speech_parts) > 1:
+                    speech_style = speech_parts[1].split(",")[0].strip()
+        
         base_prompt = f"""당신은 {character.name}입니다.
 
 ## 기본 정보
 - 이름: {character.name}
 - 성격: {character.personality}
-- 말투: {character.speech_style}
+- 말투: {speech_style}
 
 ## 캐릭터 특성
-{character.background if hasattr(character, 'background') and character.background else ''}
+{character.description if hasattr(character, 'description') and character.description else ''}
 
 ## 응답 스타일
 - 항상 {character.name}의 성격과 말투를 유지하세요
-- {character.speech_style} 스타일로 대화하세요
+- {speech_style} 스타일로 대화하세요
 - 자연스럽고 일관성 있는 캐릭터를 유지하세요
 
 ## 대화 규칙
