@@ -21,6 +21,13 @@ def get_user_group_ids(db: Session, user_id: str) -> List[str]:
 
 def build_influencer_query(db: Session, user_id: str, influencer_id: str = None):
     """사용자 권한에 따른 인플루언서 쿼리 생성"""
+    # 시스템 작업인 경우 모든 인플루언서에 접근 가능
+    if user_id == "system":
+        query = db.query(AIInfluencer)
+        if influencer_id:
+            query = query.filter(AIInfluencer.influencer_id == influencer_id)
+        return query
+    
     user_group_ids = get_user_group_ids(db, user_id)
     
     query = db.query(AIInfluencer)

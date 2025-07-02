@@ -363,7 +363,10 @@ class InfluencerQAGenerator:
             task.error_message = str(e)
             task.updated_at = datetime.now()
             print(f"QA 생성 작업 실패: {e}")
-            raise e
+            import traceback
+            print(f"상세 에러 정보: {traceback.format_exc()}")
+            # QA 생성 작업에서는 예외를 re-raise하지 않음
+            return task_id
     
     def get_task_status(self, task_id: str) -> Optional[QAGenerationTask]:
         """작업 상태 조회"""

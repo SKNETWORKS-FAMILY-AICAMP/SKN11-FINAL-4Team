@@ -60,8 +60,9 @@ class BackgroundTaskManager:
                 db.close()
                 
         except Exception as e:
-            logger.error(f"QA 생성 작업 시작 실패: influencer_id={influencer_id}, error={str(e)}")
-            raise e
+            logger.error(f"QA 생성 작업 시작 실패: influencer_id={influencer_id}, error={str(e)}", exc_info=True)
+            # 백그라운드 작업에서는 예외를 re-raise하지 않고 로깅만 함
+            pass
     
     async def _continuous_monitor_qa_generation(self, task_id: str):
         """
@@ -453,7 +454,10 @@ async def generate_influencer_qa_background(influencer_id: str):
     Args:
         influencer_id: 인플루언서 ID
     """
-    await background_task_manager.start_qa_generation_task(influencer_id)
+    try:
+        await background_task_manager.start_qa_generation_task(influencer_id)
+    except Exception as e:
+        logger.error(f"백그라운드 QA 생성 작업 실패: influencer_id={influencer_id}, error={str(e)}", exc_info=True)
 
 
 def get_background_task_manager() -> BackgroundTaskManager:
