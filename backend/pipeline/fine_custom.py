@@ -1,4 +1,4 @@
-# EXAONE 3.5 2.4B LoRA 파인튜닝 예시 코드 (수정됨)
+# EXAONE 3.5 2.4B QLoRA 4비트 양자화 파인튜닝 (개선됨)
 
 import torch
 import json
@@ -8,7 +8,8 @@ from transformers import (
     TrainingArguments, 
     Trainer,
     DataCollatorForLanguageModeling,
-    EarlyStoppingCallback
+    EarlyStoppingCallback,
+    BitsAndBytesConfig
 )
 from peft import LoraConfig, get_peft_model, TaskType, prepare_model_for_kbit_training
 from datasets import Dataset
@@ -113,9 +114,19 @@ def find_all_linear_names(model):
     
     return list(lora_module_names)
 
+def create_qlora_config():
+    """QLoRA를 위한 4비트 양자화 설정 생성"""
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=True,                      # 4비트 양자화 활성화
+        bnb_4bit_use_double_quant=True,         # 이중 양자화로 더 높은 정밀도
+        bnb_4bit_quant_type="nf4",              # NormalFloat4 양자화 (QLoRA 권장)
+        bnb_4bit_compute_dtype=torch.bfloat16,  # 계산용 데이터 타입
+    )
+    return bnb_config
+
 def load_model_and_tokenizer(model_name="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct"):
-    """모델과 토크나이저 로드"""
-    print("모델과 토크나이저 로딩 중...")
+    """QLoRA를 위한 모델과 토크나이저 로드"""
+    print("QLoRA 4비트 양자화 모델과 토크나이저 로딩 중...")
     
     # 토크나이저 로드
     tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -125,25 +136,32 @@ def load_model_and_tokenizer(model_name="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct"):
         tokenizer.pad_token = tokenizer.eos_token
         tokenizer.pad_token_id = tokenizer.eos_token_id
     
-    # 모델 로드 - gradient checkpointing 문제 해결을 위한 수정된 설정
+    # QLoRA를 위한 4비트 양자화 설정
+    bnb_config = create_qlora_config()
+    
+    # 4비트 양자화된 모델 로드
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
+        quantization_config=bnb_config,         # 4비트 양자화 적용
         torch_dtype=torch.bfloat16,
         trust_remote_code=True,
-        device_map="auto",
-        use_cache=False,  # 그래디언트 체크포인팅과 호환성을 위해
+        device_map="auto",                      # GPU 메모리에 맞게 자동 배치
+        use_cache=False,                        # 그래디언트 체크포인팅과 호환성을 위해
     )
     
-    # gradient checkpointing을 여기서 먼저 활성화
-    model.gradient_checkpointing_enable()
+    # QLoRA 훈련을 위한 모델 준비
+    model = prepare_model_for_kbit_training(
+        model, 
+        use_gradient_checkpointing=True         # 메모리 효율성을 위한 그래디언트 체크포인팅
+    )
     
-    # 모델을 LoRA 훈련에 맞게 준비 (gradient checkpointing 후에)
-    model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
+    print(f"모델 로드 완료 - 4비트 양자화 적용")
+    print(f"모델 메모리 사용량: {model.get_memory_footprint() / 1024**3:.2f} GB")
     
     return model, tokenizer
 
-def setup_lora_config(model):
-    """LoRA 설정 - 모델 구조에 맞게 자동 탐지"""
+def setup_qlora_config(model):
+    """QLoRA 전용 LoRA 설정 - 4비트 양자화에 최적화"""
     
     # 모델에서 사용 가능한 Linear 모듈들을 자동으로 찾기
     target_modules = find_all_linear_names(model)
@@ -161,18 +179,25 @@ def setup_lora_config(model):
         # 그래도 없으면 처음 몇 개만 사용
         attention_modules = target_modules[:4] if len(target_modules) >= 4 else target_modules
     
-    print(f"LoRA에 사용할 모듈들: {attention_modules}")
+    print(f"QLoRA에 사용할 모듈들: {attention_modules}")
     
+    # QLoRA 최적화된 설정
     lora_config = LoraConfig(
         task_type=TaskType.CAUSAL_LM,
-        r=8,  # rank를 줄여서 안정성 확보
-        lora_alpha=16,  # alpha도 줄임
-        lora_dropout=0.05,
+        r=16,                           # QLoRA에서는 더 높은 rank 사용 가능 (4비트 양자화로 메모리 절약)
+        lora_alpha=32,                  # alpha = 2 * r (QLoRA 권장 설정)
+        lora_dropout=0.1,              # 약간 높은 dropout으로 overfitting 방지
         target_modules=attention_modules,
-        bias="none",
-        use_rslora=False,
+        bias="none",                   # 4비트 양자화와 호환성을 위해 bias 사용 안함
+        use_rslora=True,               # RSLoRA 사용으로 성능 향상
+        init_lora_weights="gaussian",  # 가우시안 초기화로 안정성 향상
     )
     return lora_config
+
+# 하위 호환성을 위한 별칭
+def setup_lora_config(model):
+    """하위 호환성을 위한 별칭 - QLoRA 설정 사용"""
+    return setup_qlora_config(model)
 
 def prepare_dataset(tokenizer, max_length=1024):  # max_length 줄임
     """데이터셋 준비 (예시 데이터)"""
@@ -231,32 +256,37 @@ def prepare_dataset(tokenizer, max_length=1024):  # max_length 줄임
     
     return tokenized_dataset
 
-def setup_training_arguments(output_dir="./exaone-lora-results-system-custom"):
-    """훈련 인수 설정"""
+def setup_training_arguments(output_dir="./exaone-qlora-results-system-custom"):
+    """QLoRA 최적화된 훈련 인수 설정"""
     training_args = TrainingArguments(
         output_dir=output_dir,
-        per_device_train_batch_size=1,
-        gradient_accumulation_steps=4,  # 줄임
-        num_train_epochs=5,  # 테스트용으로 1 에포크
-        learning_rate=2e-4,  # 학습률 줄임
-        lr_scheduler_type="linear",  # 더 안정적인 스케줄러
-        warmup_steps=10,  # warmup_ratio 대신 steps 사용
-        logging_steps=5,
-        save_strategy="epoch",  # epoch마다 저장
-        eval_strategy="epoch",  # 조기 종료를 위한 평가 전략
-        load_best_model_at_end=True,  # 최적 모델 로드
-        metric_for_best_model="loss",  # 최적 모델 기준
-        greater_is_better=False,  # loss는 낮을수록 좋음
-        bf16=True,
-        gradient_checkpointing=False,  # gradient_checkpointing 비활성화 (모델에서 이미 활성화함)
+        per_device_train_batch_size=2,          # QLoRA로 더 큰 배치 사이즈 가능
+        gradient_accumulation_steps=8,          # 총 배치 사이즈 = 2 * 8 = 16
+        num_train_epochs=3,                     # QLoRA는 더 적은 에포크로도 효과적
+        learning_rate=5e-5,                     # QLoRA 권장 학습률 (더 낮게)
+        lr_scheduler_type="cosine",             # Cosine 스케줄러로 더 부드러운 학습
+        warmup_steps=50,                        # 더 긴 warmup
+        logging_steps=10,
+        save_strategy="epoch",                  # epoch마다 저장
+        eval_strategy="epoch",                  # 조기 종료를 위한 평가 전략
+        load_best_model_at_end=True,           # 최적 모델 로드
+        metric_for_best_model="loss",          # 최적 모델 기준
+        greater_is_better=False,               # loss는 낮을수록 좋음
+        bf16=True,                             # 4비트 양자화와 함께 bf16 사용
+        gradient_checkpointing=True,           # 메모리 효율성을 위해 활성화
         dataloader_pin_memory=False,
         remove_unused_columns=False,
         report_to="none",
         seed=42,
-        optim="adamw_torch",
-        max_grad_norm=1.0,
-        dataloader_num_workers=0,  # 멀티프로세싱 비활성화
+        optim="paged_adamw_8bit",              # QLoRA 최적화된 옵티마이저
+        max_grad_norm=0.3,                     # QLoRA 권장 gradient clipping
+        dataloader_num_workers=4,              # 데이터 로딩 병렬화
         save_total_limit=1,
+        ddp_find_unused_parameters=False,      # DDP 최적화
+        group_by_length=True,                  # 길이별 그룹화로 효율성 향상
+        length_column_name="length",
+        max_steps=-1,                          # epoch 기반 학습
+        weight_decay=0.01,                     # 정규화
     )
     
     return training_args
@@ -296,21 +326,24 @@ def upload_to_huggingface(output_dir):
         print(f"❌ 업로드 실패: {e}")
 
 def main():
-    """메인 훈련 함수"""
+    """QLoRA 4비트 양자화 파인튜닝 메인 함수"""
     
     # 환경 변수 설정
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
     
-    # 1. 모델과 토크나이저 로드
+    print("=== QLoRA 4비트 양자화 파인튜닝 시작 ===")
+    
+    # 1. QLoRA 모델과 토크나이저 로드
     model, tokenizer = load_model_and_tokenizer()
     
     # 2. 모델 구조 확인
-    print("모델 구조 확인 중...")
+    print("QLoRA 모델 구조 확인 중...")
     print(f"모델 타입: {type(model)}")
+    print(f"4비트 양자화 적용됨: {hasattr(model, 'quantization_config')}")
     
-    # 3. LoRA 설정 및 적용
-    lora_config = setup_lora_config(model)
-    model = get_peft_model(model, lora_config)
+    # 3. QLoRA 설정 및 적용
+    qlora_config = setup_qlora_config(model)
+    model = get_peft_model(model, qlora_config)
     
     # 4. LoRA 적용 후 gradient checkpointing 다시 활성화
     if hasattr(model, 'enable_input_require_grads'):
@@ -445,22 +478,36 @@ def main():
         print(f"Backward pass 실패: {e}")
         return
     
-    # 13. 훈련 시작
-    print("훈련 시작...")
+    # 13. QLoRA 훈련 시작
+    print("=== QLoRA 4비트 양자화 훈련 시작 ===")
     try:
+        # 메모리 사용량 출력
+        if torch.cuda.is_available():
+            print(f"GPU 메모리 사용량 (훈련 전): {torch.cuda.memory_allocated() / 1024**3:.2f} GB")
+        
         trainer.train()
-        print("훈련 완료!")
+        
+        if torch.cuda.is_available():
+            print(f"GPU 메모리 사용량 (훈련 후): {torch.cuda.memory_allocated() / 1024**3:.2f} GB")
+        
+        print("🎉 QLoRA 4비트 양자화 훈련 완료!")
+        
     except Exception as e:
-        print(f"훈련 중 오류 발생: {e}")
+        print(f"❌ QLoRA 훈련 중 오류 발생: {e}")
         
         # 더 자세한 디버깅 정보
-        print("\n=== 추가 디버깅 정보 ===")
+        print("\n=== QLoRA 디버깅 정보 ===")
         print(f"모델 타입: {type(model)}")
         print(f"Base model 타입: {type(model.base_model) if hasattr(model, 'base_model') else 'N/A'}")
+        print(f"4비트 양자화: {hasattr(model.base_model, 'quantization_config') if hasattr(model, 'base_model') else 'N/A'}")
         
         # PEFT 설정 확인
         if hasattr(model, 'peft_config'):
             print(f"PEFT config: {model.peft_config}")
+        
+        # GPU 메모리 정보
+        if torch.cuda.is_available():
+            print(f"GPU 메모리: {torch.cuda.memory_allocated() / 1024**3:.2f} GB / {torch.cuda.memory_reserved() / 1024**3:.2f} GB")
         
         raise
     
