@@ -8,8 +8,8 @@ import smtplib
 import logging
 from datetime import datetime
 from typing import Optional, Dict, List
-from email.mime.text import MimeText
-from email.mime.multipart import MimeMultipart
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from dataclasses import dataclass
 from enum import Enum
 import asyncio
@@ -174,14 +174,14 @@ class EmailService:
         
         try:
             # MIME 메시지 생성
-            msg = MimeMultipart('alternative')
+            msg = MIMEMultipart('alternative')
             msg['Subject'] = template.subject
             msg['From'] = self.from_email
             msg['To'] = to_email
             
             # 텍스트 및 HTML 파트 추가
-            text_part = MimeText(template.text_content, 'plain', 'utf-8')
-            html_part = MimeText(template.html_content, 'html', 'utf-8')
+            text_part = MIMEText(template.text_content, 'plain', 'utf-8')
+            html_part = MIMEText(template.html_content, 'html', 'utf-8')
             
             msg.attach(text_part)
             msg.attach(html_part)
