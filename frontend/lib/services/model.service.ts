@@ -7,6 +7,7 @@ export interface AIInfluencer {
   style_preset_id: string
   mbti_id?: number
   influencer_name: string
+  influencer_description?: string
   image_url?: string
   influencer_data_url?: string
   learning_status: number

@@ -114,6 +114,7 @@ export default function TestModelPage() {
       try {
         setModelsLoading(true)
         const data = await ModelService.getInfluencers()
+        console.log('Fetched models:', data) // 디버깅용 로그
         setAvailableModels(data)
       } catch (error) {
         console.error('Failed to fetch models:', error)
@@ -133,7 +134,7 @@ export default function TestModelPage() {
 
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900">AI 모델 테스트</h1>
+          <h1 className="text-3xl font-bold text-gray-900">AI 인플루언서 테스트</h1>
           <p className="text-gray-600 mt-2">여러 AI 인플루언서와 동시에 대화하고 응답을 비교해보세요</p>
         </div>
 
@@ -144,22 +145,30 @@ export default function TestModelPage() {
               <CardHeader>
                 <CardTitle className="flex items-center space-x-2">
                   <Bot className="h-5 w-5" />
-                  <span>모델 선택</span>
+                  <span>인플루언서 선택</span>
                 </CardTitle>
-                <CardDescription>테스트할 AI 모델들을 선택하세요 (다중 선택 가능)</CardDescription>
+                <CardDescription>테스트할 AI 인플루언서들을 선택하세요 (다중 선택 가능)</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 {modelsLoading ? (
                   <div className="text-center py-8">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mx-auto"></div>
-                    <p className="text-sm text-gray-600 mt-2">모델을 불러오는 중...</p>
+                    <p className="text-sm text-gray-600 mt-2">인플루언서를 불러오는 중...</p>
                   </div>
                 ) : (
                 <div className="space-y-3">
                   {availableModels.map((model) => {
                     const isAvailable = model.learning_status === 1
                     return (
-                      <div key={model.influencer_id} className={`flex items-start space-x-3 p-3 border rounded-lg ${isAvailable ? 'hover:bg-gray-50' : 'opacity-50 bg-gray-100'}`}>
+                      <div 
+                        key={model.influencer_id} 
+                        className={`flex items-start space-x-3 p-3 border rounded-lg transition-colors ${
+                          isAvailable 
+                            ? 'hover:bg-gray-50 cursor-pointer' 
+                            : 'opacity-50 bg-gray-100 cursor-not-allowed'
+                        }`}
+                        onClick={() => isAvailable && handleModelToggle(model.influencer_id)}
+                      >
                         <Checkbox
                           id={model.influencer_id}
                           checked={selectedModels.includes(model.influencer_id)}
@@ -174,7 +183,9 @@ export default function TestModelPage() {
                           >
                             {model.influencer_name}
                           </Label>
-                          <p className="text-xs text-gray-600 mt-1">AI 인플루언서 모델</p>
+                          <p className="text-xs text-gray-600 mt-1 truncate">
+                            {model.influencer_description || 'AI 인플루언서'}
+                          </p>
                           <div className="flex items-center space-x-2 mt-2">
                             <Badge className={isAvailable ? "bg-green-100 text-green-800 text-xs" : "bg-yellow-100 text-yellow-800 text-xs"}>
                               {isAvailable ? "사용 가능" : "생성 중"}
@@ -193,13 +204,13 @@ export default function TestModelPage() {
                 {selectedModelData.length > 0 && (
                   <div className="pt-4 border-t">
                     <h4 className="text-sm font-medium text-gray-700 mb-3">
-                      선택된 모델 ({selectedModelData.length}개)
+                      선택된 인플루언서 ({selectedModelData.length}개)
                     </h4>
                     <div className="space-y-2">
                       {selectedModelData.map((model) => (
                         <div key={model.influencer_id} className="p-2 bg-blue-50 rounded text-xs">
                           <p className="font-medium text-blue-900">{model.influencer_name}</p>
-                          <p className="text-blue-700">AI 인플루언서 모델</p>
+                          <p className="text-blue-700 truncate">{model.influencer_description || 'AI 인플루언서'}</p>
                           <p className="text-blue-700">상태: {model.learning_status === 1 ? '사용 가능' : '생성 중'}</p>
                         </div>
                       ))}
@@ -216,7 +227,7 @@ export default function TestModelPage() {
               <CardHeader>
                 <CardTitle className="flex items-center space-x-2">
                   <MessageSquare className="h-5 w-5" />
-                  <span>다중 모델 대화 테스트</span>
+                  <span>여러 인플루언서 대화 테스트</span>
                 </CardTitle>
                 <CardDescription>
                   {selectedModels.length > 0
@@ -231,8 +242,8 @@ export default function TestModelPage() {
                   {chatHistory.length === 0 ? (
                     <div className="text-center text-gray-500 py-8">
                       <MessageSquare className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-                      <p>여러 AI 모델과 대화를 시작해보세요!</p>
-                      <p className="text-sm mt-2">각 모델의 다른 응답 스타일을 비교할 수 있습니다.</p>
+                      <p>여러 AI 인플루언서와 대화를 시작해보세요!</p>
+                      <p className="text-sm mt-2">각 인플루언서의 다른 응답 스타일을 비교할 수 있습니다.</p>
                     </div>
                   ) : (
                     chatHistory.map((msg) => (
@@ -290,8 +301,8 @@ export default function TestModelPage() {
                   <Textarea
                     placeholder={
                       selectedModels.length > 0
-                        ? `${selectedModels.length}개 모델에게 메시지를 보내세요...`
-                        : "먼저 모델을 선택하세요"
+                        ? `${selectedModels.length}명의 인플루언서에게 메시지를 보내세요...`
+                        : "먼저 인플루언서를 선택하세요"
                     }
                     value={message}
                     onChange={(e) => setMessage(e.target.value)}
@@ -312,7 +323,7 @@ export default function TestModelPage() {
 
                 {selectedModels.length > 0 && (
                   <div className="mt-2 text-xs text-gray-500 text-center">
-                    {selectedModels.length}개 모델이 각각 응답합니다
+                    {selectedModels.length}명의 인플루언서가 각각 응답합니다
                   </div>
                 )}
               </CardContent>

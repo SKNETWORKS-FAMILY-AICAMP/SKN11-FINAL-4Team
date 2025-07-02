@@ -39,7 +39,7 @@ export default function DashboardPage() {
         setInfluencers(data)
       } catch (err) {
         console.error('Failed to fetch influencers:', err)
-        setError('모델 데이터를 불러오는데 실패했습니다.')
+        setError('인플루언서 정보를 불러오는데 실패했습니다.')
       } finally {
         setLoading(false)
       }
@@ -62,7 +62,7 @@ export default function DashboardPage() {
         setInfluencers((prev) => prev.filter((inf) => inf.influencer_id !== influencerId))
       } catch (err) {
         console.error('Failed to delete influencer:', err)
-        setError('모델 삭제에 실패했습니다.')
+        setError('인플루언서 삭제에 실패했습니다.')
       }
     }
   }
@@ -93,7 +93,7 @@ export default function DashboardPage() {
             {loading ? (
               <div className="flex justify-center items-center py-12">
                 <Loader2 className="h-8 w-8 animate-spin" />
-                <span className="ml-2">모델 데이터를 불러오는 중...</span>
+                <span className="ml-2">인플루언서 정보를 불러오는 중...</span>
               </div>
             ) : error ? (
               <div className="text-center py-12">
@@ -107,35 +107,38 @@ export default function DashboardPage() {
                 <div className="mb-8">
                   <div className="flex justify-between items-center mb-6">
                     <div>
-                      <h1 className="text-3xl font-bold text-gray-900">AI 모델 대시보드</h1>
-                      <p className="text-gray-600 mt-2">생성된 AI 인플루언서 모델을 관리하세요</p>
+                      <h1 className="text-3xl font-bold text-gray-900">AI 인플루언서 대시보드</h1>
+                      <p className="text-gray-600 mt-2">생성된 AI 인플루언서를 관리하세요</p>
                     </div>
-                    {hasPermission('model', 'create') && (
-                      <Link href="/create-model">
-                        <Button className="flex items-center space-x-2">
-                          <Plus className="h-4 w-4" />
-                          <span>새 모델 생성</span>
-                        </Button>
-                      </Link>
-                    )}
                   </div>
 
-                  <div className="relative max-w-md mb-6">
+                  <div className="flex justify-between items-center mb-6">
+                  <div className="relative max-w-md">
                     <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
                     <Input
-                      placeholder="모델 검색..."
+                      placeholder="인플루언서 검색..."
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
                       className="pl-10"
                     />
                   </div>
-
+                  
+                  {hasPermission('model', 'create') && (
+                    <Link href="/create-model">
+                      <Button className="flex items-center space-x-2">
+                        <Plus className="h-4 w-4" />
+                        <span>새 AI 인플루언서 생성</span>
+                      </Button>
+                    </Link>
+                  )}
+                </div>  
+                
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
                     <Card>
                       <CardContent className="p-6">
                         <div className="text-center">
                           <p className="text-3xl font-bold text-blue-600">{influencers.length}</p>
-                          <p className="text-sm text-gray-600 mt-1">전체 모델</p>
+                          <p className="text-sm text-gray-600 mt-1">전체 인플루언서</p>
                         </div>
                       </CardContent>
                     </Card>
@@ -145,7 +148,7 @@ export default function DashboardPage() {
                           <p className="text-3xl font-bold text-yellow-600">
                             {influencers.filter((inf) => inf.learning_status === 0).length}
                           </p>
-                          <p className="text-sm text-gray-600 mt-1">학습 중</p>
+                          <p className="text-sm text-gray-600 mt-1">생성 중</p>
                         </div>
                       </CardContent>
                     </Card>
@@ -161,6 +164,8 @@ export default function DashboardPage() {
                     </Card>
                   </div>
                 </div>
+                
+                
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {filteredInfluencers.map((influencer) => (
@@ -184,9 +189,9 @@ export default function DashboardPage() {
                                 </AlertDialogTrigger>
                                 <AlertDialogContent>
                                   <AlertDialogHeader>
-                                    <AlertDialogTitle>모델 삭제</AlertDialogTitle>
+                                    <AlertDialogTitle>인플루언서 삭제</AlertDialogTitle>
                                     <AlertDialogDescription>
-                                      "{influencer.influencer_name}" 모델을 완전히 삭제하시겠습니까?
+                                      "{influencer.influencer_name}" 인플루언서를 완전히 삭제하시겠습니까?
                                       <br />
                                       <br />
                                       <strong>이 작업은 되돌릴 수 없으며, 다음 데이터가 모두 삭제됩니다:</strong>

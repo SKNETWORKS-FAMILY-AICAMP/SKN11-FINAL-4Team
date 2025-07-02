@@ -52,7 +52,7 @@ export function Navigation() {
                 }`}
               >
                 <List className="h-4 w-4 mr-2" />
-                모델 목록
+                인플루언서 목록
               </Link>
             
               <Link
@@ -64,7 +64,7 @@ export function Navigation() {
                 }`}
               >
                 <TestTube className="h-4 w-4 mr-2" />
-                모델 테스트
+                인플루언서 테스트
               </Link>
             
               <Link
