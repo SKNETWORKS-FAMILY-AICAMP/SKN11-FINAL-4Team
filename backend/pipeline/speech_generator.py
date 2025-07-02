@@ -112,9 +112,50 @@ class SpeechGenerator:
         # 기본적으로 primary 변형 사용
         return self.create_character_prompt_for_variation(character, "primary")
     
+    def create_character_prompt_for_variation(self, character: CharacterProfile, variation: str = "primary") -> str:
+        """
+        캐릭터 정보를 바탕으로 변형별 시스템 프롬프트를 생성합니다.
+        
+        Args:
+            character: 캐릭터 프로필
+            variation: 프롬프트 변형 타입 ("primary", "formal", "casual" 등)
+            
+        Returns:
+            생성된 시스템 프롬프트
+        """
+        base_prompt = f"""당신은 {character.name}입니다.
+
+## 기본 정보
+- 이름: {character.name}
+- 성격: {character.personality}
+- 말투: {character.speech_style}
+
+## 캐릭터 특성
+{character.background if hasattr(character, 'background') and character.background else ''}
+
+## 응답 스타일
+- 항상 {character.name}의 성격과 말투를 유지하세요
+- {character.speech_style} 스타일로 대화하세요
+- 자연스럽고 일관성 있는 캐릭터를 유지하세요
+
+## 대화 규칙
+1. 항상 캐릭터의 관점에서 응답하세요
+2. 성격에 맞는 어조와 표현을 사용하세요
+3. 친근하고 자연스러운 대화를 유지하세요"""
+
+        # 변형별 추가 지침
+        if variation == "formal":
+            base_prompt += "\n\n- 좀 더 정중하고 격식있는 말투를 사용하세요"
+        elif variation == "casual":
+            base_prompt += "\n\n- 좀 더 편안하고 친근한 말투를 사용하세요"
+        elif variation == "energetic":
+            base_prompt += "\n\n- 좀 더 활기차고 열정적인 말투를 사용하세요"
+        
+        return base_prompt
+    
     def create_batch_requests_for_character_tones(self, user_messages: List[str], character: CharacterProfile) -> List[Dict[str, Any]]:
         """
-        하나의 캐릭터에 대해 3가지 랜덤 어조로 배치 요청을 생성합니다.
+        하나의 캐릭터에 대해 단일 어조로 배치 요청을 생성합니다.
         
         Args:
             user_messages: 변환할 사용자 메시지 리스트
@@ -125,30 +166,25 @@ class SpeechGenerator:
         """
         requests = []
         
-        # 3가지 어조 변형, 각각 5개씩 생성
-        tone_numbers = [1, 2, 3]
-        tone_names = ["어조1", "어조2", "어조3"]
+        # 캐릭터의 기본 어조 사용
+        system_prompt = self.create_character_prompt(character)
         
         for i, message in enumerate(user_messages):
-            for j, (tone_num, tone_name) in enumerate(zip(tone_numbers, tone_names)):
-                # 각 어조마다 5개 응답 생성
-                for k in range(5):
-                    system_prompt = self.create_character_prompt_for_random_tone(character, tone_num)
-                    request = {
-                        "custom_id": f"msg_{i}_tone_{j}_{tone_name}_{k+1}_{character.name}",
-                        "method": "POST",
-                        "url": "/v1/chat/completions",
-                        "body": {
-                            "model": "gpt-4o-mini",
-                            "messages": [
-                                {"role": "system", "content": system_prompt},
-                                {"role": "user", "content": message}
-                            ],
-                            "max_tokens": 1000,
-                            "temperature": 0.9
-                        }
-                    }
-                    requests.append(request)
+            request = {
+                "custom_id": f"msg_{i+1}_{character.name}",
+                "method": "POST",
+                "url": "/v1/chat/completions",
+                "body": {
+                    "model": "gpt-4o-mini",
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": message}
+                    ],
+                    "max_tokens": 1000,
+                    "temperature": 0.7  # 일관성을 위해 temperature 약간 낮춤
+                }
+            }
+            requests.append(request)
         
         return requests
 
