@@ -1,7 +1,9 @@
 "use client"
 
 import { useState } from "react"
-import { useParams } from "next/navigation"
+import { AlertCircle } from "lucide-react"
+import React from "react"
+import { useParams, useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { Navigation } from "@/components/navigation"
 import { Button } from "@/components/ui/button"
@@ -13,6 +15,7 @@ import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { tokenUtils } from "@/lib/auth"
 import {
   ArrowLeft,
   Copy,
@@ -36,6 +39,11 @@ import {
   Trash2,
   Upload,
   MessageSquare,
+  Instagram,
+  Link2,
+  Unlink,
+  CheckCircle,
+  Users,
 } from "lucide-react"
 import type { AIModel } from "@/lib/types"
 import {
@@ -173,20 +181,109 @@ const samplePosts: ContentPost[] = [
 
 export default function ModelDetailPage() {
   const params = useParams()
-  const [model, setModel] = useState<AIModel>(sampleModel)
+  const searchParams = useSearchParams()
+  const [model, setModel] = useState<any>(sampleModel)
+  const [isModelLoading, setIsModelLoading] = useState(true)
   const [posts] = useState<ContentPost[]>(samplePosts)
   const [selectedPost, setSelectedPost] = useState<ContentPost | null>(null)
   const [showApiKey, setShowApiKey] = useState(false)
   const [isUpdating, setIsUpdating] = useState(false)
+  const [instagramStatus, setInstagramStatus] = useState<{
+    is_connected: boolean
+    connected_at?: string
+    token_expires_at?: string
+    token_expired?: boolean
+    instagram_info?: {
+      id: string
+      username: string
+      account_type: string
+      name?: string
+      biography?: string
+      followers_count?: number
+      follows_count?: number
+      media_count?: number
+      profile_picture_url?: string
+      website?: string
+    }
+  }>({
+    is_connected: false
+  })
+  const [isConnecting, setIsConnecting] = useState(false)
+
+  // 디버깅용 - Instagram 상태 변경 시 로그
+  React.useEffect(() => {
+    console.log('Instagram status updated:', instagramStatus)
+  }, [instagramStatus])
+
+  // 모델 데이터 로드
+  const loadModelData = async () => {
+    setIsModelLoading(true)
+    try {
+      const response = await fetch(`/api/influencers/${params.id}`, {
+        headers: {
+          'Authorization': `Bearer ${tokenUtils.getToken()}`,
+        },
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        setModel({
+          ...data,
+          id: data.influencer_id,
+          name: data.influencer_name,
+          description: data.influencer_description || '',
+          createdAt: data.created_at?.split('T')[0] || '',
+          apiKey: sampleModel.apiKey, // API 키는 별도 조회
+          trainingData: sampleModel.trainingData, // 훈련 데이터는 별도 조회
+        })
+      } else {
+        console.error('Failed to load model data:', response.status)
+      }
+    } catch (error) {
+      console.error('Error loading model data:', error)
+    } finally {
+      setIsModelLoading(false)
+    }
+  }
+  const [activeTab, setActiveTab] = useState(() => {
+    // URL 파라미터에서 탭 정보 읽기
+    return searchParams.get('tab') || 'analytics'
+  })
   
-  // 환경 변수에서 채팅 기능 활성화 여부 확인
-  const isChatEnabled = process.env.NEXT_PUBLIC_ENABLE_CHAT === 'true'
 
   const handleUpdateModel = async () => {
     setIsUpdating(true)
-    setTimeout(() => {
+    try {
+      const response = await fetch(`/api/influencers/${params.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${tokenUtils.getToken()}`,
+        },
+        body: JSON.stringify({
+          influencer_name: model.name,
+          influencer_description: model.description,
+        }),
+      })
+
+      if (response.ok) {
+        const updatedData = await response.json()
+        setModel((prev: any) => ({
+          ...prev,
+          name: updatedData.influencer_name,
+          description: updatedData.influencer_description || '',
+        }))
+        alert('모델 정보가 성공적으로 업데이트되었습니다!')
+      } else {
+        const errorData = await response.json()
+        throw new Error(errorData.detail || '업데이트에 실패했습니다.')
+      }
+    } catch (error) {
+      console.error('Model update error:', error)
+      alert('모델 정보 업데이트에 실패했습니다. 다시 시도해주세요.')
+    } finally {
       setIsUpdating(false)
-    }, 1000)
+    }
   }
 
   const handleDeleteModel = async () => {
@@ -205,8 +302,153 @@ export default function ModelDetailPage() {
 
   const generateNewApiKey = () => {
     const newKey = "ai_inf_" + Math.random().toString(36).substring(2, 18)
-    setModel((prev) => ({ ...prev, apiKey: newKey }))
+    setModel((prev: any) => ({ ...prev, apiKey: newKey }))
   }
+
+  // Instagram 연동 관련 함수들
+  const handleInstagramConnect = async () => {
+    setIsConnecting(true)
+    
+    try {
+      // Instagram API with Instagram Login OAuth URL 생성
+      const instagramAppId = process.env.NEXT_PUBLIC_INSTAGRAM_APP_ID
+      const redirectUri = `${window.location.origin}/auth/instagram/callback`
+      // Instagram API with Instagram Login 스코프 설정
+      const scope = "instagram_business_basic,instagram_business_manage_messages,instagram_business_manage_comments,instagram_business_content_publish"
+      
+      const authUrl = `https://api.instagram.com/oauth/authorize` +
+        `?client_id=${instagramAppId}` +
+        `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+        `&scope=${scope}` +
+        `&response_type=code` +
+        `&state=${params.id}` // 모델 ID를 state로 전달
+      
+      // 팝업 창으로 Instagram OAuth 페이지 열기
+      const popup = window.open(
+        authUrl,
+        'instagram-auth',
+        'width=600,height=700,scrollbars=yes,resizable=yes'
+      )
+      
+      // 팝업에서 메시지를 기다림
+      const handleMessage = async (event: MessageEvent) => {
+        if (event.origin !== window.location.origin) return
+        
+        const { type, code, error, state } = event.data
+        
+        if (type === 'INSTAGRAM_AUTH_SUCCESS' && code && state === params.id) {
+          popup?.close()
+          window.removeEventListener('message', handleMessage)
+          
+          try {
+            // 백엔드에 code 전송하여 토큰 교환 및 계정 연동
+            const response = await fetch(`/api/influencers/${params.id}/instagram/connect`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${tokenUtils.getToken()}`,
+              },
+              body: JSON.stringify({
+                code,
+                redirect_uri: redirectUri,
+              }),
+            })
+
+            const data = await response.json()
+
+            if (response.ok) {
+              setInstagramStatus({
+                is_connected: true,
+                connected_at: new Date().toISOString(),
+                token_expired: false,
+                instagram_info: data.instagram_info,
+              })
+              alert('Instagram 비즈니스 계정이 성공적으로 연동되었습니다!')
+            } else {
+              throw new Error(data.detail || 'Instagram 연동에 실패했습니다.')
+            }
+          } catch (error) {
+            console.error('Instagram 연동 오류:', error)
+            alert('Instagram 연동에 실패했습니다. 다시 시도해주세요.')
+          }
+          
+          setIsConnecting(false)
+        } else if (type === 'INSTAGRAM_AUTH_ERROR' || error) {
+          popup?.close()
+          window.removeEventListener('message', handleMessage)
+          setIsConnecting(false)
+          alert('Instagram 연동이 취소되었거나 오류가 발생했습니다.')
+        }
+      }
+      
+      window.addEventListener('message', handleMessage)
+      
+      // 팝업이 닫힌 경우 처리
+      const checkClosed = setInterval(() => {
+        if (popup?.closed) {
+          clearInterval(checkClosed)
+          window.removeEventListener('message', handleMessage)
+          setIsConnecting(false)
+        }
+      }, 1000)
+      
+    } catch (error) {
+      console.error("Instagram 연동 오류:", error)
+      setIsConnecting(false)
+      alert('Instagram 연동 중 오류가 발생했습니다.')
+    }
+  }
+
+  const handleInstagramDisconnect = async () => {
+    try {
+      // API 호출하여 Instagram 연동 해제
+      const response = await fetch(`/api/influencers/${params.id}/instagram/disconnect`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${tokenUtils.getToken()}`,
+        },
+      })
+
+      if (response.ok) {
+        setInstagramStatus({
+          is_connected: false
+        })
+        alert("Instagram 계정 연동이 해제되었습니다.")
+      } else {
+        throw new Error('Instagram 연동 해제에 실패했습니다')
+      }
+    } catch (error) {
+      console.error("Instagram 연동 해제 오류:", error)
+      alert("Instagram 연동 해제에 실패했습니다. 다시 시도해주세요.")
+    }
+  }
+
+  // 컴포넌트 마운트 시 모델 데이터와 Instagram 연동 상태 확인
+  React.useEffect(() => {
+    loadModelData()
+    
+    const checkInstagramStatus = async () => {
+      try {
+        const response = await fetch(`/api/influencers/${params.id}/instagram/status`, {
+          headers: {
+            'Authorization': `Bearer ${tokenUtils.getToken()}`,
+          },
+        })
+
+        if (response.ok) {
+          const data = await response.json()
+          console.log('Instagram status response:', data)
+          setInstagramStatus(data)
+        } else {
+          console.error('Instagram status error:', response.status, response.statusText)
+        }
+      } catch (error) {
+        console.error("Instagram 상태 확인 오류:", error)
+      }
+    }
+
+    checkInstagramStatus()
+  }, [params.id])
 
   const getStatusBadge = (status: ContentPost["status"]) => {
     switch (status) {
@@ -630,18 +872,28 @@ export default function ModelDetailPage() {
               <h1 className="text-3xl font-bold text-gray-900">{model.name}</h1>
               <p className="text-gray-600 mt-2">{model.description}</p>
               <div className="flex items-center space-x-4 mt-4">
-                <Badge className="bg-green-100 text-green-800">사용 가능</Badge>
+                                <Badge className={
+                  model.learning_status === 1 ? "bg-green-100 text-green-800" : 
+                  model.learning_status === 0 ? "bg-yellow-100 text-yellow-800" : 
+                  "bg-red-100 text-red-800"
+                }>
+                  {model.learning_status === 1 ? "사용 가능" : 
+                   model.learning_status === 0 ? "생성 중" : 
+                   "오류"}
+                </Badge>
                 <span className="text-sm text-gray-500">생성일: {model.createdAt}</span>
               </div>
             </div>
             <div className="flex space-x-2">
-              {isChatEnabled && (
-                <Link href={`/chat/${model.id}`}>
-                  <Button variant="outline" size="sm">
-                    <MessageSquare className="h-4 w-4 mr-2" />
-                    채팅 페이지 생성
-                  </Button>
-                </Link>
+              {model.learning_status === 1 && (
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => window.open(`/chat/${model.id}`, '_blank')}
+                >
+                  <MessageSquare className="h-4 w-4 mr-2" />
+                  {model.chatbot_option ? "챗봇 페이지 이동" : "챗봇 생성"}
+                </Button>
               )}
               <AlertDialog>
                 <AlertDialogTrigger asChild>
@@ -676,8 +928,8 @@ export default function ModelDetailPage() {
           </div>
         </div>
 
-        <Tabs defaultValue="analytics" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-4">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+          <TabsList className="grid w-full grid-cols-5">
             <TabsTrigger value="analytics" className="flex items-center space-x-2">
               <BarChart3 className="h-4 w-4" />
               <span>분석</span>
@@ -689,6 +941,10 @@ export default function ModelDetailPage() {
             <TabsTrigger value="api" className="flex items-center space-x-2">
               <Download className="h-4 w-4" />
               <span>API</span>
+            </TabsTrigger>
+            <TabsTrigger value="integrations" className="flex items-center space-x-2">
+              <Link2 className="h-4 w-4" />
+              <span>연동</span>
             </TabsTrigger>
             <TabsTrigger value="settings" className="flex items-center space-x-2">
               <Info className="h-4 w-4" />
@@ -961,71 +1217,322 @@ export default function ModelDetailPage() {
             </div>
           </TabsContent>
 
-          {/* 설정 탭 */}
-          <TabsContent value="settings">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* 기본 정보 */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>기본 정보</CardTitle>
-                  <CardDescription>AI 인플루언서의 기본 정보를 수정할 수 있습니다</CardDescription>
+          {/* 연동 탭 */}
+          <TabsContent value="integrations">
+            <div className="space-y-6">
+              {/* Instagram 계정 연동 */}
+              <Card className="bg-white shadow-sm border border-gray-200">
+                <CardHeader className="pb-4">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-12 h-12 bg-pink-100 rounded-lg flex items-center justify-center">
+                      <Instagram className="h-6 w-6 text-pink-600" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-lg font-medium text-gray-900">Instagram 계정 연동</CardTitle>
+                      <CardDescription className="text-sm text-gray-600 mt-1">
+                        비즈니스 계정을 연동하여 AI 콘텐츠 자동 포스팅, 인사이트 분석 등 다양한 기능을 활용하세요.
+                      </CardDescription>
+                    </div>
+                  </div>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                  <div>
-                    <Label htmlFor="model-name">모델 이름</Label>
-                    <Input
-                      id="model-name"
-                      value={model.name}
-                      onChange={(e) => setModel((prev) => ({ ...prev, name: e.target.value }))}
-                      placeholder="AI 인플루언서 이름을 입력하세요"
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="model-description">설명</Label>
-                    <Textarea
-                      id="model-description"
-                      value={model.description}
-                      onChange={(e) => setModel((prev) => ({ ...prev, description: e.target.value }))}
-                      rows={3}
-                      placeholder="AI 인플루언서에 대한 설명을 입력하세요"
-                    />
-                  </div>
-                  <Button onClick={handleUpdateModel} disabled={isUpdating} className="w-full">
-                    {isUpdating ? "업데이트 중..." : "정보 저장"}
-                  </Button>
+                <CardContent className="space-y-6">
+                  {instagramStatus.is_connected ? (
+                    <div className="space-y-6">
+                      {/* 연동된 계정 정보 */}
+                      <div className={`flex items-start space-x-4 p-4 rounded-lg border-2 ${
+                        instagramStatus.token_expired 
+                          ? 'bg-yellow-50 border-yellow-200' 
+                          : 'bg-green-50 border-green-200'
+                      }`}>
+                        <div className="w-12 h-12 bg-gradient-to-br from-pink-500 to-purple-600 rounded-full flex items-center justify-center shadow-sm">
+                          {instagramStatus.instagram_info?.profile_picture_url ? (
+                            <img 
+                              src={instagramStatus.instagram_info.profile_picture_url} 
+                              alt="Profile"
+                              className="w-12 h-12 rounded-full object-cover"
+                            />
+                          ) : (
+                            <Instagram className="h-6 w-6 text-white" />
+                          )}
+                        </div>
+                        <div className="flex-1">
+                          <div className="flex items-center space-x-2 mb-1">
+                            {instagramStatus.token_expired ? (
+                              <AlertCircle className="h-4 w-4 text-yellow-600" />
+                            ) : (
+                              <CheckCircle className="h-4 w-4 text-green-600" />
+                            )}
+                            <p className={`font-medium ${
+                              instagramStatus.token_expired ? 'text-yellow-900' : 'text-green-900'
+                            }`}>
+                              {instagramStatus.token_expired ? 'Instagram 계정 재연동 필요' : 'Instagram 계정 연동됨'}
+                            </p>
+                          </div>
+                          <p className={`text-sm ${
+                            instagramStatus.token_expired ? 'text-yellow-700' : 'text-green-700'
+                          }`}>
+                            @{instagramStatus.instagram_info?.username || 'Unknown'} • {instagramStatus.instagram_info?.account_type || 'Unknown'} 계정
+                          </p>
+                          {instagramStatus.connected_at && (
+                            <p className={`text-xs mt-1 ${
+                              instagramStatus.token_expired ? 'text-yellow-600' : 'text-green-600'
+                            }`}>
+                              연동일: {new Date(instagramStatus.connected_at).toLocaleDateString('ko-KR')}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Instagram 상세 정보 */}
+                      {instagramStatus.instagram_info && !instagramStatus.token_expired && (
+                        <div className="space-y-4">
+                          {/* 통계 정보 */}
+                          <div className="grid grid-cols-3 gap-4 p-4 bg-white rounded-lg border border-gray-200">
+                            <div className="text-center">
+                              <p className="text-lg font-semibold text-gray-900">
+                                {(instagramStatus.instagram_info.followers_count || 0).toLocaleString()}
+                              </p>
+                              <p className="text-xs text-gray-500">팔로워</p>
+                            </div>
+                            <div className="text-center">
+                              <p className="text-lg font-semibold text-gray-900">
+                                {(instagramStatus.instagram_info.follows_count || 0).toLocaleString()}
+                              </p>
+                              <p className="text-xs text-gray-500">팔로잉</p>
+                            </div>
+                            <div className="text-center">
+                              <p className="text-lg font-semibold text-gray-900">
+                                {(instagramStatus.instagram_info.media_count || 0).toLocaleString()}
+                              </p>
+                              <p className="text-xs text-gray-500">게시물</p>
+                            </div>
+                          </div>
+
+                          {/* 프로필 정보 */}
+                          {(instagramStatus.instagram_info.name || instagramStatus.instagram_info.biography || instagramStatus.instagram_info.website) && (
+                            <div className="p-4 bg-white rounded-lg border border-gray-200 space-y-3">
+                              {instagramStatus.instagram_info.name && (
+                                <div>
+                                  <p className="text-xs text-gray-500 mb-1">이름</p>
+                                  <p className="text-sm font-medium text-gray-900">{instagramStatus.instagram_info.name}</p>
+                                </div>
+                              )}
+                              
+                              {instagramStatus.instagram_info.biography && (
+                                <div>
+                                  <p className="text-xs text-gray-500 mb-1">소개</p>
+                                  <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
+                                    {instagramStatus.instagram_info.biography}
+                                  </p>
+                                </div>
+                              )}
+                              
+                              {instagramStatus.instagram_info.website && (
+                                <div>
+                                  <p className="text-xs text-gray-500 mb-1">웹사이트</p>
+                                  <a 
+                                    href={instagramStatus.instagram_info.website} 
+                                    target="_blank" 
+                                    rel="noopener noreferrer"
+                                    className="text-sm text-blue-600 hover:text-blue-800 underline"
+                                  >
+                                    {instagramStatus.instagram_info.website}
+                                  </a>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* 활성화된 기능들 */}
+                      <div className="space-y-3">
+                        <div className="flex items-center space-x-3">
+                          <CheckCircle className="h-5 w-5 text-green-500 flex-shrink-0" />
+                          <span className="text-sm font-medium text-gray-900">AI 생성 콘텐츠 자동 포스팅</span>
+                        </div>
+                        
+                        <div className="flex items-center space-x-3">
+                          <CheckCircle className="h-5 w-5 text-green-500 flex-shrink-0" />
+                          <span className="text-sm font-medium text-gray-900">인사이트 및 분석 데이터 수집</span>
+                        </div>
+
+                        <div className="flex items-center space-x-3">
+                          <CheckCircle className="h-5 w-5 text-green-500 flex-shrink-0" />
+                          <span className="text-sm font-medium text-gray-900">광고 및 마케팅 최적화</span>
+                        </div>
+
+                        {instagramStatus.instagram_info?.account_type === 'BUSINESS' && (
+                          <div className="flex items-center space-x-3">
+                            <CheckCircle className="h-5 w-5 text-blue-500 flex-shrink-0" />
+                            <span className="text-sm font-medium text-gray-900">비즈니스 전용 고급 인사이트</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 재연동/연동 해제 버튼 */}
+                      <div className="pt-2 space-y-3">
+                        {instagramStatus.token_expired && (
+                          <Button 
+                            onClick={handleInstagramConnect}
+                            disabled={isConnecting}
+                            className="w-full bg-yellow-500 hover:bg-yellow-600 text-white font-medium py-2.5"
+                          >
+                            {isConnecting ? (
+                              <>
+                                <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                                재연동 중...
+                              </>
+                            ) : (
+                              <>
+                                <RefreshCw className="h-4 w-4 mr-2" />
+                                Instagram 계정 재연동하기
+                              </>
+                            )}
+                          </Button>
+                        )}
+                        <Button 
+                          variant="outline" 
+                          onClick={handleInstagramDisconnect}
+                          className="w-full text-red-600 border-red-200 hover:bg-red-50 font-medium py-2.5"
+                        >
+                          <Unlink className="h-4 w-4 mr-2" />
+                          연동 해제
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-6">
+                      {/* 기능 리스트 */}
+                      <div className="space-y-3">
+                        <div className="flex items-center space-x-3">
+                          <CheckCircle className="h-5 w-5 text-green-500 flex-shrink-0" />
+                          <span className="text-sm font-medium text-gray-900">AI 생성 콘텐츠 자동 포스팅</span>
+                        </div>
+                        
+                        <div className="flex items-center space-x-3">
+                          <CheckCircle className="h-5 w-5 text-green-500 flex-shrink-0" />
+                          <span className="text-sm font-medium text-gray-900">인사이트 및 분석 데이터 수집</span>
+                        </div>
+
+                        <div className="flex items-center space-x-3">
+                          <CheckCircle className="h-5 w-5 text-green-500 flex-shrink-0" />
+                          <span className="text-sm font-medium text-gray-900">광고 및 마케팅 최적화</span>
+                        </div>
+                      </div>
+
+                      {/* 연동 버튼 */}
+                      <Button 
+                        onClick={handleInstagramConnect}
+                        disabled={isConnecting}
+                        className="w-full bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white font-medium py-3 text-base"
+                      >
+                        {isConnecting ? (
+                          <>
+                            <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                            연동 중...
+                          </>
+                        ) : (
+                          "Instagram 계정 연동하기"
+                        )}
+                      </Button>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 
-              {/* 프로필 이미지 */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>프로필 이미지</CardTitle>
-                  <CardDescription>AI 인플루언서의 프로필 이미지를 설정하세요</CardDescription>
+            </div>
+          </TabsContent>
+
+          {/* 정보 탭 */}
+          <TabsContent value="settings">
+            <div className="space-y-6">
+              {/* 기본 정보 카드 */}
+              <Card className="bg-white shadow-sm border border-gray-200">
+                <CardHeader className="pb-4">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
+                      <Bot className="h-6 w-6 text-blue-600" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-lg font-medium text-gray-900">기본 정보</CardTitle>
+                      <CardDescription className="text-sm text-gray-600 mt-1">
+                        AI 인플루언서의 프로필 이미지를 설정하고 기본 정보를 수정할 수 있습니다.
+                      </CardDescription>
+                    </div>
+                  </div>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="flex flex-col items-center space-y-4">
-                    <Avatar className="h-32 w-32">
-                      <AvatarFallback className="bg-blue-600 text-white text-3xl">
-                        <Bot className="h-16 w-16" />
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="text-center space-y-2">
-                      <p className="text-sm text-gray-600">권장 크기: 400x400px, 최대 5MB</p>
-                      <div className="flex space-x-2">
-                        <Button variant="outline" size="sm">
-                          <Upload className="h-4 w-4 mr-2" />
-                          이미지 업로드
-                        </Button>
-                        <Button variant="outline" size="sm">
-                          <Trash2 className="h-4 w-4 mr-2" />
-                          제거
-                        </Button>
+                <CardContent className="space-y-8">
+                  {/* 프로필 이미지와 기본 정보를 가로로 배치 */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    {/* 프로필 이미지 섹션 */}
+                    <div className="flex flex-col items-center space-y-4">
+                      {/* 대형 프로필 이미지 */}
+                      <div className="relative">
+                        <div className="w-36 h-36 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg">
+                          <div className="w-20 h-20 bg-orange-500 rounded-lg flex items-center justify-center">
+                            <Bot className="h-10 w-10 text-white" />
+                          </div>
+                        </div>
                       </div>
+                      
+                      <div className="text-center space-y-3">
+                        <p className="text-sm text-gray-500">권장 크기: 400x400px, 최대 5MB</p>
+                        <div className="flex flex-col space-y-2 w-full max-w-xs">
+                          <Button variant="outline" size="sm" className="w-full border-gray-300 text-gray-700 hover:bg-gray-50">
+                            <Upload className="h-4 w-4 mr-2" />
+                            이미지 업로드
+                          </Button>
+                          <Button variant="outline" size="sm" className="w-full text-red-600 border-red-200 hover:bg-red-50">
+                            <Trash2 className="h-4 w-4 mr-2" />
+                            제거
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 기본 정보 입력 섹션 */}
+                    <div className="space-y-6">
+                      <div className="space-y-4">
+                        <div>
+                          <Label htmlFor="model-name" className="text-sm font-medium text-gray-700 mb-2 block">
+                            모델 이름
+                          </Label>
+                          <Input
+                            id="model-name"
+                            value={isModelLoading ? "로딩 중..." : model.name}
+                            onChange={(e) => setModel((prev: any) => ({ ...prev, name: e.target.value }))}
+                            placeholder="AI 인플루언서 이름을 입력하세요"
+                            className="border-gray-300 focus:border-blue-500 focus:ring-blue-500"
+                            disabled={isModelLoading}
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="model-description" className="text-sm font-medium text-gray-700 mb-2 block">
+                            설명
+                          </Label>
+                          <Textarea
+                            id="model-description"
+                            value={isModelLoading ? "로딩 중..." : model.description}
+                            onChange={(e) => setModel((prev: any) => ({ ...prev, description: e.target.value }))}
+                            rows={4}
+                            placeholder="AI 인플루언서에 대한 설명을 입력하세요"
+                            className="border-gray-300 focus:border-blue-500 focus:ring-blue-500 resize-none"
+                            disabled={isModelLoading}
+                          />
+                        </div>
+                      </div>
+                      <Button 
+                        onClick={handleUpdateModel} 
+                        disabled={isUpdating || isModelLoading} 
+                        className="w-full bg-gray-800 hover:bg-gray-900 text-white font-medium py-2.5"
+                      >
+                        {isUpdating ? "업데이트 중..." : isModelLoading ? "로딩 중..." : "정보 저장"}
+                      </Button>
                     </div>
                   </div>
                 </CardContent>
               </Card>
-
 
             </div>
           </TabsContent>

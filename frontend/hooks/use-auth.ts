@@ -33,6 +33,31 @@ export const usePermission = () => {
   }
 }
 
+export const useTeamPermission = () => {
+  const { user } = useAuth()
+  
+  return {
+    user,
+    isDefaultTeam: user?.teams?.length === 0 || true,
+    requiresPermissionRequest: !user ? false : (user.teams?.length === 0 || false),
+    canCreateModel: () => {
+      if (!user || !user.teams || user.teams.length === 0) return false
+      return user.teams.some(team => team.group_name === 'admin') || 
+             (user.permissions?.some(p => p.resource === 'model' && p.action === 'create') || false)
+    },
+    canCreatePost: () => {
+      if (!user || !user.teams || user.teams.length === 0) return false
+      return user.teams.some(team => team.group_name === 'admin') || 
+             (user.permissions?.some(p => p.resource === 'post' && p.action === 'create') || false)
+    },
+    canManageContent: () => {
+      if (!user || !user.teams || user.teams.length === 0) return false
+      return user.teams.some(team => team.group_name === 'admin') || 
+             (user.permissions?.some(p => p.resource === 'content' && p.action === 'manage') || false)
+    }
+  }
+}
+
 export const useRequireAuth = () => {
   const { user, isAuthenticated, isLoading } = useAuth()
   

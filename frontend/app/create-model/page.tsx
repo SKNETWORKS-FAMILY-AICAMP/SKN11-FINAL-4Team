@@ -12,8 +12,10 @@ import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Upload, ArrowLeft, Lightbulb } from "lucide-react"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Upload, ArrowLeft, Lightbulb, MessageCircle } from "lucide-react"
 import Link from "next/link"
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 
 export default function CreateModelPage() {
   const [formData, setFormData] = useState({
@@ -26,11 +28,16 @@ export default function CreateModelPage() {
     mbti: "",
     gender: "",
     age: "",
+    imageMethod: "upload", // "upload" 또는 "prompt"
+    hairStyle: "",
+    mood: "",
   })
   const [files, setFiles] = useState({
     imageSamples: null as File[] | null,
   })
   const [isLoading, setIsLoading] = useState(false)
+  const [showCustomInput, setShowCustomInput] = useState(false)
+  const [toneTab, setToneTab] = useState("recommend")
   const router = useRouter()
 
   const handleInputChange = (field: string, value: string) => {
@@ -45,6 +52,29 @@ export default function CreateModelPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    
+    // 이미지 검증
+    const hasImageUpload = files.imageSamples && files.imageSamples.length > 0
+    const hasImagePrompt = formData.imageMethod === "prompt" && 
+                          formData.hairStyle.trim() !== "" && 
+                          formData.mood.trim() !== ""
+    // 성격 및 말투 검증
+    const hasPersonality = formData.personality.trim() !== ""
+    const hasTone = formData.tone.trim() !== "" || formData.customTone.trim() !== ""
+    
+    if (!hasPersonality) {
+      alert("성격을 입력해주세요.")
+      return
+    }
+    if (!hasTone) {
+      alert("말투를 선택하거나 직접 입력해주세요.")
+      return
+    }
+    if (!hasImageUpload && !hasImagePrompt) {
+      alert("이미지를 업로드하거나 이미지 생성 프롬프트를 입력해주세요.")
+      return
+    }
+    
     setIsLoading(true)
 
     // 실제 모델 생성 로직 시뮬레이션
@@ -54,42 +84,138 @@ export default function CreateModelPage() {
     }, 2000)
   }
 
-  // 성격 기반 말투 예시 생성
-  const generateToneExamples = (personality: string) => {
+  // 성격 기반 대화 예시 생성
+  const generateConversationExamples = (personality: string) => {
     if (!personality.trim()) return []
 
     const personalityLower = personality.toLowerCase()
 
-    // 성격 키워드에 따른 말투 예시
-    const toneMap: Record<string, string[]> = {
-      친근: ["친밀하고 다정한", "편안하고 따뜻한", "가까운 친구 같은"],
-      전문: ["정중하고 전문적인", "신뢰할 수 있는", "지식이 풍부한"],
-      활발: ["에너지 넘치는", "밝고 긍정적인", "열정적이고 활기찬"],
-      차분: ["차분하고 안정적인", "신중하고 사려깊은", "평온하고 여유로운"],
-      유머: ["재치있고 유머러스한", "웃음을 주는", "밝고 재미있는"],
-      세련: ["우아하고 세련된", "품격있는", "고급스러운"],
-      솔직: ["직설적이고 솔직한", "진실한", "꾸밈없는"],
-      창의: ["창의적이고 독창적인", "예술적인", "상상력이 풍부한"],
+    // 성격 키워드에 따른 대화 예시
+    const conversationMap: Record<string, Array<{title: string, example: string, tone: string}>> = {
+      친근: [
+        {
+          title: "친근하고 다정한",
+          example: "안녕하세요! 오늘도 좋은 하루 보내고 계시나요? 😊\n\n저는 오늘 정말 특별한 것을 발견했는데, 여러분과 함께 나누고 싶어서 급하게 글을 써봤어요!",
+          tone: "친근하고 다정한"
+        },
+        {
+          title: "편안하고 따뜻한",
+          example: "여러분 안녕하세요~ 💕\n\n오늘은 정말 좋은 날씨네요! 이런 날에는 가벼운 산책이나 카페에서 여유롭게 시간을 보내는 것도 좋을 것 같아요.",
+          tone: "편안하고 따뜻한"
+        },
+        {
+          title: "가까운 친구 같은",
+          example: "야! 오늘 진짜 대박인 일이 있었어! 🤩\n\n너희들도 꼭 알아야 할 것 같아서 바로 공유하는 거야. 정말 신기했어!",
+          tone: "가까운 친구 같은"
+        }
+      ],
+      전문: [
+        {
+          title: "정중하고 전문적인",
+          example: "안녕하세요, 여러분.\n\n오늘은 [주제]에 대해 자세히 알아보겠습니다. 전문적인 관점에서 분석한 내용을 공유드리겠습니다.",
+          tone: "정중하고 전문적인"
+        },
+        {
+          title: "신뢰할 수 있는",
+          example: "안녕하세요.\n\n검증된 정보를 바탕으로 [주제]에 대한 정확한 분석 결과를 말씀드리겠습니다.",
+          tone: "신뢰할 수 있는"
+        },
+        {
+          title: "지식이 풍부한",
+          example: "안녕하세요.\n\n[주제]에 대한 심도 있는 연구 결과를 바탕으로 여러분께 유용한 정보를 제공하겠습니다.",
+          tone: "지식이 풍부한"
+        }
+      ],
+      활발: [
+        {
+          title: "에너지 넘치는",
+          example: "안녕하세요 여러분! 🔥\n\n오늘은 정말 대박인 소식을 들고 왔어요! 너무 신나서 바로 공유하고 싶었어요!",
+          tone: "에너지 넘치는"
+        },
+        {
+          title: "밝고 긍정적인",
+          example: "안녕하세요! ✨\n\n오늘도 정말 좋은 하루네요! 여러분과 함께 이런 좋은 정보를 나눌 수 있어서 정말 행복해요!",
+          tone: "밝고 긍정적인"
+        },
+        {
+          title: "열정적이고 활기찬",
+          example: "여러분 안녕하세요! 🎉\n\n오늘은 정말 특별한 순간을 여러분과 함께 나누고 싶어요! 너무 흥미진진해요!",
+          tone: "열정적이고 활기찬"
+        }
+      ],
+      차분: [
+        {
+          title: "차분하고 안정적인",
+          example: "안녕하세요.\n\n오늘은 [주제]에 대해 차분히 생각해보는 시간을 가져보겠습니다.",
+          tone: "차분하고 안정적인"
+        },
+        {
+          title: "신중하고 사려깊은",
+          example: "안녕하세요.\n\n[주제]에 대해 깊이 있게 고민해보았습니다. 여러분과 함께 생각을 나누고 싶어요.",
+          tone: "신중하고 사려깊은"
+        },
+        {
+          title: "평온하고 여유로운",
+          example: "안녕하세요.\n\n오늘은 여유롭게 [주제]에 대해 이야기해보는 시간을 가져보겠습니다.",
+          tone: "평온하고 여유로운"
+        }
+      ],
+      유머: [
+        {
+          title: "재치있고 유머러스한",
+          example: "안녕하세요 여러분! 😄\n\n오늘은 정말 재미있는 일이 있었는데, 여러분도 웃으실 것 같아서 공유해요!",
+          tone: "재치있고 유머러스한"
+        },
+        {
+          title: "웃음을 주는",
+          example: "여러분 안녕하세요! 😂\n\n오늘은 정말 웃음이 나오는 상황을 겪었어요. 여러분도 함께 웃어주세요!",
+          tone: "웃음을 주는"
+        },
+        {
+          title: "밝고 재미있는",
+          example: "안녕하세요! 🎭\n\n오늘은 정말 재미있는 이야기를 들고 왔어요! 여러분도 즐거워하실 것 같아요!",
+          tone: "밝고 재미있는"
+        }
+      ]
     }
 
     // 성격에서 키워드 찾기
-    const matchedTones: string[] = []
-    Object.keys(toneMap).forEach((key) => {
+    const matchedConversations: Array<{title: string, example: string, tone: string}> = []
+    Object.keys(conversationMap).forEach((key) => {
       if (personalityLower.includes(key)) {
-        matchedTones.push(...toneMap[key])
+        matchedConversations.push(...conversationMap[key])
       }
     })
 
     // 매칭되는 것이 없으면 기본 예시 제공
-    if (matchedTones.length === 0) {
-      return ["친근하고 다정한", "정중하고 전문적인", "밝고 긍정적인"]
+    if (matchedConversations.length === 0) {
+      return [
+        {
+          title: "친근하고 다정한",
+          example: "안녕하세요! 오늘도 좋은 하루 보내고 계시나요? 😊\n\n저는 오늘 정말 특별한 것을 발견했는데, 여러분과 함께 나누고 싶어서 급하게 글을 써봤어요!",
+          tone: "친근하고 다정한"
+        },
+        {
+          title: "정중하고 전문적인",
+          example: "안녕하세요, 여러분.\n\n오늘은 [주제]에 대해 자세히 알아보겠습니다. 전문적인 관점에서 분석한 내용을 공유드리겠습니다.",
+          tone: "정중하고 전문적인"
+        },
+        {
+          title: "밝고 긍정적인",
+          example: "안녕하세요! ✨\n\n오늘도 정말 좋은 하루네요! 여러분과 함께 이런 좋은 정보를 나눌 수 있어서 정말 행복해요!",
+          tone: "밝고 긍정적인"
+        }
+      ]
     }
 
     // 중복 제거하고 최대 3개까지
-    return [...new Set(matchedTones)].slice(0, 3)
+    const uniqueConversations = matchedConversations.filter((item, index, self) => 
+      index === self.findIndex(t => t.title === item.title)
+    )
+    return uniqueConversations.slice(0, 3)
   }
 
-  const toneExamples = generateToneExamples(formData.personality)
+  const conversationExamples = generateConversationExamples(formData.personality)
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -145,6 +271,7 @@ export default function CreateModelPage() {
                   <SelectContent>
                     <SelectItem value="character">캐릭터형 (애니메이션, 만화 스타일)</SelectItem>
                     <SelectItem value="human">사람형 (실제 사람과 유사한 형태)</SelectItem>
+                    <SelectItem value="objects">사물형 (사물과 유사한 형태)</SelectItem>
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-gray-500 mt-1">
@@ -235,95 +362,162 @@ export default function CreateModelPage() {
                   onChange={(e) => handleInputChange("personality", e.target.value)}
                   required
                 />
-                <p className="text-xs text-gray-500 mt-1">💡 성격을 입력하면 아래 말투 예시가 자동으로 생성됩니다</p>
+                <p className="text-xs text-gray-500 mt-1">💡 성격을 입력하면 아래 대화 예시가 자동으로 생성됩니다</p>
               </div>
 
               <div>
-                <Label className="text-base font-medium">말투</Label>
+                <Label className="text-base font-medium">말투 선택</Label>
                 <p className="text-sm text-gray-600 mb-4">성격에 맞는 말투를 선택하거나 직접 입력하세요</p>
-
-                {toneExamples.length > 0 && (
-                  <div className="space-y-3 mb-4">
-                    <div className="flex items-center space-x-2 text-sm text-blue-600">
-                      <Lightbulb className="h-4 w-4" />
-                      <span>성격 기반 추천 말투</span>
-                    </div>
-                    <RadioGroup value={formData.tone} onValueChange={(value) => handleInputChange("tone", value)}>
-                      {toneExamples.map((example, index) => (
-                        <div key={index} className="flex items-center space-x-2">
-                          <RadioGroupItem value={example} id={`tone-${index}`} />
-                          <Label htmlFor={`tone-${index}`} className="cursor-pointer">
-                            {example}
-                          </Label>
+                <Tabs value={toneTab} onValueChange={setToneTab} className="w-full mb-4">
+                  <TabsList className="grid w-full grid-cols-2">
+                    <TabsTrigger value="recommend">추천 말투 선택</TabsTrigger>
+                    <TabsTrigger value="custom">직접 입력</TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="recommend">
+                    {conversationExamples.length > 0 ? (
+                      <div className="space-y-4 mb-4">
+                        <div className="flex items-center space-x-2 text-sm text-blue-600">
+                          <Lightbulb className="h-4 w-4" />
+                          <span>성격 기반 추천 말투</span>
                         </div>
-                      ))}
-                      <div className="flex items-center space-x-2">
-                        <RadioGroupItem value="custom" id="tone-custom" />
-                        <Label htmlFor="tone-custom" className="cursor-pointer">
-                          직접 입력
-                        </Label>
+                        <div className="grid grid-cols-1 gap-4">
+                          {conversationExamples.map((example, index) => (
+                            <Card
+                              key={index}
+                              className={`cursor-pointer transition-all hover:shadow-md ${formData.tone === example.tone ? 'ring-2 ring-blue-500 bg-blue-50' : ''}`}
+                              onClick={() => {
+                                handleInputChange("tone", example.tone)
+                                handleInputChange("customTone", "")
+                              }}
+                            >
+                              <CardHeader className="pb-3">
+                                <div className="flex items-center space-x-2">
+                                  <MessageCircle className="h-4 w-4 text-blue-600" />
+                                  <CardTitle className="text-sm">{example.title}</CardTitle>
+                                </div>
+                              </CardHeader>
+                              <CardContent className="pt-0">
+                                <p className="text-xs text-gray-600 whitespace-pre-line">
+                                  {example.example}
+                                </p>
+                              </CardContent>
+                            </Card>
+                          ))}
+                        </div>
+                        {formData.tone && (
+                          <div className="mt-2 text-xs text-green-700">선택된 말투: {formData.tone}</div>
+                        )}
                       </div>
-                    </RadioGroup>
-                  </div>
-                )}
-
-                {(formData.tone === "custom" || toneExamples.length === 0) && (
-                  <div>
-                    <Label htmlFor="customTone">{toneExamples.length === 0 ? "말투" : "사용자 정의 말투"}</Label>
-                    <Input
-                      id="customTone"
-                      placeholder="예: 캐주얼하고 친밀한, 정중하고 전문적인"
-                      value={formData.customTone}
-                      onChange={(e) => handleInputChange("customTone", e.target.value)}
-                      required={formData.tone === "custom" || toneExamples.length === 0}
-                    />
-                  </div>
-                )}
-
-                {toneExamples.length === 0 && formData.personality && (
-                  <div className="mt-2 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-                    <div className="flex items-center space-x-2">
-                      <Lightbulb className="h-4 w-4 text-yellow-600" />
-                      <span className="text-sm text-yellow-800">
-                        "{formData.personality}" 성격에 맞는 말투 예시를 생성하지 못했습니다. 직접 입력해주세요.
-                      </span>
+                    ) : (
+                      <div className="mt-2 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                        <div className="flex items-center space-x-2">
+                          <Lightbulb className="h-4 w-4 text-yellow-600" />
+                          <span className="text-sm text-yellow-800">
+                            성격을 입력해주세요. 입력된 성격을 기반으로 말투를 생성합니다.
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </TabsContent>
+                  <TabsContent value="custom">
+                    <div>
+                      <Label htmlFor="customTone">사용자 정의 말투</Label>
+                      <Input
+                        id="customTone"
+                        placeholder="예: 캐주얼하고 친밀한, 정중하고 전문적인"
+                        value={formData.customTone}
+                        onChange={(e) => {
+                          handleInputChange("customTone", e.target.value)
+                          handleInputChange("tone", "")
+                        }}
+                      />
+                      {formData.customTone && (
+                        <div className="mt-2 text-xs text-green-700">입력된 말투: {formData.customTone}</div>
+                      )}
                     </div>
-                  </div>
-                )}
+                  </TabsContent>
+                </Tabs>
               </div>
             </CardContent>
           </Card>
 
-          {/* 학습 데이터 업로드 */}
+          {/* 이미지 설정 */}
           <Card>
             <CardHeader>
-              <CardTitle>이미지 업로드</CardTitle>
-              <CardDescription>AI 인플루언서가 사용할 이미지를 업로드하세요</CardDescription>
+              <CardTitle>이미지 설정</CardTitle>
+              <CardDescription>
+                AI 인플루언서의 이미지를 설정하세요.<br/>
+                설정하지 않으면 기본 이미지가 자동으로 생성됩니다.
+                </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-              {/* 이미지 샘플 */}
+              {/* 이미지 생성 방법 탭 */}
               <div>
-                <Label className="flex items-center space-x-2 mb-2"></Label>
-                <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-gray-400 transition-colors">
-                  <Upload className="h-8 w-8 text-gray-400 mx-auto mb-2" />
-                  <p className="text-sm text-gray-600 mb-2">이미지 파일을 드래그하거나 클릭하여 업로드</p>
-                  <input
-                    type="file"
-                    multiple
-                    accept=".jpg,.jpeg,.png,.webp"
-                    onChange={(e) => handleFileUpload("imageSamples", e.target.files)}
-                    className="hidden"
-                    id="image-upload"
-                  />
-                  <Label htmlFor="image-upload" className="cursor-pointer">
-                    <Button type="button" variant="outline" size="sm">
-                      파일 선택
-                    </Button>
-                  </Label>
-                  {files.imageSamples && (
-                    <p className="text-xs text-green-600 mt-2">{files.imageSamples.length}개 파일 선택됨</p>
-                  )}
-                </div>
+                <Label className="text-base font-medium mb-3 block">이미지 생성 방법</Label>
+                <Tabs value={formData.imageMethod} onValueChange={(value) => handleInputChange("imageMethod", value)} className="w-full">
+                  <TabsList className="grid w-full grid-cols-2">
+                    <TabsTrigger value="upload">이미지 업로드</TabsTrigger>
+                    <TabsTrigger value="prompt">이미지 생성</TabsTrigger>
+                  </TabsList>
+                  
+                  <TabsContent value="upload" className="mt-4">
+                    <div>
+                      <Label className="text-base font-medium mb-3 block">이미지 파일 업로드</Label>
+                      <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-gray-400 transition-colors">
+                        <Upload className="h-8 w-8 text-gray-400 mx-auto mb-2" />
+                        <p className="text-sm text-gray-600 mb-2">이미지 파일을 드래그하거나 클릭하여 업로드</p>
+                        <input
+                          type="file"
+                          multiple
+                          accept=".jpg,.jpeg,.png,.webp"
+                          onChange={(e) => handleFileUpload("imageSamples", e.target.files)}
+                          className="hidden"
+                          id="image-upload"
+                        />
+                        <Label htmlFor="image-upload" className="cursor-pointer">
+                          <Button type="button" variant="outline" size="sm">
+                            파일 선택
+                          </Button>
+                        </Label>
+                        {files.imageSamples && (
+                          <p className="text-xs text-green-600 mt-2">{files.imageSamples.length}개 파일 선택됨</p>
+                        )}
+                      </div>
+                    </div>
+                  </TabsContent>
+
+                  <TabsContent value="prompt" className="mt-4">
+                    <div className="space-y-4">
+                      <Label className="text-base font-medium block">이미지 생성 프롬프트</Label>
+                      
+                      <div>
+                        <Label htmlFor="hairStyle">헤어스타일</Label>
+                        <Input
+                          id="hairStyle"
+                          placeholder="예: 긴 생머리, 숏컷, 웨이브 머리, 포니테일"
+                          value={formData.hairStyle}
+                          onChange={(e) => handleInputChange("hairStyle", e.target.value)}
+                        />
+                        <p className="text-xs text-gray-500 mt-1">
+                          💡 원하는 헤어스타일을 자세히 설명해주세요
+                        </p>
+                      </div>
+
+                      <div>
+                        <Label htmlFor="mood">분위기/스타일</Label>
+                        <Input
+                          id="mood"
+                          placeholder="예: 밝고 친근한, 세련되고 우아한, 캐주얼하고 편안한"
+                          value={formData.mood}
+                          onChange={(e) => handleInputChange("mood", e.target.value)}
+                        />
+                        <p className="text-xs text-gray-500 mt-1">
+                          💡 원하는 분위기나 스타일을 설명해주세요
+                        </p>
+                      </div>
+                    </div>
+                  </TabsContent>
+                </Tabs>
               </div>
             </CardContent>
           </Card>
@@ -337,7 +531,16 @@ export default function CreateModelPage() {
             </Link>
             <Button 
               type="submit" 
-              disabled={isLoading || !formData.name || !formData.description || !formData.modelType}
+              disabled={
+                isLoading || 
+                !formData.name || 
+                !formData.description || 
+                !formData.modelType ||
+                !formData.personality ||
+                (!formData.tone && !formData.customTone) ||
+                (!(files.imageSamples && files.imageSamples.length > 0) && 
+                 !(formData.imageMethod === "prompt" && formData.hairStyle.trim() !== "" && formData.mood.trim() !== ""))
+              }
             >
               {isLoading ? "생성 중..." : "AI 모델 생성"}
             </Button>

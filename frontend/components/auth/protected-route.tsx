@@ -14,6 +14,7 @@ interface ProtectedRouteProps {
   requireGroup?: string
   requireAnyGroup?: string[]
   requireAdmin?: boolean
+  blockGroup?: number
   fallbackUrl?: string
   renderFallback?: () => React.ReactNode
 }
@@ -25,11 +26,12 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   requireGroup,
   requireAnyGroup,
   requireAdmin = false,
+  blockGroup,
   fallbackUrl = '/login',
   renderFallback
 }) => {
   const { isAuthenticated, isLoading, user } = useAuth()
-  const { hasPermission, hasGroup, hasAnyGroup, isAdmin } = usePermission()
+  const { hasGroup, hasAnyGroup, isAdmin } = usePermission()
 
   if (isLoading) {
     return (
@@ -43,7 +45,7 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     redirect(fallbackUrl)
   }
 
-  if (requireAdmin && !isAdmin()) {
+  if (blockGroup && user?.teams?.some(team => team.group_id === blockGroup)) {
     if (renderFallback) {
       return renderFallback()
     }
@@ -51,13 +53,13 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
       <div className="flex items-center justify-center min-h-screen">
         <div className="text-center">
           <h2 className="text-2xl font-bold text-gray-900 mb-4">접근 권한이 없습니다</h2>
-          <p className="text-gray-600">관리자 권한이 필요합니다.</p>
+          <p className="text-gray-600">해당 그룹의 사용자는 이 페이지에 접근할 수 없습니다.</p>
         </div>
       </div>
     )
   }
 
-  if (requirePermission && !hasPermission(requirePermission.resource, requirePermission.action)) {
+  if (requireAdmin && !user?.teams?.some(team => team.group_id === 1)) {
     if (renderFallback) {
       return renderFallback()
     }
@@ -65,14 +67,11 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
       <div className="flex items-center justify-center min-h-screen">
         <div className="text-center">
           <h2 className="text-2xl font-bold text-gray-900 mb-4">접근 권한이 없습니다</h2>
-          <p className="text-gray-600">
-            필요한 권한: {requirePermission.resource}:{requirePermission.action}
-          </p>
+          <p className="text-gray-600">관리자 권한이 필요합니다. (group_id: 1)</p>
         </div>
       </div>
     )
   }
-
   if (requireGroup && !hasGroup(requireGroup)) {
     if (renderFallback) {
       return renderFallback()
@@ -107,11 +106,12 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
 interface RequireAuthProps {
   children: React.ReactNode
   fallbackUrl?: string
+  blockGroup?: number
 }
 
-export const RequireAuth: React.FC<RequireAuthProps> = ({ children, fallbackUrl = '/login' }) => {
+export const RequireAuth: React.FC<RequireAuthProps> = ({ children, fallbackUrl = '/login', blockGroup }) => {
   return (
-    <ProtectedRoute requireAuth={true} fallbackUrl={fallbackUrl}>
+    <ProtectedRoute requireAuth={true} fallbackUrl={fallbackUrl} blockGroup={blockGroup}>
       {children}
     </ProtectedRoute>
   )

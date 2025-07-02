@@ -7,3 +7,4 @@ frontend/out
 frontend/.env.local
 frontend/package-lock.json
 frontend/certificates
+__pycache__/
