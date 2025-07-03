@@ -100,6 +100,15 @@ export function Navigation() {
                   <p className="font-medium">{user?.name || user?.user_name}</p>
                   <p className="text-xs text-gray-500">{user?.email}</p>
                   <p className="text-xs text-gray-500">{user?.company}</p>
+                  {user?.teams && user.teams.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {user.teams.map((team, idx) => (
+                        <span key={team.group_id} className="text-xs text-gray-500">
+                          {team.group_name || `그룹${team.group_id}`}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <DropdownMenuItem onClick={() => setEmailModalOpen(true)}>
                   <User className="mr-2 h-4 w-4" />
