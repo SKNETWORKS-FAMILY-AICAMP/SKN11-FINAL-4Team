@@ -61,9 +61,24 @@ export default function TestModelPage() {
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([])
   const [availableModels, setAvailableModels] = useState<AIInfluencer[]>([])
   const [modelsLoading, setModelsLoading] = useState(true)
+  const [maxModelWarning, setMaxModelWarning] = useState(false)
 
   const handleModelToggle = (modelId: string) => {
-    setSelectedModels((prev) => (prev.includes(modelId) ? prev.filter((id) => id !== modelId) : [...prev, modelId]))
+    setSelectedModels((prev) => {
+      if (prev.includes(modelId)) {
+        setMaxModelWarning(false)
+        return prev.filter((id) => id !== modelId)
+      } else {
+        if (prev.length >= 3) {
+          return prev
+        } else {
+          return [...prev, modelId]
+        }
+      }
+    })
+    setMaxModelWarning((prevSelected) => {
+      return selectedModels.length >= 2 && !selectedModels.includes(modelId)
+    })
   }
 
   const handleSendMessage = async () => {
@@ -147,9 +162,12 @@ export default function TestModelPage() {
                   <Bot className="h-5 w-5" />
                   <span>인플루언서 선택</span>
                 </CardTitle>
-                <CardDescription>테스트할 AI 인플루언서들을 선택하세요 (다중 선택 가능)</CardDescription>
+                <CardDescription>테스트할 AI 인플루언서들을 선택하세요 (3개까지 선택 가능)</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
+                {maxModelWarning && (
+                  <div className="text-xs text-red-500 mb-2">최대 3개까지 선택할 수 있습니다.</div>
+                )}
                 {modelsLoading ? (
                   <div className="text-center py-8">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mx-auto"></div>
@@ -157,23 +175,6 @@ export default function TestModelPage() {
                   </div>
                 ) : (
                 <>
-                  {selectedModelData.length > 0 && (
-                    <div className="pb-4 border-b mb-4">
-                      <h4 className="text-sm font-medium text-gray-700 mb-3">
-                        선택된 인플루언서 ({selectedModelData.length}개)
-                      </h4>
-                      <div className="flex flex-wrap gap-2">
-                        {selectedModelData.map((model) => (
-                          <span
-                            key={model.influencer_id}
-                            className="bg-blue-100 text-blue-800 rounded-full px-3 py-1 text-xs font-medium inline-block"
-                          >
-                            {model.influencer_name}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
                   <div className="space-y-3 max-h-[700px] overflow-y-auto pr-1">
                     {availableModels.filter(model => model.learning_status === 1).map((model) => (
                       <div 
@@ -222,9 +223,21 @@ export default function TestModelPage() {
                 </CardTitle>
                 <CardDescription>
                   {selectedModels.length > 0
-                    ? `${selectedModels.length}개 모델과 대화 중`
-                    : "모델을 선택하여 대화를 시작하세요."}
+                    ? `${selectedModels.length}개 인플루언서와 대화 중`
+                    : "인플루언서를 선택하여 대화를 시작하세요."}
                 </CardDescription>
+                {selectedModelData.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {selectedModelData.map((model) => (
+                      <span
+                        key={model.influencer_id}
+                        className="bg-blue-100 text-blue-800 rounded-full px-3 py-1 text-xs font-medium inline-block"
+                      >
+                        {model.influencer_name}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </CardHeader>
 
               {/* 채팅 메시지 영역 */}

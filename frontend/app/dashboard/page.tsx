@@ -285,7 +285,7 @@ export default function DashboardPage() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {filteredInfluencers.map((influencer) => (
-              <Card key={influencer.influencer_id} className="hover:shadow-lg transition-shadow flex flex-col">
+              <Card key={influencer.influencer_id} className="hover:shadow-lg transition-shadow flex flex-col h-full">
                 <CardHeader className="flex-shrink-0">
                   <div className="flex justify-between items-start">
                     <div className="flex-1">
@@ -356,14 +356,14 @@ export default function DashboardPage() {
                         {influencer.chatbot_option ? '활성화' : '비활성화'}
                       </p>
                     </div>
-                    <div className="flex pt-4 mt-auto">
-                      <Link href={`/model/${influencer.influencer_id}`} className="flex-1">
-                        <Button variant="outline" size="sm" className="w-full">
-                          <Settings className="h-4 w-4 mr-2" />
-                          관리
-                        </Button>
-                      </Link>
-                    </div>
+                  </div>
+                  <div className="flex pt-4 mt-auto">
+                    <Link href={`/model/${influencer.influencer_id}`} className="flex-1">
+                      <Button variant="outline" size="sm" className="w-full">
+                        <Settings className="h-4 w-4 mr-2" />
+                        관리
+                      </Button>
+                    </Link>
                   </div>
                 </CardContent>
               </Card>
