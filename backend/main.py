@@ -33,7 +33,7 @@ app.add_middleware(
 # 라우터 등록
 app.include_router(auth_router, prefix="/api/auth", tags=["authentication"])
 
-@app.get("/")
+@app.get("")
 async def root():
     return {"message": "Social Auth Backend API", "version": "1.0.0"}
 

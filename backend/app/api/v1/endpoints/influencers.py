@@ -44,7 +44,7 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-@router.get("/", response_model=List[AIInfluencerSchema])
+@router.get("", response_model=List[AIInfluencerSchema])
 async def get_influencers(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=100),
@@ -67,7 +67,7 @@ async def get_influencer(
     return get_influencer_by_id(db, user_id, influencer_id)
 
 
-@router.post("/", response_model=AIInfluencerSchema)
+@router.post("", response_model=AIInfluencerSchema)
 async def create_new_influencer(
     influencer_data: AIInfluencerCreate,
     background_tasks: BackgroundTasks,
@@ -163,6 +163,7 @@ async def connect_instagram_business(
 ):
     """AI 인플루언서에 Instagram 비즈니스 계정 연동"""
     user_id = current_user.get("sub")
+    print(f"🔍 DEBUG request: {request}")
     return await connect_instagram_account(db, user_id, influencer_id, request)
 
 

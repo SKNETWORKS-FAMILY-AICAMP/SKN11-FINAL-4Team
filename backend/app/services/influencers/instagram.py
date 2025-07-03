@@ -64,8 +64,42 @@ async def connect_instagram_account(db: Session, user_id: str, influencer_id: st
             detail=f"Failed to connect Instagram account: {str(e)}"
         )
     
-    # 인플루언서에 Instagram 필수 정보만 업데이트
-    influencer.instagram_id = instagram_data.get("id")
+    # 디버깅 로그 추가
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    logger.info(f"📋 Instagram 연동 데이터:")
+    logger.info(f"   - 전체 instagram_data: {instagram_data}")
+    logger.info(f"   - id: {instagram_data.get('id')}")
+    logger.info(f"   - access_token 존재: {bool(instagram_data.get('access_token'))}")
+    
+    # Instagram 비즈니스 연동 데이터에서 바로 정보 추출
+    # exchange_instagram_business_code에서 이미 모든 정보를 가져왔음
+    instagram_id = instagram_data.get("id")
+    instagram_page_id = instagram_data.get("page_id")  # Facebook 페이지 ID (웹훅용)
+    instagram_username = instagram_data.get("username") or f"user_{instagram_id}"
+    instagram_account_type = instagram_data.get("account_type", "BUSINESS")
+    
+    # 추가 정보들 (Instagram Graph API에서 가져온 정보)
+    name = instagram_data.get("name")
+    biography = instagram_data.get("biography")
+    followers_count = instagram_data.get("followers_count", 0)
+    follows_count = instagram_data.get("follows_count", 0)
+    media_count = instagram_data.get("media_count", 0)
+    profile_picture_url = instagram_data.get("profile_picture_url")
+    website = instagram_data.get("website")
+    
+    logger.info(f"💾 데이터베이스에 저장할 값들:")
+    print(f"🔍 DEBUG influencer: {instagram_data}")
+    logger.info(f"   - instagram_id: {instagram_id}")
+    logger.info(f"   - instagram_page_id: {instagram_page_id}")
+    logger.info(f"   - instagram_username: {instagram_username}")
+    logger.info(f"   - instagram_account_type: {instagram_account_type}")
+    
+    influencer.instagram_id = instagram_id
+    influencer.instagram_page_id = instagram_page_id
+    influencer.instagram_username = instagram_username
+    influencer.instagram_account_type = instagram_account_type
     influencer.instagram_access_token = instagram_data.get("access_token")
     influencer.instagram_connected_at = datetime.utcnow()
     influencer.instagram_is_active = True
@@ -99,8 +133,11 @@ def disconnect_instagram_account(db: Session, user_id: str, influencer_id: str):
     """AI 인플루언서에서 Instagram 비즈니스 계정 연동 해제"""
     influencer = get_influencer_with_permission(db, user_id, influencer_id)
     
-    # Instagram 연동 정보 제거 (필수 필드만)
+    # Instagram 연동 정보 제거 (모든 필드)
     influencer.instagram_id = None
+    influencer.instagram_page_id = None
+    influencer.instagram_username = None
+    influencer.instagram_account_type = None
     influencer.instagram_access_token = None
     influencer.instagram_connected_at = None
     influencer.instagram_token_expires_at = None
@@ -135,6 +172,10 @@ async def get_instagram_status(db: Session, user_id: str, influencer_id: str):
     
     return {
         "is_connected": influencer.instagram_is_active or False,
+        "instagram_id": influencer.instagram_id,
+        "instagram_page_id": influencer.instagram_page_id,
+        "instagram_username": influencer.instagram_username,
+        "instagram_account_type": influencer.instagram_account_type,
         "connected_at": influencer.instagram_connected_at.isoformat() if influencer.instagram_connected_at else None,
         "token_expires_at": influencer.instagram_token_expires_at.isoformat() if influencer.instagram_token_expires_at else None,
         "token_expired": token_expired,

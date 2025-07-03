@@ -51,7 +51,7 @@ class TokenAssignmentRequest(BaseModel):
     token_ids: List[str]
 
 
-@router.post("/", response_model=HFTokenManage, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=HFTokenManage, status_code=status.HTTP_201_CREATED)
 async def create_hf_token(
     token_data: HFTokenManageCreate,
     db: Session = Depends(get_db),

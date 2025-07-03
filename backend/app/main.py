@@ -199,7 +199,7 @@ async def health_check():
 
 
 # 루트 엔드포인트
-@app.get("/")
+@app.get("")
 async def root():
     """루트 엔드포인트"""
     logger.info("🏠 루트 엔드포인트 접근")

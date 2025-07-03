@@ -18,7 +18,7 @@ from app.api.v1.endpoints.auth import get_current_user
 router = APIRouter()
 
 
-@router.get("/", response_model=List[BoardSchema])
+@router.get("", response_model=List[BoardSchema])
 async def get_boards(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=100),
@@ -56,7 +56,7 @@ async def get_board(
     return board
 
 
-@router.post("/", response_model=BoardSchema)
+@router.post("", response_model=BoardSchema)
 async def create_board(
     board_data: BoardCreate,
     db: Session = Depends(get_db),

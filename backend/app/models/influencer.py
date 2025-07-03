@@ -121,6 +121,15 @@ class AIInfluencer(Base, TimestampMixin):
     instagram_id = Column(
         String(255), comment="연동된 인스타그램 계정 ID"
     )
+    instagram_page_id = Column(
+        String(255), comment="인스타그램 비즈니스 페이지 ID (웹훅에서 사용)"
+    )
+    instagram_username = Column(
+        String(100), comment="인스타그램 사용자명"
+    )
+    instagram_account_type = Column(
+        String(50), comment="인스타그램 계정 타입 (PERSONAL, BUSINESS, CREATOR)"
+    )
     instagram_access_token = Column(
         Text, comment="인스타그램 액세스 토큰"
     )
