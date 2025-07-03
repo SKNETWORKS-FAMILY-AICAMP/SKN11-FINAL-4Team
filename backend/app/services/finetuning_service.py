@@ -15,6 +15,7 @@ from enum import Enum
 
 from app.services.s3_service import get_s3_service
 from app.core.encryption import decrypt_sensitive_data
+from app.models.influencer import AIInfluencer
 
 logger = logging.getLogger(__name__)
 
@@ -194,6 +195,11 @@ class InfluencerFineTuningService:
             question = qa_pair.get('question', '').strip()
             answer = qa_pair.get('answer', '').strip()
             
+            if not question:
+                logger.error(f"QA 쌍에서 'question' 필드를 찾을 수 없거나 비어 있습니다: {qa_pair}")
+            if not answer:
+                logger.error(f"QA 쌍에서 'answer' 필드를 찾을 수 없거나 비어 있습니다: {qa_pair}")
+
             if question and answer:
                 # EXAONE 모델용 채팅 형식으로 변환
                 formatted_data = {
@@ -255,173 +261,168 @@ class InfluencerFineTuningService:
                 logger.error(f"잘못된 S3 URL 형식: {s3_url}")
                 return None
             
-            # 임시 파일에 다운로드
-            with tempfile.NamedTemporaryFile(mode='w+', suffix='.json', delete=False) as temp_file:
-                temp_path = temp_file.name
+            # S3에서 파일 내용 가져오기
+            if not self.s3_service.is_available():
+                logger.error("S3 서비스를 사용할 수 없습니다")
+                return None
             
-            try:
-                # S3에서 파일 내용 가져오기
-                if not self.s3_service.is_available():
-                    logger.error("S3 서비스를 사용할 수 없습니다")
-                    return None
+            response = self.s3_service.s3_client.get_object(
+                Bucket=self.s3_service.bucket_name,
+                Key=s3_key
+            )
+            
+            content = response['Body'].read().decode('utf-8')
+            qa_pairs = []
+            
+            for line in content.splitlines():
+                if not line.strip(): # 빈 줄 건너뛰기
+                    continue
                 
-                response = self.s3_service.s3_client.get_object(
-                    Bucket=self.s3_service.bucket_name,
-                    Key=s3_key
-                )
-                
-                # JSON 데이터 파싱
-                content = response['Body'].read().decode('utf-8')
-                
-                qa_pairs = []
-                for line in content.splitlines():
-                    if line.strip(): # 빈 줄 건너뛰기
-                        try:
-                            data = json.loads(line)
-                            if isinstance(data, dict) and 'qa_pairs' in data:
-                                qa_pairs.extend(data['qa_pairs'])
-                            elif isinstance(data, dict):
-                                # 단일 QA 쌍이 바로 JSON 객체인 경우 (예: OpenAI 배치 결과)
-                                # 'response' 키가 있고 그 안에 'body'가 있는 경우를 처리
-                                if 'response' in data and 'body' in data['response'] and 'choices' in data['response']['body']:
-                                    message_content = data['response']['body']['choices'][0]['message']['content']
-                                    # Q: A: 형식 파싱
-                                    if 'Q:' in message_content and 'A:' in message_content:
-                                        parts = message_content.split('A:', 1)
-                                        if len(parts) == 2:
-                                            question = parts[0].replace('Q:', '').strip()
-                                            answer = parts[1].strip()
-                                            qa_pairs.append({"question": question, "answer": answer})
-                                elif 'question' in data and 'answer' in data:
-                                    qa_pairs.append(data)
-                            elif isinstance(data, list):
-                                qa_pairs.extend(data)
-                        except json.JSONDecodeError as e:
-                            logger.warning(f"JSONL 파싱 오류 (줄 건너뛰기): {e} - 줄 내용: {line.strip()}")
-                            continue
-                
-                if not qa_pairs:
-                    logger.error("S3에서 유효한 QA 데이터를 추출하지 못했습니다.")
-                    return None
-                
-                logger.info(f"S3에서 QA 데이터 다운로드 완료: {len(qa_pairs)}개")
-                return qa_pairs
-                
-            finally:
-                # 임시 파일 정리
-                if os.path.exists(temp_path):
-                    os.unlink(temp_path)
+                try:
+                    data = json.loads(line)
                     
+                    # Case 1: Top-level object contains 'qa_pairs' list
+                    if isinstance(data, dict) and 'qa_pairs' in data and isinstance(data['qa_pairs'], list):
+                        for item in data['qa_pairs']:
+                            if isinstance(item, dict) and 'question' in item and 'answer' in item:
+                                qa_pairs.append({"question": item['question'], "answer": item['answer']})
+                            else:
+                                logger.warning(f"S3 QA 데이터: 'qa_pairs' 내부에 유효하지 않은 QA 쌍 발견: {item}")
+                    
+                    # Case 2: Single QA pair as a top-level object
+                    elif isinstance(data, dict) and 'question' in data and 'answer' in data:
+                        qa_pairs.append({"question": data['question'], "answer": data['answer']})
+                    
+                    # Case 3: OpenAI batch result format
+                    elif ('response' in data and isinstance(data['response'], dict) and
+                          'body' in data['response'] and isinstance(data['response']['body'], dict) and
+                          'choices' in data['response']['body'] and isinstance(data['response']['body']['choices'], list) and
+                          len(data['response']['body']['choices']) > 0 and
+                          'message' in data['response']['body']['choices'][0] and isinstance(data['response']['body']['choices'][0]['message'], dict) and
+                          'content' in data['response']['body']['choices'][0]['message']):
+                        
+                        message_content = data['response']['body']['choices'][0]['message']['content']
+                        if 'Q:' in message_content and 'A:' in message_content:
+                            parts = message_content.split('A:', 1)
+                            if len(parts) == 2:
+                                question = parts[0].replace('Q:', '').strip()
+                                answer = parts[1].strip()
+                                qa_pairs.append({"question": question, "answer": answer})
+                            else:
+                                logger.warning(f"S3 QA 데이터: OpenAI 형식에서 Q:A: 파싱 실패: {message_content}")
+                        else:
+                            logger.warning(f"S3 QA 데이터: OpenAI 형식에서 Q: 또는 A: 키워드 없음: {message_content}")
+                    
+                    # Case 4: Top-level list of QA pairs (less common for JSONL, but possible)
+                    elif isinstance(data, list):
+                        for item in data:
+                            if isinstance(item, dict) and 'question' in item and 'answer' in item:
+                                qa_pairs.append({"question": item['question'], "answer": item['answer']})
+                            else:
+                                logger.warning(f"S3 QA 데이터: 리스트 내부에 유효하지 않은 QA 쌍 발견: {item}")
+                    
+                    else:
+                        logger.warning(f"S3 QA 데이터: 알 수 없는 JSON 형식 발견 (줄 건너뛰기): {line.strip()}")
+                        
+                except json.JSONDecodeError as e:
+                    logger.warning(f"S3 QA 데이터: JSON 파싱 오류 (줄 건너뛰기): {e} - 줄 내용: {line.strip()}")
+                    continue
+            
+            if not qa_pairs:
+                logger.error("S3에서 유효한 QA 데이터를 추출하지 못했습니다.")
+                return None
+            
+            logger.info(f"S3에서 QA 데이터 다운로드 및 파싱 완료: {len(qa_pairs)}개")
+            return qa_pairs
+                
         except Exception as e:
-            logger.error(f"S3에서 QA 데이터 다운로드 실패: {e}")
+            logger.error(f"S3에서 QA 데이터 다운로드 실패: {e}", exc_info=True)
             return None
     
-    def prepare_finetuning_data(self, qa_data: List[Dict], influencer_data: Dict, 
-                              output_file: str) -> bool:
+    def prepare_finetuning_data(self, qa_data: List[Dict], influencer_data: AIInfluencer) -> tuple[List[Dict], str]:
         """
-        파인튜닝용 데이터 파일 준비
+        파인튜닝용 데이터 준비
         Args:
             qa_data: QA 데이터
-            influencer_data: 인플루언서 정보
-            output_file: 출력 파일 경로
+            influencer_data: AIInfluencer 객체
         Returns:
-            성공 여부
+            (파인튜닝용 데이터, 시스템 메시지) 튜플
         """
         try:
             # 인플루언서 정보 추출
-            influencer_name = influencer_data.get('influencer_name', '인플루언서')
-            personality = influencer_data.get('personality', '친근하고 활발한 성격')
-            style_info = influencer_data.get('style_info', '')
+            influencer_name = influencer_data.influencer_name
+            personality = getattr(influencer_data, 'influencer_personality', '친근하고 활발한 성격')
+            style_info = getattr(influencer_data, 'influencer_description', '')
             
+            # 시스템 메시지 생성
+            system_message = self._create_system_message(influencer_name, personality, style_info)
+
             # QA 데이터 변환
             finetuning_data = self.convert_qa_data_for_finetuning(
                 qa_data, influencer_name, personality, style_info
             )
             
-            # 파일로 저장
-            output_data = {
-                "data": [
-                    {
-                        "question": item["messages"][1]["content"],
-                        "answer": item["messages"][2]["content"]
-                    }
-                    for item in finetuning_data
-                ]
-            }
-            
-            with open(output_file, 'w', encoding='utf-8') as f:
-                json.dump(output_data, f, ensure_ascii=False, indent=2)
-            
-            logger.info(f"파인튜닝 데이터 파일 생성: {output_file} ({len(finetuning_data)}개 항목)")
-            return True
+            logger.info(f"파인튜닝 데이터 준비 완료: {len(finetuning_data)}개 항목")
+            return finetuning_data, system_message
             
         except Exception as e:
             logger.error(f"파인튜닝 데이터 준비 실패: {e}")
-            return False
+            raise
     
-    def run_finetuning(self, data_file: str, model_name: str, hf_token: str, epochs: int = 5) -> tuple[bool, str]:
+    def run_finetuning(self, qa_data: List[Dict], system_message: str, hf_repo_id: str, hf_token: str, epochs: int = 5) -> Optional[str]:
         """
         파인튜닝 실행
         Args:
-            data_file: 훈련 데이터 파일 경로
-            model_name: 모델 이름 (HF repo ID로 사용)
+            qa_data: 훈련 데이터 (QA 쌍 리스트)
+            system_message: 시스템 메시지
+            hf_repo_id: Hugging Face Repository ID
             hf_token: 허깅페이스 토큰
             epochs: 훈련 에포크 수
         Returns:
-            (성공 여부, HF 모델 URL)
+            HF 모델 URL (성공 시), None (실패 시)
         """
         try:
-            logger.info(f"파인튜닝 시작: {data_file} → {model_name}")
-            
+            logger.info(f"파인튜닝 시작: {hf_repo_id}")
+
             # 현재 디렉토리를 pipeline 폴더로 변경
             original_dir = os.getcwd()
             pipeline_dir = os.path.join(os.path.dirname(__file__), '../../pipeline')
             pipeline_dir = os.path.abspath(pipeline_dir)
-            
+
             try:
                 os.chdir(pipeline_dir)
-                
+
                 # fine_custom.py 임포트 및 실행
                 import sys
                 if pipeline_dir not in sys.path:
                     sys.path.insert(0, pipeline_dir)
                 
-                # 환경변수 설정
-                os.environ['HF_REPO_ID'] = model_name
-                
-                # 데이터 파일을 pipeline 디렉토리로 복사
-                target_data_file = os.path.join(pipeline_dir, 'new_qa.json')
-                shutil.copy2(data_file, target_data_file)
-                
-                try:
-                    # fine_custom 모듈 실행
-                    import fine_custom
-                    fine_custom.main()
-                    
-                    # 성공 시 HF URL 생성
-                    hf_url = f"https://huggingface.co/{model_name}"
-                    logger.info(f"파인튜닝 완료: {hf_url}")
-                    return True, hf_url
-                    
-                except Exception as e:
-                    logger.error(f"파인튜닝 실행 중 오류: {e}")
-                    return False, str(e)
-                
-                finally:
-                    # 임시 파일 정리
-                    if os.path.exists(target_data_file):
-                        os.remove(target_data_file)
-                
+                # fine_custom 모듈 실행
+                import fine_custom
+                hf_model_url = fine_custom.main(
+                    qa_data=qa_data,
+                    system_message=system_message,
+                    hf_token=hf_token,
+                    hf_repo_id=hf_repo_id,
+                    training_epochs=epochs
+                )
+
+                if hf_model_url:
+                    logger.info(f"파인튜닝 완료: {hf_model_url}")
+                    return hf_model_url
+                else:
+                    raise Exception("파인튜닝 실행 실패 또는 모델 URL 반환 실패")
+
             finally:
                 # 원래 디렉토리로 복원
                 os.chdir(original_dir)
-                
+
         except Exception as e:
             logger.error(f"파인튜닝 실행 실패: {e}")
-            return False, str(e)
+            return None
     
     def start_finetuning_task(self, influencer_id: str, qa_task_id: str, 
-                            s3_qa_url: str, influencer_data: Dict, db=None) -> str:
+                            s3_qa_url: str, influencer_data: AIInfluencer, db=None) -> str:
         """
         파인튜닝 작업 시작
         Args:
@@ -439,36 +440,23 @@ class InfluencerFineTuningService:
         task_id = f"ft_{influencer_id}_{int(time.time())}"
         
         # 인플루언서 이름 처리
-        if isinstance(influencer_data, dict):
-            influencer_name = influencer_data.get('influencer_name', 'influencer')
-            # 딕셔너리 타입도 그룹 기반으로 허깅페이스 사용자명 조회
-            try:
-                if db:
-                    _, hf_username = self._get_hf_info_from_influencer(influencer_data, db)
-                else:
-                    hf_username = 'skn-team'
-            except Exception as e:
-                logger.warning(f"허깅페이스 사용자명 조회 실패, 기본값 사용: {e}")
+        influencer_name = getattr(influencer_data, 'influencer_name', 'influencer')
+        
+        # 허깅페이스 토큰 정보 가져오기
+        try:
+            if db:
+                _, hf_username = self._get_hf_info_from_influencer(influencer_data, db)
+            else:
                 hf_username = 'skn-team'
-        else:
-            # 모델 인스턴스인 경우
-            influencer_name = getattr(influencer_data, 'influencer_name', 'influencer')
-            
-            # 허깅페이스 토큰 정보 가져오기
-            try:
-                if db:
-                    _, hf_username = self._get_hf_info_from_influencer(influencer_data, db)
-                else:
-                    hf_username = 'skn-team'
-            except Exception as e:
-                logger.warning(f"허깅페이스 사용자명 조회 실패, 기본값 사용: {e}")
-                hf_username = 'skn-team'
+        except Exception as e:
+            logger.warning(f"허깅페이스 사용자명 조회 실패, 기본값 사용: {e}")
+            hf_username = 'skn-team'
         
         # 한글 이름을 영문으로 변환
         english_name = self._convert_korean_to_english(influencer_name)
         
         # 인플루언서 모델 repo 경로 생성 (허깅페이스 사용자명/영문이름-finetuned)
-        model_repo = influencer_data.get('influencer_model_repo', '') if isinstance(influencer_data, dict) else getattr(influencer_data, 'influencer_model_repo', '')
+        model_repo = getattr(influencer_data, 'influencer_model_repo', '')
         
         if model_repo:
             # 기존 repo 경로가 있으면 사용
@@ -497,7 +485,7 @@ class InfluencerFineTuningService:
         
         return task_id
     
-    def execute_finetuning_task(self, task_id: str, influencer_data: Dict, hf_token: str, db=None) -> bool:
+    def execute_finetuning_task(self, task_id: str, influencer_data: AIInfluencer, hf_token: str, db=None) -> bool:
         """
         파인튜닝 작업 실행
         Args:
@@ -522,46 +510,35 @@ class InfluencerFineTuningService:
             if not qa_data:
                 raise Exception("S3에서 QA 데이터 다운로드 실패")
             
-            # 임시 파일 생성
-            temp_data_file = tempfile.NamedTemporaryFile(
-                mode='w', suffix='.json', delete=False
-            ).name
+            # 파인튜닝용 데이터 준비
+            finetuning_qa_data, system_message = self.prepare_finetuning_data(qa_data, influencer_data)
             
-            try:
-                # 파인튜닝용 데이터 준비
-                if not self.prepare_finetuning_data(qa_data, influencer_data, temp_data_file):
-                    raise Exception("파인튜닝 데이터 준비 실패")
-                
-                # 2. 파인튜닝 실행 단계
-                task.status = FineTuningStatus.TRAINING
+            # 2. 파인튜닝 실행 단계
+            task.status = FineTuningStatus.TRAINING
+            task.updated_at = datetime.now()
+            
+            hf_model_url = self.run_finetuning(
+                qa_data=finetuning_qa_data,
+                system_message=system_message,
+                hf_repo_id=task.hf_repo_id,
+                hf_token=hf_token,
+                epochs=task.training_epochs
+            )
+            
+            if hf_model_url:
+                # 3. 업로드 완료
+                task.status = FineTuningStatus.UPLOADING
+                task.hf_model_url = hf_model_url
                 task.updated_at = datetime.now()
                 
-                success, result = self.run_finetuning(
-                    temp_data_file, 
-                    task.hf_repo_id, 
-                    hf_token,
-                    task.training_epochs
-                )
+                # 4. 완료
+                task.status = FineTuningStatus.COMPLETED
+                task.updated_at = datetime.now()
                 
-                if success:
-                    # 3. 업로드 완료
-                    task.status = FineTuningStatus.UPLOADING
-                    task.hf_model_url = result
-                    task.updated_at = datetime.now()
-                    
-                    # 4. 완료
-                    task.status = FineTuningStatus.COMPLETED
-                    task.updated_at = datetime.now()
-                    
-                    logger.info(f"파인튜닝 작업 완료: {task_id} → {task.hf_model_url}")
-                    return True
-                else:
-                    raise Exception(f"파인튜닝 실행 실패: {result}")
-                
-            finally:
-                # 임시 파일 정리
-                if os.path.exists(temp_data_file):
-                    os.unlink(temp_data_file)
+                logger.info(f"파인튜닝 작업 완료: {task_id} → {task.hf_model_url}")
+                return True
+            else:
+                raise Exception(f"파인튜닝 실행 실패: 모델 URL을 반환하지 못했습니다.")
             
         except Exception as e:
             task.status = FineTuningStatus.FAILED
@@ -679,16 +656,9 @@ class InfluencerFineTuningService:
             import asyncio
             from functools import partial
             
-            # 인플루언서 데이터를 딕셔너리로 변환 (execute_finetuning_task용)
-            influencer_dict = {
-                'influencer_name': influencer_data.influencer_name,
-                'personality': getattr(influencer_data, 'influencer_personality', '친근하고 활발한 성격'),
-                'style_info': getattr(influencer_data, 'influencer_description', '')
-            }
-            
             # 동기 함수를 비동기로 실행
             loop = asyncio.get_event_loop()
-            execute_task = partial(self.execute_finetuning_task, task_id, influencer_dict, hf_token, db)
+            execute_task = partial(self.execute_finetuning_task, task_id, influencer_data, hf_token, db)
             success = await loop.run_in_executor(None, execute_task)
             
             if success:
