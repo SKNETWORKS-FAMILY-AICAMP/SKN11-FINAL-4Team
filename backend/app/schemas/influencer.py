@@ -76,6 +76,7 @@ class AIInfluencerCreate(BaseSchema):
     group_id: int
     style_preset_id: Optional[str] = None  # 프리셋이 없으면 자동 생성
     mbti_id: Optional[int] = None
+    hf_manage_id: Optional[str] = None  # 허깅페이스 토큰 관리 ID
     influencer_name: str
     influencer_description: Optional[str] = None
     image_url: Optional[str] = None
@@ -98,6 +99,7 @@ class AIInfluencerCreate(BaseSchema):
 class AIInfluencerUpdate(BaseModel):
     style_preset_id: Optional[str] = None
     mbti_id: Optional[int] = None
+    hf_manage_id: Optional[str] = None
     influencer_name: Optional[str] = None
     influencer_description: Optional[str] = None
     image_url: Optional[str] = None

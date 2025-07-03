@@ -6,7 +6,9 @@ from sqlalchemy import (
     Boolean,
     Text,
     TIMESTAMP,
+    DateTime,
     ForeignKeyConstraint,
+    func,
 )
 from sqlalchemy.orm import relationship
 from app.models.base import Base, TimestampMixin
@@ -150,7 +152,7 @@ class AIInfluencer(Base, TimestampMixin):
 
 
 class BatchKey(Base):
-    """배치키 모델"""
+    """배치키 모델 - QA 생성 배치 작업 관리"""
 
     __tablename__ = "BATCH_KEY"
 
@@ -167,6 +169,32 @@ class BatchKey(Base):
         comment="인플루언서 고유 식별자",
     )
     batch_key = Column(String(255), nullable=False, comment="배치키 값")
+    
+    # QA 생성 배치 작업 관리를 위한 새 필드들
+    task_id = Column(String(255), nullable=True, unique=True, index=True, comment="QA 생성 작업 ID")
+    openai_batch_id = Column(String(255), nullable=True, unique=True, index=True, comment="OpenAI 배치 ID")
+    status = Column(String(50), nullable=True, default="pending", comment="배치 상태")
+    total_qa_pairs = Column(Integer, default=2000, comment="총 QA 쌍 수")
+    generated_qa_pairs = Column(Integer, default=0, comment="생성된 QA 쌍 수")
+    
+    # 결과 정보
+    input_file_id = Column(String(255), nullable=True, comment="입력 파일 ID")
+    output_file_id = Column(String(255), nullable=True, comment="출력 파일 ID")
+    error_message = Column(Text, nullable=True, comment="오류 메시지")
+    
+    # S3 업로드 정보
+    s3_qa_file_url = Column(String(500), nullable=True, comment="S3 QA 파일 URL")
+    s3_processed_file_url = Column(String(500), nullable=True, comment="S3 처리된 파일 URL")
+    
+    # 처리 플래그
+    is_processed = Column(Boolean, default=False, comment="결과 처리 완료 여부")
+    is_uploaded_to_s3 = Column(Boolean, default=False, comment="S3 업로드 완료 여부")
+    is_finetuning_started = Column(Boolean, default=False, comment="파인튜닝 시작 여부")
+    
+    # 타임스탬프
+    created_at = Column(DateTime, default=func.now(), comment="생성 시간")
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), comment="수정 시간")
+    completed_at = Column(DateTime, nullable=True, comment="완료 시간")
 
     # 관계
     influencer = relationship("AIInfluencer", back_populates="batch_keys")

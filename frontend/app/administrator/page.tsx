@@ -13,12 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { AlertDialog, AlertDialogTrigger, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogCancel, AlertDialogAction } from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
-import { AdminService, type AdminTeam, type AdminUser } from "@/lib/services/admin.service"
-
-interface HfTokenItem {
-  alias: string;
-  token: string;
-}
+import { AdminService, type AdminTeam, type AdminUser, type AdminHFToken, type AdminCreateHFTokenRequest } from "@/lib/services/admin.service"
 
 export default function AdministratorPage() {
   const [teams, setTeams] = useState<AdminTeam[]>([])
@@ -31,19 +26,19 @@ export default function AdministratorPage() {
   const [dragUserId, setDragUserId] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState("")
   const [dragOverBox, setDragOverBox] = useState<string | null>(null)
-  const [hfTokens, setHfTokens] = useState<HfTokenItem[]>([])
-  const [shownTokenIdxs, setShownTokenIdxs] = useState<number[]>([])
-  const [editIdx, setEditIdx] = useState<number | null>(null)
+  
+  // HF Token 관련 상태들
+  const [hfTokens, setHfTokens] = useState<AdminHFToken[]>([])
+  const [loadingTokens, setLoadingTokens] = useState(false)
   const [inputToken, setInputToken] = useState("")
   const [inputAlias, setInputAlias] = useState("")
-  const [adding, setAdding] = useState(false)
-  const [dragTokenAlias, setDragTokenAlias] = useState<string | null>(null)
+  const [inputUsername, setInputUsername] = useState("")
+  const [selectedTeamForToken, setSelectedTeamForToken] = useState<number | null>(null)
+  const [creatingToken, setCreatingToken] = useState(false)
+  const [dragTokenId, setDragTokenId] = useState<string | null>(null)
   const [dragOverTokenBox, setDragOverTokenBox] = useState<string | null>(null)
-  const [selectedTokenDetail, setSelectedTokenDetail] = useState<HfTokenItem | null>(null)
+  const [selectedTokenDetail, setSelectedTokenDetail] = useState<AdminHFToken | null>(null)
   const [isTokenDetailOpen, setIsTokenDetailOpen] = useState(false)
-  const [isEditingTokenDetail, setIsEditingTokenDetail] = useState(false)
-  const [editTokenAlias, setEditTokenAlias] = useState("")
-  const [editTokenValue, setEditTokenValue] = useState("")
 
   // API에서 데이터 로드
   useEffect(() => {
@@ -71,6 +66,63 @@ export default function AdministratorPage() {
 
     fetchData()
   }, [])
+
+  // HF 토큰 탭이 선택될 때 토큰 데이터 로드
+  useEffect(() => {
+    fetchHFTokens()
+  }, [])
+
+  // HF 토큰 데이터 로드
+  const fetchHFTokens = async () => {
+    try {
+      setLoadingTokens(true)
+      const tokensData = await AdminService.getHFTokens({ include_assigned: true })
+      console.log('HF Tokens data:', tokensData)
+      setHfTokens(tokensData)
+    } catch (err: any) {
+      console.error('Error loading HF tokens:', err)
+      setError(err.message || 'HF 토큰을 불러오는데 실패했습니다.')
+    } finally {
+      setLoadingTokens(false)
+    }
+  }
+
+  // HF 토큰 생성
+  const handleCreateHFToken = async () => {
+    if (!inputAlias.trim() || !inputToken.trim() || !inputUsername.trim()) return
+
+    try {
+      setCreatingToken(true)
+      
+      const tokenData: AdminCreateHFTokenRequest = {
+        hf_token_value: inputToken.trim(),
+        hf_token_nickname: inputAlias.trim(),
+        hf_user_name: inputUsername.trim(),
+        assign_to_team_id: selectedTeamForToken || null
+      }
+
+      const newToken = await AdminService.createHFToken(tokenData)
+      console.log('Token created:', newToken)
+      
+      // 토큰 목록 새로고침
+      await fetchHFTokens()
+      
+      // 입력 필드 초기화
+      setInputAlias("")
+      setInputToken("")
+      setInputUsername("")
+      setSelectedTeamForToken(null)
+      
+      // 성공 메시지 (선택사항)
+      console.log('HF 토큰이 성공적으로 생성되었습니다.')
+      
+    } catch (err: any) {
+      console.error('Error creating HF token:', err)
+      setError(err.message || 'HF 토큰 생성에 실패했습니다.')
+    } finally {
+      setCreatingToken(false)
+    }
+  }
 
   // 그룹 추가
   const groupNameExists = teams.some(t => t.group_name === newGroupName.trim());
@@ -221,8 +273,8 @@ export default function AdministratorPage() {
   })
   const otherUsers = allUsers.filter(u => !assignedUserIds.has(u.user_id))
 
-  const aliasExists = hfTokens.some(t => t.alias === inputAlias.trim());
-  const tokenExists = hfTokens.some(t => t.token === inputToken.trim());
+  const aliasExists = hfTokens.some(t => t.hf_token_nickname === inputAlias.trim());
+  const usernameExists = hfTokens.some(t => t.hf_user_name === inputUsername.trim());
 
   return (
     <RequireAdmin>
@@ -530,150 +582,187 @@ export default function AdministratorPage() {
                       {/* 새 토큰 추가 섹션 */}
                       <div className="mb-6 pb-6 border-b">
                         <h4 className="font-medium text-gray-900 mb-4">새 토큰 추가</h4>
-                        <div className="flex gap-3 items-end">
-                          <div className="flex-1 max-w-xs">
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 items-end">
+                          <div>
                             <Label htmlFor="new-token-alias">별칭</Label>
                             <Input
                               id="new-token-alias"
                               placeholder="예: 서비스용, 개발용"
                               value={inputAlias}
                               onChange={e => setInputAlias(e.target.value)}
+                              disabled={creatingToken}
                             />
                           </div>
-                          <div className="flex-1 max-w-xs">
+                          <div>
+                            <Label htmlFor="new-token-username">허깅페이스 사용자명</Label>
+                            <Input
+                              id="new-token-username"
+                              placeholder="허깅페이스 계정명"
+                              value={inputUsername}
+                              onChange={e => setInputUsername(e.target.value)}
+                              disabled={creatingToken}
+                            />
+                          </div>
+                          <div>
                             <Label htmlFor="new-token-value">토큰</Label>
                             <Input
                               id="new-token-value"
-                              placeholder="허깅페이스 토큰 입력"
+                              type="password"
+                              placeholder="hf_..."
                               value={inputToken}
                               onChange={e => setInputToken(e.target.value)}
+                              disabled={creatingToken}
                             />
                           </div>
+                          <div>
+                            <Label htmlFor="team-select">팀 할당 (선택사항)</Label>
+                            <select
+                              id="team-select"
+                              className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                              value={selectedTeamForToken || ""}
+                              onChange={e => setSelectedTeamForToken(e.target.value ? Number(e.target.value) : null)}
+                              disabled={creatingToken}
+                            >
+                              <option value="">할당하지 않음</option>
+                              {teams.map(team => (
+                                <option key={team.group_id} value={team.group_id}>
+                                  {team.group_name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                        <div className="flex justify-end mt-4">
                           <Button
-                            onClick={() => {
-                              if (!inputAlias.trim() || !inputToken.trim()) return;
-                              const aliasExists = hfTokens.some(t => t.alias === inputAlias.trim());
-                              const tokenExists = hfTokens.some(t => t.token === inputToken.trim());
-                              if (aliasExists || tokenExists) return;
-                              setHfTokens([...hfTokens, { alias: inputAlias, token: inputToken }]);
-                              setInputAlias("");
-                              setInputToken("");
-                            }}
-                            disabled={!inputAlias.trim() || !inputToken.trim() || aliasExists || tokenExists}
+                            onClick={handleCreateHFToken}
+                            disabled={!inputAlias.trim() || !inputToken.trim() || !inputUsername.trim() || aliasExists || creatingToken}
                             className="bg-blue-600 hover:bg-blue-700 text-white"
                           >
-                            <Plus className="h-4 w-4 mr-1" />
-                            토큰 추가
+                            {creatingToken ? (
+                              <>
+                                <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                                생성 중...
+                              </>
+                            ) : (
+                              <>
+                                <Plus className="h-4 w-4 mr-1" />
+                                토큰 생성
+                              </>
+                            )}
                           </Button>
                         </div>
                         {aliasExists && (
                           <div className="text-xs text-red-600 mt-1">이미 사용 중인 별칭입니다.</div>
                         )}
-                        {tokenExists && (
-                          <div className="text-xs text-red-600 mt-1">이미 등록된 토큰입니다.</div>
+                        {usernameExists && (
+                          <div className="text-xs text-red-600 mt-1">이미 등록된 사용자명입니다.</div>
                         )}
                       </div>
                       {/* 토큰 리스트 */}
-                      {hfTokens.length === 0 && !adding && (
-                        <div className="text-gray-400 mb-4">등록된 토큰이 없습니다. 새 토큰을 추가해보세요.</div>
-                      )}
-                      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                        {/* 전체 토큰 목록 */}
-                        <Card className={`shadow-sm transition-all ${dragOverTokenBox === 'all-tokens' ? 'bg-green-50 border-green-300 shadow-md' : ''}`}
-                          onDragOver={e => { e.preventDefault(); setDragOverTokenBox('all-tokens'); }}
-                          onDragLeave={() => setDragOverTokenBox(null)}
-                          onDrop={() => {
-                            if (dragTokenAlias) {
-                              // TODO: API 호출로 토큰 할당 해제
-                              setDragTokenAlias(null);
-                            }
-                            setDragOverTokenBox(null);
-                          }}
-                        >
-                          <CardHeader className="pb-3">
-                            <CardTitle className="text-base font-semibold flex items-center gap-2">
-                              <Key className="h-4 w-4 text-yellow-600" />
-                              전체 토큰
-                            </CardTitle>
-                          </CardHeader>
-                          <CardContent className="transition-colors" style={{ minHeight: '200px' }}>
-                            <div className="text-xs text-gray-500 mb-2">
-                              토큰을 <span className="font-semibold text-blue-600">수정/삭제</span>하려면 해당 토큰을 <span className="font-semibold text-blue-600">클릭</span>해주세요.
-                            </div>
-                            <div className="space-y-2 overflow-y-auto mt-4">
-                              {hfTokens.map((item, idx) => {
-                                const assigned = false // TODO: 팀별 토큰 할당 기능 구현 필요
-                                if (assigned) return null
-                                // 수정 모드
-                                if (editIdx === idx) {
-                                  return (
-                                    <div key={item.alias + '-' + idx} className="flex flex-col md:flex-row gap-3 items-center mb-2 p-2 border rounded bg-yellow-50">
-                                      <Input
-                                        type="text"
-                                        placeholder="별칭"
-                                        value={inputAlias}
-                                        onChange={e => setInputAlias(e.target.value)}
-                                        className="w-full md:w-48"
-                                      />
-                                      <Input
-                                        type="text"
-                                        placeholder="허깅페이스 토큰 입력"
-                                        value={inputToken}
-                                        onChange={e => setInputToken(e.target.value)}
-                                        className="w-full md:w-96"
-                                      />
-                                      <Button className="bg-blue-600 text-white" onClick={() => {
-                                        if (!inputAlias.trim() || !inputToken.trim()) return;
-                                        // 중복 체크
-                                        if (hfTokens.some((t, i) => i !== idx && (t.alias === inputAlias.trim() || t.token === inputToken.trim()))) return;
-                                        setHfTokens(hfTokens.map((t, i) => i === idx ? { alias: inputAlias, token: inputToken } : t));
-                                        setEditIdx(null);
-                                        setInputAlias("");
-                                        setInputToken("");
-                                      }}>저장</Button>
-                                      <Button variant="outline" onClick={() => { setEditIdx(null); setInputAlias(""); setInputToken(""); }}>취소</Button>
-                                    </div>
-                                  )
-                                }
-                                // 일반 모드
-                                return (
-                                  <div
-                                    key={item.alias + '-' + idx}
-                                    className="flex items-center gap-3 p-4 rounded-lg transition-all w-full min-h-[50px] bg-yellow-50 border border-yellow-200 hover:bg-yellow-100"
-                                    draggable
-                                    onDragStart={() => setDragTokenAlias(item.alias)}
-                                    onDragEnd={() => setDragTokenAlias(null)}
-                                    onClick={e => {
-                                      if (!dragTokenAlias) {
-                                        setSelectedTokenDetail(item);
-                                        setIsTokenDetailOpen(true);
-                                      }
-                                    }}
-                                    style={{ cursor: 'pointer' }}
-                                  >
-                                    <span className="font-medium text-yellow-800">{item.alias}</span>
-                                    <span className="text-xs text-gray-400">({item.token.slice(0, 6)}...)</span>
-                                  </div>
-                                )
-                              })}
-                              {hfTokens.length === 0 && (
-                                <div className="text-center py-8 text-gray-400">
-                                  <Key className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                                  <p className="text-sm">등록된 토큰이 없습니다. 새 토큰을 추가해보세요.</p>
-                                </div>
-                              )}
-                            </div>
-                          </CardContent>
-                        </Card>
-
-                        {/* 그룹별 토큰 할당 카드 - TODO: 토큰 관리 기능 구현 필요 */}
-                        <div className="lg:col-span-2 space-y-4">
-                          <div className="text-center py-8 text-gray-400">
-                            <Key className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                            <p className="text-sm">토큰 관리 기능은 추후 구현 예정입니다.</p>
+                      {loadingTokens ? (
+                        <div className="flex items-center justify-center py-12">
+                          <div className="text-center">
+                            <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4 text-blue-600" />
+                            <p className="text-gray-600">토큰을 불러오는 중...</p>
                           </div>
                         </div>
-                      </div>
+                      ) : hfTokens.length === 0 ? (
+                        <div className="text-center py-8 text-gray-400">
+                          <Key className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                          <p className="text-sm">등록된 토큰이 없습니다. 새 토큰을 추가해보세요.</p>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                          {/* 할당되지 않은 토큰들 */}
+                          <Card className={`shadow-sm transition-all ${dragOverTokenBox === 'unassigned-tokens' ? 'bg-green-50 border-green-300 shadow-md' : ''}`}>
+                            <CardHeader className="pb-3">
+                              <CardTitle className="text-base font-semibold flex items-center gap-2">
+                                <Key className="h-4 w-4 text-yellow-600" />
+                                할당되지 않은 토큰 ({hfTokens.filter(t => !t.group_id).length})
+                              </CardTitle>
+                            </CardHeader>
+                            <CardContent className="transition-colors" style={{ minHeight: '200px' }}>
+                              <div className="text-xs text-gray-500 mb-2">
+                                토큰을 <span className="font-semibold text-blue-600">클릭</span>하여 상세 정보를 확인하세요.
+                              </div>
+                              <div className="space-y-2 overflow-y-auto mt-4">
+                                {hfTokens
+                                  .filter(token => !token.group_id)
+                                  .map((token) => (
+                                    <div
+                                      key={token.hf_manage_id}
+                                      className="flex items-center gap-3 p-4 rounded-lg transition-all w-full min-h-[50px] bg-yellow-50 border border-yellow-200 hover:bg-yellow-100 cursor-pointer"
+                                      onClick={() => {
+                                        setSelectedTokenDetail(token);
+                                        setIsTokenDetailOpen(true);
+                                      }}
+                                    >
+                                      <div className="flex-1">
+                                        <div className="font-medium text-yellow-800">{token.hf_token_nickname}</div>
+                                        <div className="text-xs text-gray-500">사용자: {token.hf_user_name}</div>
+                                        {token.hf_token_masked && (
+                                          <div className="text-xs text-gray-400">{token.hf_token_masked}</div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  ))}
+                                {hfTokens.filter(t => !t.group_id).length === 0 && (
+                                  <div className="text-center py-4 text-gray-400">
+                                    <p className="text-sm">할당되지 않은 토큰이 없습니다.</p>
+                                  </div>
+                                )}
+                              </div>
+                            </CardContent>
+                          </Card>
+
+                          {/* 팀별 할당된 토큰들 */}
+                          <div className="lg:col-span-2 space-y-4">
+                            {teams.map(team => {
+                              const teamTokens = hfTokens.filter(t => t.group_id === team.group_id)
+                              if (teamTokens.length === 0) return null
+                              
+                              return (
+                                <Card key={team.group_id} className="shadow-sm">
+                                  <CardHeader className="pb-3">
+                                    <CardTitle className="text-base font-semibold flex items-center gap-2">
+                                      <div className={`w-3 h-3 rounded-full ${
+                                        team.group_id === 1 ? 'bg-red-500' : 'bg-green-500'
+                                      }`}></div>
+                                      {team.group_name} ({teamTokens.length}개 토큰)
+                                    </CardTitle>
+                                  </CardHeader>
+                                  <CardContent>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                      {teamTokens.map((token) => (
+                                        <div
+                                          key={token.hf_manage_id}
+                                          className="flex items-center gap-2 p-3 rounded-lg bg-blue-50 border border-blue-200 hover:bg-blue-100 cursor-pointer"
+                                          onClick={() => {
+                                            setSelectedTokenDetail(token);
+                                            setIsTokenDetailOpen(true);
+                                          }}
+                                        >
+                                          <div className="flex-1">
+                                            <div className="font-medium text-blue-800 text-sm">{token.hf_token_nickname}</div>
+                                            <div className="text-xs text-gray-500">{token.hf_user_name}</div>
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </CardContent>
+                                </Card>
+                              )
+                            })}
+                            
+                            {hfTokens.filter(t => t.group_id).length === 0 && (
+                              <div className="text-center py-8 text-gray-400">
+                                <Key className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                                <p className="text-sm">팀에 할당된 토큰이 없습니다.</p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
                     </CardContent>
                   </Card>
                 </TabsContent>
@@ -810,104 +899,107 @@ export default function AdministratorPage() {
                   </DialogHeader>
                   {selectedTokenDetail && (
                     <div className="space-y-4">
-                      {isEditingTokenDetail ? (
-                        <>
-                          <div>
-                            <Label htmlFor="edit-token-alias">별칭</Label>
-                            <Input
-                              id="edit-token-alias"
-                              value={editTokenAlias}
-                              onChange={e => setEditTokenAlias(e.target.value)}
-                            />
-                          </div>
-                          <div>
-                            <Label htmlFor="edit-token-value">토큰</Label>
-                            <Input
-                              id="edit-token-value"
-                              value={editTokenValue}
-                              onChange={e => setEditTokenValue(e.target.value)}
-                            />
-                          </div>
-                          <div className="flex justify-end gap-2 mt-6">
-                            <Button
-                              className="bg-blue-600 text-white"
-                              onClick={() => {
-                                if (
-                                  hfTokens.some(t => t.alias === editTokenAlias.trim() && t.alias !== selectedTokenDetail.alias) ||
-                                  hfTokens.some(t => t.token === editTokenValue.trim() && t.token !== selectedTokenDetail.token)
-                                ) return;
-                                setHfTokens(hfTokens.map(t =>
-                                  t.alias === selectedTokenDetail.alias
-                                    ? { alias: editTokenAlias, token: editTokenValue }
-                                    : t
-                                ));
-                                setSelectedTokenDetail({ alias: editTokenAlias, token: editTokenValue });
-                                setIsEditingTokenDetail(false);
-                              }}
-                              disabled={
-                                !editTokenAlias.trim() ||
-                                !editTokenValue.trim() ||
-                                (hfTokens.some(t => t.alias === editTokenAlias.trim() && t.alias !== selectedTokenDetail.alias)) ||
-                                (hfTokens.some(t => t.token === editTokenValue.trim() && t.token !== selectedTokenDetail.token))
-                              }
-                            >저장</Button>
-                            <Button variant="outline" onClick={() => {
-                              setIsEditingTokenDetail(false);
-                              setEditTokenAlias(selectedTokenDetail.alias);
-                              setEditTokenValue(selectedTokenDetail.token);
-                            }}>취소</Button>
-                          </div>
-                          {hfTokens.some(t => t.alias === editTokenAlias.trim() && t.alias !== selectedTokenDetail.alias) && (
-                            <div className="text-xs text-red-600 mt-1">이미 사용 중인 별칭입니다.</div>
-                          )}
-                          {hfTokens.some(t => t.token === editTokenValue.trim() && t.token !== selectedTokenDetail.token) && (
-                            <div className="text-xs text-red-600 mt-1">이미 등록된 토큰입니다.</div>
-                          )}
-                        </>
-                      ) : (
-                        <>
-                          <div>
-                            <span className="font-semibold">별칭:</span> {selectedTokenDetail.alias}
-                          </div>
-                          <div>
-                            <span className="font-semibold">토큰:</span> <span className="break-all">{selectedTokenDetail.token}</span>
-                          </div>
-                          <div>
-                            <span className="font-semibold">할당된 그룹:</span>
-                            <ul className="list-disc ml-6 mt-1">
-                              <li className="text-gray-400">없음 (토큰 할당 기능 미구현)</li>
-                            </ul>
-                          </div>
-                          <div className="flex justify-end gap-2 mt-6">
-                            <Button variant="outline" onClick={() => {
-                              setIsEditingTokenDetail(true);
-                              setEditTokenAlias(selectedTokenDetail.alias);
-                              setEditTokenValue(selectedTokenDetail.token);
-                            }}>수정</Button>
-                            <AlertDialog>
-                              <AlertDialogTrigger asChild>
-                                <Button variant="destructive">삭제</Button>
-                              </AlertDialogTrigger>
-                              <AlertDialogContent>
-                                <AlertDialogHeader>
-                                  <AlertDialogTitle>토큰 삭제</AlertDialogTitle>
-                                  <AlertDialogDescription>
-                                    정말 이 토큰을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.
-                                  </AlertDialogDescription>
-                                </AlertDialogHeader>
-                                <AlertDialogFooter>
-                                  <AlertDialogCancel>취소</AlertDialogCancel>
-                                  <AlertDialogAction onClick={() => {
-                                    setHfTokens(hfTokens.filter(t => t.alias !== selectedTokenDetail.alias));
-                                    setIsTokenDetailOpen(false);
-                                  }} className="bg-red-600 hover:bg-red-700">삭제</AlertDialogAction>
-                                </AlertDialogFooter>
-                              </AlertDialogContent>
-                            </AlertDialog>
-                            <Button variant="outline" onClick={() => setIsTokenDetailOpen(false)}>닫기</Button>
-                          </div>
-                        </>
+                      <div>
+                        <span className="font-semibold">토큰 ID:</span> <span className="text-sm text-gray-600">{selectedTokenDetail.hf_manage_id}</span>
+                      </div>
+                      <div>
+                        <span className="font-semibold">별칭:</span> {selectedTokenDetail.hf_token_nickname}
+                      </div>
+                      <div>
+                        <span className="font-semibold">허깅페이스 사용자명:</span> {selectedTokenDetail.hf_user_name}
+                      </div>
+                      <div>
+                        <span className="font-semibold">토큰 (마스킹됨):</span> <span className="break-all font-mono text-sm">{selectedTokenDetail.hf_token_masked || 'N/A'}</span>
+                      </div>
+                      <div>
+                        <span className="font-semibold">할당된 팀:</span>
+                        {selectedTokenDetail.group_id ? (
+                          <span className="ml-2 px-2 py-1 bg-blue-100 text-blue-800 rounded text-sm">
+                            {teams.find(t => t.group_id === selectedTokenDetail.group_id)?.group_name || `팀 ${selectedTokenDetail.group_id}`}
+                          </span>
+                        ) : (
+                          <span className="ml-2 text-gray-500">할당되지 않음</span>
+                        )}
+                      </div>
+                      {selectedTokenDetail.created_at && (
+                        <div>
+                          <span className="font-semibold">생성일:</span> <span className="text-sm text-gray-600">
+                            {new Date(selectedTokenDetail.created_at).toLocaleString('ko-KR')}
+                          </span>
+                        </div>
                       )}
+                      <div className="flex justify-end gap-2 mt-6">
+                        {!selectedTokenDetail.group_id && (
+                          <select
+                            className="mr-2 flex h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm"
+                            onChange={async (e) => {
+                              if (e.target.value) {
+                                try {
+                                  await AdminService.assignTokenToTeam(selectedTokenDetail.hf_manage_id, Number(e.target.value))
+                                  await fetchHFTokens()
+                                  setIsTokenDetailOpen(false)
+                                } catch (err: any) {
+                                  setError(err.message || '토큰 할당에 실패했습니다.')
+                                }
+                              }
+                            }}
+                          >
+                            <option value="">팀에 할당...</option>
+                            {teams.map(team => (
+                              <option key={team.group_id} value={team.group_id}>
+                                {team.group_name}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                        {selectedTokenDetail.group_id && (
+                          <Button 
+                            variant="outline" 
+                            onClick={async () => {
+                              try {
+                                await AdminService.unassignToken(selectedTokenDetail.hf_manage_id)
+                                await fetchHFTokens()
+                                setIsTokenDetailOpen(false)
+                              } catch (err: any) {
+                                setError(err.message || '토큰 할당 해제에 실패했습니다.')
+                              }
+                            }}
+                          >
+                            할당 해제
+                          </Button>
+                        )}
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button variant="destructive">삭제</Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>토큰 삭제</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                정말 이 토큰을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>취소</AlertDialogCancel>
+                              <AlertDialogAction 
+                                onClick={async () => {
+                                  try {
+                                    await AdminService.deleteHFToken(selectedTokenDetail.hf_manage_id)
+                                    await fetchHFTokens()
+                                    setIsTokenDetailOpen(false)
+                                  } catch (err: any) {
+                                    setError(err.message || '토큰 삭제에 실패했습니다.')
+                                  }
+                                }} 
+                                className="bg-red-600 hover:bg-red-700"
+                              >
+                                삭제
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                        <Button variant="outline" onClick={() => setIsTokenDetailOpen(false)}>닫기</Button>
+                      </div>
                     </div>
                   )}
                 </DialogContent>

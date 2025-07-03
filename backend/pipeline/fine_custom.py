@@ -34,12 +34,9 @@ except Exception as e:
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
-# Hugging Face 토큰 및 repo_id 설정 (환경 변수에서 가져오기)
-HF_TOKEN = os.getenv("HF_TOKEN")
+# Hugging Face repo_id 설정 (환경 변수에서 가져오기)
 HF_REPO_ID = os.getenv("HF_REPO_ID", "Snowfall0601/Exaone-lucio_finetuned")  # 기본값 설정
 
-if not HF_TOKEN:
-    print("WARNING: HF_TOKEN 환경 변수가 설정되지 않았습니다. 업로드를 건너뜁니다.")
 print(f"업로드 대상 저장소: {HF_REPO_ID}")
 
 class ExaoneDataPreprocessor:
@@ -343,10 +340,55 @@ def setup_training_arguments(output_dir="./exaone-qlora-results-system-custom"):
     
     return training_args
 
+def get_hf_token_from_db():
+    """데이터베이스에서 허깅페이스 토큰 가져오기"""
+    try:
+        import sys
+        import os
+        
+        # 프로젝트 루트를 경로에 추가
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        parent_dir = os.path.dirname(current_dir)
+        if parent_dir not in sys.path:
+            sys.path.insert(0, parent_dir)
+        
+        from app.database import get_db
+        from app.models.user import HFTokenManage
+        from app.core.encryption import decrypt_sensitive_data
+        
+        # 데이터베이스 연결
+        db = next(get_db())
+        
+        try:
+            # 활성화된 토큰 가져오기 (최신 생성순으로 정렬)
+            hf_token_manage = db.query(HFTokenManage).order_by(
+                HFTokenManage.created_at.desc()
+            ).first()
+            
+            if hf_token_manage and hf_token_manage.hf_token_value:
+                # 암호화된 토큰 복호화
+                decrypted_token = decrypt_sensitive_data(hf_token_manage.hf_token_value)
+                print(f"✅ 데이터베이스에서 HF 토큰 조회 성공: {hf_token_manage.hf_token_nickname} (그룹: {hf_token_manage.group_id})")
+                return decrypted_token
+            else:
+                print("❌ 데이터베이스에서 HF 토큰을 찾을 수 없습니다.")
+                print("💡 관리자 페이지에서 허깅페이스 토큰을 등록하고 팀에 할당해주세요.")
+                return None
+                
+        finally:
+            db.close()
+            
+    except Exception as e:
+        print(f"❌ 데이터베이스에서 HF 토큰 조회 실패: {e}")
+        return None
+
 def upload_to_huggingface(output_dir):
     """파인튜닝된 모델을 Hugging Face Hub에 업로드"""
-    if not HF_TOKEN:
-        print("HF_TOKEN이 설정되지 않아 업로드를 건너뜁니다.")
+    # 데이터베이스에서 HF 토큰 가져오기
+    hf_token = get_hf_token_from_db()
+    
+    if not hf_token:
+        print("HF 토큰을 데이터베이스에서 가져올 수 없어 업로드를 건너뜁니다.")
         return
     
     try:
@@ -359,7 +401,7 @@ def upload_to_huggingface(output_dir):
             repo_id=HF_REPO_ID,
             repo_type="model",
             private=False,
-            token=HF_TOKEN,
+            token=hf_token,
             exist_ok=True,
         )
         
@@ -369,7 +411,7 @@ def upload_to_huggingface(output_dir):
             repo_id=HF_REPO_ID,
             folder_path=output_dir,
             repo_type="model",
-            token=HF_TOKEN,
+            token=hf_token,
         )
         
         print(f"✅ 업로드 완료! 모델 URL: https://huggingface.co/{HF_REPO_ID}")

@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Depends, Query, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import List, Optional
+import os
+import logging
 
 from app.database import get_db
 from app.schemas.influencer import (
@@ -39,6 +41,7 @@ from app.services.finetuning_service import get_finetuning_service, InfluencerFi
 from datetime import datetime
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.get("/", response_model=List[AIInfluencerSchema])
@@ -73,16 +76,26 @@ async def create_new_influencer(
 ):
     """새 AI 인플루언서 생성"""
     user_id = current_user.get("sub")
+    logger.info(f"🚀 API: 인플루언서 생성 요청 - user_id: {user_id}, name: {influencer_data.influencer_name}")
     
     # 인플루언서 생성
     influencer = create_influencer(db, user_id, influencer_data)
     
-    # 백그라운드에서 QA 생성 작업 시작
-    background_tasks.add_task(
-        generate_influencer_qa_background,
-        influencer.influencer_id
-    )
+    # 환경변수로 자동 QA 생성 제어
+    auto_qa_enabled = os.getenv('AUTO_FINETUNING_ENABLED', 'true').lower() == 'true'
+    logger.info(f"🔧 자동 QA 생성 설정: {auto_qa_enabled}")
     
+    if auto_qa_enabled:
+        logger.info(f"⚡ 백그라운드 QA 생성 작업 시작 - influencer_id: {influencer.influencer_id}")
+        # 백그라운드에서 QA 생성 작업 시작
+        background_tasks.add_task(
+            generate_influencer_qa_background,
+            influencer.influencer_id
+        )
+    else:
+        logger.info("⏸️ 자동 QA 생성이 비활성화되어 있습니다")
+    
+    logger.info(f"✅ API: 인플루언서 생성 완료 - ID: {influencer.influencer_id}")
     return influencer
 
 
@@ -192,6 +205,13 @@ async def trigger_qa_generation(
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="인플루언서를 찾을 수 없습니다")
     
+    # 환경변수로 자동 QA 생성 제어
+    auto_qa_enabled = os.getenv('AUTO_FINETUNING_ENABLED', 'true').lower() == 'true'
+    
+    if not auto_qa_enabled:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=403, detail="자동 QA 생성이 비활성화되어 있습니다")
+    
     # 백그라운드에서 QA 생성 작업 시작
     background_tasks.add_task(
         generate_influencer_qa_background,
@@ -218,33 +238,42 @@ async def get_qa_generation_status(
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="인플루언서를 찾을 수 없습니다")
     
+    from app.models.influencer import BatchKey
+    
     if task_id:
-        # 특정 작업 상태 조회
-        task = task_manager.get_qa_task_status(task_id)
-        if not task or task.influencer_id != influencer_id:
+        # 특정 작업 상태 조회 (DB에서)
+        batch_key_entry = db.query(BatchKey).filter(BatchKey.task_id == task_id).first()
+        
+        if not batch_key_entry or batch_key_entry.influencer_id != influencer_id:
             from fastapi import HTTPException
             raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다")
         
         # 실시간 OpenAI 배치 상태 확인
         openai_batch_status = None
-        if task.batch_id:
+        if batch_key_entry.openai_batch_id:
             try:
-                openai_batch_status = task_manager.qa_generator.check_batch_status(task.batch_id)
+                openai_batch_status = task_manager.qa_generator.check_batch_status(batch_key_entry.openai_batch_id)
             except Exception as e:
                 openai_batch_status = {"error": f"OpenAI 상태 조회 실패: {str(e)}"}
         
+        s3_urls = {}
+        if batch_key_entry.s3_qa_file_url:
+            s3_urls["processed_qa_url"] = batch_key_entry.s3_qa_file_url
+        if batch_key_entry.s3_processed_file_url:
+            s3_urls["raw_results_url"] = batch_key_entry.s3_processed_file_url
+
         return {
-            "task_id": task.task_id,
-            "influencer_id": task.influencer_id,
-            "status": task.status.value,
-            "batch_id": task.batch_id,
-            "total_qa_pairs": task.total_qa_pairs,
-            "generated_qa_pairs": task.generated_qa_pairs,
-            "error_message": task.error_message,
-            "s3_urls": task.s3_urls,
-            "created_at": task.created_at,
-            "updated_at": task.updated_at,
-            "is_running": task_manager.is_task_running(task.task_id),
+            "task_id": batch_key_entry.task_id,
+            "influencer_id": batch_key_entry.influencer_id,
+            "status": batch_key_entry.status, # DB에서 직접 상태 가져옴
+            "batch_id": batch_key_entry.openai_batch_id,
+            "total_qa_pairs": batch_key_entry.total_qa_pairs,
+            "generated_qa_pairs": batch_key_entry.generated_qa_pairs,
+            "error_message": batch_key_entry.error_message,
+            "s3_urls": s3_urls,
+            "created_at": batch_key_entry.created_at,
+            "updated_at": batch_key_entry.updated_at,
+            "is_running": task_manager.is_task_running(task_id), # 백그라운드 태스크 매니저에서 실행 여부 확인
             "openai_batch_status": openai_batch_status  # 실제 OpenAI 상태 추가
         }
     else:
@@ -293,7 +322,7 @@ async def cancel_qa_generation(
         raise HTTPException(status_code=404, detail="인플루언서를 찾을 수 없습니다")
     
     # 작업 존재 확인
-    task = task_manager.get_qa_task_status(task_id)
+    task = task_manager.qa_generator.get_task_status(task_id)
     if not task or task.influencer_id != influencer_id:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다")
@@ -451,6 +480,13 @@ async def handle_openai_batch_webhook(
         # 배치 완료 시 즉시 처리
         if batch_status == "completed":
             print(f"🚀 배치 완료, 즉시 결과 처리 시작: task_id={task_id}")
+            
+            # 환경변수로 자동 처리 제어
+            auto_qa_enabled = os.getenv('AUTO_FINETUNING_ENABLED', 'true').lower() == 'true'
+            
+            if not auto_qa_enabled:
+                print(f"🔒 자동 QA 처리가 비활성화되어 있습니다 (AUTO_FINETUNING_ENABLED=false)")
+                return {"message": "자동 QA 처리가 비활성화되어 있습니다", "task_id": task_id}
             
             # 상태 업데이트
             matching_task.status = QAGenerationStatus.BATCH_COMPLETED

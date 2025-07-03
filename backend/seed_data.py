@@ -29,6 +29,7 @@ from app.models.influencer import (
 )
 from app.models.board import Board
 from app.core.security import get_password_hash
+from app.core.encryption import encrypt_sensitive_data
 
 
 def seed_data():
@@ -161,46 +162,8 @@ def seed_data():
         
         db.commit()
         
-        # 4. 허깅페이스 토큰 데이터 생성
-        hf_tokens_data = [
-            {
-                "group_id": 1,
-                "hf_token_value": "hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-                "hf_token_nickname": "개발용 토큰",
-                "hf_user_name": "dev_user",
-            },
-            {
-                "group_id": 2,
-                "hf_token_value": "hf_yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
-                "hf_token_nickname": "테스트용 토큰",
-                "hf_user_name": "test_user",
-            },
-            {
-                "group_id": 3,
-                "hf_token_value": "hf_zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
-                "hf_token_nickname": "프로덕션용 토큰",
-                "hf_user_name": "prod_user",
-            },
-        ]
-        
-        print("\n🔑 허깅페이스 토큰 데이터 생성 중...")
-        for token_data in hf_tokens_data:
-            existing_token = (
-                db.query(HFTokenManage)
-                .filter(
-                    HFTokenManage.group_id == token_data["group_id"],
-                    HFTokenManage.hf_token_nickname == token_data["hf_token_nickname"],
-                )
-                .first()
-            )
-            if not existing_token:
-                hf_token = HFTokenManage(**token_data)
-                db.add(hf_token)
-                print(f"✅ 토큰 생성: {token_data['hf_token_nickname']}")
-            else:
-                print(f"ℹ️ 기존 토큰: {token_data['hf_token_nickname']}")
-        
-        db.commit()
+        # 4. 허깅페이스 토큰은 실제 데이터베이스 데이터만 사용 (목업 데이터 제거)
+        print("\n🔑 허깅페이스 토큰은 실제 데이터만 사용합니다 (관리자 페이지에서 등록)")
         
         # AI 인플루언서 생성 전에 MBTI, StylePreset 기본 데이터 추가
         if not db.query(ModelMBTI).filter_by(mbti_id=1).first():

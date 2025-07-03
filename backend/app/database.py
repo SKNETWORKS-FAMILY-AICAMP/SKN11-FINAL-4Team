@@ -46,7 +46,6 @@ def init_database():
             APICallAggregation,
         )
         from app.models.board import Board
-        from app.models.batch_job import BatchJob
 
         # 테이블 생성
         Base.metadata.create_all(bind=engine)

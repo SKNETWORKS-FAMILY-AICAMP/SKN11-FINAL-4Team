@@ -10,6 +10,8 @@ from app.api.v1.endpoints import (
     analytics,
     system,
     instagram,
+    hf_tokens,
+    admin,
 )
 
 api_router = APIRouter()
@@ -42,3 +44,9 @@ api_router.include_router(system.router, prefix="/system", tags=["System"])
 
 # 인스타그램 연동 API
 api_router.include_router(instagram.router, prefix="/instagram", tags=["Instagram"])
+
+# 허깅페이스 토큰 관리 API
+api_router.include_router(hf_tokens.router, prefix="/hf-tokens", tags=["HuggingFace Tokens"])
+
+# 관리자 페이지 API
+api_router.include_router(admin.router, prefix="/admin", tags=["Administrator"])

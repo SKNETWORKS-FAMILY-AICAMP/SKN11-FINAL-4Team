@@ -400,3 +400,87 @@ async def get_team_users(
 
     users = team.users[skip : skip + limit]
     return users
+
+
+# 허깅페이스 토큰 관련 API
+
+@router.get("/{group_id}/hf-tokens")
+async def get_team_hf_tokens(
+    group_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    팀에 할당된 허깅페이스 토큰 목록 조회
+    
+    - **group_id**: 팀 ID
+    """
+    try:
+        # 팀 존재 확인
+        team = db.query(Team).filter(Team.group_id == group_id).first()
+        if team is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Team not found"
+            )
+        
+        # 권한 확인 - 관리자이거나 해당 팀에 속한 사용자만 조회 가능
+        user_id = current_user.get("sub")
+        user = db.query(User).filter(User.user_id == user_id).first()
+        
+        if not check_admin_permission(current_user, db) and user not in team.users:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not authorized to access this team's tokens",
+            )
+        
+        # 해당 팀에 할당된 허깅페이스 토큰들 조회
+        from app.models.user import HFTokenManage
+        from app.core.encryption import decrypt_sensitive_data
+        
+        tokens = db.query(HFTokenManage).filter(
+            HFTokenManage.group_id == group_id
+        ).all()
+        
+        # 토큰 값 마스킹 처리
+        masked_tokens = []
+        for token in tokens:
+            token_dict = {
+                "hf_manage_id": token.hf_manage_id,
+                "group_id": token.group_id,
+                "hf_token_nickname": token.hf_token_nickname,
+                "hf_user_name": token.hf_user_name,
+                "created_at": token.created_at,
+                "updated_at": token.updated_at,
+            }
+            
+            # 토큰 값 마스킹
+            if token.hf_token_value:
+                try:
+                    decrypted_value = decrypt_sensitive_data(token.hf_token_value)
+                    # 간단한 마스킹: hf_****끝4자리
+                    if len(decrypted_value) > 8:
+                        token_dict["hf_token_masked"] = f"hf_****{decrypted_value[-4:]}"
+                    else:
+                        token_dict["hf_token_masked"] = "hf_****"
+                except Exception:
+                    token_dict["hf_token_masked"] = "hf_****"
+            
+            masked_tokens.append(token_dict)
+        
+        return {
+            "team": {
+                "group_id": team.group_id,
+                "group_name": team.group_name,
+                "group_description": team.group_description,
+            },
+            "tokens": masked_tokens,
+            "total_tokens": len(masked_tokens)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )

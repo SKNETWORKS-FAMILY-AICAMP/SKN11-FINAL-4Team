@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from app.services.s3_service import get_s3_service
+from app.core.encryption import decrypt_sensitive_data
 
 logger = logging.getLogger(__name__)
 
@@ -55,12 +56,122 @@ class InfluencerFineTuningService:
         self.s3_service = get_s3_service()
         self.tasks: Dict[str, FineTuningTask] = {}
         
-        # 환경변수에서 설정 가져오기
-        self.hf_token = os.getenv('HF_TOKEN')
+        # 기본 모델 설정
         self.base_model = os.getenv('FINETUNING_BASE_MODEL', 'LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct')
+    
+    def _convert_korean_to_english(self, korean_name: str) -> str:
+        """
+        한글 이름을 영문으로 변환
+        Args:
+            korean_name: 한글 이름
+        Returns:
+            영문 변환된 이름
+        """
+        # 한글을 로마자로 변환하는 간단한 매핑
+        korean_to_roman = {
+            'ㄱ': 'g', 'ㄴ': 'n', 'ㄷ': 'd', 'ㄹ': 'r', 'ㅁ': 'm', 'ㅂ': 'b', 'ㅅ': 's',
+            'ㅇ': '', 'ㅈ': 'j', 'ㅊ': 'ch', 'ㅋ': 'k', 'ㅌ': 't', 'ㅍ': 'p', 'ㅎ': 'h',
+            'ㅏ': 'a', 'ㅑ': 'ya', 'ㅓ': 'eo', 'ㅕ': 'yeo', 'ㅗ': 'o', 'ㅛ': 'yo', 'ㅜ': 'u',
+            'ㅠ': 'yu', 'ㅡ': 'eu', 'ㅣ': 'i', 'ㅐ': 'ae', 'ㅒ': 'yae', 'ㅔ': 'e', 'ㅖ': 'ye',
+            'ㅘ': 'wa', 'ㅙ': 'wae', 'ㅚ': 'oe', 'ㅝ': 'wo', 'ㅞ': 'we', 'ㅟ': 'wi', 'ㅢ': 'ui'
+        }
         
-        if not self.hf_token:
-            logger.warning("HF_TOKEN 환경변수가 설정되지 않았습니다. Hugging Face 업로드가 불가능합니다.")
+        # 간단한 한글 단어 매핑 (일반적인 이름들)
+        name_mapping = {
+            '루시우': 'lucio',
+            '아나': 'ana', 
+            '메르시': 'mercy',
+            '트레이서': 'tracer',
+            '위도우메이커': 'widowmaker',
+            '솔져': 'soldier',
+            '라인하르트': 'reinhardt',
+            '디바': 'dva',
+            '윈스턴': 'winston',
+            '겐지': 'genji',
+            '한조': 'hanzo',
+            '맥크리': 'mccree',
+            '파라': 'pharah',
+            '리퍼': 'reaper',
+            '토르비욘': 'torbjorn',
+            '바스티온': 'bastion',
+            '시메트라': 'symmetra',
+            '젠야타': 'zenyatta'
+        }
+        
+        # 직접 매핑이 있는 경우 사용
+        if korean_name in name_mapping:
+            return name_mapping[korean_name]
+        
+        # 간단한 변환: 영문자와 숫자만 남기고 나머지는 제거
+        result = ""
+        for char in korean_name:
+            if char.isalnum():
+                if 'a' <= char <= 'z' or 'A' <= char <= 'Z' or '0' <= char <= '9':
+                    result += char.lower()
+                else:
+                    # 한글인 경우 간단히 처리
+                    result += 'ko'
+            elif char in ['-', '_']:
+                result += char
+        
+        # 결과가 비어있거나 너무 짧으면 기본값 사용
+        if not result or len(result) < 2:
+            result = f"influencer_{hash(korean_name) % 10000}"
+        
+        return result
+    
+    def _get_hf_info_from_influencer(self, influencer_data, db) -> tuple[str, str]:
+        """
+        인플루언서의 그룹 ID를 통해 허깅페이스 토큰과 사용자명 정보 가져오기
+        Args:
+            influencer_data: 인플루언서 데이터
+            db: 데이터베이스 세션
+        Returns:
+            (hf_token, hf_username) 튜플
+        """
+        logger.debug(f"_get_hf_info_from_influencer 호출됨. influencer_data 타입: {type(influencer_data)}")
+        if isinstance(influencer_data, dict):
+            logger.debug(f"influencer_data (dict): {influencer_data}")
+        else:
+            logger.debug(f"influencer_data (object): {influencer_data.__dict__ if hasattr(influencer_data, '__dict__') else influencer_data}")
+
+        try:
+            # 인플루언서의 그룹 ID 추출
+            group_id = None
+            if hasattr(influencer_data, 'group_id'):
+                group_id = influencer_data.group_id
+            elif isinstance(influencer_data, dict):
+                group_id = influencer_data.get('group_id')
+            
+            logger.debug(f"추출된 group_id: {group_id}")
+
+            if not group_id:
+                raise Exception("인플루언서의 그룹 ID를 찾을 수 없습니다")
+            
+            # 해당 그룹의 허깅페이스 토큰 조회 (최신 생성순으로 정렬)
+            from app.models.user import HFTokenManage
+            hf_token_manage = db.query(HFTokenManage).filter(
+                HFTokenManage.group_id == group_id
+            ).order_by(HFTokenManage.created_at.desc()).first()
+            
+            if hf_token_manage:
+                logger.debug(f"HFTokenManage 객체 발견. 닉네임: {hf_token_manage.hf_token_nickname}, 사용자명: {hf_token_manage.hf_user_name}")
+                # 암호화된 토큰 복호화
+                try:
+                    decrypted_token = decrypt_sensitive_data(hf_token_manage.hf_token_value)
+                    logger.info(f"그룹 {group_id}의 허깅페이스 토큰 조회 성공: {hf_token_manage.hf_token_nickname}")
+                    return decrypted_token, hf_token_manage.hf_user_name
+                except Exception as decrypt_e:
+                    logger.error(f"허깅페이스 토큰 복호화 실패: {decrypt_e}", exc_info=True)
+                    raise Exception(f"허깅페이스 토큰 복호화 실패: {decrypt_e}")
+            else:
+                logger.warning(f"그룹 {group_id}에 등록된 허깅페이스 토큰을 찾을 수 없습니다.")
+                # 그룹에 토큰이 없는 경우 
+                raise Exception(f"그룹 {group_id}에 등록된 허깅페이스 토큰이 없습니다. 관리자에게 문의하여 토큰을 등록해주세요.")
+            
+        except Exception as e:
+            logger.error(f"허깅페이스 정보 가져오기 실패: {e}", exc_info=True)
+            raise
     
     def convert_qa_data_for_finetuning(self, qa_data: List[Dict], influencer_name: str, 
                                      personality: str, style_info: str = "") -> List[Dict]:
@@ -161,15 +272,36 @@ class InfluencerFineTuningService:
                 
                 # JSON 데이터 파싱
                 content = response['Body'].read().decode('utf-8')
-                data = json.loads(content)
                 
-                # QA 쌍 추출
-                if isinstance(data, dict) and 'qa_pairs' in data:
-                    qa_pairs = data['qa_pairs']
-                elif isinstance(data, list):
-                    qa_pairs = data
-                else:
-                    logger.error("예상하지 못한 데이터 형식입니다")
+                qa_pairs = []
+                for line in content.splitlines():
+                    if line.strip(): # 빈 줄 건너뛰기
+                        try:
+                            data = json.loads(line)
+                            if isinstance(data, dict) and 'qa_pairs' in data:
+                                qa_pairs.extend(data['qa_pairs'])
+                            elif isinstance(data, dict):
+                                # 단일 QA 쌍이 바로 JSON 객체인 경우 (예: OpenAI 배치 결과)
+                                # 'response' 키가 있고 그 안에 'body'가 있는 경우를 처리
+                                if 'response' in data and 'body' in data['response'] and 'choices' in data['response']['body']:
+                                    message_content = data['response']['body']['choices'][0]['message']['content']
+                                    # Q: A: 형식 파싱
+                                    if 'Q:' in message_content and 'A:' in message_content:
+                                        parts = message_content.split('A:', 1)
+                                        if len(parts) == 2:
+                                            question = parts[0].replace('Q:', '').strip()
+                                            answer = parts[1].strip()
+                                            qa_pairs.append({"question": question, "answer": answer})
+                                elif 'question' in data and 'answer' in data:
+                                    qa_pairs.append(data)
+                            elif isinstance(data, list):
+                                qa_pairs.extend(data)
+                        except json.JSONDecodeError as e:
+                            logger.warning(f"JSONL 파싱 오류 (줄 건너뛰기): {e} - 줄 내용: {line.strip()}")
+                            continue
+                
+                if not qa_pairs:
+                    logger.error("S3에서 유효한 QA 데이터를 추출하지 못했습니다.")
                     return None
                 
                 logger.info(f"S3에서 QA 데이터 다운로드 완료: {len(qa_pairs)}개")
@@ -227,12 +359,13 @@ class InfluencerFineTuningService:
             logger.error(f"파인튜닝 데이터 준비 실패: {e}")
             return False
     
-    def run_finetuning(self, data_file: str, model_name: str, epochs: int = 5) -> tuple[bool, str]:
+    def run_finetuning(self, data_file: str, model_name: str, hf_token: str, epochs: int = 5) -> tuple[bool, str]:
         """
         파인튜닝 실행
         Args:
             data_file: 훈련 데이터 파일 경로
             model_name: 모델 이름 (HF repo ID로 사용)
+            hf_token: 허깅페이스 토큰
             epochs: 훈련 에포크 수
         Returns:
             (성공 여부, HF 모델 URL)
@@ -255,8 +388,6 @@ class InfluencerFineTuningService:
                 
                 # 환경변수 설정
                 os.environ['HF_REPO_ID'] = model_name
-                if self.hf_token:
-                    os.environ['HF_TOKEN'] = self.hf_token
                 
                 # 데이터 파일을 pipeline 디렉토리로 복사
                 target_data_file = os.path.join(pipeline_dir, 'new_qa.json')
@@ -290,14 +421,15 @@ class InfluencerFineTuningService:
             return False, str(e)
     
     def start_finetuning_task(self, influencer_id: str, qa_task_id: str, 
-                            s3_qa_url: str, influencer_data: Dict) -> str:
+                            s3_qa_url: str, influencer_data: Dict, db=None) -> str:
         """
         파인튜닝 작업 시작
         Args:
             influencer_id: 인플루언서 ID
             qa_task_id: QA 생성 작업 ID
             s3_qa_url: S3 QA 데이터 URL
-            influencer_data: 인플루언서 정보
+            influencer_data: 인플루언서 정보 (딕셔너리 또는 모델 인스턴스)
+            db: 데이터베이스 세션
         Returns:
             파인튜닝 작업 ID
         """
@@ -306,11 +438,48 @@ class InfluencerFineTuningService:
         # 작업 ID 생성
         task_id = f"ft_{influencer_id}_{int(time.time())}"
         
-        # HF repo ID 생성
-        influencer_name = influencer_data.get('influencer_name', 'influencer')
-        # 안전한 repo 이름 생성 (특수문자 제거)
-        safe_name = ''.join(c for c in influencer_name if c.isalnum() or c in '-_').lower()
-        hf_repo_id = f"skn-team/{safe_name}-finetuned"
+        # 인플루언서 이름 처리
+        if isinstance(influencer_data, dict):
+            influencer_name = influencer_data.get('influencer_name', 'influencer')
+            # 딕셔너리 타입도 그룹 기반으로 허깅페이스 사용자명 조회
+            try:
+                if db:
+                    _, hf_username = self._get_hf_info_from_influencer(influencer_data, db)
+                else:
+                    hf_username = 'skn-team'
+            except Exception as e:
+                logger.warning(f"허깅페이스 사용자명 조회 실패, 기본값 사용: {e}")
+                hf_username = 'skn-team'
+        else:
+            # 모델 인스턴스인 경우
+            influencer_name = getattr(influencer_data, 'influencer_name', 'influencer')
+            
+            # 허깅페이스 토큰 정보 가져오기
+            try:
+                if db:
+                    _, hf_username = self._get_hf_info_from_influencer(influencer_data, db)
+                else:
+                    hf_username = 'skn-team'
+            except Exception as e:
+                logger.warning(f"허깅페이스 사용자명 조회 실패, 기본값 사용: {e}")
+                hf_username = 'skn-team'
+        
+        # 한글 이름을 영문으로 변환
+        english_name = self._convert_korean_to_english(influencer_name)
+        
+        # 인플루언서 모델 repo 경로 생성 (허깅페이스 사용자명/영문이름-finetuned)
+        model_repo = influencer_data.get('influencer_model_repo', '') if isinstance(influencer_data, dict) else getattr(influencer_data, 'influencer_model_repo', '')
+        
+        if model_repo:
+            # 기존 repo 경로가 있으면 사용
+            hf_repo_id = model_repo
+            safe_name = model_repo.split('/')[-1] if '/' in model_repo else model_repo
+        else:
+            # 새로운 repo 경로 생성
+            safe_name = f"{english_name}-finetuned"
+            hf_repo_id = f"{hf_username}/{safe_name}"
+        
+        logger.info(f"파인튜닝 리포지토리 설정: {hf_repo_id} (원본: {influencer_name} → 영문: {english_name})")
         
         # 작업 생성
         task = FineTuningTask(
@@ -328,12 +497,13 @@ class InfluencerFineTuningService:
         
         return task_id
     
-    def execute_finetuning_task(self, task_id: str, influencer_data: Dict) -> bool:
+    def execute_finetuning_task(self, task_id: str, influencer_data: Dict, hf_token: str, db=None) -> bool:
         """
         파인튜닝 작업 실행
         Args:
             task_id: 작업 ID
             influencer_data: 인플루언서 정보
+            db: 데이터베이스 세션
         Returns:
             성공 여부
         """
@@ -369,6 +539,7 @@ class InfluencerFineTuningService:
                 success, result = self.run_finetuning(
                     temp_data_file, 
                     task.hf_repo_id, 
+                    hf_token,
                     task.training_epochs
                 )
                 
@@ -414,6 +585,63 @@ class InfluencerFineTuningService:
             if task.influencer_id == influencer_id
         ]
     
+    def is_influencer_finetuned(self, influencer_data, db=None) -> bool:
+        """
+        인플루언서가 파인튜닝되었는지 확인
+        Args:
+            influencer_data: 인플루언서 데이터 (딕셔너리 또는 모델 인스턴스)
+            db: 데이터베이스 세션
+        Returns:
+            파인튜닝 완료 여부
+        """
+        try:
+            # 인플루언서 ID 추출
+            if isinstance(influencer_data, dict):
+                influencer_id = influencer_data.get('influencer_id')
+                model_repo = influencer_data.get('influencer_model_repo', '')
+            else:
+                influencer_id = getattr(influencer_data, 'influencer_id', None)
+                model_repo = getattr(influencer_data, 'influencer_model_repo', '')
+            
+            if not influencer_id:
+                return False
+            
+            # 1. 모델 repo가 설정되어 있는지 확인
+            if model_repo and model_repo.strip():
+                logger.info(f"인플루언서 {influencer_id}에 모델 repo가 설정됨: {model_repo}")
+                return True
+            
+            # 2. 완료된 파인튜닝 작업이 있는지 확인
+            completed_tasks = [
+                task for task in self.tasks.values() 
+                if (task.influencer_id == influencer_id and 
+                    task.status == FineTuningStatus.COMPLETED)
+            ]
+            
+            if completed_tasks:
+                logger.info(f"인플루언서 {influencer_id}에 완료된 파인튜닝 작업 발견: {len(completed_tasks)}개")
+                return True
+            
+            # 3. 데이터베이스에서 완료된 파인튜닝 기록 확인
+            if db:
+                from app.models.influencer import BatchKey as BatchJob
+                completed_finetuning = db.query(BatchJob).filter(
+                    BatchJob.influencer_id == influencer_id,
+                    BatchJob.is_finetuning_started == True,
+                    BatchJob.status == "completed"
+                ).first()
+                
+                if completed_finetuning:
+                    logger.info(f"인플루언서 {influencer_id}에 데이터베이스에서 완료된 파인튜닝 발견")
+                    return True
+            
+            logger.info(f"인플루언서 {influencer_id}는 아직 파인튜닝되지 않음")
+            return False
+            
+        except Exception as e:
+            logger.error(f"파인튜닝 상태 확인 중 오류: {e}")
+            return False
+    
     async def start_finetuning_for_influencer(self, influencer_id: str, s3_qa_file_url: str, db) -> bool:
         """
         인플루언서를 위한 파인튜닝 시작 (startup service용)
@@ -435,28 +663,32 @@ class InfluencerFineTuningService:
                 logger.error(f"인플루언서를 찾을 수 없습니다: {influencer_id}")
                 return False
             
-            # 인플루언서 데이터를 딕셔너리로 변환
-            influencer_dict = {
-                'influencer_name': influencer_data.influencer_name,
-                'personality': getattr(influencer_data, 'influencer_personality', '친근하고 활발한 성격'),
-                'style_info': getattr(influencer_data, 'influencer_description', '')
-            }
-            
-            # 파인튜닝 작업 시작
+            # 허깅페이스 토큰 정보 가져오기
+            hf_token, hf_username = self._get_hf_info_from_influencer(influencer_data, db)
+
+            # 파인튜닝 작업 시작 (모델 인스턴스 직접 사용)
             task_id = self.start_finetuning_task(
                 influencer_id=influencer_id,
                 qa_task_id=f"startup_restart_{influencer_id}",
                 s3_qa_url=s3_qa_file_url,
-                influencer_data=influencer_dict
+                influencer_data=influencer_data,  # 모델 인스턴스 직접 전달
+                db=db
             )
             
             # 파인튜닝 실행 (백그라운드에서)
             import asyncio
             from functools import partial
             
+            # 인플루언서 데이터를 딕셔너리로 변환 (execute_finetuning_task용)
+            influencer_dict = {
+                'influencer_name': influencer_data.influencer_name,
+                'personality': getattr(influencer_data, 'influencer_personality', '친근하고 활발한 성격'),
+                'style_info': getattr(influencer_data, 'influencer_description', '')
+            }
+            
             # 동기 함수를 비동기로 실행
             loop = asyncio.get_event_loop()
-            execute_task = partial(self.execute_finetuning_task, task_id, influencer_dict)
+            execute_task = partial(self.execute_finetuning_task, task_id, influencer_dict, hf_token, db)
             success = await loop.run_in_executor(None, execute_task)
             
             if success:

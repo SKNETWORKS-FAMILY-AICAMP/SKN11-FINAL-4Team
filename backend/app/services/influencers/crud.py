@@ -2,10 +2,13 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
 import uuid
+import logging
 
 from app.models.influencer import AIInfluencer, StylePreset, ModelMBTI
 from app.models.user import User
 from app.schemas.influencer import AIInfluencerCreate, AIInfluencerUpdate
+
+logger = logging.getLogger(__name__)
 
 
 def get_user_group_ids(db: Session, user_id: str) -> List[str]:
@@ -67,15 +70,20 @@ def get_influencer_by_id(db: Session, user_id: str, influencer_id: str):
 
 def create_influencer(db: Session, user_id: str, influencer_data: AIInfluencerCreate):
     """새 AI 인플루언서 생성"""
+    logger.info(f"🎨 인플루언서 생성 시작 - user_id: {user_id}, name: {influencer_data.influencer_name}")
+    
     from app.services.influencers.style_presets import create_style_preset
     from app.schemas.influencer import StylePresetCreate
     
     # 스타일 프리셋 처리
     style_preset_id = influencer_data.style_preset_id
+    logger.debug(f"선택된 프리셋 ID: {style_preset_id}")
     
     if not style_preset_id:
+        logger.info("📝 프리셋이 선택되지 않아 자동 생성합니다")
         # 프리셋이 없으면 현재 값으로 자동 생성
         if not influencer_data.personality or not influencer_data.tone:
+            logger.error("❌ 성격과 말투가 누락됨")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="성격과 말투가 필요합니다. 프리셋을 지정하거나 성격과 말투를 입력해주세요."
@@ -124,7 +132,9 @@ def create_influencer(db: Session, user_id: str, influencer_data: AIInfluencerCr
         
         style_preset = create_style_preset(db, preset_data)
         style_preset_id = style_preset.style_preset_id
+        logger.info(f"✅ 자동 프리셋 생성 완료: {style_preset_id}")
     else:
+        logger.info(f"🎯 기존 프리셋 사용: {style_preset_id}")
         # 기존 프리셋 존재 확인
         style_preset = (
             db.query(StylePreset)
@@ -132,6 +142,7 @@ def create_influencer(db: Session, user_id: str, influencer_data: AIInfluencerCr
             .first()
         )
         if not style_preset:
+            logger.error(f"❌ 프리셋을 찾을 수 없음: {style_preset_id}")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, 
                 detail="Style preset not found"
@@ -181,7 +192,8 @@ def create_influencer(db: Session, user_id: str, influencer_data: AIInfluencerCr
     db.add(influencer)
     db.commit()
     db.refresh(influencer)
-
+    
+    logger.info(f"🎉 인플루언서 생성 완료 - ID: {influencer.influencer_id}, 이름: {influencer.influencer_name}")
     return influencer
 
 
