@@ -33,7 +33,7 @@ def check_admin_permission(current_user: User, db: Session):
     return False
 
 
-@router.post("/", response_model=UserSchema)
+@router.post("", response_model=UserSchema)
 async def create_user(
     user_data: UserCreate,
     db: Session = Depends(get_db),
@@ -79,7 +79,7 @@ async def create_user(
     return user
 
 
-@router.get("/", response_model=List[UserWithTeams])
+@router.get("", response_model=List[UserWithTeams])
 async def get_users(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=100),

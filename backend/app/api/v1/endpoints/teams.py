@@ -44,7 +44,7 @@ class BulkUserOperation(BaseModel):
     user_ids: List[str]
 
 
-@router.get("/", response_model=List[TeamWithUsers])
+@router.get("", response_model=List[TeamWithUsers])
 async def get_teams(
     skip: int = 0,
     limit: int = 100,
@@ -107,7 +107,7 @@ async def get_team(
     return team
 
 
-@router.post("/", response_model=TeamSchema)
+@router.post("", response_model=TeamSchema)
 async def create_team(
     team_data: TeamCreate,
     current_user: dict = Depends(get_current_user),

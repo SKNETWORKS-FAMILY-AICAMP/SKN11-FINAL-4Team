@@ -13,7 +13,7 @@ from app.services.notification_service import get_notification_service, Notifica
 router = APIRouter()
 
 
-@router.get("/")
+@router.get("")
 async def get_notifications(
     unread_only: bool = False,
     current_user: dict = Depends(get_current_user),

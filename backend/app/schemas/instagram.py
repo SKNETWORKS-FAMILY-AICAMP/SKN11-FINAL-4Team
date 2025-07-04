@@ -33,3 +33,17 @@ class InstagramStatus(BaseModel):
     account_type: Optional[str] = None
     connected_at: Optional[datetime] = None
     is_active: bool = False
+
+class InstagramDMRequest(BaseModel):
+    """인스타그램 DM 요청 모델"""
+    sender_id: str
+    recipient_id: str
+    message: str
+    timestamp: Optional[datetime] = None
+
+class InstagramDMResponse(BaseModel):
+    """인스타그램 DM 응답 모델"""
+    success: bool
+    message: str
+    response_text: Optional[str] = None
+    timestamp: Optional[datetime] = None
