@@ -1,11 +1,11 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, Suspense } from "react"
 import { useSearchParams } from "next/navigation"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { CheckCircle, AlertCircle, Loader2, Instagram } from "lucide-react"
 
-export default function InstagramCallbackPage() {
+function InstagramCallbackContent() {
   const searchParams = useSearchParams()
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading')
   const [message, setMessage] = useState('Instagram 인증을 처리하고 있습니다...')
@@ -138,5 +138,35 @@ export default function InstagramCallbackPage() {
         </CardContent>
       </Card>
     </div>
+  )
+}
+
+export default function InstagramCallbackPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <Card className="w-full max-w-md">
+          <CardHeader className="text-center">
+            <div className="flex justify-center mb-4">
+              <Loader2 className="h-12 w-12 text-blue-500 animate-spin" />
+            </div>
+            <CardTitle className="flex items-center justify-center space-x-2">
+              <Instagram className="h-5 w-5 text-pink-600" />
+              <span>Instagram 인증</span>
+            </CardTitle>
+            <CardDescription>
+              Instagram 인증을 처리하고 있습니다...
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="text-center">
+              <p className="text-sm text-gray-600">잠시만 기다려주세요...</p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    }>
+      <InstagramCallbackContent />
+    </Suspense>
   )
 }

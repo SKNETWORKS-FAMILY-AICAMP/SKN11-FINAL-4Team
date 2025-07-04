@@ -11,6 +11,9 @@ from app.api.v1.endpoints import (
     system,
     instagram,
     content_enhancement,
+    hf_tokens,
+    admin,
+    chatbot,
 )
 from app.api.v1.endpoints.public import mbti as public_mbti
 
@@ -36,6 +39,9 @@ api_router.include_router(boards.router, prefix="/boards", tags=["Boards"])
 # 채팅 API
 api_router.include_router(chat.router, prefix="/chat", tags=["Chat"])
 
+# 챗봇 WebSocket API
+api_router.include_router(chatbot.router, prefix="/chatbot", tags=["Chatbot"])
+
 # 분석 및 집계 API
 api_router.include_router(analytics.router, prefix="/analytics", tags=["Analytics"])
 
@@ -50,3 +56,9 @@ api_router.include_router(content_enhancement.router, prefix="/content-enhanceme
 
 # 공개 API (인증 불필요)
 api_router.include_router(public_mbti.router, prefix="/public", tags=["Public APIs"])
+
+# 허깅페이스 토큰 관리 API
+api_router.include_router(hf_tokens.router, prefix="/hf-tokens", tags=["HuggingFace Tokens"])
+
+# 관리자 페이지 API
+api_router.include_router(admin.router, prefix="/admin", tags=["Administrator"])

@@ -23,6 +23,7 @@ app.add_middleware(
         "http://localhost:3000",
         "https://localhost:3000",
         "https://273b-222-112-208-68.ngrok-free.app",
+        "*",
         os.getenv("FRONTEND_URL", "http://localhost:3000")
     ],
     allow_credentials=True,
@@ -33,7 +34,7 @@ app.add_middleware(
 # 라우터 등록
 app.include_router(auth_router, prefix="/api/auth", tags=["authentication"])
 
-@app.get("/")
+@app.get("")
 async def root():
     return {"message": "Social Auth Backend API", "version": "1.0.0"}
 

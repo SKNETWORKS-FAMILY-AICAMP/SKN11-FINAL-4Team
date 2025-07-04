@@ -12,7 +12,7 @@ from app.api.v1.endpoints.auth import get_current_user
 router = APIRouter()
 
 
-@router.get("/", response_model=List[ChatMessageSchema])
+@router.get("", response_model=List[ChatMessageSchema])
 async def get_chat_messages(
     influencer_id: str,
     skip: int = Query(0, ge=0),
@@ -47,7 +47,7 @@ async def get_chat_messages(
     return messages
 
 
-@router.post("/", response_model=ChatMessageSchema)
+@router.post("", response_model=ChatMessageSchema)
 async def create_chat_message(
     message_data: ChatMessageCreate,
     db: Session = Depends(get_db),

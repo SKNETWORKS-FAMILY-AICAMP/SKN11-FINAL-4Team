@@ -86,6 +86,17 @@ class Settings(BaseSettings):
     # 캐시 설정
     CACHE_TTL: int = int(os.getenv("CACHE_TTL", "300"))  # 5 minutes
 
+    # QA 생성 설정
+    QA_GENERATION_COUNT: int = int(os.getenv("QA_GENERATION_COUNT", "2000"))  # 기본값 2000개
+    
+    # 자동 파인튜닝 설정
+    AUTO_FINETUNING_ENABLED: bool = os.getenv("AUTO_FINETUNING_ENABLED", "true").lower() == "true"
+    
+    # OpenAI 배치 모니터링 설정
+    OPENAI_MONITORING_MODE: str = os.getenv("OPENAI_MONITORING_MODE", "webhook")  # webhook 또는 polling
+    OPENAI_POLLING_INTERVAL_MINUTES: int = int(os.getenv("OPENAI_POLLING_INTERVAL_MINUTES", "7"))  # 폴링 간격 (분)
+    OPENAI_WEBHOOK_URL: str = os.getenv("OPENAI_WEBHOOK_URL", "http://localhost:8000/api/v1/influencers/webhooks/openai/batch-complete")
+
     # 추가 환경 변수들 (누락된 것들)
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
     APP_NAME: str = os.getenv("APP_NAME", "AIMEX Backend")
@@ -119,6 +130,19 @@ class Settings(BaseSettings):
 
         if self.ACCESS_TOKEN_EXPIRE_MINUTES < 1:
             raise ValueError("ACCESS_TOKEN_EXPIRE_MINUTES must be at least 1 minute")
+
+        if self.QA_GENERATION_COUNT < 1:
+            raise ValueError("QA_GENERATION_COUNT must be at least 1")
+        if self.QA_GENERATION_COUNT > 50000:
+            raise ValueError("QA_GENERATION_COUNT must not exceed 50,000 (OpenAI Batch API limit)")
+        
+        if self.OPENAI_MONITORING_MODE not in ["webhook", "polling"]:
+            raise ValueError("OPENAI_MONITORING_MODE must be either 'webhook' or 'polling'")
+        
+        if self.OPENAI_POLLING_INTERVAL_MINUTES < 1:
+            raise ValueError("OPENAI_POLLING_INTERVAL_MINUTES must be at least 1 minute")
+        if self.OPENAI_POLLING_INTERVAL_MINUTES > 60:
+            raise ValueError("OPENAI_POLLING_INTERVAL_MINUTES should not exceed 60 minutes for timely updates")
 
 
 settings = Settings()
