@@ -14,6 +14,9 @@ from dotenv import load_dotenv
 # .env 파일에서 환경변수 로드
 load_dotenv()
 
+# QA 생성 개수 설정 (환경변수에서 읽기)
+QA_GENERATION_COUNT = int(os.getenv('QA_GENERATION_COUNT', '2000'))
+
 # OpenAI 클라이언트 초기화
 client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 
@@ -36,8 +39,10 @@ def create_speech_examples(dialogues: List[str], num_examples: int = 20) -> str:
     
     return examples_text
 
-def create_batch_requests(dialogues: List[str], num_requests: int = 2000) -> List[Dict]:
+def create_batch_requests(dialogues: List[str], num_requests: int = None) -> List[Dict]:
     """배치 요청을 위한 JSONL 형태의 요청들 생성"""
+    if num_requests is None:
+        num_requests = QA_GENERATION_COUNT
     
     # 다양한 질문 주제들
     question_topics = [
@@ -115,7 +120,7 @@ def submit_batch_job(batch_file_path: str) -> str:
         endpoint="/v1/chat/completions",
         completion_window="24h",
         metadata={
-            "description": "Vi character QA pairs generation - 2000 samples"
+            "description": f"Vi character QA pairs generation - {QA_GENERATION_COUNT} samples"
         }
     )
     
@@ -208,7 +213,7 @@ def main():
         
         # 2. 배치 요청 생성
         print("2. 배치 요청 생성 중...")
-        requests = create_batch_requests(dialogues, 2000)
+        requests = create_batch_requests(dialogues)
         print(f"{len(requests)}개의 요청 생성 완료")
         
         # 3. 배치 파일 저장

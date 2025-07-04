@@ -3,25 +3,46 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
+from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 import logging
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from app.core.config import settings
 from app.database import init_database, test_database_connection
 from app.api.v1.api import api_router
+from app.services.startup_service import run_startup_tasks
+from app.services.batch_monitor import start_batch_monitoring, stop_batch_monitoring
 
 # 로깅 설정
-logging.basicConfig(
-    level=getattr(logging, settings.LOG_LEVEL), format=settings.LOG_FORMAT
-)
+if settings.DEBUG:
+    # 개발 환경에서는 더 상세한 로깅
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s",
+        handlers=[
+            logging.StreamHandler(),  # 콘솔 출력
+        ]
+    )
+    # 개발 환경에서는 SQLAlchemy 로그도 표시
+    logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
+    logging.getLogger('app').setLevel(logging.DEBUG)
+else:
+    # 프로덕션 환경에서는 기존 설정 유지
+    logging.basicConfig(
+        level=getattr(logging, settings.LOG_LEVEL), 
+        format=settings.LOG_FORMAT
+    )
+    # 외부 라이브러리 로그 비활성화
+    logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
+    logging.getLogger('sqlalchemy.pool').setLevel(logging.WARNING)
+    logging.getLogger('sqlalchemy.dialects').setLevel(logging.WARNING)
+
 logger = logging.getLogger(__name__)
 
-# 외부 라이브러리 로그 비활성화
-logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
-logging.getLogger('sqlalchemy.pool').setLevel(logging.WARNING)
-logging.getLogger('sqlalchemy.dialects').setLevel(logging.WARNING)
+# 공통으로 비활성화할 로그들
 logging.getLogger('httpx').setLevel(logging.WARNING)
 logging.getLogger('httpcore').setLevel(logging.WARNING)
 
@@ -37,12 +58,32 @@ async def lifespan(app: FastAPI):
         logger.error("❌ Database connection failed")
         raise Exception("Database connection failed")
 
+    # 시작시 작업 실행 (QA 데이터 있지만 파인튜닝 시작 안된 작업들 자동 재시작)
+    try:
+        await run_startup_tasks()
+    except Exception as e:
+        logger.warning(f"⚠️ Startup tasks failed, but continuing: {e}")
+
+    # 배치 모니터링 시작 (폴링 모드인 경우)
+    try:
+        await start_batch_monitoring()
+        logger.info(f"🔄 배치 모니터링 모드: {settings.OPENAI_MONITORING_MODE}")
+    except Exception as e:
+        logger.warning(f"⚠️ Batch monitoring failed to start, but continuing: {e}")
+
     logger.info("✅ AIMEX API Server ready")
 
     yield
 
     # 종료 시 실행
     logger.info("🛑 Shutting down AIMEX API Server...")
+    
+    # 배치 모니터링 중지
+    try:
+        await stop_batch_monitoring()
+        logger.info("✅ 배치 모니터링이 정상적으로 중지되었습니다")
+    except Exception as e:
+        logger.error(f"❌ 배치 모니터링 중지 중 오류: {e}")
 
 
 # FastAPI 애플리케이션 생성
@@ -160,9 +201,10 @@ async def health_check():
 
 
 # 루트 엔드포인트
-@app.get("/")
+@app.get("")
 async def root():
     """루트 엔드포인트"""
+    logger.info("🏠 루트 엔드포인트 접근")
     return {
         "message": "Welcome to AIMEX API",
         "version": settings.VERSION,
@@ -170,9 +212,29 @@ async def root():
         "health": "/health",
     }
 
+# 개발용 로그 테스트 엔드포인트
+@app.get("/test-logs")
+async def test_logs():
+    """로그 테스트 엔드포인트"""
+    logger.debug("🔍 DEBUG 레벨 로그 테스트")
+    logger.info("ℹ️ INFO 레벨 로그 테스트")
+    logger.warning("⚠️ WARNING 레벨 로그 테스트")
+    logger.error("❌ ERROR 레벨 로그 테스트")
+    
+    return {
+        "message": "로그 테스트 완료",
+        "debug_mode": settings.DEBUG,
+        "log_level": settings.LOG_LEVEL
+    }
+
 
 # API 라우터 등록
 app.include_router(api_router, prefix=settings.API_V1_STR)
+
+# 업로드된 파일 서빙을 위한 정적 파일 서비스
+upload_dir = Path("uploads")
+upload_dir.mkdir(exist_ok=True)
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 # 버전 없는 라우터 추가 (하위 호환성)
 from app.api.v1.endpoints.auth import router as auth_router
