@@ -253,7 +253,7 @@ function PostListContent() {
         content: board.board_description,
         createdAt: board.created_at,
         platform: getPlatformName(board.board_platform),
-        hashtags: board.board_hash_tag ? board.board_hash_tag.split(' ').filter((tag: string) => tag.startsWith('#')) : [],
+        hashtags: board.board_hash_tag ? board.board_hash_tag.split(' ').filter((tag: string) => tag.trim()).map((tag: string) => tag.startsWith('#') ? tag : `#${tag}`) : [],
         status: getStatusName(board.board_status),
         author: 'AI 인플루언서',
         modelName: 'AI 인플루언서',
@@ -347,7 +347,7 @@ function PostListContent() {
         board_hash_tag: newPostHashtags || "",
         image_url: "/placeholder.svg?height=400&width=400",
         engagement: { likes: 0, comments: 0, shares: 0 },
-        hashtags: newPostHashtags ? newPostHashtags.split(' ').filter(tag => tag.startsWith('#')) : [],
+        hashtags: newPostHashtags ? newPostHashtags.split(' ').filter(tag => tag.trim()).map(tag => tag.startsWith('#') ? tag : `#${tag}`) : [],
         media: {
           type: "image",
           urls: ["/placeholder.svg?height=400&width=400"]
@@ -797,11 +797,19 @@ function PostListContent() {
                       {(post.content || post.board_description || '').length > 150 ? `${(post.content || post.board_description || '').substring(0, 150)}...` : (post.content || post.board_description || '')}
                     </p>
                     <div className="flex flex-wrap gap-1 mb-3">
-                      {(post.hashtags || []).map((tag, index) => (
-                        <span key={index} className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded">
-                          {tag}
-                        </span>
-                      ))}
+                      {(post.hashtags || []).length > 0 ? (
+                        (post.hashtags || []).map((tag, index) => (
+                          <span key={index} className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded">
+                            {tag}
+                          </span>
+                        ))
+                      ) : (
+                        post.board_hash_tag && post.board_hash_tag.split(' ').filter(tag => tag.trim()).map((tag, index) => (
+                          <span key={index} className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded">
+                            {tag.startsWith('#') ? tag : `#${tag}`}
+                          </span>
+                        ))
+                      )}
                     </div>
                   </div>
                 </div>
