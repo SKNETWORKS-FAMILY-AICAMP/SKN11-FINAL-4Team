@@ -60,6 +60,7 @@ class StylePreset(StylePresetBase, TimestampSchema):
 class AIInfluencerBase(BaseModel):
     user_id: str
     group_id: int
+    hf_manage_id: Optional[str] = None
     style_preset_id: str
     mbti_id: Optional[int] = None
     influencer_name: str
@@ -97,6 +98,7 @@ class AIInfluencerCreate(BaseSchema):
 
 
 class AIInfluencerUpdate(BaseModel):
+    hf_manage_id: Optional[str] = None
     style_preset_id: Optional[str] = None
     mbti_id: Optional[int] = None
     hf_manage_id: Optional[str] = None

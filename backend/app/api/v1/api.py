@@ -10,6 +10,7 @@ from app.api.v1.endpoints import (
     analytics,
     system,
     instagram,
+    model_test,
     content_enhancement,
     hf_tokens,
     admin,
@@ -39,9 +40,6 @@ api_router.include_router(boards.router, prefix="/boards", tags=["Boards"])
 # 채팅 API
 api_router.include_router(chat.router, prefix="/chat", tags=["Chat"])
 
-# 챗봇 WebSocket API
-api_router.include_router(chatbot.router, prefix="/chatbot", tags=["Chatbot"])
-
 # 분석 및 집계 API
 api_router.include_router(analytics.router, prefix="/analytics", tags=["Analytics"])
 
@@ -50,6 +48,9 @@ api_router.include_router(system.router, prefix="/system", tags=["System"])
 
 # 인스타그램 연동 API
 api_router.include_router(instagram.router, prefix="/instagram", tags=["Instagram"])
+
+# Model Test API
+api_router.include_router(model_test.router, prefix="/model-test", tags=["ModelTest"])
 
 # 게시글  API
 api_router.include_router(content_enhancement.router, prefix="/content-enhancement", tags=["Content Enhancement"])
