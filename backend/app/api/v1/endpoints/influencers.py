@@ -53,32 +53,7 @@ async def get_influencers(
 ):
     """사용자별 AI 인플루언서 목록 조회"""
     user_id = current_user.get("sub")
-    
-    # 사용자 정보 가져오기
-    user = db.query(User).filter(User.user_id == user_id).first()
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found"
-        )
-    
-    # 사용자의 팀에 속한 모델들 조회
-    user_group_ids = [group.group_id for group in user.teams]
-    
-    print(user_group_ids)
-    query = db.query(AIInfluencer)
-    if user_group_ids:
-        # 팀이 있는 경우: 팀에 속한 모델들 + 본인이 생성한 모델들
-        query = query.filter(
-            (AIInfluencer.group_id.in_(user_group_ids)) |
-            (AIInfluencer.user_id == user_id)
-        )
-    else:
-        # 팀이 없는 경우: 본인이 생성한 모델들만
-        query = query.filter(AIInfluencer.user_id == user_id)
-    
-    influencers = query.offset(skip).limit(limit).all()
-    return influencers
+
     return get_influencers_list(db, user_id, skip, limit)
 
 
@@ -90,40 +65,11 @@ async def get_influencer(
 ):
     """특정 AI 인플루언서 조회"""
     user_id = current_user.get("sub")
-    
-    # 사용자 정보 가져오기
-    user = db.query(User).filter(User.user_id == user_id).first()
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found"
-        )
-    print(user)
-    # 사용자의 팀에 속한 모델들 조회
-    user_group_ids = [group.group_id for group in user.teams]
-    
-    query = db.query(AIInfluencer).filter(AIInfluencer.influencer_id == influencer_id)
-    if user_group_ids:
-        # 팀이 있는 경우: 팀에 속한 모델들 + 본인이 생성한 모델들
-        query = query.filter(
-            (AIInfluencer.group_id.in_(user_group_ids)) |
-            (AIInfluencer.user_id == user_id)
-        )
-    else:
-        # 팀이 없는 경우: 본인이 생성한 모델들만
-        query = query.filter(AIInfluencer.user_id == user_id)
-    
-    influencer = query.first()
-
-    if influencer is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Influencer not found"
-        )
-    return influencer
+    return get_influencer_by_id(db, user_id, influencer_id)
 
 
-@router.post("/", response_model=AIInfluencerSchema)
-async def create_influencer(
+@router.post("", response_model=AIInfluencerSchema)
+async def createnew_influencer(
     influencer_data: AIInfluencerCreate,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),

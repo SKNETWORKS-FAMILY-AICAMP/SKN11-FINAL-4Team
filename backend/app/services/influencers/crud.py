@@ -19,7 +19,7 @@ def get_user_group_ids(db: Session, user_id: str) -> List[str]:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found"
         )
-    return [group.group_id for group in user.groups]
+    return [group.group_id for group in user.teams]
 
 
 def build_influencer_query(db: Session, user_id: str, influencer_id: str = None):
