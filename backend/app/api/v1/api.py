@@ -12,6 +12,7 @@ from app.api.v1.endpoints import (
     instagram,
     hf_tokens,
     admin,
+    chatbot,
 )
 
 api_router = APIRouter()
@@ -35,6 +36,9 @@ api_router.include_router(boards.router, prefix="/boards", tags=["Boards"])
 
 # 채팅 API
 api_router.include_router(chat.router, prefix="/chat", tags=["Chat"])
+
+# 챗봇 WebSocket API
+api_router.include_router(chatbot.router, prefix="/chatbot", tags=["Chatbot"])
 
 # 분석 및 집계 API
 api_router.include_router(analytics.router, prefix="/analytics", tags=["Analytics"])

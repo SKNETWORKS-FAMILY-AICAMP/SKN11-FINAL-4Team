@@ -61,9 +61,24 @@ export default function TestModelPage() {
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([])
   const [availableModels, setAvailableModels] = useState<AIInfluencer[]>([])
   const [modelsLoading, setModelsLoading] = useState(true)
+  const [maxModelWarning, setMaxModelWarning] = useState(false)
 
   const handleModelToggle = (modelId: string) => {
-    setSelectedModels((prev) => (prev.includes(modelId) ? prev.filter((id) => id !== modelId) : [...prev, modelId]))
+    setSelectedModels((prev) => {
+      if (prev.includes(modelId)) {
+        setMaxModelWarning(false)
+        return prev.filter((id) => id !== modelId)
+      } else {
+        if (prev.length >= 3) {
+          return prev
+        } else {
+          return [...prev, modelId]
+        }
+      }
+    })
+    setMaxModelWarning((prevSelected) => {
+      return selectedModels.length >= 2 && !selectedModels.includes(modelId)
+    })
   }
 
   const handleSendMessage = async () => {
@@ -147,39 +162,36 @@ export default function TestModelPage() {
                   <Bot className="h-5 w-5" />
                   <span>인플루언서 선택</span>
                 </CardTitle>
-                <CardDescription>테스트할 AI 인플루언서들을 선택하세요 (다중 선택 가능)</CardDescription>
+                <CardDescription>테스트할 AI 인플루언서들을 선택하세요 (3개까지 선택 가능)</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
+                {maxModelWarning && (
+                  <div className="text-xs text-red-500 mb-2">최대 3개까지 선택할 수 있습니다.</div>
+                )}
                 {modelsLoading ? (
                   <div className="text-center py-8">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mx-auto"></div>
                     <p className="text-sm text-gray-600 mt-2">인플루언서를 불러오는 중...</p>
                   </div>
                 ) : (
-                <div className="space-y-3">
-                  {availableModels.map((model) => {
-                    const isAvailable = model.learning_status === 1
-                    return (
+                <>
+                  <div className="space-y-3 max-h-[700px] overflow-y-auto pr-1">
+                    {availableModels.filter(model => model.learning_status === 1).map((model) => (
                       <div 
                         key={model.influencer_id} 
-                        className={`flex items-start space-x-3 p-3 border rounded-lg transition-colors ${
-                          isAvailable 
-                            ? 'hover:bg-gray-50 cursor-pointer' 
-                            : 'opacity-50 bg-gray-100 cursor-not-allowed'
-                        }`}
-                        onClick={() => isAvailable && handleModelToggle(model.influencer_id)}
+                        className="flex items-start space-x-3 p-3 border rounded-lg transition-colors hover:bg-gray-50 cursor-pointer"
+                        onClick={() => handleModelToggle(model.influencer_id)}
                       >
                         <Checkbox
                           id={model.influencer_id}
                           checked={selectedModels.includes(model.influencer_id)}
-                          onCheckedChange={() => isAvailable && handleModelToggle(model.influencer_id)}
+                          onCheckedChange={() => handleModelToggle(model.influencer_id)}
                           className="mt-1"
-                          disabled={!isAvailable}
                         />
                         <div className="flex-1 min-w-0">
                           <Label 
                             htmlFor={model.influencer_id} 
-                            className={`text-sm font-medium ${isAvailable ? 'cursor-pointer' : 'cursor-not-allowed'}`}
+                            className="text-sm font-medium cursor-pointer"
                           >
                             {model.influencer_name}
                           </Label>
@@ -187,35 +199,15 @@ export default function TestModelPage() {
                             {model.influencer_description || 'AI 인플루언서'}
                           </p>
                           <div className="flex items-center space-x-2 mt-2">
-                            <Badge className={isAvailable ? "bg-green-100 text-green-800 text-xs" : "bg-yellow-100 text-yellow-800 text-xs"}>
-                              {isAvailable ? "사용 가능" : "생성 중"}
+                            <Badge className="bg-green-100 text-green-800 text-xs">
+                              사용 가능
                             </Badge>
-                            {!isAvailable && (
-                              <span className="text-xs text-gray-500">선택 불가</span>
-                            )}
                           </div>
                         </div>
                       </div>
-                    )
-                  })}
-                </div>
-                )}
-
-                {selectedModelData.length > 0 && (
-                  <div className="pt-4 border-t">
-                    <h4 className="text-sm font-medium text-gray-700 mb-3">
-                      선택된 인플루언서 ({selectedModelData.length}개)
-                    </h4>
-                    <div className="space-y-2">
-                      {selectedModelData.map((model) => (
-                        <div key={model.influencer_id} className="p-2 bg-blue-50 rounded text-xs">
-                          <p className="font-medium text-blue-900">{model.influencer_name}</p>
-                          <p className="text-blue-700 truncate">{model.influencer_description || 'AI 인플루언서'}</p>
-                          <p className="text-blue-700">상태: {model.learning_status === 1 ? '사용 가능' : '생성 중'}</p>
-                        </div>
-                      ))}
-                    </div>
+                    ))}
                   </div>
+                </>
                 )}
               </CardContent>
             </Card>
@@ -223,7 +215,7 @@ export default function TestModelPage() {
 
           {/* 채팅 인터페이스 */}
           <div className="lg:col-span-2">
-            <Card className="h-[600px] flex flex-col">
+            <Card className="h-[700px] flex flex-col">
               <CardHeader>
                 <CardTitle className="flex items-center space-x-2">
                   <MessageSquare className="h-5 w-5" />
@@ -231,9 +223,21 @@ export default function TestModelPage() {
                 </CardTitle>
                 <CardDescription>
                   {selectedModels.length > 0
-                    ? `${selectedModels.length}개 모델과 대화 중`
-                    : "모델을 선택하여 대화를 시작하세요"}
+                    ? `${selectedModels.length}개 인플루언서와 대화 중`
+                    : "인플루언서를 선택하여 대화를 시작하세요."}
                 </CardDescription>
+                {selectedModelData.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {selectedModelData.map((model) => (
+                      <span
+                        key={model.influencer_id}
+                        className="bg-blue-100 text-blue-800 rounded-full px-3 py-1 text-xs font-medium inline-block"
+                      >
+                        {model.influencer_name}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </CardHeader>
 
               {/* 채팅 메시지 영역 */}
@@ -243,7 +247,7 @@ export default function TestModelPage() {
                     <div className="text-center text-gray-500 py-8">
                       <MessageSquare className="h-12 w-12 mx-auto mb-4 text-gray-300" />
                       <p>여러 AI 인플루언서와 대화를 시작해보세요!</p>
-                      <p className="text-sm mt-2">각 인플루언서의 다른 응답 스타일을 비교할 수 있습니다.</p>
+                      <p className="text-sm mt-2">각 인플루언서의 다른 응답 스타일을 비교할 수 있습니다</p>
                     </div>
                   ) : (
                     chatHistory.map((msg) => (
