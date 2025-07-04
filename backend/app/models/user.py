@@ -14,7 +14,7 @@ from app.models.base import Base, TimestampMixin
 from app.models.influencer import AIInfluencer
 import uuid
 
-# User-Team 다대다 관계 테이블
+# User-Team 다대다 관계 테이블 (실제 DB 구조에 맞춤)
 user_group = Table(
     "USER_GROUP",
     Base.metadata,
@@ -45,13 +45,13 @@ class User(Base, TimestampMixin):
     email = Column(String(50), nullable=False, unique=True, comment="사용자 이메일")
 
     # 관계
-    groups = relationship("Team", secondary=user_group, back_populates="users")
+    teams = relationship("Team", secondary=user_group, back_populates="users")
     system_logs = relationship("SystemLog", back_populates="user")
     ai_influencers = relationship("AIInfluencer", back_populates="user")
 
 
 class Team(Base, TimestampMixin):
-    """그룹 모델"""
+    """팀 모델 (실제 DB 구조에 맞춤)"""
 
     __tablename__ = "TEAM"
 
@@ -62,9 +62,9 @@ class Team(Base, TimestampMixin):
     group_description = Column(Text, comment="그룹 설명")
 
     # 관계
-    users = relationship("User", secondary=user_group, back_populates="groups")
-    hf_tokens = relationship("HFTokenManage", back_populates="group")
-    ai_influencers = relationship("AIInfluencer", back_populates="group")
+    users = relationship("User", secondary=user_group, back_populates="teams")
+    hf_tokens = relationship("HFTokenManage", back_populates="team")
+    ai_influencers = relationship("AIInfluencer", back_populates="team")
 
 
 class HFTokenManage(Base, TimestampMixin):
@@ -95,7 +95,7 @@ class HFTokenManage(Base, TimestampMixin):
     )
 
     # 관계
-    group = relationship("Team", back_populates="hf_tokens")
+    team = relationship("Team", back_populates="hf_tokens")
 
 
 class SystemLog(Base):

@@ -10,7 +10,9 @@ from app.api.v1.endpoints import (
     analytics,
     system,
     instagram,
+    content_enhancement,
 )
+from app.api.v1.endpoints.public import mbti as public_mbti
 
 api_router = APIRouter()
 
@@ -42,3 +44,9 @@ api_router.include_router(system.router, prefix="/system", tags=["System"])
 
 # 인스타그램 연동 API
 api_router.include_router(instagram.router, prefix="/instagram", tags=["Instagram"])
+
+# 게시글  API
+api_router.include_router(content_enhancement.router, prefix="/content-enhancement", tags=["Content Enhancement"])
+
+# 공개 API (인증 불필요)
+api_router.include_router(public_mbti.router, prefix="/public", tags=["Public APIs"])

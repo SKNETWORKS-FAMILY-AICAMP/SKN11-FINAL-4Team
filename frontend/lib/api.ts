@@ -145,15 +145,20 @@ class APIClient {
     return this.request<T>(endpoint, { ...options, method: 'DELETE' })
   }
 
-  // 파일 업로드용 메서드
-  async uploadFile<T>(
+  // 파일 업로드용 메서드 (개선된 버전)
+  async uploadFiles<T>(
     endpoint: string,
-    file: File,
+    files: FileList | File[],
     additionalData?: Record<string, string>,
     options?: Omit<RequestOptions, 'headers'>
   ): Promise<T> {
     const formData = new FormData()
-    formData.append('file', file)
+    
+    // 파일 배열을 FormData에 추가
+    const fileArray = Array.from(files)
+    fileArray.forEach((file, index) => {
+      formData.append('files', file)
+    })
     
     if (additionalData) {
       Object.entries(additionalData).forEach(([key, value]) => {
@@ -180,7 +185,14 @@ class APIClient {
       body: formData
     })
 
-    const data = await response.json()
+    let data
+    const contentType = response.headers.get('content-type')
+    
+    if (contentType?.includes('application/json')) {
+      data = await response.json()
+    } else {
+      data = await response.text()
+    }
 
     if (!response.ok) {
       throw new APIError(

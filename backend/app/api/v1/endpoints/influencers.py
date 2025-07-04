@@ -42,7 +42,7 @@ async def get_influencers(
         )
     
     # 사용자의 팀에 속한 모델들 조회
-    user_group_ids = [group.group_id for group in user.groups]
+    user_group_ids = [group.group_id for group in user.teams]
     
     print(user_group_ids)
     query = db.query(AIInfluencer)
@@ -78,7 +78,7 @@ async def get_influencer(
         )
     print(user)
     # 사용자의 팀에 속한 모델들 조회
-    user_group_ids = [group.group_id for group in user.groups]
+    user_group_ids = [group.group_id for group in user.teams]
     
     query = db.query(AIInfluencer).filter(AIInfluencer.influencer_id == influencer_id)
     if user_group_ids:
@@ -163,7 +163,7 @@ async def update_influencer(
             detail="User not found"
         )
     
-    user_group_ids = [group.group_id for group in user.groups]
+    user_group_ids = [group.group_id for group in user.teams]
     
     query = db.query(AIInfluencer).filter(AIInfluencer.influencer_id == influencer_id)
     if user_group_ids:
@@ -208,7 +208,7 @@ async def delete_influencer(
             detail="User not found"
         )
     
-    user_group_ids = [group.group_id for group in user.groups]
+    user_group_ids = [group.group_id for group in user.teams]
     
     query = db.query(AIInfluencer).filter(AIInfluencer.influencer_id == influencer_id)
     if user_group_ids:
@@ -294,7 +294,7 @@ async def connect_instagram_business(
             detail="User not found"
         )
     
-    user_group_ids = [group.group_id for group in user.groups]
+    user_group_ids = [group.group_id for group in user.teams]
     
     query = db.query(AIInfluencer).filter(AIInfluencer.influencer_id == influencer_id)
     if user_group_ids:
@@ -372,7 +372,7 @@ async def disconnect_instagram_business(
             detail="User not found"
         )
     
-    user_group_ids = [group.group_id for group in user.groups]
+    user_group_ids = [group.group_id for group in user.teams]
     
     query = db.query(AIInfluencer).filter(AIInfluencer.influencer_id == influencer_id)
     if user_group_ids:
@@ -419,7 +419,7 @@ async def get_instagram_connection_status(
             detail="User not found"
         )
     
-    user_group_ids = [group.group_id for group in user.groups]
+    user_group_ids = [group.group_id for group in user.teams]
     
     query = db.query(AIInfluencer).filter(AIInfluencer.influencer_id == influencer_id)
     if user_group_ids:
