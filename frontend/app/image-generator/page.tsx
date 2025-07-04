@@ -767,13 +767,13 @@ export default function ImageGeneratorPage() {
                   ) : (
                     <div className="space-y-6">
                       {/* 업로드된 이미지 미리보기 */}
-                      <div className="relative">
+                      <div className="relative flex justify-center">
                         <div className="relative inline-block">
                           <img
                             ref={imageRef}
                             src={uploadedImageUrl}
                             alt="업로드된 이미지"
-                            className="w-full max-w-md mx-auto rounded-lg shadow-md"
+                            className="max-w-md rounded-lg shadow-md"
                           />
                           {maskMode && (
                             <canvas
@@ -789,15 +789,15 @@ export default function ImageGeneratorPage() {
                               }}
                             />
                           )}
+                          <Button
+                            variant="destructive"
+                            size="sm"
+                            onClick={handleRemoveUploadedImage}
+                            className="absolute top-2 right-2"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
                         </div>
-                        <Button
-                          variant="destructive"
-                          size="sm"
-                          onClick={handleRemoveUploadedImage}
-                          className="absolute top-2 right-2"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
                       </div>
 
                       {/* 마스크 그리기 컨트롤 */}
