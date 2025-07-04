@@ -96,6 +96,7 @@ class HFTokenManage(Base, TimestampMixin):
 
     # 관계
     group = relationship("Team", back_populates="hf_tokens")
+    ai_influencers = relationship("AIInfluencer", back_populates="hf_token")
 
 
 class SystemLog(Base):
