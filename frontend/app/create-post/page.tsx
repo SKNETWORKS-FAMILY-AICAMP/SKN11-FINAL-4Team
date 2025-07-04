@@ -352,7 +352,7 @@ export default function CreatePostPage() {
           board_description: formData.board_description,
           board_platform: formData.board_platform,
           board_hash_tag: formData.board_hashtag.join(' '),
-          team_id: user?.teams?.[0]?.team_id || 1,
+          team_id: user?.teams?.[0]?.group_id || 1,
           image_url: imageUrl,
           board_status: 1 // 임시저장 상태
         })
