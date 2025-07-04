@@ -8,6 +8,7 @@ from sqlalchemy import (
     TIMESTAMP,
     ForeignKeyConstraint,
 )
+import sqlalchemy as sa
 from sqlalchemy.orm import relationship
 from app.models.base import Base, TimestampMixin
 from app.models.board import Board
@@ -85,6 +86,12 @@ class AIInfluencer(Base, TimestampMixin):
         nullable=False,
         comment="그룹 고유 식별자",
     )
+    hf_manage_id = Column(
+        String(255),
+        ForeignKey("HF_TOKEN_MANAGE.hf_manage_id"),
+        nullable=True,
+        comment="허깅페이스 토큰 관리 고유 식별자",
+    )
     style_preset_id = Column(
         String(255),
         ForeignKey("STYLE_PRESET.style_preset_id"),
@@ -97,9 +104,7 @@ class AIInfluencer(Base, TimestampMixin):
     influencer_name = Column(
         String(100), nullable=False, unique=True, comment="AI 인플루언서 이름"
     )
-    influencer_description = Column(
-        Text, comment="AI 인플루언서 설명"
-    )
+    influencer_description = Column(Text, comment="AI 인플루언서 설명")
     image_url = Column(
         Text,
         comment="인플루언서 이미지를 받아오면 그대로 사용, 없다면 정보를 기반으로 만들어서 사용",
@@ -114,17 +119,11 @@ class AIInfluencer(Base, TimestampMixin):
         String(255), nullable=False, comment="허깅페이스 repo URL 경로"
     )
     chatbot_option = Column(Boolean, nullable=False, comment="챗봇 생성 여부")
-    
+
     # Instagram 계정 연동 정보 (필수 필드만)
-    instagram_id = Column(
-        String(255), comment="연동된 인스타그램 계정 ID"
-    )
-    instagram_access_token = Column(
-        Text, comment="인스타그램 액세스 토큰"
-    )
-    instagram_connected_at = Column(
-        TIMESTAMP, comment="인스타그램 계정 연동 일시"
-    )
+    instagram_id = Column(String(255), comment="연동된 인스타그램 계정 ID")
+    instagram_access_token = Column(Text, comment="인스타그램 액세스 토큰")
+    instagram_connected_at = Column(TIMESTAMP, comment="인스타그램 계정 연동 일시")
     instagram_is_active = Column(
         Boolean, default=False, comment="인스타그램 연동 활성화 여부"
     )
@@ -135,6 +134,7 @@ class AIInfluencer(Base, TimestampMixin):
     # 관계
     user = relationship("User", back_populates="ai_influencers")
     group = relationship("Team", back_populates="ai_influencers")
+    hf_token = relationship("HFTokenManage", back_populates="ai_influencers")
     style_preset = relationship("StylePreset", back_populates="ai_influencers")
     mbti = relationship("ModelMBTI", back_populates="ai_influencers")
     batch_keys = relationship("BatchKey", back_populates="influencer")
@@ -147,6 +147,17 @@ class AIInfluencer(Base, TimestampMixin):
     influencer_age_group = Column(Integer, comment="AI 인플루언서 연령대")
     voice_option = Column(Boolean, default=False, comment="음성 생성 옵션")
     image_option = Column(Boolean, default=False, comment="이미지 생성 옵션")
+
+    # 복합 기본키 설정
+    __table_args__ = (
+        sa.PrimaryKeyConstraint(
+            "influencer_id",
+            "user_id",
+            "group_id",
+            "hf_manage_id",
+            name="pk_ai_influencer",
+        ),
+    )
 
 
 class BatchKey(Base):
