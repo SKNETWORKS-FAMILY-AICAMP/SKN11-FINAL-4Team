@@ -1,5 +1,5 @@
 import uuid
-import openai
+from openai import AsyncOpenAI
 from typing import Dict, Any, Optional
 from sqlalchemy.orm import Session
 from datetime import datetime
@@ -13,7 +13,7 @@ class ContentEnhancementService:
     """게시글 설명 향상 서비스"""
     
     def __init__(self):
-        openai.api_key = settings.OPENAI_API_KEY
+        self.client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
     
     async def enhance_content(
         self, 
@@ -23,34 +23,40 @@ class ContentEnhancementService:
     ) -> ContentEnhancement:
         """게시글 설명 향상"""
         
-        # OpenAI API 호출로 내용 향상
-        enhanced_text = await self._call_openai_enhancement(
-            request.original_content, 
-            request.enhancement_style,
-            request.hashtags,
-            request.board_topic,
-            request.board_platform
-        )
-        
-        # DB에 저장
-        enhancement = ContentEnhancement(
-            enhancement_id=str(uuid.uuid4()),
-            user_id=user_id,
-            original_content=request.original_content,
-            enhanced_content=enhanced_text["enhanced_content"],
-            status="pending",
-            openai_model=enhanced_text.get("model"),
-            openai_tokens_used=enhanced_text.get("tokens_used"),
-            openai_cost=enhanced_text.get("cost"),
-            influencer_id=request.influencer_id,
-            enhancement_prompt=enhanced_text.get("prompt")
-        )
-        
-        db.add(enhancement)
-        db.commit()
-        db.refresh(enhancement)
-        
-        return enhancement
+        try:
+            # OpenAI API 호출로 내용 향상
+            enhanced_text = await self._call_openai_enhancement(
+                request.original_content, 
+                request.enhancement_style,
+                request.hashtags,
+                request.board_topic,
+                request.board_platform
+            )
+            
+            # DB에 저장
+            enhancement = ContentEnhancement(
+                enhancement_id=str(uuid.uuid4()),
+                user_id=user_id,
+                original_content=request.original_content,
+                enhanced_content=enhanced_text["enhanced_content"],
+                status="pending",
+                openai_model=enhanced_text.get("model"),
+                openai_tokens_used=enhanced_text.get("tokens_used"),
+                openai_cost=enhanced_text.get("cost"),
+                influencer_id=request.influencer_id,
+                enhancement_prompt=enhanced_text.get("prompt")
+            )
+            
+            db.add(enhancement)
+            db.commit()
+            db.refresh(enhancement)
+            
+            return enhancement
+            
+        except Exception as e:
+            # 데이터베이스 롤백
+            db.rollback()
+            raise Exception(f"Failed to enhance content: {str(e)}")
     
     async def _call_openai_enhancement(
         self, 
@@ -112,7 +118,7 @@ class ContentEnhancementService:
 """
         
         try:
-            response = await openai.ChatCompletion.acreate(
+            response = await self.client.chat.completions.create(
                 model=settings.OPENAI_MODEL,
                 messages=[
                     {"role": "system", "content": "당신은 SNS 콘텐츠 작성 전문가입니다. 사용자의 게시글을 더 매력적이고 효과적으로 개선해주세요."},

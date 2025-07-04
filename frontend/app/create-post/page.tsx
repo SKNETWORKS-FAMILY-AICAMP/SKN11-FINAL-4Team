@@ -12,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
+import { apiClient } from "@/lib/api"
 import { 
   ArrowLeft, 
   Save, 
@@ -84,6 +85,11 @@ export default function CreatePostPage() {
     status: string
   } | null>(null)
   const [isEnhancing, setIsEnhancing] = useState(false)
+  
+  // 발행 설정 상태
+  const [publishType, setPublishType] = useState<'immediate' | 'scheduled'>('immediate')
+  const [scheduledDate, setScheduledDate] = useState('')
+  const [scheduledTime, setScheduledTime] = useState('')
 
   // 인플루언서 데이터 로딩
   useEffect(() => {
@@ -154,13 +160,20 @@ export default function CreatePostPage() {
   // 모든 필드 입력 여부 검증 (미리보기 버튼용)
   const isFormValid = () => {
     const hasImage = formData.uploaded_image !== null || imagePreview !== null
-    return (
+    const basicFieldsValid = (
       formData.influencer_id.trim() !== '' &&
       formData.board_topic.trim() !== '' &&
       formData.board_description.trim() !== '' &&
       formData.board_hashtag.length > 0 &&
       hasImage
     )
+    
+    // 예약 발행이 선택된 경우 날짜/시간 검증
+    if (publishType === 'scheduled') {
+      return basicFieldsValid && scheduledDate !== '' && scheduledTime !== ''
+    }
+    
+    return basicFieldsValid
   }
 
   // 이미지 파일 처리 공통 함수
@@ -234,28 +247,15 @@ export default function CreatePostPage() {
     setError(null)
 
     try {
-      const response = await fetch('/api/v1/content-enhancement/enhance', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
-        },
-        body: JSON.stringify({
-          original_content: formData.board_description,
-          influencer_id: formData.influencer_id,
-          enhancement_style: "creative",
-          hashtags: formData.board_hashtag,
-          board_topic: formData.board_topic,
-          board_platform: formData.board_platform
-        })
+      const data = await apiClient.post('/api/v1/content-enhancement/enhance', {
+        original_content: formData.board_description,
+        influencer_id: formData.influencer_id,
+        enhancement_style: "creative",
+        hashtags: formData.board_hashtag,
+        board_topic: formData.board_topic,
+        board_platform: formData.board_platform
       })
-
-      if (!response.ok) {
-        throw new Error('설명 향상에 실패했습니다.')
-      }
-
-      const data = await response.json()
-      setEnhancedContent(data)
+      setEnhancedContent(data as any)
     } catch (err) {
       console.error('Content enhancement failed:', err)
       setError(err instanceof Error ? err.message : '설명 향상에 실패했습니다.')
@@ -269,21 +269,10 @@ export default function CreatePostPage() {
     if (!enhancedContent) return
 
     try {
-      const response = await fetch('/api/v1/content-enhancement/approve', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
-        },
-        body: JSON.stringify({
-          enhancement_id: enhancedContent.enhancement_id,
-          approved: approved
-        })
+      await apiClient.post('/api/v1/content-enhancement/approve', {
+        enhancement_id: enhancedContent.enhancement_id,
+        approved: approved
       })
-
-      if (!response.ok) {
-        throw new Error('승인 처리에 실패했습니다.')
-      }
 
       if (approved) {
         // 승인된 내용으로 폼 데이터 업데이트
@@ -316,46 +305,116 @@ export default function CreatePostPage() {
       return
     }
 
+    // 예약 발행 시 날짜/시간 검증
+    if (publishType === 'scheduled') {
+      if (!scheduledDate || !scheduledTime) {
+        setError("예약 발행을 선택했다면 날짜와 시간을 모두 선택해주세요.")
+        return
+      }
+      
+      const scheduledDateTime = new Date(`${scheduledDate}T${scheduledTime}`)
+      const now = new Date()
+      
+      if (scheduledDateTime <= now) {
+        setError("예약 시간은 현재 시간보다 이후여야 합니다.")
+        return
+      }
+    }
+
     setSubmitting(true)
     setError(null)
 
     try {
-      // 먼저 이미지 업로드
-      const imageFormData = new FormData()
-      imageFormData.append('files', formData.uploaded_image)
+      // 백엔드 URL 가져오기
+      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://localhost:8000';
+      console.log('Backend URL:', backendUrl);
       
-      const imageResponse = await fetch('/api/v1/boards/upload-image', {
+      // 먼저 GET 테스트
+      console.log('Testing GET connection...');
+      const getTestResponse = await fetch(`${backendUrl}/api/v1/boards/upload-test-get`, {
+        method: 'GET'
+      });
+      console.log('GET test result:', await getTestResponse.json());
+      
+      // POST 테스트
+      console.log('Testing POST connection...');
+      const testResponse = await fetch(`${backendUrl}/api/v1/boards/upload-test`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({})
+      });
+      console.log('POST test result:', await testResponse.json());
+      
+      // 인증 토큰 확인
+      const token = localStorage.getItem('access_token');
+      console.log('Token exists:', !!token);
+      console.log('Token preview:', token ? token.substring(0, 20) + '...' : 'null');
+      
+      // 이미지 업로드
+      const imageFormData = new FormData()
+      imageFormData.append('file', formData.uploaded_image)  // 단일 파일로 변경
+      
+      console.log('Uploading image...', formData.uploaded_image);
+      console.log('FormData entries:', Array.from(imageFormData.entries()));
+      
+      const imageResponse = await fetch(`${backendUrl}/api/v1/boards/upload-image-simple`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+          // Content-Type을 명시적으로 설정하지 않음 (브라우저가 자동으로 boundary 설정)
         },
         body: imageFormData
       })
 
+      console.log('Image upload response status:', imageResponse.status);
+      
       if (!imageResponse.ok) {
-        throw new Error('이미지 업로드에 실패했습니다.')
+        const errorText = await imageResponse.text();
+        console.error('Image upload error:', errorText);
+        throw new Error(`이미지 업로드에 실패했습니다: ${imageResponse.status} - ${errorText}`);
       }
 
       const imageData = await imageResponse.json()
-      const imageUrl = imageData.files[0].file_url
+      console.log('Image upload response:', imageData);
+      const imageUrl = imageData.file_url // 백엔드에서 반환된 실제 파일 URL 사용
+      console.log('Image URL:', imageUrl);
+
+      // 발행 상태 결정
+      let boardStatus = 1; // 기본값: 임시저장
+      if (publishType === 'immediate') {
+        boardStatus = 2; // 즉시 발행
+      } else if (publishType === 'scheduled') {
+        boardStatus = 1; // 예약 발행은 일단 임시저장으로 저장 (나중에 스케줄러가 처리)
+      }
+
+      // 게시글 데이터 준비
+      const boardData = {
+        influencer_id: formData.influencer_id,
+        board_topic: formData.board_topic,
+        board_description: formData.board_description,
+        board_platform: formData.board_platform,
+        board_hash_tag: formData.board_hashtag.join(' '),
+        team_id: user?.teams?.[0]?.group_id || 1,
+        image_url: imageUrl,
+        board_status: boardStatus,
+        // 예약 발행 시 스케줄 정보 추가
+        ...(publishType === 'scheduled' && {
+          scheduled_at: `${scheduledDate}T${scheduledTime}:00`
+        })
+      };
+      
+      console.log('Sending board data:', boardData);
 
       // 게시글 생성
-      const response = await fetch('/api/v1/boards', {
+      const response = await fetch(`${backendUrl}/api/v1/boards`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${localStorage.getItem('access_token')}`
         },
-        body: JSON.stringify({
-          influencer_id: formData.influencer_id,
-          board_topic: formData.board_topic,
-          board_description: formData.board_description,
-          board_platform: formData.board_platform,
-          board_hash_tag: formData.board_hashtag.join(' '),
-          team_id: user?.teams?.[0]?.group_id || 1,
-          image_url: imageUrl,
-          board_status: 1 // 임시저장 상태
-        })
+        body: JSON.stringify(boardData)
       })
 
       if (!response.ok) {
@@ -556,7 +615,7 @@ export default function CreatePostPage() {
                         <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
                           <h4 className="font-medium text-green-900 mb-2 flex items-center">
                             <Sparkles className="h-4 w-4 mr-2" />
-                            AI가 향상한 내용
+                            AI가 생성한 내용
                           </h4>
                           <div className="text-sm text-green-800 whitespace-pre-wrap bg-white p-3 rounded border mb-4">
                             {enhancedContent.enhanced_content}
@@ -724,6 +783,90 @@ export default function CreatePostPage() {
                   </div>
 
 
+                </CardContent>
+              </Card>
+
+              {/* 발행 설정 */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center space-x-2">
+                    <svg className="h-5 w-5 text-black" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clipRule="evenodd" />
+                    </svg>
+                    <span>발행 설정</span>
+                  </CardTitle>
+                  <CardDescription>게시글을 언제 발행할지 선택하세요</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {/* 발행 옵션 */}
+                  <div className="grid grid-cols-2 gap-4">
+                    {/* 즉시 발행 */}
+                    <div 
+                      className={`border-2 rounded-lg p-4 cursor-pointer transition-all ${
+                        publishType === 'immediate' 
+                          ? 'border-blue-500 bg-blue-50' 
+                          : 'border-gray-200 hover:border-gray-300'
+                      }`}
+                      onClick={() => {
+                        setPublishType('immediate')
+                        setScheduledDate('')
+                        setScheduledTime('')
+                      }}
+                    >
+                      <div className="text-center space-y-2">
+                        <div className="text-lg font-medium">즉시 발행</div>
+                        <div className="text-sm text-gray-600">게시글이 즉시 발행됩니다</div>
+                      </div>
+                    </div>
+
+                    {/* 스케줄 발행 */}
+                    <div 
+                      className={`border-2 rounded-lg p-4 cursor-pointer transition-all ${
+                        publishType === 'scheduled' 
+                          ? 'border-blue-500 bg-blue-50' 
+                          : 'border-gray-200 hover:border-gray-300'
+                      }`}
+                      onClick={() => setPublishType('scheduled')}
+                    >
+                      <div className="text-center space-y-2">
+                        <div className="text-lg font-medium">스케줄 발행</div>
+                        <div className="text-sm text-gray-600">원하는 시간에 발행</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 스케줄 발행 선택 시 날짜/시간 입력 */}
+                  {publishType === 'scheduled' && (
+                    <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                      <Label className="text-sm font-medium text-blue-900 mb-2 block">예약 날짜 및 시간</Label>
+                      <Input
+                        type="datetime-local"
+                        value={scheduledDate && scheduledTime ? `${scheduledDate}T${scheduledTime}` : ''}
+                        onChange={(e) => {
+                          const value = e.target.value
+                          if (value) {
+                            const [date, time] = value.split('T')
+                            setScheduledDate(date)
+                            setScheduledTime(time)
+                          }
+                        }}
+                        min={new Date().toISOString().slice(0, 16)}
+                        className="w-full border-blue-300 focus:border-blue-500"
+                      />
+                      {scheduledDate && scheduledTime && (
+                        <div className="mt-2 text-sm text-blue-700">
+                          📅 예약 시간: {new Date(`${scheduledDate}T${scheduledTime}`).toLocaleString('ko-KR', {
+                            year: 'numeric',
+                            month: 'long',
+                            day: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            weekday: 'long'
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 

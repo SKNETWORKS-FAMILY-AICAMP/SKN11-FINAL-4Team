@@ -31,23 +31,36 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 
 // 게시글 타입 정의
 interface Post {
-  id: string
-  title: string
-  content: string
-  author: string
-  modelName: string
-  status: "draft" | "published" | "scheduled"
-  createdAt: string
+  board_id: string
+  id?: string
+  board_topic: string
+  title?: string
+  board_description: string
+  content?: string
+  influencer_id: string
+  user_id: string
+  team_id: number
+  group_id: number
+  board_platform: number
+  platform?: string
+  board_hash_tag: string
+  hashtags?: string[]
+  board_status: number
+  status?: "draft" | "published" | "scheduled"
+  image_url: string
+  created_at: string
+  updated_at: string
+  createdAt?: string
+  author?: string
+  modelName?: string
   publishedAt?: string
   scheduledAt?: string
-  platform: string
-  engagement: {
+  engagement?: {
     likes: number
     comments: number
     shares: number
     views?: number
   }
-  hashtags: string[]
   media?: {
     type: "image" | "video" | "carousel"
     urls: string[]
@@ -129,7 +142,8 @@ const samplePosts: Post[] = [
 ]
 
 function PostListContent() {
-  const [posts, setPosts] = useState<Post[]>(samplePosts)
+  const [posts, setPosts] = useState<Post[]>([])
+  const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState("")
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [modelFilter, setModelFilter] = useState<string>("all")
@@ -153,6 +167,83 @@ function PostListContent() {
   const searchParams = useSearchParams()
   const hasAddedNewPost = useRef(false)
   const router = useRouter()
+
+  // API에서 게시글 목록 가져오기
+  const fetchPosts = async () => {
+    try {
+      setLoading(true)
+      const token = localStorage.getItem('access_token')
+      
+      if (!token) {
+        console.error('No access token found')
+        return
+      }
+
+      const response = await fetch('https://localhost:8000/api/v1/boards', {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
+      const boardData = await response.json()
+      
+      // API 데이터를 Post 인터페이스에 맞게 변환
+      const transformedPosts: Post[] = boardData.map((board: any) => ({
+        ...board,
+        id: board.board_id,
+        title: board.board_topic,
+        content: board.board_description,
+        createdAt: board.created_at,
+        platform: getPlatformName(board.board_platform),
+        hashtags: board.board_hash_tag ? board.board_hash_tag.split(' ').filter((tag: string) => tag.startsWith('#')) : [],
+        status: getStatusName(board.board_status),
+        author: 'AI 인플루언서',
+        modelName: 'AI 인플루언서',
+        engagement: { likes: 0, comments: 0, shares: 0 },
+        media: {
+          type: "image" as const,
+          urls: [board.image_url || "/placeholder.svg?height=400&width=400"],
+          thumbnailUrl: board.image_url || "/placeholder.svg?height=400&width=400"
+        }
+      }))
+
+      setPosts(transformedPosts)
+    } catch (error) {
+      console.error('Failed to fetch posts:', error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // 플랫폼 번호를 이름으로 변환
+  const getPlatformName = (platformNumber: number) => {
+    switch (platformNumber) {
+      case 0: return 'Instagram'
+      case 1: return 'Blog'
+      case 2: return 'Facebook'
+      default: return 'Instagram'
+    }
+  }
+
+  // 상태 번호를 이름으로 변환
+  const getStatusName = (statusNumber: number) => {
+    switch (statusNumber) {
+      case 1: return 'draft' as const
+      case 2: return 'published' as const
+      default: return 'draft' as const
+    }
+  }
+
+  // 컴포넌트 마운트 시 데이터 가져오기
+  useEffect(() => {
+    fetchPosts()
+  }, [])
 
   // 새 게시글 처리
   useEffect(() => {
@@ -193,27 +284,61 @@ function PostListContent() {
 
   const filteredPosts = posts.filter((post) => {
     const matchesSearch = 
-      post.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      post.content.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      post.author.toLowerCase().includes(searchTerm.toLowerCase())
+      (post.title || post.board_topic || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (post.content || post.board_description || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (post.author || 'AI 인플루언서').toLowerCase().includes(searchTerm.toLowerCase())
     
     const matchesStatus = statusFilter === "all" || post.status === statusFilter
-    const matchesModel = modelFilter === "all" || post.modelName === modelFilter
+    const matchesModel = modelFilter === "all" || (post.modelName || 'AI 인플루언서') === modelFilter
     const matchesPlatform = platformFilter === "all" || post.platform === platformFilter
     
     return matchesSearch && matchesStatus && matchesModel && matchesPlatform
   })
 
-  const handleDeletePost = (postId: string) => {
-    setPosts((prev) => prev.filter((post) => post.id !== postId))
+  const handleDeletePost = async (postId: string) => {
+    try {
+      const token = localStorage.getItem('access_token')
+      if (!token) return
+
+      const response = await fetch(`https://localhost:8000/api/v1/boards/${postId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      })
+
+      if (response.ok) {
+        setPosts((prev) => prev.filter((post) => (post.id || post.board_id) !== postId))
+      }
+    } catch (error) {
+      console.error('Failed to delete post:', error)
+    }
   }
 
-  const handlePublishPost = (postId: string) => {
-    setPosts(currentPosts =>
-      currentPosts.map(p =>
-        p.id === postId ? { ...p, status: 'published' as const } : p
-      )
-    );
+  const handlePublishPost = async (postId: string) => {
+    try {
+      const token = localStorage.getItem('access_token')
+      if (!token) return
+
+      const response = await fetch(`https://localhost:8000/api/v1/boards/${postId}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ board_status: 2 }) // 2 = published
+      })
+
+      if (response.ok) {
+        setPosts(currentPosts =>
+          currentPosts.map(p =>
+            (p.id || p.board_id) === postId ? { ...p, status: 'published' as const, board_status: 2 } : p
+          )
+        );
+      }
+    } catch (error) {
+      console.error('Failed to publish post:', error)
+    }
   };
 
   const handleApplyFilters = () => {
@@ -517,7 +642,7 @@ function PostListContent() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
             <Card>
               <CardContent className="p-6">
                 <div className="text-center">
@@ -546,21 +671,16 @@ function PostListContent() {
                 </div>
               </CardContent>
             </Card>
-            <Card>
-              <CardContent className="p-6">
-                <div className="text-center">
-                  <p className="text-3xl font-bold text-gray-600">
-                    {posts.filter((post) => post.status === "draft").length}
-                  </p>
-                  <p className="text-sm text-gray-600 mt-1">임시저장</p>
-                </div>
-              </CardContent>
-            </Card>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {filteredPosts.map((post) => (
+        {loading ? (
+          <div className="text-center py-12">
+            <p className="text-gray-500 text-lg">게시글을 불러오는 중...</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {filteredPosts.map((post) => (
             <Card
               key={post.id}
               className="hover:shadow-lg transition-shadow cursor-pointer group"
@@ -570,15 +690,15 @@ function PostListContent() {
                 <div className="flex justify-between items-start mb-4">
                   <div className="flex-1">
                     <div className="flex items-center space-x-3 mb-2">
-                      <h4 className="text-lg font-semibold text-gray-900">{post.title}</h4>
+                      <h4 className="text-lg font-semibold text-gray-900">{post.title || post.board_topic}</h4>
                       {getStatusBadge(post.status)}
                       {getPlatformBadge(post.platform)}
                     </div>
                     <p className="text-gray-600 text-sm line-clamp-3 mb-3">
-                      {post.content.length > 150 ? `${post.content.substring(0, 150)}...` : post.content}
+                      {(post.content || post.board_description || '').length > 150 ? `${(post.content || post.board_description || '').substring(0, 150)}...` : (post.content || post.board_description || '')}
                     </p>
                     <div className="flex flex-wrap gap-1 mb-3">
-                      {post.hashtags.map((tag, index) => (
+                      {(post.hashtags || []).map((tag, index) => (
                         <span key={index} className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded">
                           {tag}
                         </span>
@@ -591,12 +711,12 @@ function PostListContent() {
                   <div className="flex items-center space-x-4 text-sm text-gray-500">
                     <div className="flex items-center space-x-1">
                       <User className="h-4 w-4" />
-                      <span>{post.author}</span>
+                      <span>{post.author || 'AI 인플루언서'}</span>
                     </div>
                   </div>
                   <div className="flex items-center space-x-1 text-sm text-gray-500">
                     <Calendar className="h-4 w-4" />
-                    <span>{formatFullDate(post.createdAt)}</span>
+                    <span>{formatFullDate(post.createdAt || post.created_at)}</span>
                   </div>
                 </div>
 
@@ -629,7 +749,7 @@ function PostListContent() {
                   
                   <div className="flex items-center space-x-2" onClick={e => e.stopPropagation()}>
                     {post.status !== 'published' && (
-                      <Button size="sm" variant="outline" className="flex items-center space-x-1" onClick={() => handlePublishPost(post.id)}>
+                      <Button size="sm" variant="outline" className="flex items-center space-x-1" onClick={() => handlePublishPost(post.id || post.board_id)}>
                         <UploadCloud className="h-4 w-4" />
                         <span>업로드</span>
                       </Button>
@@ -649,7 +769,7 @@ function PostListContent() {
                         </AlertDialogHeader>
                         <AlertDialogFooter>
                           <AlertDialogCancel>취소</AlertDialogCancel>
-                          <AlertDialogAction onClick={() => handleDeletePost(post.id)} className="bg-red-600 hover:bg-red-700">삭제</AlertDialogAction>
+                          <AlertDialogAction onClick={() => handleDeletePost(post.id || post.board_id)} className="bg-red-600 hover:bg-red-700">삭제</AlertDialogAction>
                         </AlertDialogFooter>
                       </AlertDialogContent>
                     </AlertDialog>
@@ -657,10 +777,11 @@ function PostListContent() {
                 </div>
               </CardContent>
             </Card>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
 
-        {filteredPosts.length === 0 && (
+        {!loading && filteredPosts.length === 0 && (
           <div className="text-center py-12">
             <p className="text-gray-500 text-lg">검색 결과가 없습니다.</p>
             <p className="text-gray-400 mt-2">다른 검색어를 시도해보세요.</p>
@@ -690,17 +811,17 @@ function PostListContent() {
                           className="font-semibold text-gray-900 text-lg"
                         />
                       ) : (
-                        <h3 className="font-semibold text-gray-900">{selectedPost.title}</h3>
+                        <h3 className="font-semibold text-gray-900">{selectedPost.title || selectedPost.board_topic}</h3>
                       )}
                       {getStatusBadge(selectedPost.status)}
                       {getPlatformBadge(selectedPost.platform)}
                     </div>
                     <div className="flex items-center space-x-2 text-sm text-gray-500 mt-1">
                       <User className="h-4 w-4" />
-                      <span>{selectedPost.author}</span>
+                      <span>{selectedPost.author || 'AI 인플루언서'}</span>
                       <span>•</span>
                       <Calendar className="h-4 w-4" />
-                      <span>{formatFullDate(selectedPost.createdAt)}</span>
+                      <span>{formatFullDate(selectedPost.createdAt || selectedPost.created_at)}</span>
                     </div>
                   </div>
                 </div>
@@ -717,7 +838,7 @@ function PostListContent() {
                       />
                     ) : (
                       <div className="whitespace-pre-wrap text-gray-800 leading-relaxed">
-                        {selectedPost.content}
+                        {selectedPost.content || selectedPost.board_description}
                       </div>
                     )}
                   </div>
@@ -734,7 +855,7 @@ function PostListContent() {
                     />
                   ) : (
                     <div className="flex flex-wrap gap-2">
-                      {selectedPost.hashtags.map((tag, index) => (
+                      {(selectedPost.hashtags || []).map((tag, index) => (
                         <span key={index} className="text-sm text-blue-600 bg-blue-50 px-3 py-1 rounded-full">
                           {tag}
                         </span>

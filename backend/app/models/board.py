@@ -43,6 +43,11 @@ class Board(Base, TimestampMixin):
         nullable=False,
         comment="팀 고유 식별자",
     )
+    group_id = Column(
+        Integer,
+        nullable=False,
+        comment="그룹 고유 식별자",
+    )
     board_topic = Column(
         String(255), nullable=False, comment="게시글의 주제 또는 카테고리명"
     )
@@ -60,13 +65,13 @@ class Board(Base, TimestampMixin):
     image_url = Column(
         Text, nullable=False, comment="게시글 썸네일 또는 대표 이미지 URL 경로"
     )
-    published_at = Column(TIMESTAMP, comment="게시물 발행 시각")
     # created_at과 updated_at은 TimestampMixin에서 제공됨
+    # published_at 필드는 DB에 존재하지 않으므로 완전히 제거됨
 
     # 복합 외래키 제약조건 (USER_GROUP 테이블 참조)
     __table_args__ = (
         ForeignKeyConstraint(
-            ["user_id", "team_id"],
+            ["user_id", "group_id"],
             ["USER_GROUP.user_id", "USER_GROUP.group_id"],
             ondelete="CASCADE",
             onupdate="CASCADE",

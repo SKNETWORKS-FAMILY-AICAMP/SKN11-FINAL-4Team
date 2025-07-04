@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File, Request
 from sqlalchemy.orm import Session
 from typing import List
 import uuid
@@ -42,6 +42,99 @@ UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
 
 
+@router.get("/test-auth")
+async def test_auth(
+    current_user: dict = Depends(get_current_user),
+):
+    """인증 테스트 엔드포인트"""
+    try:
+        user_id = current_user.get("sub")
+        logger.info(f"Auth test successful for user: {user_id}")
+        return {
+            "success": True,
+            "user_id": user_id,
+            "user_data": current_user
+        }
+    except Exception as e:
+        logger.error(f"Auth test failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Authentication failed: {str(e)}"
+        )
+
+
+@router.post("/upload-test")
+async def upload_test(request: Request):
+    """인증 없는 업로드 테스트"""
+    logger.info("=== UPLOAD TEST ENDPOINT REACHED ===")
+    logger.info(f"Request method: {request.method}")
+    logger.info(f"Request URL: {request.url}")
+    logger.info(f"Request headers: {dict(request.headers)}")
+    return {"success": True, "message": "Upload endpoint is working"}
+
+
+@router.get("/upload-test-get")
+async def upload_test_get():
+    """GET 테스트"""
+    logger.info("GET test endpoint reached!")
+    return {"success": True, "message": "GET endpoint is working"}
+
+
+@router.post("/upload-image-simple")
+async def upload_image_simple(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user),
+):
+    """단순 이미지 업로드"""
+    try:
+        logger.info("=== Simple upload starting ===")
+        
+        user_id = current_user.get("sub")
+        if not user_id:
+            logger.error("Authentication failed in upload")
+            raise HTTPException(status_code=401, detail="Authentication required")
+        
+        logger.info(f"User {user_id} uploading file: {file.filename}")
+        logger.info(f"File content type: {file.content_type}")
+        
+        # 파일 내용 읽기
+        content = await file.read()
+        logger.info(f"File read successfully: {len(content)} bytes")
+        
+        # 파일 확장자 확인
+        if not file.content_type or not file.content_type.startswith("image/"):
+            raise HTTPException(status_code=400, detail="Only image files are allowed")
+        
+        # 고유 파일명 생성
+        file_extension = file.filename.split(".")[-1] if "." in file.filename else "jpg"
+        unique_filename = f"{user_id}_{uuid.uuid4()}.{file_extension}"
+        file_path = UPLOAD_DIR / unique_filename
+        
+        # 파일 저장
+        UPLOAD_DIR.mkdir(exist_ok=True)
+        with open(file_path, "wb") as buffer:
+            buffer.write(content)
+        
+        # 파일 URL 생성
+        file_url = f"/uploads/{unique_filename}"
+        
+        result = {
+            "success": True,
+            "filename": file.filename,
+            "saved_filename": unique_filename,
+            "file_url": file_url,
+            "size": len(content),
+            "content_type": file.content_type
+        }
+        
+        logger.info(f"=== Upload completed: {file_url} ===")
+        return result
+        
+    except Exception as e:
+        logger.error(f"Simple upload failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/upload-image")
 async def upload_image(
     files: List[UploadFile] = File(...),
@@ -50,29 +143,66 @@ async def upload_image(
 ):
     """이미지 파일 업로드"""
     try:
+        logger.info("Starting image upload process")
+        
+        # 사용자 인증 확인
         user_id = current_user.get("sub")
         if not user_id:
+            logger.error("User authentication failed - no user_id")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="User authentication required"
             )
         
+        logger.info(f"User {user_id} is uploading {len(files)} files")
+        
+        # 업로드 디렉토리 확인 및 생성
+        try:
+            UPLOAD_DIR.mkdir(exist_ok=True)
+            logger.info(f"Upload directory ensured: {UPLOAD_DIR}")
+        except Exception as e:
+            logger.error(f"Failed to create upload directory: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Upload directory creation failed"
+            )
+        
         uploaded_files = []
         
-        for file in files:
+        for i, file in enumerate(files):
+            logger.info(f"Processing file {i+1}/{len(files)}: {file.filename}")
+            
+            # 파일 이름 검증
+            if not file.filename:
+                logger.error(f"File {i+1} has no filename")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"File {i+1} has no filename"
+                )
+            
             # 파일 확장자 및 크기 검증
-            if not file.content_type.startswith("image/"):
+            if not file.content_type or not file.content_type.startswith("image/"):
+                logger.error(f"Invalid file type: {file.content_type}")
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Invalid file type: {file.content_type}. Only images are allowed."
                 )
             
-            # 파일 크기 제한 (10MB)
-            file_size = 0
-            file_content = await file.read()
-            file_size = len(file_content)
+            # 파일 내용 읽기
+            try:
+                file_content = await file.read()
+                file_size = len(file_content)
+                logger.info(f"File {file.filename} read successfully: {file_size} bytes")
+            except Exception as e:
+                logger.error(f"Failed to read file {file.filename}: {e}")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Failed to read file {file.filename}"
+                )
             
+            # 파일 크기 제한 (10MB)
             if file_size > 10 * 1024 * 1024:  # 10MB
+                logger.error(f"File too large: {file_size} bytes")
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"File too large: {file_size} bytes. Maximum size is 10MB."
@@ -84,8 +214,16 @@ async def upload_image(
             file_path = UPLOAD_DIR / unique_filename
             
             # 파일 저장
-            with open(file_path, "wb") as buffer:
-                buffer.write(file_content)
+            try:
+                with open(file_path, "wb") as buffer:
+                    buffer.write(file_content)
+                logger.info(f"File saved to: {file_path}")
+            except Exception as e:
+                logger.error(f"Failed to save file {file.filename}: {e}")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Failed to save file {file.filename}"
+                )
             
             # 파일 URL 생성 (상대 경로)
             file_url = f"/uploads/{unique_filename}"
@@ -98,18 +236,22 @@ async def upload_image(
                 "content_type": file.content_type
             })
             
-            logger.info(f"File uploaded: {file.filename} -> {unique_filename} ({file_size} bytes)")
+            logger.info(f"File uploaded successfully: {file.filename} -> {unique_filename} ({file_size} bytes)")
         
-        return {
+        result = {
             "success": True,
             "message": f"{len(uploaded_files)} files uploaded successfully",
             "files": uploaded_files
         }
         
-    except HTTPException:
+        logger.info(f"Upload process completed successfully for user {user_id}")
+        return result
+        
+    except HTTPException as e:
+        logger.error(f"HTTP Exception in upload: {e.detail}")
         raise
     except Exception as e:
-        logger.error(f"File upload failed: {e}")
+        logger.error(f"Unexpected error in file upload: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"File upload failed: {str(e)}"
@@ -164,24 +306,78 @@ async def create_board(
     current_user: dict = Depends(get_current_user),
 ):
     """새 게시글 생성"""
-    user_id = current_user.get("sub")
-    if not user_id:
+    try:
+        logger.info("=== Creating new board ===")
+        
+        # SQLAlchemy 메타데이터 캐시 강제 초기화
+        from app.models.board import Board
+        from sqlalchemy import text
+        
+        user_id = current_user.get("sub")
+        if not user_id:
+            logger.error("User authentication failed - no user_id")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User authentication required"
+            )
+        
+        logger.info(f"User {user_id} creating board")
+        logger.info(f"Board data: {board_data.dict()}")
+        
+        # Raw SQL로 직접 INSERT하여 SQLAlchemy 메타데이터 캐시 문제 완전 회피
+        board_id = str(uuid.uuid4())
+        board_dict = board_data.dict()
+        
+        # published_at 필드가 포함되지 않은 명시적 컬럼 리스트 사용
+        insert_sql = text("""
+            INSERT INTO BOARD (
+                board_id, influencer_id, user_id, team_id, group_id, board_topic, 
+                board_description, board_platform, board_hash_tag, 
+                board_status, image_url, created_at, updated_at
+            ) VALUES (
+                :board_id, :influencer_id, :user_id, :team_id, :group_id, :board_topic,
+                :board_description, :board_platform, :board_hash_tag,
+                :board_status, :image_url, NOW(), NOW()
+            )
+        """)
+        
+        db.execute(insert_sql, {
+            'board_id': board_id,
+            'influencer_id': board_dict['influencer_id'],
+            'user_id': user_id,
+            'team_id': board_dict['team_id'],
+            'group_id': board_dict['team_id'],
+            'board_topic': board_dict['board_topic'],
+            'board_description': board_dict.get('board_description'),
+            'board_platform': board_dict['board_platform'],
+            'board_hash_tag': board_dict.get('board_hash_tag'),
+            'board_status': board_dict.get('board_status', 1),
+            'image_url': board_dict['image_url']
+        })
+        
+        db.commit()
+        logger.info(f"Board created with raw SQL: {board_id}")
+        
+        # 생성된 레코드를 다시 조회하여 반환
+        board = db.query(Board).filter(Board.board_id == board_id).first()
+        if not board:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Board creation failed - record not found after insert"
+            )
+        
+        logger.info(f"Board created successfully: {board.board_id}")
+        return board
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error creating board: {e}", exc_info=True)
+        db.rollback()
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User authentication required"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create board: {str(e)}"
         )
-    
-    board = Board(
-        board_id=str(uuid.uuid4()), 
-        user_id=user_id, 
-        **board_data.dict(exclude={'user_id'})
-    )
-
-    db.add(board)
-    db.commit()
-    db.refresh(board)
-
-    return board
 
 
 @router.put("/{board_id}", response_model=BoardSchema)
@@ -406,8 +602,8 @@ async def generate_and_save_board(
             board_platform=request.board_platform,
             board_hash_tag=hashtag_str,
             board_status=0,  # 최초 생성 상태
-            image_url=image_urls,
-            reservation_at=request.reservation_at
+            image_url=image_urls
+            # reservation_at=request.reservation_at  # 나중에 구현
         )
         
         db.add(new_board)
@@ -470,6 +666,61 @@ async def test_openai_only(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"OpenAI test failed: {str(e)}"
         )
+
+
+@router.get("/comfyui/models")
+async def get_comfyui_models(
+    db: Session = Depends(get_db),
+):
+    """ComfyUI 모델 목록 조회"""
+    try:
+        from app.core.config import settings
+        import httpx
+        
+        # ComfyUI 서버에서 모델 정보 가져오기
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(f"{settings.COMFYUI_SERVER_URL}/object_info")
+            
+            if response.status_code != 200:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="ComfyUI server is not available"
+                )
+            
+            data = response.json()
+            
+            # 체크포인트 모델 목록 추출
+            checkpoint_models = data.get("CheckpointLoaderSimple", {}).get("input", {}).get("required", {}).get("ckpt_name", [[]])[0]
+            
+            # 모델 목록을 프론트엔드에서 사용하기 쉬운 형태로 변환
+            models = [
+                {
+                    "id": model,
+                    "name": model.replace(".ckpt", "").replace(".safetensors", ""),
+                    "type": "checkpoint",
+                    "description": f"Checkpoint model: {model}"
+                }
+                for model in checkpoint_models
+            ]
+            
+            return {
+                "success": True,
+                "models": models
+            }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to fetch ComfyUI models: {e}")
+        # 기본 모델들 반환 (ComfyUI가 연결되지 않은 경우)
+        return {
+            "success": False,
+            "error": "Failed to fetch models from ComfyUI",
+            "models": [
+                {"id": "sd_xl_base_1.0", "name": "Stable Diffusion XL Base", "type": "checkpoint", "description": "Base SDXL model"},
+                {"id": "sd_v1-5", "name": "Stable Diffusion v1.5", "type": "checkpoint", "description": "SD 1.5 model"}
+            ]
+        }
 
 
 @router.post("/test-comfyui")

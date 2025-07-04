@@ -32,12 +32,22 @@ async def enhance_content(
                 detail="User authentication required"
             )
         
+        # OpenAI API 키 확인
+        from app.core.config import settings
+        if not settings.OPENAI_API_KEY:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="OpenAI API key not configured"
+            )
+        
         enhancement = await content_service.enhance_content(
             db=db, 
             user_id=user_id, 
             request=request
         )
         return enhancement
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

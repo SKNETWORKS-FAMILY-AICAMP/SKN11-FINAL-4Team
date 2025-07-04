@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.middleware.base import BaseHTTPMiddleware
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -99,7 +100,7 @@ app = FastAPI(
 # CORS 미들웨어 설정
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.BACKEND_CORS_ORIGINS + ["*"],  # 개발 환경에서 모든 origin 허용
+    allow_origins=settings.BACKEND_CORS_ORIGINS if not settings.DEBUG else ["*"],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
@@ -111,6 +112,27 @@ app.add_middleware(
     TrustedHostMiddleware,
     allowed_hosts=["*"]
 )
+
+
+# 파일 업로드 크기 제한 미들웨어
+class FileSizeMiddleware(BaseHTTPMiddleware):
+    def __init__(self, app, max_size: int = 50 * 1024 * 1024):  # 50MB
+        super().__init__(app)
+        self.max_size = max_size
+
+    async def dispatch(self, request: Request, call_next):
+        if request.method == "POST" and "multipart/form-data" in request.headers.get("content-type", ""):
+            content_length = request.headers.get("content-length")
+            if content_length and int(content_length) > self.max_size:
+                return JSONResponse(
+                    status_code=413,
+                    content={"detail": f"File too large. Maximum size is {self.max_size} bytes"}
+                )
+        
+        response = await call_next(request)
+        return response
+
+# app.add_middleware(FileSizeMiddleware)  # 임시 비활성화
 
 
 # 요청 로깅 미들웨어

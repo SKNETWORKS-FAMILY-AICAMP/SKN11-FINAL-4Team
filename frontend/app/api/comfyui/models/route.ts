@@ -3,11 +3,11 @@ import { NextRequest, NextResponse } from 'next/server'
 // ComfyUI 모델 목록을 가져오는 API
 export async function GET(request: NextRequest) {
   try {
-    // ComfyUI 서버 URL (환경변수로 관리)
-    const comfyUIUrl = process.env.COMFYUI_URL || 'http://localhost:8188'
+    // Backend API를 통해 ComfyUI 모델 정보 가져오기
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
     
-    // ComfyUI의 모델 목록 API 호출
-    const response = await fetch(`${comfyUIUrl}/object_info`, {
+    // Backend의 ComfyUI 모델 목록 엔드포인트 호출
+    const response = await fetch(`${backendUrl}/api/v1/boards/comfyui/models`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -15,25 +15,14 @@ export async function GET(request: NextRequest) {
     })
 
     if (!response.ok) {
-      throw new Error('Failed to fetch models from ComfyUI')
+      throw new Error('Failed to fetch models from backend')
     }
 
     const data = await response.json()
     
-    // 체크포인트 모델 목록 추출
-    const checkpointModels = data.CheckpointLoaderSimple?.input?.required?.ckpt_name?.[0] || []
-    
-    // 모델 목록을 프론트엔드에서 사용하기 쉬운 형태로 변환
-    const models = checkpointModels.map((modelName: string, index: number) => ({
-      id: modelName,
-      name: modelName.replace(/\.(ckpt|safetensors)$/, ''), // 확장자 제거
-      type: 'checkpoint',
-      description: `Checkpoint model: ${modelName}`
-    }))
-
     return NextResponse.json({
-      success: true,
-      models: models
+      success: data.success,
+      models: data.models
     })
   } catch (error) {
     console.error('Error fetching ComfyUI models:', error)
