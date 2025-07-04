@@ -384,9 +384,9 @@ export default function CreatePostPage() {
       // 발행 상태 결정
       let boardStatus = 1; // 기본값: 임시저장
       if (publishType === 'immediate') {
-        boardStatus = 2; // 즉시 발행
+        boardStatus = 3; // 즉시 발행
       } else if (publishType === 'scheduled') {
-        boardStatus = 1; // 예약 발행은 일단 임시저장으로 저장 (나중에 스케줄러가 처리)
+        boardStatus = 2; // 예약 발행
       }
 
       // 게시글 데이터 준비

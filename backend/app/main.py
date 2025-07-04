@@ -16,6 +16,7 @@ from app.database import init_database, test_database_connection
 from app.api.v1.api import api_router
 from app.services.startup_service import run_startup_tasks
 from app.services.batch_monitor import start_batch_monitoring, stop_batch_monitoring
+from app.services.scheduler_service import scheduler_service
 
 # 로깅 설정
 if settings.DEBUG:
@@ -72,6 +73,13 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"⚠️ Batch monitoring failed to start, but continuing: {e}")
 
+    # 스케줄러 서비스 시작
+    try:
+        await scheduler_service.start()
+        logger.info("📅 스케줄러 서비스 시작 완료")
+    except Exception as e:
+        logger.warning(f"⚠️ Scheduler service failed to start, but continuing: {e}")
+
     logger.info("✅ AIMEX API Server ready")
 
     yield
@@ -85,6 +93,13 @@ async def lifespan(app: FastAPI):
         logger.info("✅ 배치 모니터링이 정상적으로 중지되었습니다")
     except Exception as e:
         logger.error(f"❌ 배치 모니터링 중지 중 오류: {e}")
+
+    # 스케줄러 서비스 중지
+    try:
+        await scheduler_service.stop()
+        logger.info("✅ 스케줄러 서비스가 정상적으로 중지되었습니다")
+    except Exception as e:
+        logger.error(f"❌ 스케줄러 서비스 중지 중 오류: {e}")
 
 
 # FastAPI 애플리케이션 생성

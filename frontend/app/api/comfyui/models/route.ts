@@ -11,7 +11,12 @@ export async function GET(request: NextRequest) {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
-      }
+      },
+      // SSL 인증서 검증 무시 (개발 환경용)
+      ...(process.env.NODE_ENV === 'development' && { 
+        // @ts-ignore
+        agent: new (require('https').Agent)({ rejectUnauthorized: false })
+      })
     })
 
     if (!response.ok) {

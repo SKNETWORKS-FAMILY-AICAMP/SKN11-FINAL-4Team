@@ -27,6 +27,7 @@ class BoardCreate(BaseModel):
     board_hash_tag: Optional[str] = None
     board_status: int = 1
     image_url: str
+    scheduled_at: Optional[str] = None  # 예약 발행 시간 (ISO 형식 문자열)
     # user_id와 published_at는 제외 (백엔드에서 자동으로 설정됨)
 
 

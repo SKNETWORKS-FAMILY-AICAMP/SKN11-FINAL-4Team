@@ -31,25 +31,25 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 
 // 게시글 타입 정의
 interface Post {
-  board_id: string
+  board_id?: string
   id?: string
-  board_topic: string
+  board_topic?: string
   title?: string
-  board_description: string
+  board_description?: string
   content?: string
-  influencer_id: string
-  user_id: string
-  team_id: number
-  group_id: number
-  board_platform: number
+  influencer_id?: string
+  user_id?: string
+  team_id?: number
+  group_id?: number
+  board_platform?: number
   platform?: string
-  board_hash_tag: string
+  board_hash_tag?: string
   hashtags?: string[]
-  board_status: number
+  board_status?: number
   status?: "draft" | "published" | "scheduled"
-  image_url: string
-  created_at: string
-  updated_at: string
+  image_url?: string
+  created_at?: string
+  updated_at?: string
   createdAt?: string
   author?: string
   modelName?: string
@@ -72,14 +72,27 @@ interface Post {
 const samplePosts: Post[] = [
   {
     id: "1",
+    board_id: "1",
     title: "2024년 봄 패션 트렌드 총정리",
+    board_topic: "2024년 봄 패션 트렌드 총정리",
     content: "올해 봄에는 파스텔 톤과 레이어드 룩이 대세입니다. 여러분도 트렌디한 봄 스타일을 시도해보세요! 특히 파스텔 블루와 라벤더 컬러가 정말 예뻐요. 레이어드 룩은 베이직한 니트 위에 가벼운 카디건을 걸쳐서 완성하면 완벽해요.",
+    board_description: "올해 봄에는 파스텔 톤과 레이어드 룩이 대세입니다. 여러분도 트렌디한 봄 스타일을 시도해보세요!",
     author: "패션 인플루언서 AI",
     modelName: "패션 인플루언서 AI",
     status: "published",
     createdAt: "2024-01-15",
     publishedAt: "2024-01-15",
     platform: "Instagram",
+    influencer_id: "inf1",
+    user_id: "user1",
+    team_id: 1,
+    group_id: 1,
+    board_platform: 0,
+    board_hash_tag: "#봄패션 #파스텔톤 #레이어드룩",
+    board_status: 3,
+    image_url: "/placeholder.svg?height=400&width=400",
+    created_at: "2024-01-15",
+    updated_at: "2024-01-15",
     engagement: { likes: 1250, comments: 89, shares: 45 },
     hashtags: ["#봄패션", "#파스텔톤", "#레이어드룩", "#2024트렌드", "#패션인플루언서"],
     media: {
@@ -89,14 +102,27 @@ const samplePosts: Post[] = [
   },
   {
     id: "2",
+    board_id: "2",
     title: "완벽한 메이크업을 위한 5가지 팁",
+    board_topic: "완벽한 메이크업을 위한 5가지 팁",
     content: "기초 메이크업부터 완성까지, 전문가가 알려주는 메이크업 노하우를 공유합니다. 첫 번째로는 스킨케어가 가장 중요해요. 깨끗하고 촉촉한 피부가 완벽한 메이크업의 기본이에요. 두 번째는 컨실러 사용법, 세 번째는 아이메이크업 팁, 네 번째는 립 메이크업, 다섯 번째는 파우더 사용법까지!",
+    board_description: "기초 메이크업부터 완성까지, 전문가가 알려주는 메이크업 노하우를 공유합니다.",
     author: "뷰티 전문가 AI",
     modelName: "뷰티 전문가 AI",
     status: "published",
     createdAt: "2024-01-20",
     publishedAt: "2024-01-20",
     platform: "YouTube",
+    influencer_id: "inf2",
+    user_id: "user1",
+    team_id: 1,
+    group_id: 1,
+    board_platform: 1,
+    board_hash_tag: "#메이크업팁 #뷰티 #메이크업튜토리얼",
+    board_status: 3,
+    image_url: "/placeholder.svg?height=315&width=560",
+    created_at: "2024-01-20",
+    updated_at: "2024-01-20",
     engagement: { likes: 890, comments: 67, shares: 23, views: 15420 },
     hashtags: ["#메이크업팁", "#뷰티", "#메이크업튜토리얼", "#뷰티인플루언서"],
     media: {
@@ -107,14 +133,27 @@ const samplePosts: Post[] = [
   },
   {
     id: "3",
+    board_id: "3",
     title: "집에서 할 수 있는 홈 트레이닝 루틴",
+    board_topic: "집에서 할 수 있는 홈 트레이닝 루틴",
     content: "헬스장에 가지 않아도 효과적인 홈 트레이닝 방법을 소개합니다. 30분만 투자하면 충분해요! 스쿼트, 플랭크, 버피 등 기본 동작들로 구성된 루틴이에요. 초보자도 쉽게 따라할 수 있도록 단계별로 설명드릴게요.",
+    board_description: "헬스장에 가지 않아도 효과적인 홈 트레이닝 방법을 소개합니다.",
     author: "피트니스 코치 AI",
     modelName: "피트니스 코치 AI",
     status: "scheduled",
     createdAt: "2024-01-25",
     scheduledAt: "2024-01-25T16:00:00",
     platform: "TikTok",
+    influencer_id: "inf3",
+    user_id: "user1",
+    team_id: 1,
+    group_id: 1,
+    board_platform: 3,
+    board_hash_tag: "#홈트레이닝 #피트니스 #운동",
+    board_status: 2,
+    image_url: "/placeholder.svg?height=600&width=400",
+    created_at: "2024-01-25",
+    updated_at: "2024-01-25",
     engagement: { likes: 0, comments: 0, shares: 0 },
     hashtags: ["#홈트레이닝", "#피트니스", "#운동", "#다이어트"],
     media: {
@@ -125,13 +164,26 @@ const samplePosts: Post[] = [
   },
   {
     id: "4",
+    board_id: "4",
     title: "건강한 다이어트 식단 가이드",
+    board_topic: "건강한 다이어트 식단 가이드",
     content: "무리하지 않고 건강하게 다이어트하는 방법을 알려드립니다. 균형 잡힌 식단이 핵심이에요. 단백질, 탄수화물, 지방을 적절히 섭취하면서 칼로리만 조절하는 방식이에요. 아침에는 단백질이 풍부한 식사, 점심은 균형잡힌 한끼, 저녁은 가벼운 식사로 구성해보세요.",
+    board_description: "무리하지 않고 건강하게 다이어트하는 방법을 알려드립니다.",
     author: "피트니스 코치 AI",
     modelName: "피트니스 코치 AI",
     status: "draft",
     createdAt: "2024-01-28",
     platform: "Blog",
+    influencer_id: "inf4",
+    user_id: "user1",
+    team_id: 1,
+    group_id: 1,
+    board_platform: 1,
+    board_hash_tag: "#다이어트 #건강식단 #피트니스",
+    board_status: 1,
+    image_url: "/placeholder.svg?height=300&width=500",
+    created_at: "2024-01-28",
+    updated_at: "2024-01-28",
     engagement: { likes: 0, comments: 0, shares: 0 },
     hashtags: ["#다이어트", "#건강식단", "#피트니스", "#웰빙"],
     media: {
@@ -206,6 +258,8 @@ function PostListContent() {
         author: 'AI 인플루언서',
         modelName: 'AI 인플루언서',
         engagement: { likes: 0, comments: 0, shares: 0 },
+        scheduledAt: board.reservation_at,
+        publishedAt: board.pulished_at,
         media: {
           type: "image" as const,
           urls: [board.image_url || "/placeholder.svg?height=400&width=400"],
@@ -234,8 +288,9 @@ function PostListContent() {
   // 상태 번호를 이름으로 변환
   const getStatusName = (statusNumber: number) => {
     switch (statusNumber) {
-      case 1: return 'draft' as const
-      case 2: return 'published' as const
+      case 1: return 'draft' as const     // 임시저장
+      case 2: return 'scheduled' as const // 예약됨
+      case 3: return 'published' as const // 발행됨
       default: return 'draft' as const
     }
   }
@@ -244,6 +299,19 @@ function PostListContent() {
   useEffect(() => {
     fetchPosts()
   }, [])
+
+  // 예약된 게시글이 있을 때 주기적으로 상태 확인 (60초마다)
+  useEffect(() => {
+    const hasScheduledPosts = posts.some(post => post.status === 'scheduled')
+    
+    if (hasScheduledPosts) {
+      const interval = setInterval(() => {
+        fetchPosts() // 예약된 게시글이 있으면 60초마다 새로고침
+      }, 60000) // 60초
+      
+      return () => clearInterval(interval)
+    }
+  }, [posts])
 
   // 새 게시글 처리
   useEffect(() => {
@@ -258,13 +326,26 @@ function PostListContent() {
       
       const newPost: Post = {
         id: Date.now().toString(),
+        board_id: Date.now().toString(),
         title: newPostTitle,
+        board_topic: newPostTitle,
         content: newPostContent,
+        board_description: newPostContent,
         author: newPostModel,
         modelName: newPostModel,
         status: "draft",
         createdAt: new Date().toISOString(),
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
         platform: newPostPlatform || "Instagram",
+        board_platform: 0,
+        board_status: 1,
+        influencer_id: "temp",
+        user_id: "temp",
+        team_id: 1,
+        group_id: 1,
+        board_hash_tag: newPostHashtags || "",
+        image_url: "/placeholder.svg?height=400&width=400",
         engagement: { likes: 0, comments: 0, shares: 0 },
         hashtags: newPostHashtags ? newPostHashtags.split(' ').filter(tag => tag.startsWith('#')) : [],
         media: {
@@ -295,7 +376,8 @@ function PostListContent() {
     return matchesSearch && matchesStatus && matchesModel && matchesPlatform
   })
 
-  const handleDeletePost = async (postId: string) => {
+  const handleDeletePost = async (postId: string | undefined) => {
+    if (!postId) return
     try {
       const token = localStorage.getItem('access_token')
       if (!token) return
@@ -315,7 +397,8 @@ function PostListContent() {
     }
   }
 
-  const handlePublishPost = async (postId: string) => {
+  const handlePublishPost = async (postId: string | undefined) => {
+    if (!postId) return
     try {
       const token = localStorage.getItem('access_token')
       if (!token) return
@@ -326,13 +409,13 @@ function PostListContent() {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ board_status: 2 }) // 2 = published
+        body: JSON.stringify({ board_status: 3 }) // 3 = published
       })
 
       if (response.ok) {
         setPosts(currentPosts =>
           currentPosts.map(p =>
-            (p.id || p.board_id) === postId ? { ...p, status: 'published' as const, board_status: 2 } : p
+            (p.id || p.board_id) === postId ? { ...p, status: 'published' as const, board_status: 3 } : p
           )
         );
       }
@@ -373,7 +456,8 @@ function PostListContent() {
     }
   }
 
-  const getPlatformIcon = (platform: string) => {
+  const getPlatformIcon = (platform: string | undefined) => {
+    if (!platform) return "📱"
     switch (platform.toLowerCase()) {
       case "instagram":
         return "📷"
@@ -388,7 +472,8 @@ function PostListContent() {
     }
   }
 
-  const getPlatformBadge = (platform: string) => {
+  const getPlatformBadge = (platform: string | undefined) => {
+    if (!platform) return <Badge className="bg-gray-100 text-gray-800">알 수 없음</Badge>
     const colors: Record<string, string> = {
       Instagram: "bg-pink-100 text-pink-800",
       Facebook: "bg-blue-100 text-blue-800",
@@ -401,35 +486,49 @@ function PostListContent() {
     return <Badge className={colors[platform] || "bg-gray-100 text-gray-800"}>{platform}</Badge>
   }
 
-  const formatDate = (dateString: string) => {
+  const formatDate = (dateString: string | undefined) => {
     if (!dateString) return ""
-    return new Date(dateString).toLocaleDateString("ko-KR", {
+    const date = new Date(dateString)
+    // 유효한 날짜인지 확인
+    if (isNaN(date.getTime())) return ""
+    
+    // 한국 시간으로 변환 (UTC + 9시간)
+    const koreanTime = new Date(date.getTime() + (9 * 60 * 60 * 1000))
+    
+    return koreanTime.toLocaleString("ko-KR", {
       year: "numeric",
       month: "short",
       day: "numeric",
       hour: "2-digit",
-      minute: "2-digit",
+      minute: "2-digit"
     })
   }
 
-  const formatFullDate = (dateString: string) => {
+  const formatFullDate = (dateString: string | undefined) => {
     if (!dateString) return ""
-    return new Date(dateString).toLocaleDateString("ko-KR", {
+    const date = new Date(dateString)
+    // 유효한 날짜인지 확인
+    if (isNaN(date.getTime())) return ""
+    
+    // 한국 시간으로 변환 (UTC + 9시간)
+    const koreanTime = new Date(date.getTime() + (9 * 60 * 60 * 1000))
+    
+    return koreanTime.toLocaleString("ko-KR", {
       year: "numeric",
       month: "long",
       day: "numeric",
       weekday: "long",
       hour: "2-digit",
-      minute: "2-digit",
+      minute: "2-digit"
     })
   }
 
   useEffect(() => {
     if (isViewModalOpen && selectedPost) {
       setEditMode(false);
-      setEditTitle(selectedPost.title);
-      setEditContent(selectedPost.content);
-      setEditHashtags(selectedPost.hashtags.join(" "));
+      setEditTitle(selectedPost.title || selectedPost.board_topic || "");
+      setEditContent(selectedPost.content || selectedPost.board_description || "");
+      setEditHashtags(selectedPost.hashtags ? selectedPost.hashtags.join(" ") : "");
       setEditScheduledAt(selectedPost.scheduledAt ? selectedPost.scheduledAt.slice(0, 16) : "");
     }
   }, [isViewModalOpen, selectedPost]);
@@ -524,7 +623,7 @@ function PostListContent() {
                       {uniqueModels.map((model) => (
                         <button
                           key={model}
-                          onClick={() => setTempModelFilter(model)}
+                          onClick={() => setTempModelFilter(model || "")}
                           className={`text-left px-3 py-2 rounded-md text-sm transition-colors ${
                             tempModelFilter === model
                               ? "bg-blue-100 text-blue-700 border border-blue-200"
@@ -554,14 +653,14 @@ function PostListContent() {
                       {uniquePlatforms.map((platform) => (
                         <button
                           key={platform}
-                          onClick={() => setTempPlatformFilter(platform)}
+                          onClick={() => setTempPlatformFilter(platform || "")}
                           className={`text-left px-3 py-2 rounded-md text-sm transition-colors flex items-center gap-2 ${
                             tempPlatformFilter === platform
                               ? "bg-blue-100 text-blue-700 border border-blue-200"
                               : "bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-200"
                           }`}
                         >
-                          <span className="text-base">{getPlatformIcon(platform)}</span>
+                          <span className="text-base">{getPlatformIcon(platform || "")}</span>
                           {platform}
                         </button>
                       ))}
@@ -692,7 +791,7 @@ function PostListContent() {
                     <div className="flex items-center space-x-3 mb-2">
                       <h4 className="text-lg font-semibold text-gray-900">{post.title || post.board_topic}</h4>
                       {getStatusBadge(post.status)}
-                      {getPlatformBadge(post.platform)}
+                      {getPlatformBadge(post.platform || "")}
                     </div>
                     <p className="text-gray-600 text-sm line-clamp-3 mb-3">
                       {(post.content || post.board_description || '').length > 150 ? `${(post.content || post.board_description || '').substring(0, 150)}...` : (post.content || post.board_description || '')}
@@ -716,14 +815,20 @@ function PostListContent() {
                   </div>
                   <div className="flex items-center space-x-1 text-sm text-gray-500">
                     <Calendar className="h-4 w-4" />
-                    <span>{formatFullDate(post.createdAt || post.created_at)}</span>
+                    {post.status === 'scheduled' && post.scheduledAt ? (
+                      <span>예약: {formatDate(post.scheduledAt)}</span>
+                    ) : post.status === 'published' && post.publishedAt ? (
+                      <span>발행: {formatDate(post.publishedAt)}</span>
+                    ) : (
+                      <span>생성: {formatDate(post.createdAt || post.created_at || "")}</span>
+                    )}
                   </div>
                 </div>
 
                 {/* 성과지표와 액션 버튼들 */}
                 <div className="flex items-center justify-between pt-3 border-t mt-3">
                   <div className="flex items-center space-x-4 text-sm text-gray-600">
-                    {post.status === "published" && (
+                    {post.status === "published" && post.engagement && (
                       <>
                         <div className="flex items-center space-x-1">
                           <Heart className="h-4 w-4 text-red-500" />
@@ -749,7 +854,7 @@ function PostListContent() {
                   
                   <div className="flex items-center space-x-2" onClick={e => e.stopPropagation()}>
                     {post.status !== 'published' && (
-                      <Button size="sm" variant="outline" className="flex items-center space-x-1" onClick={() => handlePublishPost(post.id || post.board_id)}>
+                      <Button size="sm" variant="outline" className="flex items-center space-x-1" onClick={() => handlePublishPost(post.id || post.board_id || "")}>                      
                         <UploadCloud className="h-4 w-4" />
                         <span>업로드</span>
                       </Button>
@@ -769,7 +874,7 @@ function PostListContent() {
                         </AlertDialogHeader>
                         <AlertDialogFooter>
                           <AlertDialogCancel>취소</AlertDialogCancel>
-                          <AlertDialogAction onClick={() => handleDeletePost(post.id || post.board_id)} className="bg-red-600 hover:bg-red-700">삭제</AlertDialogAction>
+                          <AlertDialogAction onClick={() => handleDeletePost(post.id || post.board_id || "")} className="bg-red-600 hover:bg-red-700">삭제</AlertDialogAction>
                         </AlertDialogFooter>
                       </AlertDialogContent>
                     </AlertDialog>
@@ -814,14 +919,14 @@ function PostListContent() {
                         <h3 className="font-semibold text-gray-900">{selectedPost.title || selectedPost.board_topic}</h3>
                       )}
                       {getStatusBadge(selectedPost.status)}
-                      {getPlatformBadge(selectedPost.platform)}
+                      {getPlatformBadge(selectedPost.platform || "")}
                     </div>
                     <div className="flex items-center space-x-2 text-sm text-gray-500 mt-1">
                       <User className="h-4 w-4" />
                       <span>{selectedPost.author || 'AI 인플루언서'}</span>
                       <span>•</span>
                       <Calendar className="h-4 w-4" />
-                      <span>{formatFullDate(selectedPost.createdAt || selectedPost.created_at)}</span>
+                      <span>{formatFullDate(selectedPost.createdAt || selectedPost.created_at || "")}</span>
                     </div>
                   </div>
                 </div>
@@ -914,7 +1019,7 @@ function PostListContent() {
                 )}
 
                 {/* 성과 지표 */}
-                {selectedPost.status === "published" && (
+                {selectedPost.status === "published" && selectedPost.engagement && (
                   <div className="space-y-2">
                     <h4 className="text-sm font-medium text-gray-900">성과 지표</h4>
                     <div className="bg-gray-50 rounded-lg p-4">

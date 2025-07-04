@@ -33,6 +33,7 @@ from app.services.image_generation_workflow import (
     FullImageGenerationRequest,
     FullImageGenerationResponse
 )
+from app.services.scheduler_service import scheduler_service
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -328,35 +329,94 @@ async def create_board(
         board_id = str(uuid.uuid4())
         board_dict = board_data.dict()
         
-        # published_at 필드가 포함되지 않은 명시적 컬럼 리스트 사용
-        insert_sql = text("""
-            INSERT INTO BOARD (
-                board_id, influencer_id, user_id, team_id, group_id, board_topic, 
-                board_description, board_platform, board_hash_tag, 
-                board_status, image_url, created_at, updated_at
-            ) VALUES (
-                :board_id, :influencer_id, :user_id, :team_id, :group_id, :board_topic,
-                :board_description, :board_platform, :board_hash_tag,
-                :board_status, :image_url, NOW(), NOW()
-            )
-        """)
+        # 예약 발행인 경우 reservation_at 필드 포함
+        if board_dict.get('board_status') == 2 and board_dict.get('scheduled_at'):
+            insert_sql = text("""
+                INSERT INTO BOARD (
+                    board_id, influencer_id, user_id, team_id, group_id, board_topic, 
+                    board_description, board_platform, board_hash_tag, 
+                    board_status, image_url, reservation_at, created_at, updated_at
+                ) VALUES (
+                    :board_id, :influencer_id, :user_id, :team_id, :group_id, :board_topic,
+                    :board_description, :board_platform, :board_hash_tag,
+                    :board_status, :image_url, :reservation_at, NOW(), NOW()
+                )
+            """)
+            
+            insert_params = {
+                'board_id': board_id,
+                'influencer_id': board_dict['influencer_id'],
+                'user_id': user_id,
+                'team_id': board_dict['team_id'],
+                'group_id': board_dict['team_id'],
+                'board_topic': board_dict['board_topic'],
+                'board_description': board_dict.get('board_description'),
+                'board_platform': board_dict['board_platform'],
+                'board_hash_tag': board_dict.get('board_hash_tag'),
+                'board_status': board_dict.get('board_status', 1),
+                'image_url': board_dict['image_url'],
+                'reservation_at': board_dict.get('scheduled_at')
+            }
+        else:
+            # 즉시 발행 또는 임시저장인 경우
+            insert_sql = text("""
+                INSERT INTO BOARD (
+                    board_id, influencer_id, user_id, team_id, group_id, board_topic, 
+                    board_description, board_platform, board_hash_tag, 
+                    board_status, image_url, created_at, updated_at
+                ) VALUES (
+                    :board_id, :influencer_id, :user_id, :team_id, :group_id, :board_topic,
+                    :board_description, :board_platform, :board_hash_tag,
+                    :board_status, :image_url, NOW(), NOW()
+                )
+            """)
+            
+            insert_params = {
+                'board_id': board_id,
+                'influencer_id': board_dict['influencer_id'],
+                'user_id': user_id,
+                'team_id': board_dict['team_id'],
+                'group_id': board_dict['team_id'],
+                'board_topic': board_dict['board_topic'],
+                'board_description': board_dict.get('board_description'),
+                'board_platform': board_dict['board_platform'],
+                'board_hash_tag': board_dict.get('board_hash_tag'),
+                'board_status': board_dict.get('board_status', 1),
+                'image_url': board_dict['image_url']
+            }
         
-        db.execute(insert_sql, {
-            'board_id': board_id,
-            'influencer_id': board_dict['influencer_id'],
-            'user_id': user_id,
-            'team_id': board_dict['team_id'],
-            'group_id': board_dict['team_id'],
-            'board_topic': board_dict['board_topic'],
-            'board_description': board_dict.get('board_description'),
-            'board_platform': board_dict['board_platform'],
-            'board_hash_tag': board_dict.get('board_hash_tag'),
-            'board_status': board_dict.get('board_status', 1),
-            'image_url': board_dict['image_url']
-        })
+        db.execute(insert_sql, insert_params)
         
         db.commit()
         logger.info(f"Board created with raw SQL: {board_id}")
+        
+        # 예약 발행인 경우 스케줄러에 등록
+        if board_dict.get('board_status') == 2 and board_dict.get('scheduled_at'):
+            try:
+                from datetime import datetime, timezone
+                import pytz
+                
+                # 프론트엔드에서 받은 로컬 시간을 한국 시간으로 처리
+                scheduled_time_str = board_dict.get('scheduled_at')
+                
+                # ISO 형식 문자열을 datetime으로 변환
+                if scheduled_time_str.endswith(':00'):
+                    # 이미 초가 포함된 경우
+                    scheduled_time = datetime.fromisoformat(scheduled_time_str)
+                else:
+                    # 초가 없는 경우 추가
+                    scheduled_time = datetime.fromisoformat(scheduled_time_str + ':00')
+                
+                # 한국 시간대로 설정 (naive datetime을 한국 시간으로 가정)
+                korea_tz = pytz.timezone('Asia/Seoul')
+                if scheduled_time.tzinfo is None:
+                    scheduled_time = korea_tz.localize(scheduled_time)
+                
+                await scheduler_service.schedule_post(board_id, scheduled_time)
+                logger.info(f"게시글 {board_id} 스케줄링 등록 완료: {scheduled_time} (한국시간)")
+            except Exception as e:
+                logger.error(f"게시글 {board_id} 스케줄링 등록 실패: {str(e)}")
+                # 스케줄링 실패해도 게시글 생성은 성공으로 처리
         
         # 생성된 레코드를 다시 조회하여 반환
         board = db.query(Board).filter(Board.board_id == board_id).first()
@@ -1056,4 +1116,160 @@ async def cleanup_all_orphaned_pods(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to cleanup orphaned pods: {str(e)}"
+        )
+
+
+# ===================================================================
+# 스케줄링 관리 엔드포인트
+# ===================================================================
+
+@router.post("/{board_id}/schedule")
+async def schedule_board(
+    board_id: str,
+    scheduled_time: str,  # ISO format datetime string
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """게시글 예약 발행 스케줄링"""
+    try:
+        user_id = current_user.get("sub")
+        
+        # 게시글 소유권 확인
+        board = (
+            db.query(Board)
+            .filter(Board.board_id == board_id, Board.user_id == user_id)
+            .first()
+        )
+
+        if board is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, 
+                detail="Board not found"
+            )
+        
+        # 날짜 파싱
+        from datetime import datetime
+        try:
+            scheduled_datetime = datetime.fromisoformat(scheduled_time.replace('Z', '+00:00'))
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid datetime format. Use ISO format."
+            )
+        
+        # 현재 시간보다 이후인지 확인
+        if scheduled_datetime <= datetime.now():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Scheduled time must be in the future"
+            )
+        
+        # 게시글 상태를 예약으로 변경
+        stmt = update(Board).where(Board.board_id == board_id).values(
+            board_status=2,  # 예약 상태
+            reservation_at=scheduled_datetime
+        )
+        db.execute(stmt)
+        db.commit()
+        
+        # 스케줄러에 등록
+        await scheduler_service.schedule_post(board_id, scheduled_datetime)
+        
+        logger.info(f"게시글 {board_id} 예약 발행 스케줄링 완료: {scheduled_datetime}")
+        
+        return {
+            "message": "Board scheduled successfully",
+            "board_id": board_id,
+            "scheduled_time": scheduled_datetime.isoformat()
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to schedule board {board_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to schedule board: {str(e)}"
+        )
+
+
+@router.delete("/{board_id}/schedule")
+async def cancel_scheduled_board(
+    board_id: str,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """게시글 예약 발행 취소"""
+    try:
+        user_id = current_user.get("sub")
+        
+        # 게시글 소유권 확인
+        board = (
+            db.query(Board)
+            .filter(Board.board_id == board_id, Board.user_id == user_id)
+            .first()
+        )
+
+        if board is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, 
+                detail="Board not found"
+            )
+        
+        # 예약 상태인지 확인
+        if board.board_status != 2:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Board is not scheduled"
+            )
+        
+        # 게시글 상태를 임시저장으로 변경
+        stmt = update(Board).where(Board.board_id == board_id).values(
+            board_status=1,  # 임시저장 상태
+            reservation_at=None
+        )
+        db.execute(stmt)
+        db.commit()
+        
+        # 스케줄러에서 제거
+        success = await scheduler_service.cancel_scheduled_post(board_id)
+        
+        logger.info(f"게시글 {board_id} 예약 발행 취소 완료")
+        
+        return {
+            "message": "Board schedule cancelled successfully",
+            "board_id": board_id,
+            "scheduler_cancelled": success
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to cancel scheduled board {board_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to cancel scheduled board: {str(e)}"
+        )
+
+
+@router.get("/scheduler/status")
+async def get_scheduler_status(
+    current_user: dict = Depends(get_current_user),
+):
+    """스케줄러 상태 조회"""
+    try:
+        status = scheduler_service.get_scheduler_status()
+        scheduled_jobs = scheduler_service.get_scheduled_jobs()
+        
+        return {
+            "scheduler_status": status,
+            "scheduled_jobs": scheduled_jobs,
+            "total_scheduled": len(scheduled_jobs)
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to get scheduler status: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get scheduler status: {str(e)}"
         )
