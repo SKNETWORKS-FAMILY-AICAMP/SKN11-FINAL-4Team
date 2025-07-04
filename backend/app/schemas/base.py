@@ -6,7 +6,10 @@ from typing import Optional
 class BaseSchema(BaseModel):
     """기본 스키마 클래스"""
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        from_attributes=True,
+        protected_namespaces=()  # model_ 필드 사용 허용
+    )
 
 
 class TimestampSchema(BaseSchema):

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, Suspense } from "react"
 import { AlertCircle } from "lucide-react"
 import React from "react"
 import { useParams, useSearchParams } from "next/navigation"
@@ -179,7 +179,7 @@ const samplePosts: ContentPost[] = [
   },
 ]
 
-export default function ModelDetailPage() {
+function ModelDetailContent() {
   const params = useParams()
   const searchParams = useSearchParams()
   const [model, setModel] = useState<any>(sampleModel)
@@ -1539,5 +1539,30 @@ export default function ModelDetailPage() {
         </Tabs>
       </div>
     </div>
+  )
+}
+
+export default function ModelDetailPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gray-50">
+        <Navigation />
+        <div className="max-w-6xl mx-auto p-8">
+          <div className="animate-pulse">
+            <div className="h-8 bg-gray-200 rounded w-64 mb-6"></div>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              <div className="lg:col-span-2">
+                <div className="h-96 bg-gray-200 rounded-lg"></div>
+              </div>
+              <div>
+                <div className="h-64 bg-gray-200 rounded-lg"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    }>
+      <ModelDetailContent />
+    </Suspense>
   )
 }
