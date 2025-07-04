@@ -79,7 +79,7 @@ export class ModelService {
     if (params?.limit) searchParams.set('limit', params.limit.toString())
 
     const query = searchParams.toString()
-    const endpoint = `/api/v1/influencers${query ? `?${query}` : ''}`
+    const endpoint = `/api/v1/influencers/${query ? `?${query}` : ''}`
     
     return await apiClient.get<AIInfluencer[]>(endpoint)
   }

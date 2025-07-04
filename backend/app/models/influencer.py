@@ -145,7 +145,7 @@ class AIInfluencer(Base, TimestampMixin):
 
     # 관계
     user = relationship("User", back_populates="ai_influencers")
-    group = relationship("Team", back_populates="ai_influencers")
+    team = relationship("Team", back_populates="ai_influencers")
     style_preset = relationship("StylePreset", back_populates="ai_influencers")
     mbti = relationship("ModelMBTI", back_populates="ai_influencers")
     batch_keys = relationship("BatchKey", back_populates="influencer")

@@ -3,10 +3,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
+from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 import logging
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from app.core.config import settings
 from app.database import init_database, test_database_connection
@@ -228,6 +230,11 @@ async def test_logs():
 
 # API 라우터 등록
 app.include_router(api_router, prefix=settings.API_V1_STR)
+
+# 업로드된 파일 서빙을 위한 정적 파일 서비스
+upload_dir = Path("uploads")
+upload_dir.mkdir(exist_ok=True)
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 # 버전 없는 라우터 추가 (하위 호환성)
 from app.api.v1.endpoints.auth import router as auth_router
