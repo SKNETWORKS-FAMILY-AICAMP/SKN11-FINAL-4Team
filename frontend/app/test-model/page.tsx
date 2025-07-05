@@ -66,7 +66,7 @@ export default function TestModelPage() {
     setIsLoading(true)
 
     try {
-      const res = await fetch("/api/v1/model_test/multi-chat", {
+      const res = await fetch("/api/v1/model-test/multi-chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -109,7 +109,11 @@ export default function TestModelPage() {
     const fetchModels = async () => {
       try {
         setModelsLoading(true)
-        const res = await fetch("/api/v1/influencers")
+        const res = await fetch("/api/v1/influencers", {
+          headers: {
+            'Authorization': `Bearer ${tokenUtils.getToken()}`,
+          }
+        })
         const data = await res.json()
         setAvailableModels(data)
       } catch (error) {
