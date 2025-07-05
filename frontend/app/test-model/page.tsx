@@ -12,8 +12,7 @@ import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import { MessageSquare, Send, Bot, User } from "lucide-react"
 import type { AIModel } from "@/lib/types"
-import { ModelService, type AIInfluencer } from "@/lib/services/model.service"
-import { tokenUtils } from "@/lib/auth"
+import { ModelService, type AIInfluencer, type MultiChatRequest, type MultiChatResponse } from "@/lib/services/model.service"
 
 interface ChatMessage {
   id: string
@@ -66,22 +65,25 @@ export default function TestModelPage() {
     setIsLoading(true)
 
     try {
-      const res = await fetch("/api/v1/model-test/multi-chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          influencers: selectedModels.map((modelId) => {
-            const model = availableModels.find((m) => m.influencer_id === modelId)
-            return {
-              influencer_id: modelId,
-              influencer_model_repo: model?.influencer_model_repo || "",
-            }
-          }),
-          message,
+      const request: MultiChatRequest = {
+        influencers: selectedModels.map((modelId) => {
+          const model = availableModels.find((m) => m.influencer_id === modelId)
+          return {
+            influencer_id: modelId,
+            influencer_model_repo: model?.influencer_model_repo || "",
+          }
         }),
-      })
-      const data = await res.json()
-      const aiMessages: ChatMessage[] = data.results.map((result: any, index: number) => ({
+        message,
+      }
+      
+      // 디버깅을 위한 로그 추가
+      console.log('Sending request:', JSON.stringify(request, null, 2))
+      
+      const data = await ModelService.multiChat(request)
+      
+      // 응답 로그 추가
+      console.log('Received response:', JSON.stringify(data, null, 2))
+      const aiMessages: ChatMessage[] = data.results.map((result, index) => ({
         id: (Date.now() + index + 1).toString(),
         type: "ai" as const,
         content: result.response,
@@ -91,7 +93,16 @@ export default function TestModelPage() {
       }))
       setChatHistory((prev) => [...prev, ...aiMessages])
     } catch (error) {
-      // 에러 처리
+      console.error('Error sending message:', error)
+      const errorMessage: ChatMessage = {
+        id: (Date.now() + 1).toString(),
+        type: "ai",
+        content: "죄송합니다. 메시지 전송 중 오류가 발생했습니다. 다시 시도해주세요.",
+        timestamp: new Date().toLocaleTimeString(),
+        modelId: "error",
+        modelName: "Error",
+      }
+      setChatHistory((prev) => [...prev, errorMessage])
     } finally {
       setIsLoading(false)
     }
@@ -109,14 +120,10 @@ export default function TestModelPage() {
     const fetchModels = async () => {
       try {
         setModelsLoading(true)
-        const res = await fetch("/api/v1/influencers", {
-          headers: {
-            'Authorization': `Bearer ${tokenUtils.getToken()}`,
-          }
-        })
-        const data = await res.json()
+        const data = await ModelService.getInfluencers()
         setAvailableModels(data)
       } catch (error) {
+        console.error('Error fetching models:', error)
         setAvailableModels([])
       } finally {
         setModelsLoading(false)
