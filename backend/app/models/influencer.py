@@ -9,6 +9,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKeyConstraint,
     func,
+    Float,
 )
 import sqlalchemy as sa
 from sqlalchemy.orm import relationship
@@ -324,3 +325,6 @@ class APICallAggregation(Base):
     influencer_api = relationship(
         "InfluencerAPI", back_populates="api_call_aggregations"
     )
+
+
+
