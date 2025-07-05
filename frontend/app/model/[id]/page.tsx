@@ -235,6 +235,12 @@ function ModelDetailContent() {
           createdAt: data.created_at?.split('T')[0] || '',
           apiKey: sampleModel.apiKey, // API 키는 별도 조회
           trainingData: sampleModel.trainingData, // 훈련 데이터는 별도 조회
+          // Instagram 연동 정보 추가
+          instagram_id: data.instagram_id,
+          instagram_username: data.instagram_username,
+          instagram_account_type: data.instagram_account_type,
+          instagram_is_active: data.instagram_is_active,
+          instagram_connected_at: data.instagram_connected_at,
         })
       } else {
         console.error('Failed to load model data:', response.status)
@@ -423,32 +429,53 @@ function ModelDetailContent() {
     }
   }
 
-  // 컴포넌트 마운트 시 모델 데이터와 Instagram 연동 상태 확인
+  // 컴포넌트 마운트 시 모델 데이터 로드
   React.useEffect(() => {
     loadModelData()
-    
-    const checkInstagramStatus = async () => {
-      try {
-        const response = await fetch(`/api/influencers/${params.id}/instagram/status`, {
-          headers: {
-            'Authorization': `Bearer ${tokenUtils.getToken()}`,
-          },
-        })
-
-        if (response.ok) {
-          const data = await response.json()
-          console.log('Instagram status response:', data)
-          setInstagramStatus(data)
-        } else {
-          console.error('Instagram status error:', response.status, response.statusText)
-        }
-      } catch (error) {
-        console.error("Instagram 상태 확인 오류:", error)
-      }
-    }
-
-    checkInstagramStatus()
   }, [params.id])
+
+  // 모델 데이터 로드 후 Instagram 상태 확인
+  React.useEffect(() => {
+    if (!isModelLoading && model) {
+      const checkInstagramStatus = async () => {
+        try {
+          // 모델 데이터에서 Instagram 정보 확인
+          if (model.instagram_is_active) {
+            setInstagramStatus({
+              is_connected: true,
+              connected_at: model.instagram_connected_at,
+              instagram_info: {
+                id: model.instagram_id || '',
+                username: model.instagram_username || '',
+                account_type: model.instagram_account_type || '',
+              }
+            })
+          } else {
+            // API로 추가 확인 (기존 방식 유지)
+            const response = await fetch(`/api/influencers/${params.id}/instagram/status`, {
+              headers: {
+                'Authorization': `Bearer ${tokenUtils.getToken()}`,
+              },
+            })
+
+            if (response.ok) {
+              const data = await response.json()
+              console.log('Instagram status response:', data)
+              setInstagramStatus(data)
+            } else {
+              console.error('Instagram status error:', response.status, response.statusText)
+              setInstagramStatus({ is_connected: false })
+            }
+          }
+        } catch (error) {
+          console.error("Instagram 상태 확인 오류:", error)
+          setInstagramStatus({ is_connected: false })
+        }
+      }
+
+      checkInstagramStatus()
+    }
+  }, [isModelLoading, model, params.id])
 
   const getStatusBadge = (status: ContentPost["status"]) => {
     switch (status) {

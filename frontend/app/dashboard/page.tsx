@@ -22,6 +22,7 @@ import {
 import { Plus, Search, Settings, Trash2, Loader2, Filter, X } from "lucide-react"
 import { usePermission } from "@/hooks/use-auth"
 import { ModelService, type AIInfluencer } from "@/lib/services/model.service"
+import { PlatformBadge } from "@/components/ui/platform-badge"
 import {
   Dialog,
   DialogContent,
@@ -39,6 +40,8 @@ export default function DashboardPage() {
   // 필터 상태
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [tempStatusFilter, setTempStatusFilter] = useState<string>("all")
+  const [platformFilter, setPlatformFilter] = useState<string>("all")
+  const [tempPlatformFilter, setTempPlatformFilter] = useState<string>("all")
   const [isFilterModalOpen, setIsFilterModalOpen] = useState(false)
 
   // API에서 인플루언서 데이터 가져오기
@@ -68,17 +71,22 @@ export default function DashboardPage() {
         (statusFilter === "learning" && influencer.learning_status === 0) ||
         (statusFilter === "ready" && influencer.learning_status === 1) ||
         (statusFilter === "error" && influencer.learning_status === 2)
-      return matchesSearch && matchesStatus
+      const matchesPlatform = platformFilter === "all" ||
+        (platformFilter === "instagram" && influencer.instagram_is_active) ||
+        (platformFilter === "not_connected" && !influencer.instagram_is_active)
+      return matchesSearch && matchesStatus && matchesPlatform
     }
   )
 
   // 필터 적용 핸들러
   const handleApplyFilters = () => {
     setStatusFilter(tempStatusFilter)
+    setPlatformFilter(tempPlatformFilter)
     setIsFilterModalOpen(false)
   }
   const handleOpenFilterModal = () => {
     setTempStatusFilter(statusFilter)
+    setTempPlatformFilter(platformFilter)
     setIsFilterModalOpen(true)
   }
 
@@ -141,8 +149,10 @@ export default function DashboardPage() {
                   <Button variant="outline" className="flex items-center gap-2" onClick={handleOpenFilterModal}>
                     <Filter className="h-4 w-4" />
                     필터
-                    {statusFilter !== "all" && (
-                      <Badge variant="secondary" className="ml-1">1</Badge>
+                    {platformFilter !== "all" && (
+                      <Badge variant="secondary" className="ml-1">
+                        1
+                      </Badge>
                     )}
                   </Button>
                 </DialogTrigger>
@@ -151,49 +161,39 @@ export default function DashboardPage() {
                     <DialogTitle>필터 설정</DialogTitle>
                   </DialogHeader>
                   <div className="space-y-6">
-                    {/* 상태 필터 */}
+                    {/* 플랫폼 필터만 남김 */}
                     <div>
-                      <h3 className="font-medium text-sm text-gray-900 mb-3">상태</h3>
+                      <h3 className="font-medium text-sm text-gray-900 mb-3">플랫폼 연동</h3>
                       <div className="grid grid-cols-2 gap-2">
                         <button
-                          onClick={() => setTempStatusFilter("all")}
+                          onClick={() => setTempPlatformFilter("all")}
                           className={`text-left px-3 py-2 rounded-md text-sm transition-colors ${
-                            tempStatusFilter === "all"
+                            tempPlatformFilter === "all"
                               ? "bg-blue-100 text-blue-700 border border-blue-200"
                               : "bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-200"
                           }`}
                         >
-                          전체 상태
+                          전체 플랫폼
                         </button>
                         <button
-                          onClick={() => setTempStatusFilter("learning")}
+                          onClick={() => setTempPlatformFilter("instagram")}
                           className={`text-left px-3 py-2 rounded-md text-sm transition-colors ${
-                            tempStatusFilter === "learning"
-                              ? "bg-yellow-100 text-yellow-700 border border-yellow-200"
+                            tempPlatformFilter === "instagram"
+                              ? "bg-purple-100 text-purple-700 border border-purple-200"
                               : "bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-200"
                           }`}
                         >
-                          생성 중
+                          Instagram 연동
                         </button>
                         <button
-                          onClick={() => setTempStatusFilter("ready")}
+                          onClick={() => setTempPlatformFilter("not_connected")}
                           className={`text-left px-3 py-2 rounded-md text-sm transition-colors ${
-                            tempStatusFilter === "ready"
-                              ? "bg-green-100 text-green-700 border border-green-200"
+                            tempPlatformFilter === "not_connected"
+                              ? "bg-gray-100 text-gray-700 border border-gray-200"
                               : "bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-200"
                           }`}
                         >
-                          사용 가능
-                        </button>
-                        <button
-                          onClick={() => setTempStatusFilter("error")}
-                          className={`text-left px-3 py-2 rounded-md text-sm transition-colors ${
-                            tempStatusFilter === "error"
-                              ? "bg-red-100 text-red-700 border border-red-200"
-                              : "bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-200"
-                          }`}
-                        >
-                          오류
+                          미연동
                         </button>
                       </div>
                     </div>
@@ -229,13 +229,13 @@ export default function DashboardPage() {
           </div>
 
           {/* 활성 필터 표시 */}
-          {statusFilter !== "all" && (
-            <div className="flex items-center gap-2 mb-4">
+          {platformFilter !== "all" && (
+            <div className="flex items-center gap-2 mb-4 flex-wrap">
               <span className="text-sm text-gray-500">활성 필터:</span>
               <Badge variant="outline" className="text-xs flex items-center gap-1">
-                상태: {statusFilter === "learning" ? "생성 중" : statusFilter === "ready" ? "사용 가능" : "오류"}
+                플랫폼: {platformFilter === "instagram" ? "Instagram 연동" : "미연동"}
                 <button
-                  onClick={() => setStatusFilter("all")}
+                  onClick={() => setPlatformFilter("all")}
                   className="ml-1 hover:text-red-600 transition-colors"
                 >
                   <X className="h-3 w-3" />
@@ -244,16 +244,19 @@ export default function DashboardPage() {
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => setStatusFilter("all")}
+                onClick={() => setPlatformFilter("all")}
                 className="text-gray-400 hover:text-gray-600"
               >
-                <X className="h-3 w-3" />
+                모든 필터 초기화
               </Button>
             </div>
           )}
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-            <Card>
+            <Card
+              className={`cursor-pointer transition-shadow ${statusFilter === "all" ? "ring-2 ring-blue-400" : "hover:shadow-lg"}`}
+              onClick={() => setStatusFilter("all")}
+            >
               <CardContent className="p-6">
                 <div className="text-center">
                   <p className="text-3xl font-bold text-blue-600">{influencers.length}</p>
@@ -261,7 +264,10 @@ export default function DashboardPage() {
                 </div>
               </CardContent>
             </Card>
-            <Card>
+            <Card
+              className={`cursor-pointer transition-shadow ${statusFilter === "learning" ? "ring-2 ring-yellow-400" : "hover:shadow-lg"}`}
+              onClick={() => setStatusFilter("learning")}
+            >
               <CardContent className="p-6">
                 <div className="text-center">
                   <p className="text-3xl font-bold text-yellow-600">
@@ -271,7 +277,10 @@ export default function DashboardPage() {
                 </div>
               </CardContent>
             </Card>
-            <Card>
+            <Card
+              className={`cursor-pointer transition-shadow ${statusFilter === "ready" ? "ring-2 ring-green-400" : "hover:shadow-lg"}`}
+              onClick={() => setStatusFilter("ready")}
+            >
               <CardContent className="p-6">
                 <div className="text-center">
                   <p className="text-3xl font-bold text-green-600">
@@ -355,6 +364,21 @@ export default function DashboardPage() {
                       <p className="text-sm text-gray-600">
                         {influencer.chatbot_option ? '활성화' : '비활성화'}
                       </p>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-gray-700">연동 플랫폼</p>
+                      <div className="flex flex-wrap gap-2 mt-1">
+                        {influencer.instagram_is_active ? (
+                          <PlatformBadge
+                            platform="instagram"
+                            isConnected={!!influencer.instagram_is_active}
+                            username={influencer.instagram_username}
+                          />
+                        ) : (
+                          <span className="text-gray-400 text-sm">-</span>
+                        )}
+                        {/* 향후 다른 플랫폼 추가 가능 */}
+                      </div>
                     </div>
                   </div>
                   <div className="flex pt-4 mt-auto">

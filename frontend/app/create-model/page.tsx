@@ -15,18 +15,34 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Upload, ArrowLeft, Lightbulb, MessageCircle, Palette } from "lucide-react"
+import { Upload, ArrowLeft, Lightbulb, MessageCircle, Palette, Trash2 } from "lucide-react"
 import Link from "next/link"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 
+interface FormDataType {
+  name: string;
+  description: string;
+  modelType: string;
+  personality: string;
+  tone: string;
+  customTones: string[];
+  mbti: string;
+  gender: string;
+  age: string;
+  imageMethod: string;
+  hairStyle: string;
+  mood: string;
+  selectedPresetId: string;
+}
+
 export default function CreateModelPage() {
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<FormDataType>({
     name: "",
     description: "",
-    modelType: "", // "character" 또는 "human"
+    modelType: "", // "character" 또는 "human" 또는 "object"
     personality: "",
     tone: "",
-    customTone: "",
+    customTones: [],
     mbti: "",
     gender: "",
     age: "",
@@ -42,31 +58,77 @@ export default function CreateModelPage() {
   const [showCustomInput, setShowCustomInput] = useState(false)
   const [toneTab, setToneTab] = useState("recommend")
   const [inputMethodTab, setInputMethodTab] = useState("preset") // "preset" 또는 "manual"
-  const [stylePresets, setStylePresets] = useState<StylePreset[]>([])
+  const [stylePresets, setStylePresets] = useState<any[]>([])
   const [loadingPresets, setLoadingPresets] = useState(false)
+  const [pendingPreset, setPendingPreset] = useState<any | null>(null)
   const router = useRouter()
   const { user } = useAuth()
+  const [showToneExamples, setShowToneExamples] = useState(false)
+  const [customToneInput, setCustomToneInput] = useState("")
 
-  // 컴포넌트 마운트 시 프리셋 목록 로드
   useEffect(() => {
-    loadStylePresets()
+    // 임시: 하드코딩 데이터 fetch처럼 세팅
+    setTimeout(() => {
+      setStylePresets([
+        {
+          style_preset_id: "preset1",
+          style_preset_name: "밝고 긍정적인 캐릭터",
+          modelType: "character",
+          mbti: "ENFP",
+          gender: "female",
+          age: "20",
+          personality: "밝고 긍정적",
+          tone: "존댓말",
+          hairStyle: "긴 생머리",
+          mood: "밝고 경쾌한"
+        },
+        {
+          style_preset_id: "preset2",
+          style_preset_name: "차분하고 신중한 사람형",
+          modelType: "human",
+          mbti: "INFJ",
+          gender: "male",
+          age: "30",
+          personality: "차분하고 신중함",
+          tone: "공손함",
+          hairStyle: "단정한 숏컷",
+          mood: "차분하고 신뢰감 있는"
+        }
+      ]);
+    }, 300); // fetch 흉내
   }, [])
 
-  const loadStylePresets = async () => {
-    try {
-      setLoadingPresets(true)
-      const presets = await ModelService.getStylePresets({ limit: 50 })
-      setStylePresets(presets)
-    } catch (error) {
-      console.error('프리셋 로드 실패:', error)
-      // 오류 발생 시 빈 배열로 설정 (프리셋 없이도 사용 가능)
-      setStylePresets([])
-    } finally {
-      setLoadingPresets(false)
+  useEffect(() => {
+    if (formData.imageMethod === "prompt" && pendingPreset) {
+      setFormData(prev => ({
+        ...prev,
+        modelType: pendingPreset.modelType ?? "",
+        hairStyle: pendingPreset.hairStyle ?? "",
+        mood: pendingPreset.mood ?? "",
+        personality: pendingPreset.personality ?? "",
+        customTones: pendingPreset.tone ? [pendingPreset.tone] : [],
+        tone: "",
+        mbti: pendingPreset.mbti ?? "",
+        gender: pendingPreset.gender ?? "",
+        age: pendingPreset.age ?? "",
+      }));
+      setPendingPreset(null);
     }
-  }
+  }, [formData.imageMethod, pendingPreset]);
 
-  const handleInputChange = (field: string, value: string) => {
+  // 성격(personality)이 바뀌면 추천 말투 숨김
+  useEffect(() => {
+    setShowToneExamples(false);
+  }, [formData.personality]);
+
+  // customTone이 있으면 customTones로 마이그레이션
+  useEffect(() => {
+    if (formData.tone && !formData.customTones.length) {
+      setFormData((prev) => ({ ...prev, customTones: [prev.tone] }));
+    }
+  }, [formData.tone]);
+
+  const handleInputChange = (field: string, value: string | string[]) => {
     setFormData((prev) => ({ ...prev, [field]: value }))
   }
 
@@ -78,30 +140,35 @@ export default function CreateModelPage() {
 
   // 프리셋 선택 핸들러
   const handlePresetSelect = (presetId: string) => {
-    const selectedPreset = stylePresets.find(p => p.style_preset_id === presetId)
+    if (presetId === "manual") {
+      setToneTab && setToneTab("recommend");
+      setFormData({
+        name: "",
+        description: "",
+        modelType: "",
+        mbti: "",
+        gender: "",
+        age: "",
+        personality: "",
+        tone: "",
+        customTones: [],
+        imageMethod: "upload",
+        hairStyle: "",
+        mood: "",
+        selectedPresetId: "manual"
+      });
+      setPendingPreset(null);
+      return;
+    }
+    const selectedPreset = stylePresets.find(p => p.style_preset_id === presetId);
     if (selectedPreset) {
-      // 프리셋 데이터로 폼 자동 채우기
+      setToneTab && setToneTab("custom");
       setFormData(prev => ({
         ...prev,
         selectedPresetId: presetId,
-        // 모델 유형 매핑 (1=캐릭터, 2=사람, 3=사물)
-        modelType: selectedPreset.influencer_type === 1 ? "character" : 
-                  selectedPreset.influencer_type === 2 ? "human" : "objects",
-        // 성별 매핑 (0=남성, 1=여성, 2=기타)
-        gender: selectedPreset.influencer_gender === 0 ? "male" : 
-               selectedPreset.influencer_gender === 1 ? "female" : "other",
-        // 연령대 매핑 (20대, 30대 등)
-        age: selectedPreset.influencer_age_group === 1 ? "15" :
-             selectedPreset.influencer_age_group === 2 ? "25" :
-             selectedPreset.influencer_age_group === 3 ? "35" :
-             selectedPreset.influencer_age_group === 4 ? "45" : "55",
-        personality: selectedPreset.influencer_personality,
-        tone: selectedPreset.influencer_speech,
-        customTone: "",
-        hairStyle: selectedPreset.influencer_hairstyle,
-        mood: selectedPreset.influencer_style,
-        imageMethod: "prompt" // 프리셋 선택 시 이미지 생성 모드로 설정
-      }))
+        imageMethod: "prompt"
+      }));
+      setPendingPreset(selectedPreset);
     }
   }
 
@@ -124,7 +191,7 @@ export default function CreateModelPage() {
         alert("성격을 입력해주세요.")
         return
       }
-      if (!formData.tone.trim() && !formData.customTone.trim()) {
+      if (!formData.tone.trim() && !formData.customTones.length) {
         alert("말투를 선택하거나 직접 입력해주세요.")
         return
       }
@@ -155,19 +222,19 @@ export default function CreateModelPage() {
       const createInfluencerData = {
         user_id: user.user_id,
         group_id: user.teams[0].group_id, // 첫 번째 팀의 group_id 사용
-        style_preset_id: formData.selectedPresetId || null, // 선택된 프리셋 ID 또는 자동 생성을 위해 null
-        mbti_id: null,
+        style_preset_id: formData.selectedPresetId || "", // 빈 문자열로 전달
+        mbti_id: undefined,
         influencer_name: formData.name,
         influencer_description: formData.description,
-        image_url: null,
-        influencer_data_url: null,
+        image_url: undefined,
+        influencer_data_url: undefined,
         learning_status: 0, // 초기 상태
         influencer_model_repo: "",
         chatbot_option: true,
         
         // 프리셋 자동 생성을 위한 추가 데이터 (프리셋이 선택되지 않은 경우에만 사용)
         personality: formData.personality,
-        tone: formData.tone || formData.customTone,
+        tone: formData.tone || formData.customTones[0] || "",
         model_type: formData.modelType,
         mbti: formData.mbti,
         gender: formData.gender,
@@ -206,9 +273,8 @@ export default function CreateModelPage() {
 
   // 성격 기반 대화 예시 생성
   const generateConversationExamples = (personality: string) => {
-    if (!personality.trim()) return []
-
-    const personalityLower = personality.toLowerCase()
+    if (!(personality || '').trim()) return []
+    const personalityLower = (personality || '').toLowerCase()
 
     // 성격 키워드에 따른 대화 예시
     const conversationMap: Record<string, Array<{title: string, example: string, tone: string}>> = {
@@ -337,6 +403,44 @@ export default function CreateModelPage() {
 
   const conversationExamples = generateConversationExamples(formData.personality)
 
+  // 프리셋 기반 동적 옵션 추출
+  const uniqueModelTypes = Array.from(new Set(stylePresets.map(p => p.influencer_type)));
+  const uniqueModelTypeOptions = uniqueModelTypes.map(type => ({
+    value: String(type),
+    label: type === 1 ? "캐릭터" : type === 2 ? "사람" : type === 3 ? "사물" : `기타(${type})`
+  }));
+  const uniqueGenders = Array.from(new Set(stylePresets.map(p => p.influencer_gender)));
+  const uniqueGenderOptions = uniqueGenders.map(gender => ({
+    value: String(gender),
+    label: gender === 0 ? "남성" : gender === 1 ? "여성" : gender === 2 ? "기타" : `기타(${gender})`
+  }));
+  const uniqueAges = Array.from(new Set(stylePresets.map(p => p.influencer_age_group)));
+  const uniqueAgeOptions = uniqueAges.map(age => ({
+    value: String(age),
+    label: age === 1 ? "10대" : age === 2 ? "20대" : age === 3 ? "30대" : age === 4 ? "40대" : age === 5 ? "50대 이상" : `기타(${age})`
+  }));
+  const uniquePersonalities = Array.from(new Set(stylePresets.map(p => p.influencer_personality).filter(Boolean)));
+  const uniqueTones = Array.from(new Set(stylePresets.map(p => p.influencer_speech).filter(Boolean)));
+
+  // 말투 추가 함수
+  const handleAddCustomTone = () => {
+    const value = customToneInput.trim();
+    if (!value) return;
+    setFormData((prev) => ({
+      ...prev,
+      customTones: [...(prev.customTones || []), value],
+    }));
+    setCustomToneInput("");
+  };
+
+  // 말투 삭제 함수
+  const handleRemoveCustomTone = (idx: number) => {
+    setFormData((prev) => ({
+      ...prev,
+      customTones: prev.customTones.filter((_, i) => i !== idx),
+    }));
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       <Navigation />
@@ -352,207 +456,16 @@ export default function CreateModelPage() {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-8">
-          {/* 설정 방법 선택 */}
-          <Card>
-            <CardHeader>
-              <CardTitle>인플루언서 생성 방법</CardTitle>
-              <CardDescription>프리셋을 선택하거나 직접 설정하여 AI 인플루언서를 만들어보세요</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Tabs value={inputMethodTab} onValueChange={setInputMethodTab} className="w-full">
-                <TabsList className="grid w-full grid-cols-2">
-                  <TabsTrigger value="preset" className="flex items-center space-x-2">
-                    <Palette className="h-4 w-4" />
-                    <span>프리셋 선택</span>
-                  </TabsTrigger>
-                  <TabsTrigger value="manual" className="flex items-center space-x-2">
-                    <MessageCircle className="h-4 w-4" />
-                    <span>직접 입력</span>
-                  </TabsTrigger>
-                </TabsList>
-
-                <TabsContent value="preset" className="mt-6">
-                  {/* 프리셋 선택 영역 */}
-                  {loadingPresets ? (
-                    <div className="text-center py-8">
-                      <p className="text-gray-500">프리셋 로딩 중...</p>
-                    </div>
-                  ) : stylePresets.length === 0 ? (
-                    <div className="text-center py-8">
-                      <div className="text-gray-500 space-y-2">
-                        <p>프리셋을 불러올 수 없습니다.</p>
-                        <p className="text-sm">직접 입력 탭에서 설정해주세요.</p>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {stylePresets.map((preset) => (
-                          <Card
-                            key={preset.style_preset_id}
-                            className={`cursor-pointer transition-all hover:shadow-md ${
-                              formData.selectedPresetId === preset.style_preset_id 
-                                ? 'ring-2 ring-blue-500 bg-blue-50' 
-                                : 'hover:bg-gray-50'
-                            }`}
-                            onClick={() => handlePresetSelect(preset.style_preset_id)}
-                          >
-                            <CardHeader className="pb-3">
-                              <CardTitle className="text-sm font-medium">
-                                {preset.style_preset_name}
-                              </CardTitle>
-                            </CardHeader>
-                            <CardContent className="pt-0 space-y-2">
-                              <div className="text-xs space-y-1">
-                                <div className="flex justify-between">
-                                  <span className="text-gray-500">유형:</span>
-                                  <span className="font-medium">
-                                    {preset.influencer_type === 1 ? '캐릭터형' : 
-                                     preset.influencer_type === 2 ? '사람형' : '사물형'}
-                                  </span>
-                                </div>
-                                <div className="flex justify-between">
-                                  <span className="text-gray-500">성별:</span>
-                                  <span className="font-medium">
-                                    {preset.influencer_gender === 0 ? '남성' : 
-                                     preset.influencer_gender === 1 ? '여성' : '기타'}
-                                  </span>
-                                </div>
-                                <div className="flex justify-between">
-                                  <span className="text-gray-500">연령대:</span>
-                                  <span className="font-medium">
-                                    {preset.influencer_age_group === 1 ? '10대' :
-                                     preset.influencer_age_group === 2 ? '20대' :
-                                     preset.influencer_age_group === 3 ? '30대' :
-                                     preset.influencer_age_group === 4 ? '40대' : '50대+'}
-                                  </span>
-                                </div>
-                              </div>
-                              <div className="pt-2 border-t border-gray-100">
-                                <p className="text-xs text-gray-600 line-clamp-2">
-                                  {preset.influencer_personality}
-                                </p>
-                              </div>
-                              <div className="text-xs text-gray-500">
-                                <span className="font-medium">스타일:</span> {preset.influencer_style}
-                              </div>
-                            </CardContent>
-                          </Card>
-                        ))}
-                      </div>
-                      
-                      {formData.selectedPresetId && (
-                        <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
-                          <div className="flex items-center space-x-2">
-                            <Palette className="h-4 w-4 text-green-600" />
-                            <span className="text-sm text-green-800 font-medium">
-                              프리셋이 선택되었습니다!
-                            </span>
-                          </div>
-                          <p className="text-xs text-green-700 mt-1">
-                            선택된 프리셋: {stylePresets.find(p => p.style_preset_id === formData.selectedPresetId)?.style_preset_name}
-                          </p>
-                          <p className="text-xs text-green-600 mt-1">
-                            선택한 프리셋으로 인플루언서가 생성됩니다. 이름과 설명만 추가로 입력해주세요.
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </TabsContent>
-
-                <TabsContent value="manual" className="mt-6">
-                  {/* 직접 입력 영역 */}
-                  <div className="space-y-6">
-                    <div>
-                      <Label htmlFor="modelType">모델 유형</Label>
-                      <Select value={formData.modelType} onValueChange={(value) => handleInputChange("modelType", value)}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="모델 유형을 선택하세요" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="character">캐릭터형 (애니메이션, 만화 스타일)</SelectItem>
-                          <SelectItem value="human">사람형 (실제 사람과 유사한 형태)</SelectItem>
-                          <SelectItem value="objects">사물형 (사물과 유사한 형태)</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <p className="text-xs text-gray-500 mt-1">
-                        💡 캐릭터형은 애니메이션이나 만화 스타일로, 사람형은 실제 사람과 유사하게 생성됩니다
-                      </p>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      <div>
-                        <Label htmlFor="mbti">MBTI (선택사항)</Label>
-                        <Select value={formData.mbti} onValueChange={(value) => handleInputChange("mbti", value)}>
-                          <SelectTrigger>
-                            <SelectValue placeholder="MBTI 선택 (선택사항)" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="none">선택 안함</SelectItem>
-                            <SelectItem value="ENFP">ENFP - 재기발랄한 활동가</SelectItem>
-                            <SelectItem value="ENFJ">ENFJ - 정의로운 사회운동가</SelectItem>
-                            <SelectItem value="ENTP">ENTP - 뜨거운 논쟁을 즐기는 변론가</SelectItem>
-                            <SelectItem value="ENTJ">ENTJ - 대담한 통솔자</SelectItem>
-                            <SelectItem value="ESFP">ESFP - 자유로운 영혼의 연예인</SelectItem>
-                            <SelectItem value="ESFJ">ESFJ - 사교적인 외교관</SelectItem>
-                            <SelectItem value="ESTP">ESTP - 모험을 즐기는 사업가</SelectItem>
-                            <SelectItem value="ESTJ">ESTJ - 엄격한 관리자</SelectItem>
-                            <SelectItem value="INFP">INFP - 열정적인 중재자</SelectItem>
-                            <SelectItem value="INFJ">INFJ - 선의의 옹호자</SelectItem>
-                            <SelectItem value="INTP">INTP - 논리적인 사색가</SelectItem>
-                            <SelectItem value="INTJ">INTJ - 용의주도한 전략가</SelectItem>
-                            <SelectItem value="ISFP">ISFP - 호기심 많은 예술가</SelectItem>
-                            <SelectItem value="ISFJ">ISFJ - 용감한 수호자</SelectItem>
-                            <SelectItem value="ISTP">ISTP - 만능 재주꾼</SelectItem>
-                            <SelectItem value="ISTJ">ISTJ - 현실주의자</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      <div>
-                        <Label htmlFor="gender">성별 (선택사항)</Label>
-                        <Select value={formData.gender} onValueChange={(value) => handleInputChange("gender", value)}>
-                          <SelectTrigger>
-                            <SelectValue placeholder="성별 선택 (선택사항)" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="none">선택 안함</SelectItem>
-                            <SelectItem value="male">남성</SelectItem>
-                            <SelectItem value="female">여성</SelectItem>
-                            <SelectItem value="other">기타</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      <div>
-                        <Label htmlFor="age">나이 (선택사항)</Label>
-                        <Input
-                          id="age"
-                          type="number"
-                          placeholder="나이 입력 (선택사항)"
-                          value={formData.age}
-                          onChange={(e) => handleInputChange("age", e.target.value)}
-                          min="1"
-                          max="100"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </TabsContent>
-              </Tabs>
-            </CardContent>
-          </Card>
-
-          {/* 기본 정보 */}
+          {/* 프리셋 선택 및 상세 정보 카드 */}
           <Card>
             <CardHeader>
               <CardTitle>기본 정보</CardTitle>
-              <CardDescription>AI 인플루언서의 이름과 설명을 입력하세요</CardDescription>
+              <CardDescription>AI 인플루언서의 이름, 설명, 특성을 입력하세요</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              {/* 이름/설명 입력 */}
               <div>
-                <Label htmlFor="name">모델 이름</Label>
+                <Label htmlFor="name">AI 인플루언서 이름</Label>
                 <Input
                   id="name"
                   placeholder="예: 패션 인플루언서 AI"
@@ -561,7 +474,6 @@ export default function CreateModelPage() {
                   required
                 />
               </div>
-
               <div>
                 <Label htmlFor="description">설명</Label>
                 <Textarea
@@ -573,11 +485,86 @@ export default function CreateModelPage() {
                   required
                 />
               </div>
+              {/* 프리셋 불러오기 Select (설명 아래로 이동) */}
+              <div>
+                <Label>프리셋 불러오기</Label>
+                <Select
+                  value={formData.selectedPresetId || "manual"}
+                  onValueChange={presetId => handlePresetSelect(presetId)}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="프리셋을 선택하면 아래 입력란이 자동으로 채워집니다" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="manual">직접 입력</SelectItem>
+                    {stylePresets.map(preset => (
+                      <SelectItem key={preset.style_preset_id} value={preset.style_preset_id}>
+                        {preset.style_preset_name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              {/* 아래 입력란은 항상 노출, 프리셋 선택 시 값만 자동 채움 */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <Label htmlFor="mbti">MBTI (선택사항)</Label>
+                  <Select value={formData.mbti} onValueChange={(value) => handleInputChange("mbti", value)}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="MBTI 선택 (선택사항)" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">선택 안함</SelectItem>
+                      <SelectItem value="ENFP">ENFP - 재기발랄한 활동가</SelectItem>
+                      <SelectItem value="ENFJ">ENFJ - 정의로운 사회운동가</SelectItem>
+                      <SelectItem value="ENTP">ENTP - 뜨거운 논쟁을 즐기는 변론가</SelectItem>
+                      <SelectItem value="ENTJ">ENTJ - 대담한 통솔자</SelectItem>
+                      <SelectItem value="ESFP">ESFP - 자유로운 영혼의 연예인</SelectItem>
+                      <SelectItem value="ESFJ">ESFJ - 사교적인 외교관</SelectItem>
+                      <SelectItem value="ESTP">ESTP - 모험을 즐기는 사업가</SelectItem>
+                      <SelectItem value="ESTJ">ESTJ - 엄격한 관리자</SelectItem>
+                      <SelectItem value="INFP">INFP - 열정적인 중재자</SelectItem>
+                      <SelectItem value="INFJ">INFJ - 선의의 옹호자</SelectItem>
+                      <SelectItem value="INTP">INTP - 논리적인 사색가</SelectItem>
+                      <SelectItem value="INTJ">INTJ - 용의주도한 전략가</SelectItem>
+                      <SelectItem value="ISFP">ISFP - 호기심 많은 예술가</SelectItem>
+                      <SelectItem value="ISFJ">ISFJ - 용감한 수호자</SelectItem>
+                      <SelectItem value="ISTP">ISTP - 만능 재주꾼</SelectItem>
+                      <SelectItem value="ISTJ">ISTJ - 현실주의자</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label htmlFor="gender">성별 (선택사항)</Label>
+                  <Select value={formData.gender} onValueChange={(value) => handleInputChange("gender", value)}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="성별 선택 (선택사항)" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">선택 안함</SelectItem>
+                      <SelectItem value="male">남성</SelectItem>
+                      <SelectItem value="female">여성</SelectItem>
+                      <SelectItem value="other">기타</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label htmlFor="age">나이 (선택사항)</Label>
+                  <Input
+                    id="age"
+                    type="number"
+                    placeholder="나이 입력 (선택사항)"
+                    value={formData.age}
+                    onChange={(e) => handleInputChange("age", e.target.value)}
+                    min="1"
+                    max="100"
+                  />
+                </div>
+              </div>
             </CardContent>
           </Card>
 
           {/* 성격 및 말투 설정 - 직접 입력 모드일 때만 표시 */}
-          {inputMethodTab === "manual" && (
           <Card>
             <CardHeader>
               <CardTitle>성격 및 말투</CardTitle>
@@ -605,7 +592,15 @@ export default function CreateModelPage() {
                     <TabsTrigger value="custom">직접 입력</TabsTrigger>
                   </TabsList>
                   <TabsContent value="recommend">
-                    {conversationExamples.length > 0 ? (
+                    <Button
+                      className="mb-4"
+                      onClick={() => setShowToneExamples(true)}
+                      disabled={!formData.personality.trim()}
+                      type="button"
+                    >
+                      {showToneExamples ? '말투 재생성' : '말투 생성'}
+                    </Button>
+                    {showToneExamples && conversationExamples.length > 0 ? (
                       <div className="space-y-4 mb-4">
                         <div className="flex items-center space-x-2 text-sm text-blue-600">
                           <Lightbulb className="h-4 w-4" />
@@ -618,7 +613,7 @@ export default function CreateModelPage() {
                               className={`cursor-pointer transition-all hover:shadow-md ${formData.tone === example.tone ? 'ring-2 ring-blue-500 bg-blue-50' : ''}`}
                               onClick={() => {
                                 handleInputChange("tone", example.tone)
-                                handleInputChange("customTone", "")
+                                handleInputChange("customTones", [] as string[])
                               }}
                             >
                               <CardHeader className="pb-3">
@@ -635,46 +630,59 @@ export default function CreateModelPage() {
                             </Card>
                           ))}
                         </div>
-                        {formData.tone && (
-                          <div className="mt-2 text-xs text-green-700">선택된 말투: {formData.tone}</div>
-                        )}
                       </div>
                     ) : (
                       <div className="mt-2 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
                         <div className="flex items-center space-x-2">
                           <Lightbulb className="h-4 w-4 text-yellow-600" />
                           <span className="text-sm text-yellow-800">
-                            성격을 입력해주세요. 입력된 성격을 기반으로 말투를 생성합니다.
+                            성격을 입력하고 '말투 생성' 버튼을 누르면 추천 말투가 생성됩니다.
                           </span>
                         </div>
                       </div>
                     )}
                   </TabsContent>
                   <TabsContent value="custom">
-                    <div>
-                      <Label htmlFor="customTone">사용자 정의 말투</Label>
-                      <Input
-                        id="customTone"
-                        placeholder="예: 캐주얼하고 친밀한, 정중하고 전문적인"
-                        value={formData.customTone}
-                        onChange={(e) => {
-                          handleInputChange("customTone", e.target.value)
-                          handleInputChange("tone", "")
-                        }}
-                      />
-                      {formData.customTone && (
-                        <div className="mt-2 text-xs text-green-700">입력된 말투: {formData.customTone}</div>
-                      )}
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Lightbulb className="h-4 w-4 text-yellow-600" />
+                        <span className="text-sm text-yellow-800">
+                          예시 말투가 많을수록 인플루언서가 학습을 잘합니다.
+                        </span>
+                      </div>
+                      <div className="flex gap-2">
+                        <Input
+                          value={customToneInput}
+                          onChange={e => setCustomToneInput(e.target.value)}
+                          placeholder="말투 예시를 입력하세요"
+                          onKeyDown={e => { if (e.key === 'Enter') handleAddCustomTone(); }}
+                        />
+                        <Button type="button" onClick={handleAddCustomTone} disabled={!customToneInput.trim()}>
+                          추가
+                        </Button>
+                      </div>
+                      <ul className="space-y-1">
+                        {formData.customTones && formData.customTones.length > 0 ? (
+                          formData.customTones.map((tone, idx) => (
+                            <li key={idx} className="flex items-center gap-2 bg-gray-50 rounded px-3 py-2">
+                              <span className="flex-1 text-sm">{tone}</span>
+                              <Button type="button" size="icon" variant="ghost" onClick={() => handleRemoveCustomTone(idx)}>
+                                <Trash2 className="w-4 h-4 text-red-500" />
+                              </Button>
+                            </li>
+                          ))
+                        ) : (
+                          <li className="text-gray-400 text-sm">아직 추가된 말투가 없습니다.</li>
+                        )}
+                      </ul>
                     </div>
                   </TabsContent>
                 </Tabs>
               </div>
             </CardContent>
           </Card>
-          )}
-
-          {/* 이미지 설정 - 직접 입력 모드일 때만 표시 */}
-          {inputMethodTab === "manual" && (
+          
+          {/* 이미지 업로드/생성 카드 */}
           <Card>
             <CardHeader>
               <CardTitle>이미지 설정</CardTitle>
@@ -722,7 +730,19 @@ export default function CreateModelPage() {
                   <TabsContent value="prompt" className="mt-4">
                     <div className="space-y-4">
                       <Label className="text-base font-medium block">이미지 생성 프롬프트</Label>
-                      
+                      <div>
+                        <Label htmlFor="modelType">AI 인플루언서 유형</Label>
+                        <Select value={formData.modelType} onValueChange={(value) => handleInputChange("modelType", value)}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="AI 인플루언서 유형을 선택하세요" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="character">캐릭터형 (애니메이션, 만화 스타일)</SelectItem>
+                            <SelectItem value="human">사람형 (실제 사람과 유사한 형태)</SelectItem>
+                            <SelectItem value="objects">사물형 (사물과 유사한 형태)</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
                       <div>
                         <Label htmlFor="hairStyle">헤어스타일</Label>
                         <Input
@@ -731,11 +751,8 @@ export default function CreateModelPage() {
                           value={formData.hairStyle}
                           onChange={(e) => handleInputChange("hairStyle", e.target.value)}
                         />
-                        <p className="text-xs text-gray-500 mt-1">
-                          💡 원하는 헤어스타일을 자세히 설명해주세요
-                        </p>
+                        <p className="text-xs text-gray-500 mt-1">💡 원하는 헤어스타일을 자세히 설명해주세요</p>
                       </div>
-
                       <div>
                         <Label htmlFor="mood">분위기/스타일</Label>
                         <Input
@@ -744,9 +761,7 @@ export default function CreateModelPage() {
                           value={formData.mood}
                           onChange={(e) => handleInputChange("mood", e.target.value)}
                         />
-                        <p className="text-xs text-gray-500 mt-1">
-                          💡 원하는 분위기나 스타일을 설명해주세요
-                        </p>
+                        <p className="text-xs text-gray-500 mt-1">💡 원하는 분위기나 스타일을 설명해주세요</p>
                       </div>
                     </div>
                   </TabsContent>
@@ -754,34 +769,10 @@ export default function CreateModelPage() {
               </div>
             </CardContent>
           </Card>
-          )}
 
-          {/* 제출 버튼 */}
-          <div className="flex justify-end space-x-4">
-            <Link href="/dashboard">
-              <Button type="button" variant="outline">
-                취소
-              </Button>
-            </Link>
-            <Button 
-              type="submit" 
-              disabled={
-                isLoading || 
-                !formData.name || 
-                !formData.description || 
-                (inputMethodTab === "preset" && !formData.selectedPresetId) ||
-                (inputMethodTab === "manual" && (
-                  !formData.modelType ||
-                  !formData.personality ||
-                  (!formData.tone && !formData.customTone) ||
-                  (!(files.imageSamples && files.imageSamples.length > 0) && 
-                   !(formData.imageMethod === "prompt" && formData.hairStyle.trim() !== "" && formData.mood.trim() !== ""))
-                ))
-              }
-            >
-              {isLoading ? "생성 중..." : "AI 모델 생성"}
-            </Button>
-          </div>
+          <Button type="submit" disabled={isLoading}>
+            {isLoading ? '생성 중...' : '생성하기'}
+          </Button>
         </form>
       </div>
     </div>

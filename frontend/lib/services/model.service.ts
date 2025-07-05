@@ -17,6 +17,12 @@ export interface AIInfluencer {
   updated_at?: string
   style_preset?: StylePreset
   mbti?: ModelMBTI
+  // Instagram 연동 정보
+  instagram_id?: string
+  instagram_username?: string
+  instagram_account_type?: string
+  instagram_is_active?: boolean
+  instagram_connected_at?: string
 }
 
 export interface StylePreset {
