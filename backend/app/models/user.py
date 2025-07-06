@@ -50,6 +50,7 @@ class User(Base, TimestampMixin):
     ai_influencers = relationship("AIInfluencer", back_populates="user")
 
 
+
 class Team(Base, TimestampMixin):
     """팀 모델 (실제 DB 구조에 맞춤)"""
 
