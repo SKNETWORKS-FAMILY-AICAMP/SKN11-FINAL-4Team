@@ -7,7 +7,7 @@ import uuid
 from app.database import get_db
 from app.models.user import SystemLog, User
 from app.schemas.user import SystemLogCreate, SystemLog as SystemLogSchema
-from app.api.v1.endpoints.auth import get_current_user
+from app.core.security import get_current_user
 
 router = APIRouter()
 

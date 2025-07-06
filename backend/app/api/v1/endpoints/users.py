@@ -11,26 +11,12 @@ from app.schemas.user import (
     User as UserSchema,
     UserWithTeams,
 )
-from app.api.v1.endpoints.auth import get_current_user
+from app.core.security import get_current_user
+from app.core.permissions import check_admin_permission
 
 router = APIRouter()
 
 
-def check_admin_permission(current_user: User, db: Session):
-    """관리자 권한 체크 - 그룹 0번에 속한 사용자를 관리자로 간주"""
-    # 그룹 0번이 관리자 그룹이라고 가정
-    admin_team = db.query(Team).filter(Team.group_id == 0).first()
-    if admin_team:
-        # 현재 사용자가 관리자 그룹에 속해있는지 확인
-        user_in_admin_team = (
-            db.query(Team)
-            .join(Team.users)
-            .filter(Team.group_id == 0, User.user_id == str(current_user.user_id))
-            .first()
-        )
-        if user_in_admin_team:
-            return True
-    return False
 
 
 @router.post("", response_model=UserSchema)

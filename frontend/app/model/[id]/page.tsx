@@ -210,9 +210,9 @@ function ModelDetailContent() {
   })
   const [isConnecting, setIsConnecting] = useState(false)
 
-  // 디버깅용 - Instagram 상태 변경 시 로그
+  // Instagram 상태 변경 시 처리
   React.useEffect(() => {
-    console.log('Instagram status updated:', instagramStatus)
+    // Instagram 상태 업데이트 처리
   }, [instagramStatus])
 
   // 모델 데이터 로드
@@ -260,33 +260,19 @@ function ModelDetailContent() {
   const handleUpdateModel = async () => {
     setIsUpdating(true)
     try {
-      const response = await fetch(`/api/influencers/${params.id}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${tokenUtils.getToken()}`,
-        },
-        body: JSON.stringify({
-          influencer_name: model.name,
-          influencer_description: model.description,
-        }),
+      const updatedData = await ModelService.updateInfluencer(params.id as string, {
+        influencer_name: model.name,
+        influencer_description: model.description,
       })
-
-      if (response.ok) {
-        const updatedData = await response.json()
-        setModel((prev: any) => ({
-          ...prev,
-          name: updatedData.influencer_name,
-          description: updatedData.influencer_description || '',
-        }))
-        alert('모델 정보가 성공적으로 업데이트되었습니다!')
-      } else {
-        const errorData = await response.json()
-        throw new Error(errorData.detail || '업데이트에 실패했습니다.')
-      }
+      setModel((prev: any) => ({
+        ...prev,
+        name: updatedData.influencer_name,
+        description: updatedData.influencer_description || "",
+      }))
+      alert("모델 정보가 성공적으로 업데이트되었습니다!")
     } catch (error) {
-      console.error('Model update error:', error)
-      alert('모델 정보 업데이트에 실패했습니다. 다시 시도해주세요.')
+      console.error("Model update error:", error)
+      alert("모델 정보 업데이트에 실패했습니다. 다시 시도해주세요.")
     } finally {
       setIsUpdating(false)
     }
@@ -460,8 +446,7 @@ function ModelDetailContent() {
 
             if (response.ok) {
               const data = await response.json()
-              console.log('Instagram status response:', data)
-              setInstagramStatus(data)
+                  setInstagramStatus(data)
             } else {
               console.error('Instagram status error:', response.status, response.statusText)
               setInstagramStatus({ is_connected: false })

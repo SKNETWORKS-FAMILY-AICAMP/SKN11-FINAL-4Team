@@ -1,6 +1,6 @@
 import httpx
 import os
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 from fastapi import HTTPException, status
 from dotenv import load_dotenv
 
@@ -232,3 +232,23 @@ class InstagramService:
             import traceback
             logger.error(f"   - 에러 트레이스: {traceback.format_exc()}")
             return False
+
+    async def get_user_media(self, user_id: str, access_token: str, limit: int = 20) -> List[Dict]:
+        """사용자의 미디어 목록을 가져옵니다."""
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"https://graph.instagram.com/{user_id}/media",
+                params={"fields": "id,caption,media_type,media_url,permalink,thumbnail_url,timestamp,like_count,comments_count", "access_token": access_token, "limit": limit}
+            )
+            response.raise_for_status()
+            return response.json().get('data', [])
+
+    async def get_media_insights(self, media_id: str, access_token: str) -> Dict:
+        """미디어에 대한 인사이트를 가져옵니다."""
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"https://graph.facebook.com/v18.0/{media_id}/insights",
+                params={"metric": "engagement,impressions,reach", "access_token": access_token}
+            )
+            response.raise_for_status()
+            return response.json()

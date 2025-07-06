@@ -39,7 +39,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const router = useRouter()
 
   const logout = useCallback(async () => {
-    console.log('logout')
     try {
       await BackendAuthService.logout()
     } catch (error) {
@@ -119,7 +118,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     const interval = setInterval(() => {
       const token = tokenUtils.getToken()
       if (token && tokenUtils.isTokenExpired(token)) {
-        console.log('Token expired, logging out...')
         logout()
       }
     }, 60000)
