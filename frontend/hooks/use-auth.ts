@@ -1,10 +1,7 @@
-"use client"
-
 import { useContext } from 'react'
 import { AuthContext } from '@/contexts/auth-context'
-import type { User } from '@/lib/types'
 
-export const useAuth = () => {
+export function useAuth() {
   const context = useContext(AuthContext)
   
   if (!context) {
@@ -14,57 +11,25 @@ export const useAuth = () => {
   return context
 }
 
-export const usePermission = () => {
-  const { user, hasPermission, hasGroup, hasAnyGroup, isAdmin } = useAuth()
+// 권한 관련 훅들을 별도로 제공
+export function usePermission() {
+  const context = useContext(AuthContext)
+  
+  if (!context) {
+    throw new Error('usePermission must be used within an AuthProvider')
+  }
   
   return {
-    user,
-    hasPermission,
-    hasGroup,
-    hasAnyGroup,
-    isAdmin,
-    canAccess: (resource: string, action: string) => hasPermission(resource, action),
-    canAccessModel: (modelAllowedGroups?: string[]) => {
-      if (!user) return false
-      if (!modelAllowedGroups || modelAllowedGroups.length === 0) return true
-      
-      return hasAnyGroup(modelAllowedGroups) || isAdmin()
-    }
+    user: context.user,
+    hasPermission: context.hasPermission,
+    hasGroup: context.hasGroup,
+    hasAnyGroup: context.hasAnyGroup,
+    isAdmin: context.isAdmin,
+    canAccessModel: context.canAccessModel,
+    requiresPermissionRequest: context.requiresPermissionRequest,
+    canCreateModel: context.canCreateModel,
+    canCreatePost: context.canCreatePost,
+    canManageContent: context.canManageContent,
+    isDefaultTeam: context.isDefaultTeam
   }
-}
-
-export const useRequireAuth = () => {
-  const { user, isAuthenticated, isLoading } = useAuth()
-  
-  if (isLoading) {
-    return { user: null, isReady: false }
-  }
-  
-  if (!isAuthenticated || !user) {
-    throw new Error('Authentication required')
-  }
-  
-  return { user, isReady: true }
-}
-
-export const useRequirePermission = (resource: string, action: string) => {
-  const { hasPermission } = usePermission()
-  const hasAccess = hasPermission(resource, action)
-  
-  if (!hasAccess) {
-    throw new Error(`Permission denied: ${resource}:${action}`)
-  }
-  
-  return hasAccess
-}
-
-export const useRequireGroup = (groupName: string) => {
-  const { hasGroup } = usePermission()
-  const hasAccess = hasGroup(groupName)
-  
-  if (!hasAccess) {
-    throw new Error(`Group access denied: ${groupName}`)
-  }
-  
-  return hasAccess
 }

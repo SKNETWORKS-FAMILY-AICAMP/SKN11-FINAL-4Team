@@ -25,51 +25,13 @@ export default function LoginPage() {
     setIsLoading(provider)
 
     try {
-      if (provider === "google") {
-        // Google은 authorization code 방식으로 처리
-        const result = await socialLogin(provider)
-        
-        if (result.success && result.data) {
-          // 백엔드 API 호출해서 JWT 토큰 받기
-          const { BackendAuthService } = await import('@/lib/backend-auth')
-          const backendResponse = await BackendAuthService.exchangeCodeForToken(
-            provider,
-            result.data.code,
-            result.data.redirect_uri
-          )
-          
-          if (backendResponse.access_token) {
-            login(backendResponse.access_token)
-            router.push("/dashboard")
-          } else {
-            throw new Error('No backend token received')
-          }
-        } else {
-          throw new Error(result.error || 'Google login failed')
-        }
-      } else {
-        // 다른 소셜 로그인 (네이버 등) - 백엔드로 사용자 정보 전달
-        const result = await socialLogin(provider)
-        
-        if (result.success && result.data) {
-          // 백엔드 API 호출해서 JWT 토큰 받기
-          const { BackendAuthService } = await import('@/lib/backend-auth')
-          const backendResponse = await BackendAuthService.authenticateWithUserInfo(provider, result.data)
-          
-          if (backendResponse.access_token) {
-            login(backendResponse.access_token)
-            router.push("/dashboard")
-          } else {
-            throw new Error('No backend token received')
-          }
-        } else {
-          throw new Error(result.error || 'Social login failed')
-        }
-      }
+      // 리다이렉트 방식 소셜 로그인 시작
+      // socialLogin은 현재 페이지를 localStorage에 저장하고 리다이렉트함
+      await socialLogin(provider)
+      // 이 시점에서 페이지가 리다이렉트되므로 아래 코드는 실행되지 않음
     } catch (error) {
-      console.error('로그인 실패:', error)
-      alert('로그인에 실패했습니다. 다시 시도해주세요.')
-    } finally {
+      console.error('로그인 시작 실패:', error)
+      alert('로그인을 시작할 수 없습니다. 다시 시도해주세요.')
       setIsLoading(null)
     }
   }

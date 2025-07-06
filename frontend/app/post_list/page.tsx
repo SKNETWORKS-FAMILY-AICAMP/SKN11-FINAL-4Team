@@ -36,7 +36,7 @@ interface Post {
   content: string
   author: string
   modelName: string
-  status: "draft" | "published" | "scheduled"
+  status: "published" | "scheduled"
   createdAt: string
   publishedAt?: string
   scheduledAt?: string
@@ -116,8 +116,9 @@ const samplePosts: Post[] = [
     content: "무리하지 않고 건강하게 다이어트하는 방법을 알려드립니다. 균형 잡힌 식단이 핵심이에요. 단백질, 탄수화물, 지방을 적절히 섭취하면서 칼로리만 조절하는 방식이에요. 아침에는 단백질이 풍부한 식사, 점심은 균형잡힌 한끼, 저녁은 가벼운 식사로 구성해보세요.",
     author: "피트니스 코치 AI",
     modelName: "피트니스 코치 AI",
-    status: "draft",
+    status: "scheduled",
     createdAt: "2024-01-28",
+    scheduledAt: "2024-01-28T16:00:00",
     platform: "Blog",
     engagement: { likes: 0, comments: 0, shares: 0 },
     hashtags: ["#다이어트", "#건강식단", "#피트니스", "#웰빙"],
@@ -171,7 +172,7 @@ function PostListContent() {
         content: newPostContent,
         author: newPostModel,
         modelName: newPostModel,
-        status: "draft",
+        status: "published",
         createdAt: new Date().toISOString(),
         platform: newPostPlatform || "Instagram",
         engagement: { likes: 0, comments: 0, shares: 0 },
@@ -241,8 +242,6 @@ function PostListContent() {
         return <Badge className="bg-green-100 text-green-800">발행됨</Badge>
       case "scheduled":
         return <Badge className="bg-blue-100 text-blue-800">예약됨</Badge>
-      case "draft":
-        return <Badge className="bg-gray-100 text-gray-800">임시저장</Badge>
       default:
         return <Badge variant="secondary">알 수 없음</Badge>
     }
@@ -316,12 +315,12 @@ function PostListContent() {
         if (post.id !== selectedPost.id) return post;
         let newStatus = post.status;
         let newScheduledAt = post.scheduledAt;
-        if (post.status === "draft" || post.status === "scheduled") {
+        if (post.status === "scheduled") {
           if (editScheduledAt) {
             newStatus = "scheduled";
             newScheduledAt = editScheduledAt;
           } else {
-            newStatus = "draft";
+            newStatus = "published";
             newScheduledAt = undefined;
           }
         }
@@ -353,7 +352,113 @@ function PostListContent() {
               <h1 className="text-3xl font-bold text-gray-900">게시글 관리</h1>
               <p className="text-gray-600 mt-2">AI 인플루언서가 생성한 게시글을 관리하세요</p>
             </div>
-            <div className="flex items-center space-x-3">
+          </div>
+
+          <div className="flex items-center gap-2 mb-6">
+            <div className="relative flex-1 max-w-md">
+              <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+              <Input
+                placeholder="게시글 검색..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-10"
+              />
+            </div>
+            <Dialog open={isFilterModalOpen} onOpenChange={setIsFilterModalOpen}>
+              <DialogTrigger asChild>
+                <Button variant="outline" className="flex items-center gap-2" onClick={handleOpenFilterModal}>
+                  <Filter className="h-4 w-4" />
+                  필터
+                  {(modelFilter !== "all" || platformFilter !== "all") && (
+                    <Badge variant="secondary" className="ml-1">
+                      {[modelFilter, platformFilter].filter(f => f !== "all").length}
+                    </Badge>
+                  )}
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-md">
+                <DialogHeader>
+                  <DialogTitle>필터 설정</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-6">
+                  {/* 모델 필터 */}
+                  <div>
+                    <h3 className="font-medium text-sm text-gray-900 mb-3">모델</h3>
+                    <div className="grid grid-cols-1 gap-2">
+                      <button
+                        onClick={() => setTempModelFilter("all")}
+                        className={`text-left px-3 py-2 rounded-md text-sm transition-colors ${
+                          tempModelFilter === "all"
+                            ? "bg-blue-100 text-blue-700 border border-blue-200"
+                            : "bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-200"
+                        }`}
+                      >
+                        전체 모델
+                      </button>
+                      {uniqueModels.map((model) => (
+                        <button
+                          key={model}
+                          onClick={() => setTempModelFilter(model)}
+                          className={`text-left px-3 py-2 rounded-md text-sm transition-colors ${
+                            tempModelFilter === model
+                              ? "bg-blue-100 text-blue-700 border border-blue-200"
+                              : "bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-200"
+                          }`}
+                        >
+                          {model}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* 플랫폼 필터 */}
+                  <div>
+                    <h3 className="font-medium text-sm text-gray-900 mb-3">플랫폼</h3>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        onClick={() => setTempPlatformFilter("all")}
+                        className={`text-left px-3 py-2 rounded-md text-sm transition-colors ${
+                          tempPlatformFilter === "all"
+                            ? "bg-blue-100 text-blue-700 border border-blue-200"
+                            : "bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-200"
+                        }`}
+                      >
+                        전체 플랫폼
+                      </button>
+                      {uniquePlatforms.map((platform) => (
+                        <button
+                          key={platform}
+                          onClick={() => setTempPlatformFilter(platform)}
+                          className={`text-left px-3 py-2 rounded-md text-sm transition-colors ${
+                            tempPlatformFilter === platform
+                              ? "bg-purple-100 text-purple-700 border border-purple-200"
+                              : "bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-200"
+                          }`}
+                        >
+                          {platform}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                {/* 적용하기 버튼 */}
+                <div className="flex justify-end gap-2 pt-4 border-t">
+                  <Button
+                    variant="outline"
+                    onClick={() => setIsFilterModalOpen(false)}
+                  >
+                    취소
+                  </Button>
+                  <Button
+                    onClick={handleApplyFilters}
+                    className="bg-blue-600 hover:bg-blue-700"
+                  >
+                    적용하기
+                  </Button>
+                </div>
+              </DialogContent>
+            </Dialog>
+            <div className="flex-1 flex justify-end">
               <Link href="/create-post">
                 <Button className="flex items-center space-x-2">
                   <Plus className="h-4 w-4" />
@@ -363,253 +468,37 @@ function PostListContent() {
             </div>
           </div>
 
-          <div className="mb-6">
-            {/* 검색 필드와 필터 버튼 */}
-            <div className="flex items-center gap-4 mb-4">
-              <div className="relative flex-1 max-w-md">
-                <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-                <Input
-                  placeholder="게시글 검색..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10"
-                />
-              </div>
-              
-              <Dialog open={isFilterModalOpen} onOpenChange={setIsFilterModalOpen}>
-                <DialogTrigger asChild>
-                  <Button variant="outline" className="flex items-center gap-2" onClick={handleOpenFilterModal}>
-                    <Filter className="h-4 w-4" />
-                    필터
-                    {(modelFilter !== "all" || platformFilter !== "all" || statusFilter !== "all") && (
-                      <Badge variant="secondary" className="ml-1">
-                        {[modelFilter, platformFilter, statusFilter].filter(f => f !== "all").length}
-                      </Badge>
-                    )}
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="max-w-md">
-                  <DialogHeader>
-                    <DialogTitle>필터 설정</DialogTitle>
-                  </DialogHeader>
-                  <div className="space-y-6">
-                    {/* 모델 필터 */}
-                    <div>
-                      <h3 className="font-medium text-sm text-gray-900 mb-3">모델</h3>
-                      <div className="grid grid-cols-1 gap-2">
-                        <button
-                          onClick={() => setTempModelFilter("all")}
-                          className={`text-left px-3 py-2 rounded-md text-sm transition-colors ${
-                            tempModelFilter === "all"
-                              ? "bg-blue-100 text-blue-700 border border-blue-200"
-                              : "bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-200"
-                          }`}
-                        >
-                          전체 모델
-                        </button>
-                        {uniqueModels.map((model) => (
-                          <button
-                            key={model}
-                            onClick={() => setTempModelFilter(model)}
-                            className={`text-left px-3 py-2 rounded-md text-sm transition-colors ${
-                              tempModelFilter === model
-                                ? "bg-blue-100 text-blue-700 border border-blue-200"
-                                : "bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-200"
-                            }`}
-                          >
-                            {model}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* 플랫폼 필터 */}
-                    <div>
-                      <h3 className="font-medium text-sm text-gray-900 mb-3">플랫폼</h3>
-                      <div className="grid grid-cols-2 gap-2">
-                        <button
-                          onClick={() => setTempPlatformFilter("all")}
-                          className={`text-left px-3 py-2 rounded-md text-sm transition-colors ${
-                            tempPlatformFilter === "all"
-                              ? "bg-blue-100 text-blue-700 border border-blue-200"
-                              : "bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-200"
-                          }`}
-                        >
-                          전체 플랫폼
-                        </button>
-                        {uniquePlatforms.map((platform) => (
-                          <button
-                            key={platform}
-                            onClick={() => setTempPlatformFilter(platform)}
-                            className={`text-left px-3 py-2 rounded-md text-sm transition-colors flex items-center gap-2 ${
-                              tempPlatformFilter === platform
-                                ? "bg-blue-100 text-blue-700 border border-blue-200"
-                                : "bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-200"
-                            }`}
-                          >
-                            <span className="text-base">{getPlatformIcon(platform)}</span>
-                            {platform}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* 상태 필터 */}
-                    <div>
-                      <h3 className="font-medium text-sm text-gray-900 mb-3">상태</h3>
-                      <div className="grid grid-cols-2 gap-2">
-                        <button
-                          onClick={() => setTempStatusFilter("all")}
-                          className={`text-left px-3 py-2 rounded-md text-sm transition-colors ${
-                            tempStatusFilter === "all"
-                              ? "bg-blue-100 text-blue-700 border border-blue-200"
-                              : "bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-200"
-                          }`}
-                        >
-                          전체 상태
-                        </button>
-                        <button
-                          onClick={() => setTempStatusFilter("published")}
-                          className={`text-left px-3 py-2 rounded-md text-sm transition-colors ${
-                            tempStatusFilter === "published"
-                              ? "bg-green-100 text-green-700 border border-green-200"
-                              : "bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-200"
-                          }`}
-                        >
-                          발행됨
-                        </button>
-                        <button
-                          onClick={() => setTempStatusFilter("scheduled")}
-                          className={`text-left px-3 py-2 rounded-md text-sm transition-colors ${
-                            tempStatusFilter === "scheduled"
-                              ? "bg-blue-100 text-blue-700 border border-blue-200"
-                              : "bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-200"
-                          }`}
-                        >
-                          예약됨
-                        </button>
-                        <button
-                          onClick={() => setTempStatusFilter("draft")}
-                          className={`text-left px-3 py-2 rounded-md text-sm transition-colors ${
-                            tempStatusFilter === "draft"
-                              ? "bg-gray-100 text-gray-700 border border-gray-200"
-                              : "bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-200"
-                          }`}
-                        >
-                          임시저장
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  {/* 적용하기 버튼 */}
-                  <div className="flex justify-end gap-2 pt-4 border-t">
-                    <Button
-                      variant="outline"
-                      onClick={() => setIsFilterModalOpen(false)}
-                    >
-                      취소
-                    </Button>
-                    <Button
-                      onClick={handleApplyFilters}
-                      className="bg-blue-600 hover:bg-blue-700"
-                    >
-                      적용하기
-                    </Button>
-                  </div>
-                </DialogContent>
-              </Dialog>
-            </div>
-            
-            {/* 활성 필터 표시 */}
-            {(modelFilter !== "all" || platformFilter !== "all" || statusFilter !== "all") && (
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-gray-500">활성 필터:</span>
-                {modelFilter !== "all" && (
-                  <Badge variant="outline" className="text-xs flex items-center gap-1">
-                    모델: {modelFilter}
-                    <button
-                      onClick={() => setModelFilter("all")}
-                      className="ml-1 hover:text-red-600 transition-colors"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </Badge>
-                )}
-                {platformFilter !== "all" && (
-                  <Badge variant="outline" className="text-xs flex items-center gap-1">
-                    플랫폼: {platformFilter}
-                    <button
-                      onClick={() => setPlatformFilter("all")}
-                      className="ml-1 hover:text-red-600 transition-colors"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </Badge>
-                )}
-                {statusFilter !== "all" && (
-                  <Badge variant="outline" className="text-xs flex items-center gap-1">
-                    상태: {statusFilter === "published" ? "발행됨" : statusFilter === "scheduled" ? "예약됨" : "임시저장"}
-                    <button
-                      onClick={() => setStatusFilter("all")}
-                      className="ml-1 hover:text-red-600 transition-colors"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </Badge>
-                )}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setModelFilter("all")
-                    setPlatformFilter("all")
-                    setStatusFilter("all")
-                  }}
-                  className="text-gray-400 hover:text-gray-600"
-                >
-                  <X className="h-3 w-3" />
-                </Button>
-              </div>
-            )}
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-            <Card>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <Card
+              className={`cursor-pointer transition-shadow ${statusFilter === "all" ? "ring-2 ring-blue-400" : "hover:shadow-lg"}`}
+              onClick={() => setStatusFilter("all")}
+            >
               <CardContent className="p-6">
                 <div className="text-center">
                   <p className="text-3xl font-bold text-blue-600">{posts.length}</p>
-                  <p className="text-sm text-gray-600 mt-1">전체 게시글</p>
+                  <p className="text-sm text-gray-600 mt-1">전체</p>
                 </div>
               </CardContent>
             </Card>
-            <Card>
+            <Card
+              className={`cursor-pointer transition-shadow ${statusFilter === "published" ? "ring-2 ring-green-400" : "hover:shadow-lg"}`}
+              onClick={() => setStatusFilter("published")}
+            >
               <CardContent className="p-6">
                 <div className="text-center">
-                  <p className="text-3xl font-bold text-green-600">
-                    {posts.filter((post) => post.status === "published").length}
-                  </p>
+                  <p className="text-3xl font-bold text-green-600">{posts.filter((p) => p.status === "published").length}</p>
                   <p className="text-sm text-gray-600 mt-1">발행됨</p>
                 </div>
               </CardContent>
             </Card>
-            <Card>
+            <Card
+              className={`cursor-pointer transition-shadow ${statusFilter === "scheduled" ? "ring-2 ring-blue-400" : "hover:shadow-lg"}`}
+              onClick={() => setStatusFilter("scheduled")}
+            >
               <CardContent className="p-6">
                 <div className="text-center">
-                  <p className="text-3xl font-bold text-blue-600">
-                    {posts.filter((post) => post.status === "scheduled").length}
-                  </p>
+                  <p className="text-3xl font-bold text-blue-600">{posts.filter((p) => p.status === "scheduled").length}</p>
                   <p className="text-sm text-gray-600 mt-1">예약됨</p>
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-6">
-                <div className="text-center">
-                  <p className="text-3xl font-bold text-gray-600">
-                    {posts.filter((post) => post.status === "draft").length}
-                  </p>
-                  <p className="text-sm text-gray-600 mt-1">임시저장</p>
                 </div>
               </CardContent>
             </Card>
@@ -801,7 +690,7 @@ function PostListContent() {
                 </div>
 
                 {/* 예약 날짜 (임시저장/예약 상태 모두) */}
-                {(selectedPost.status === "scheduled" || selectedPost.status === "draft") && (
+                {(selectedPost.status === "scheduled") && (
                   <div className="space-y-2">
                     <h4 className="text-sm font-medium text-gray-900">예약 날짜</h4>
                     {editMode ? (
