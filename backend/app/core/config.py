@@ -32,9 +32,13 @@ class Settings(BaseSettings):
     # CORS 설정
     BACKEND_CORS_ORIGINS: List[str] = [
         "http://localhost:3000",  # Next.js frontend
+        "https://localhost:3000",  # HTTPS Next.js frontend
         "http://localhost:3001",
+        "https://localhost:3001",
         "http://127.0.0.1:3000",
+        "https://127.0.0.1:3000",
         "http://127.0.0.1:3001",
+        "https://127.0.0.1:3001",
         "http://localhost:8080",  # Vue.js frontend
         "http://localhost:8081",
     ]
@@ -42,6 +46,23 @@ class Settings(BaseSettings):
     # 허깅페이스 설정
     HUGGINGFACE_API_URL: str = "https://api.huggingface.co"
     HUGGINGFACE_TIMEOUT: int = int(os.getenv("HUGGINGFACE_TIMEOUT", "30"))
+
+    # OpenAI 설정
+    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
+    OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4")
+    OPENAI_MAX_TOKENS: int = int(os.getenv("OPENAI_MAX_TOKENS", "2000"))
+
+    # ComfyUI 설정
+    COMFYUI_SERVER_URL: str = os.getenv("COMFYUI_SERVER_URL", "http://127.0.0.1:8188")
+    COMFYUI_API_KEY: str = os.getenv("COMFYUI_API_KEY", "")
+    COMFYUI_TIMEOUT: int = int(os.getenv("COMFYUI_TIMEOUT", "300"))
+
+    # RunPod 설정
+    RUNPOD_API_KEY: str = os.getenv("RUNPOD_API_KEY", "")
+    RUNPOD_TEMPLATE_ID: str = os.getenv("RUNPOD_TEMPLATE_ID", "")  # ComfyUI 템플릿 ID
+    RUNPOD_GPU_TYPE: str = os.getenv("RUNPOD_GPU_TYPE", "NVIDIA RTX 5090")
+    RUNPOD_MAX_WORKERS: int = int(os.getenv("RUNPOD_MAX_WORKERS", "1"))
+    RUNPOD_IDLE_TIMEOUT: int = int(os.getenv("RUNPOD_IDLE_TIMEOUT", "300"))  # 5분
 
     # 로깅 설정
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")

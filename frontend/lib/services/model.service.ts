@@ -64,6 +64,21 @@ export interface UpdateInfluencerRequest {
   chatbot_option?: boolean
 }
 
+export interface MultiChatRequest {
+  influencers: Array<{
+    influencer_id: string
+    influencer_model_repo: string
+  }>
+  message: string
+}
+
+export interface MultiChatResponse {
+  results: Array<{
+    influencer_id: string
+    response: string
+  }>
+}
+
 
 export class ModelService {
   /**
@@ -79,7 +94,7 @@ export class ModelService {
     if (params?.limit) searchParams.set('limit', params.limit.toString())
 
     const query = searchParams.toString()
-    const endpoint = `/api/v1/influencers${query ? `?${query}` : ''}`
+    const endpoint = `/api/v1/influencers/${query ? `?${query}` : ''}`
     
     return await apiClient.get<AIInfluencer[]>(endpoint)
   }
@@ -135,6 +150,13 @@ export class ModelService {
    */
   static async getMBTIList(): Promise<ModelMBTI[]> {
     return await apiClient.get<ModelMBTI[]>('/api/v1/influencers/mbti')
+  }
+
+  /**
+   * 멀티 채팅 (모델 테스트)
+   */
+  static async multiChat(request: MultiChatRequest): Promise<MultiChatResponse> {
+    return await apiClient.post<MultiChatResponse>('/api/v1/model-test/multi-chat', request)
   }
 
 }

@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from datetime import timedelta
 from typing import Dict
 import uuid
+import logging
 
 from app.database import get_db
 from app.models.user import User
@@ -15,6 +16,7 @@ from app.core.social_auth import SocialAuthService
 router = APIRouter()
 
 social_auth_service = SocialAuthService()
+logger = logging.getLogger(__name__)
 
 
 @router.post("/social-login", response_model=TokenResponse)
@@ -110,8 +112,8 @@ async def social_login(request: SocialLoginRequest, db: Session = Depends(get_db
         jwt_payload["sub"] = user.user_id  # Use database user_id as subject
         
         # Add team information to JWT payload
-        team_names = [team.group_name for team in user.groups]
-        jwt_payload["groups"] = team_names if team_names else ["default"]
+        team_names = [team.group_name for team in user.teams]
+        jwt_payload["teams"] = team_names if team_names else ["default"]
         
         # Create access token
         access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
@@ -142,7 +144,10 @@ async def get_current_user_info(
 ):
     """현재 로그인한 사용자 정보 조회 (DB에서, 팀 정보 포함)"""
     user_id = current_user.get("sub")
-    user = db.query(User).filter(User.user_id == user_id).first()
+    
+    from sqlalchemy.orm import selectinload
+    
+    user = db.query(User).options(selectinload(User.teams)).filter(User.user_id == user_id).first()
     
     if user is None:
         raise HTTPException(
@@ -152,7 +157,8 @@ async def get_current_user_info(
         )
 
     # UserWithTeams 스키마에 맞게 teams 필드로 변환
-    print(f"DEBUG: User {user.user_id} groups: {[(g.group_id, g.group_name) for g in user.groups]}")
+    logger.info(f"DEBUG: User {user.user_id} teams: {[(t.group_id, t.group_name) for t in user.teams]}")
+    
     user_dict = {
         "user_id": user.user_id,
         "provider_id": user.provider_id,
@@ -161,7 +167,7 @@ async def get_current_user_info(
         "email": user.email,
         "created_at": user.created_at,
         "updated_at": user.updated_at,
-        "teams": user.groups  # groups를 teams로 매핑
+        "teams": user.teams  # teams 필드 사용
     }
     
     return user_dict

@@ -288,6 +288,68 @@ GET /api/v1/system/logs/users/{user_id}
 - **관리자만 가능**
 - 특정 사용자의 로그 조회
 
+## 모델 테스트(멀티챗) API
+
+### 엔드포인트
+- **POST** `/api/v1/model-test/multi-chat`
+
+### 설명
+- 여러 인플루언서(모델)를 선택하여 하나의 메시지를 동시에 전송하고, 각 모델의 AI 답변을 한 번에 받아오는 테스트용 API입니다.
+- 퍼블릭 모델은 토큰 없이 사용 가능하며, 프라이빗 모델은 Hugging Face 액세스 토큰이 필요합니다.
+
+### 요청(Request) 예시
+```
+{
+  "influencers": [
+    {
+      "influencer_id": "gpt2",
+      "influencer_model_repo": "gpt2"
+    },
+    {
+      "influencer_id": "distilgpt2",
+      "influencer_model_repo": "distilgpt2"
+    }
+  ],
+  "message": "AI로 무엇을 할 수 있을까요?",
+  "hf_token": "hf_xxxxxxxxxxxxxxxxxxxxx"  // 프라이빗 모델 사용 시에만 필요
+}
+```
+
+#### 파라미터 설명
+- `influencers`: 테스트할 인플루언서(모델) 정보 배열
+  - `influencer_id`: 프론트엔드에서 구분용으로 사용하는 인플루언서(모델) id
+  - `influencer_model_repo`: Hugging Face 모델 경로(예: "gpt2", "yourorg/your-private-model")
+- `message`: 모든 모델에 보낼 질문/메시지
+- `hf_token`: (선택) 프라이빗 모델 사용 시 필요한 Hugging Face 액세스 토큰
+
+### 응답(Response) 예시
+```
+{
+  "results": [
+    {
+      "influencer_id": "gpt2",
+      "response": "AI로 무엇을 할 수 있을까요? ... (gpt2의 답변)"
+    },
+    {
+      "influencer_id": "distilgpt2",
+      "response": "AI로 무엇을 할 수 있을까요? ... (distilgpt2의 답변)"
+    }
+  ]
+}
+```
+
+### 동작 방식
+1. 프론트엔드에서 사용 가능한 모델 목록을 불러와 다중 선택
+2. 선택된 모델 정보와 메시지를 위 JSON 형식으로 POST
+3. 백엔드는 각 모델별로 Hugging Face pipeline을 통해 답변 생성
+4. 모든 답변을 `results` 배열로 반환
+
+### 참고/주의사항
+- 퍼블릭 모델은 토큰 없이 사용 가능
+- 프라이빗 모델은 `hf_token` 필드에 Hugging Face 액세스 토큰을 반드시 포함해야 함
+- Swagger UI 등에서 테스트 시, Request body에 위 JSON 형식으로 입력
+- 쿼리 파라미터 방식은 지원하지 않음 (복잡한 구조는 JSON body로만 지원)
+
 ## 데이터 모델 (DDL 기반)
 
 ### User (사용자)

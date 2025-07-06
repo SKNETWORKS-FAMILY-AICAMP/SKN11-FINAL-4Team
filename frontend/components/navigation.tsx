@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { Bot, List, TestTube, PenTool, LogOut, User, Shield } from "lucide-react"
+import { Bot, List, TestTube, PenTool, LogOut, User, Shield, ImageIcon } from "lucide-react"
 import { useAuth, usePermission } from "@/hooks/use-auth"
 
 export function Navigation() {
@@ -77,6 +77,18 @@ export function Navigation() {
               >
                 <PenTool className="h-4 w-4 mr-2" />
                 게시글 목록
+              </Link>
+            
+              <Link
+                href="/image-generator"
+                className={`inline-flex items-center px-1 pt-1 text-sm font-medium ${
+                  pathname === "/image-generator"
+                    ? "text-blue-600 border-b-2 border-blue-600"
+                    : "text-gray-500 hover:text-gray-700"
+                }`}
+              >
+                <ImageIcon className="h-4 w-4 mr-2" />
+                이미지 생성 & 수정
               </Link>
             
           </div>

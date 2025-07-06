@@ -29,7 +29,7 @@ class User(UserBase):
         from_attributes = True
 
 
-# Team 스키마
+# Team 스키마 (실제 DB 구조에 맞춤)
 class TeamBase(BaseModel):
     group_name: str
     group_description: Optional[str] = None
@@ -59,7 +59,7 @@ class TeamWithUsers(Team):
     users: List[User] = []
 
 
-# HFToken 스키마는 app.schemas.hf_token에서 import 사용
+# HFToken 스키마 (실제 DB 구조에 맞춤)는 app.schemas.hf_token에서 import 사용
 
 
 # SystemLog 스키마

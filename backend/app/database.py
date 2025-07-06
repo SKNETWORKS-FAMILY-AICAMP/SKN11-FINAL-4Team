@@ -46,6 +46,8 @@ def init_database():
             APICallAggregation,
         )
         from app.models.board import Board
+        from app.models.image_generation import ImageGenerationRequest
+        from app.models.content_enhancement import ContentEnhancement
 
         # 테이블 생성
         Base.metadata.create_all(bind=engine)
