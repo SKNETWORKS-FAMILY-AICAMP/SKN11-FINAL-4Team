@@ -29,7 +29,7 @@ export default function AdministratorPage() {
   const [dragUserId, setDragUserId] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState("")
   const [dragOverBox, setDragOverBox] = useState<string | null>(null)
-  
+
   // HF Token 관련 상태들
   const [hfTokens, setHfTokens] = useState<AdminHFToken[]>([])
   const [loadingTokens, setLoadingTokens] = useState(false)
@@ -42,7 +42,7 @@ export default function AdministratorPage() {
   const [dragOverTokenBox, setDragOverTokenBox] = useState<string | null>(null)
   const [selectedTokenDetail, setSelectedTokenDetail] = useState<AdminHFToken | null>(null)
   const [isTokenDetailOpen, setIsTokenDetailOpen] = useState(false)
-  
+
   // 사용자 관리 관련 상태들
   const [selectedUserDetail, setSelectedUserDetail] = useState<AdminUser | null>(null)
   const [isUserDetailOpen, setIsUserDetailOpen] = useState(false)
@@ -61,10 +61,10 @@ export default function AdministratorPage() {
           AdminService.getTeams(),
           AdminService.getUsers()
         ])
-        
+
         console.log('Teams data:', teamsData)
         console.log('Users data:', usersData)
-        
+
         setTeams(teamsData)
         setAllUsers(usersData)
         setSelectedGroupId(teamsData[0]?.group_id || null)
@@ -105,7 +105,7 @@ export default function AdministratorPage() {
 
     try {
       setCreatingToken(true)
-      
+
       const tokenData: AdminCreateHFTokenRequest = {
         hf_token_value: inputToken.trim(),
         hf_token_nickname: inputAlias.trim(),
@@ -115,22 +115,22 @@ export default function AdministratorPage() {
 
       const newToken = await AdminService.createHFToken(tokenData)
       console.log('Token created:', newToken)
-      
+
       // 토큰 목록 새로고침
       await fetchHFTokens()
-      
+
       // 입력 필드 초기화
       setInputAlias("")
       setInputToken("")
       setInputUsername("")
       setSelectedTeamForToken(null)
-      
+
       toast({
         title: "토큰 생성 완료",
         description: `'${inputAlias.trim()}' 토큰이 성공적으로 생성되었습니다.`,
         variant: "default",
       })
-      
+
     } catch (err: any) {
       console.error('Error creating HF token:', err)
       setError(err.message || 'HF 토큰 생성에 실패했습니다.')
@@ -148,7 +148,7 @@ export default function AdministratorPage() {
   const groupNameExists = teams.some(t => t.group_name === newGroupName.trim());
   const handleAddGroup = async () => {
     if (!newGroupName.trim() || groupNameExists) return;
-    
+
     try {
       const newTeam = await AdminService.createTeam({
         group_name: newGroupName.trim(),
@@ -176,7 +176,7 @@ export default function AdministratorPage() {
   const handleDeleteGroup = async (groupId: number) => {
     try {
       const teamToDelete = teams.find(t => t.group_id === groupId)
-      
+
       // 팀에 사용자가 있는지 확인
       if (teamToDelete?.users && teamToDelete.users.length > 0) {
         toast({
@@ -186,7 +186,7 @@ export default function AdministratorPage() {
         })
         return
       }
-      
+
       await AdminService.deleteTeam(groupId)
       setTeams(prev => prev.filter(t => t.group_id !== groupId))
       if (selectedGroupId === groupId) {
@@ -224,47 +224,50 @@ export default function AdministratorPage() {
     // 드래그 중에도 스크롤 가능하도록 설정
     document.body.style.overflow = 'auto'
     document.body.style.userSelect = 'none'
-    
+
     // 드래그 중 스크롤을 방해하지 않도록 설정
     const handleDrag = (e: DragEvent) => {
       e.preventDefault()
       // 드래그 중에도 스크롤 허용
       document.body.style.overflow = 'auto'
     }
-    
+
     document.addEventListener('drag', handleDrag)
-    
+
     // 드래그 종료 시 이벤트 리스너 제거
     const cleanup = () => {
       document.removeEventListener('drag', handleDrag)
       document.body.style.overflow = ''
       document.body.style.userSelect = ''
     }
-    
+
     // 드래그 종료 시 정리
     document.addEventListener('dragend', cleanup, { once: true })
   }
-  
+
   const handleDropToGroup = async () => {
     if (dragUserId && selectedGroupId) {
       try {
         // 현재 사용자가 속한 팀들 찾기
-        const currentTeams = teams.filter(t => 
+        const currentTeams = teams.filter(t =>
           t.users.some(u => u.user_id === dragUserId)
         )
-        
+
         // 이미 해당 팀에 속해있는지 확인
         const alreadyInTargetTeam = currentTeams.some(t => t.group_id === selectedGroupId)
-        
+
         if (!alreadyInTargetTeam) {
+          const draggedUser = allUsers.find(u => u.user_id === dragUserId)
+          const targetTeam = teams.find(t => t.group_id === selectedGroupId)
+
           // 다른 팀들에서 제거
           for (const team of currentTeams) {
             await AdminService.removeUserFromTeam(team.group_id, dragUserId)
           }
-          
+
           // 새 팀에 추가
           await AdminService.addUserToTeam(selectedGroupId, dragUserId)
-          
+
           // 상태 업데이트
           const [updatedTeams, updatedUsers] = await Promise.all([
             AdminService.getTeams(),
@@ -272,34 +275,63 @@ export default function AdministratorPage() {
           ])
           setTeams(updatedTeams)
           setAllUsers(updatedUsers)
+
+          toast({
+            title: "팀 할당 완료",
+            description: `'${draggedUser?.user_name || '사용자'}'이(가) '${targetTeam?.group_name || '팀'}'에 성공적으로 할당되었습니다.`,
+            variant: "default",
+          })
+        } else {
+          toast({
+            title: "이미 할당됨",
+            description: "해당 사용자는 이미 이 팀에 할당되어 있습니다.",
+            variant: "default",
+          })
         }
       } catch (err: any) {
         console.error('Failed to move user:', err)
         setError('사용자 이동에 실패했습니다.')
+        toast({
+          title: "팀 할당 실패",
+          description: "사용자 팀 할당 중 오류가 발생했습니다.",
+          variant: "destructive",
+        })
       }
     }
     setDragUserId(null);
     setSelectedGroupId(null);
   }
-  
+
   const handleDropToAll = async () => {
     if (dragUserId) {
       try {
+        const draggedUser = allUsers.find(u => u.user_id === dragUserId)
         // 사용자가 속한 모든 팀에서 제거
-        const userTeams = teams.filter(t => 
+        const userTeams = teams.filter(t =>
           t.users?.some(u => u.user_id === dragUserId)
         )
-        
+
         for (const team of userTeams) {
           await AdminService.removeUserFromTeam(team.group_id, dragUserId)
         }
-        
+
         // 상태 업데이트
         const [updatedTeams] = await Promise.all([AdminService.getTeams()])
         setTeams(updatedTeams)
+
+        toast({
+          title: "팀에서 제거 완료",
+          description: `'${draggedUser?.user_name || '사용자'}'이(가) 모든 팀에서 성공적으로 제거되었습니다.`,
+          variant: "default",
+        })
       } catch (err: any) {
         console.error('Failed to remove user from teams:', err)
         setError('사용자 제거에 실패했습니다.')
+        toast({
+          title: "팀에서 제거 실패",
+          description: "사용자 팀 제거 중 오류가 발생했습니다.",
+          variant: "destructive",
+        })
       }
     }
     setDragUserId(null)
@@ -332,7 +364,7 @@ export default function AdministratorPage() {
     try {
       const selectedTeam = teams.find(t => t.group_id === selectedTeamForUserAssignment)
       await AdminService.addUserToTeam(selectedTeamForUserAssignment, selectedUserForTeamAssignment.user_id)
-      
+
       // 데이터 새로고침
       const [teamsData, usersData] = await Promise.all([
         AdminService.getTeams(),
@@ -340,11 +372,11 @@ export default function AdministratorPage() {
       ])
       setTeams(teamsData)
       setAllUsers(usersData)
-      
+
       setIsUserTeamAssignmentOpen(false)
       setSelectedUserForTeamAssignment(null)
       setSelectedTeamForUserAssignment(null)
-      
+
       toast({
         title: "팀 할당 완료",
         description: `'${selectedUserForTeamAssignment.user_name}'이(가) '${selectedTeam?.group_name || '팀'}'에 성공적으로 할당되었습니다.`,
@@ -365,7 +397,7 @@ export default function AdministratorPage() {
     try {
       const userToDelete = allUsers.find(u => u.user_id === userId)
       await AdminService.deleteUser(userId)
-      
+
       // 데이터 새로고침
       const [teamsData, usersData] = await Promise.all([
         AdminService.getTeams(),
@@ -373,7 +405,7 @@ export default function AdministratorPage() {
       ])
       setTeams(teamsData)
       setAllUsers(usersData)
-      
+
       toast({
         title: "사용자 삭제 완료",
         description: `'${userToDelete?.user_name || '사용자'}'이(가) 성공적으로 삭제되었습니다.`,
@@ -394,9 +426,9 @@ export default function AdministratorPage() {
     try {
       const team = teams.find(t => t.group_id === teamId)
       const user = allUsers.find(u => u.user_id === userId)
-      
+
       await AdminService.removeUserFromTeam(teamId, userId)
-      
+
       // 데이터 새로고침
       const [teamsData, usersData] = await Promise.all([
         AdminService.getTeams(),
@@ -404,7 +436,7 @@ export default function AdministratorPage() {
       ])
       setTeams(teamsData)
       setAllUsers(usersData)
-      
+
       toast({
         title: "팀에서 사용자 제거 완료",
         description: `'${user?.user_name || '사용자'}'가 '${team?.group_name || '팀'}'에서 성공적으로 제거되었습니다.`,
@@ -432,7 +464,7 @@ export default function AdministratorPage() {
       await fetchHFTokens()
       setIsEditingAlias(false)
       setEditingTokenAlias("")
-      
+
       toast({
         title: "별칭 수정 완료",
         description: "토큰 별칭이 성공적으로 수정되었습니다.",
@@ -452,7 +484,7 @@ export default function AdministratorPage() {
   // 그룹/사용자 정보
   const selectedTeam = teams.find(t => t.group_id === selectedGroupId)
   const teamUsers = selectedTeam?.users || []
-  
+
   // 어떤 팀에도 속하지 않은 사용자들 필터링
   const assignedUserIds = new Set<string>()
   teams?.forEach(team => {
@@ -467,8 +499,8 @@ export default function AdministratorPage() {
 
   return (
     <RequireAdmin>
-      <div className="min-h-screen bg-gray-50" style={{ 
-        overflow: 'auto', 
+      <div className="min-h-screen bg-gray-50" style={{
+        overflow: 'auto',
         overscrollBehavior: 'contain',
         scrollBehavior: 'smooth'
       }}>
@@ -498,9 +530,9 @@ export default function AdministratorPage() {
                 <span className="text-red-800 font-medium">오류 발생</span>
               </div>
               <p className="text-red-700 mt-1">{error}</p>
-              <Button 
-                variant="outline" 
-                size="sm" 
+              <Button
+                variant="outline"
+                size="sm"
                 className="mt-2"
                 onClick={() => window.location.reload()}
               >
@@ -553,14 +585,13 @@ export default function AdministratorPage() {
                       </div>
                       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                         {/* 전체 사용자 목록 */}
-                        <Card 
-                          className={`shadow-sm transition-all ${
-                            dragOverBox === 'all' ? 'bg-green-50 border-green-300 shadow-md' : ''
-                          }`}
-                          onDragOver={e => { 
-                            e.preventDefault(); 
+                        <Card
+                          className={`shadow-sm transition-all ${dragOverBox === 'all' ? 'bg-green-50 border-green-300 shadow-md' : ''
+                            }`}
+                          onDragOver={e => {
+                            e.preventDefault();
                             e.stopPropagation();
-                            setDragOverBox('all'); 
+                            setDragOverBox('all');
                           }}
                           onDragLeave={(e) => {
                             if (!e.currentTarget.contains(e.relatedTarget as Node)) {
@@ -580,9 +611,9 @@ export default function AdministratorPage() {
                               전체 사용자
                             </CardTitle>
                           </CardHeader>
-                          <CardContent 
+                          <CardContent
                             className={`transition-colors`}
-                            style={{ 
+                            style={{
                               minHeight: '300px',
                               position: 'relative'
                             }}
@@ -595,73 +626,72 @@ export default function AdministratorPage() {
                             />
                             <div className="space-y-2 overflow-y-auto" style={{ scrollBehavior: 'smooth', overscrollBehavior: 'contain' }}>
                               {otherUsers
-                                .filter(user => 
+                                .filter(user =>
                                   user.user_name.includes(searchTerm) || user.email.includes(searchTerm)
                                 )
                                 .map(user => (
-                                <div
-                                  key={user.user_id}
-                                  className={`flex items-center gap-3 p-4 rounded-lg transition-all w-full min-h-[70px] ${
-                                    dragUserId === user.user_id 
-                                      ? 'opacity-50 transform scale-95 bg-blue-100' 
+                                  <div
+                                    key={user.user_id}
+                                    className={`flex items-center gap-3 p-4 rounded-lg transition-all w-full min-h-[70px] ${dragUserId === user.user_id
+                                      ? 'opacity-50 transform scale-95 bg-blue-100'
                                       : 'hover:bg-gray-50 hover:shadow-sm'
-                                  }`}
-                                  draggable
-                                  onDragStart={() => handleDragStart(user.user_id)}
-                                  onDragEnd={handleDragEnd}
-                                  onDrag={(e) => {
-                                    // 드래그 중에도 스크롤 허용
-                                    e.preventDefault()
-                                    document.body.style.overflow = 'auto'
-                                  }}
-                                  style={{ 
-                                    cursor: dragUserId === user.user_id ? 'grabbing' : 'grab',
-                                    touchAction: 'pan-y',
-                                    userSelect: 'none',
-                                    WebkitUserSelect: 'none',
-                                    MozUserSelect: 'none',
-                                    msUserSelect: 'none',
-                                    pointerEvents: 'auto'
-                                  }}
-                                >
-                                  <Avatar className="h-8 w-8 flex-shrink-0">
-                                    <AvatarFallback className="bg-gray-200 text-gray-600 text-xs">
-                                      {user.user_name.charAt(0)}
-                                    </AvatarFallback>
-                                  </Avatar>
-                                  <div className="flex-1 min-w-0 flex flex-col justify-center">
-                                    <p className="font-medium text-sm truncate">{user.user_name}</p>
-                                    <p className="text-xs text-gray-500 truncate">{user.email}</p>
-                                  </div>
-                                  <div className="flex items-center gap-1 flex-shrink-0">
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={(e) => {
-                                        e.stopPropagation()
-                                        handleUserDetail(user)
-                                      }}
-                                      className="h-6 w-6 p-0"
-                                    >
-                                      <Eye className="h-3 w-3" />
-                                    </Button>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={(e) => {
-                                        e.stopPropagation()
-                                        handleUserTeamAssignment(user)
-                                      }}
-                                      className="h-6 w-6 p-0"
-                                    >
-                                      <Users className="h-3 w-3" />
-                                    </Button>
+                                      }`}
+                                    draggable
+                                    onDragStart={() => handleDragStart(user.user_id)}
+                                    onDragEnd={handleDragEnd}
+                                    onDrag={(e) => {
+                                      // 드래그 중에도 스크롤 허용
+                                      e.preventDefault()
+                                      document.body.style.overflow = 'auto'
+                                    }}
+                                    style={{
+                                      cursor: dragUserId === user.user_id ? 'grabbing' : 'grab',
+                                      touchAction: 'pan-y',
+                                      userSelect: 'none',
+                                      WebkitUserSelect: 'none',
+                                      MozUserSelect: 'none',
+                                      msUserSelect: 'none',
+                                      pointerEvents: 'auto'
+                                    }}
+                                  >
+                                    <Avatar className="h-8 w-8 flex-shrink-0">
+                                      <AvatarFallback className="bg-gray-200 text-gray-600 text-xs">
+                                        {user.user_name.charAt(0)}
+                                      </AvatarFallback>
+                                    </Avatar>
+                                    <div className="flex-1 min-w-0 flex flex-col justify-center">
+                                      <p className="font-medium text-sm truncate">{user.user_name}</p>
+                                      <p className="text-xs text-gray-500 truncate">{user.email}</p>
+                                    </div>
+                                    <div className="flex items-center gap-1 flex-shrink-0">
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={(e) => {
+                                          e.stopPropagation()
+                                          handleUserDetail(user)
+                                        }}
+                                        className="h-6 w-6 p-0"
+                                      >
+                                        <Eye className="h-3 w-3" />
+                                      </Button>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={(e) => {
+                                          e.stopPropagation()
+                                          handleUserTeamAssignment(user)
+                                        }}
+                                        className="h-6 w-6 p-0"
+                                      >
+                                        <Users className="h-3 w-3" />
+                                      </Button>
 
+                                    </div>
                                   </div>
-                                </div>
-                              ))}
+                                ))}
                               {otherUsers
-                                .filter(user => 
+                                .filter(user =>
                                   user.user_name.includes(searchTerm) || user.email.includes(searchTerm)
                                 ).length === 0 && (
                                   <div className="text-center py-8 text-gray-500">
@@ -676,14 +706,13 @@ export default function AdministratorPage() {
                         {/* 권한 그룹들 */}
                         <div className="lg:col-span-2 space-y-4">
                           {teams.map(team => (
-                            <Card 
-                              key={team.group_id} 
-                              className={`shadow-sm transition-all ${
-                                dragOverBox === `group-${team.group_id}` ? 'bg-green-50 border-green-300 shadow-md' : ''
-                              }`}
-                              onDragOver={e => { 
-                                e.preventDefault(); 
-                                setDragOverBox(`group-${team.group_id}`); 
+                            <Card
+                              key={team.group_id}
+                              className={`shadow-sm transition-all ${dragOverBox === `group-${team.group_id}` ? 'bg-green-50 border-green-300 shadow-md' : ''
+                                }`}
+                              onDragOver={e => {
+                                e.preventDefault();
+                                setDragOverBox(`group-${team.group_id}`);
                                 setSelectedGroupId(team.group_id);
                               }}
                               onDragLeave={() => setDragOverBox(null)}
@@ -695,166 +724,164 @@ export default function AdministratorPage() {
                               <CardHeader className="pb-3">
                                 <div className="flex items-center justify-between">
                                   <div className="flex items-center gap-3">
-                                    <div className={`w-3 h-3 rounded-full ${
-                                      team.group_id === 0 ? 'bg-red-500' :
+                                    <div className={`w-3 h-3 rounded-full ${team.group_id === 0 ? 'bg-red-500' :
                                       team.group_name === 'Editor' ? 'bg-blue-500' : 'bg-green-500'
-                                    }`}></div>
-                                      <div>
-                                        <CardTitle className="text-base font-semibold">{team.group_name}</CardTitle>
-                                        <p className="text-sm text-gray-500">
-                                          {team.group_description || `${team.users?.length || 0}명의 사용자`}
-                                        </p>
-                                      </div>
+                                      }`}></div>
+                                    <div>
+                                      <CardTitle className="text-base font-semibold">{team.group_name}</CardTitle>
+                                      <p className="text-sm text-gray-500">
+                                        {team.group_description || `${team.users?.length || 0}명의 사용자`}
+                                      </p>
                                     </div>
-                                    <div className="flex items-center gap-2">
-                                      <Badge variant="secondary" className="text-xs">
-                                        {team.users?.length || 0}명
-                                      </Badge>
-                                      {team.group_id !== 1 && (
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <Badge variant="secondary" className="text-xs">
+                                      {team.users?.length || 0}명
+                                    </Badge>
+                                    {team.group_id !== 1 && (
+                                      <AlertDialog>
+                                        <AlertDialogTrigger asChild>
+                                          <Button
+                                            size="icon"
+                                            variant="ghost"
+                                            className="h-8 w-8"
+                                          >
+                                            <Trash2 className="h-4 w-4 text-red-500" />
+                                          </Button>
+                                        </AlertDialogTrigger>
+                                        <AlertDialogContent>
+                                          <AlertDialogHeader>
+                                            <AlertDialogTitle>팀 삭제 확인</AlertDialogTitle>
+                                            <AlertDialogDescription>
+                                              정말 '{team.group_name}' 팀을 삭제하시겠습니까?
+                                              {team.users && team.users.length > 0 && (
+                                                <span className="block mt-2 text-red-600 font-medium">
+                                                  ⚠️ 이 팀에는 {team.users.length}명의 사용자가 있습니다.
+                                                  삭제하기 전에 모든 사용자를 다른 팀으로 이동해주세요.
+                                                </span>
+                                              )}
+                                            </AlertDialogDescription>
+                                          </AlertDialogHeader>
+                                          <AlertDialogFooter>
+                                            <AlertDialogCancel>취소</AlertDialogCancel>
+                                            <AlertDialogAction
+                                              onClick={() => handleDeleteGroup(team.group_id)}
+                                              className="bg-red-600 hover:bg-red-700"
+                                            >
+                                              삭제
+                                            </AlertDialogAction>
+                                          </AlertDialogFooter>
+                                        </AlertDialogContent>
+                                      </AlertDialog>
+                                    )}
+                                  </div>
+                                </div>
+                              </CardHeader>
+                              <CardContent
+                                className={`min-h-[120px] transition-colors`}
+                              >
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                  {(team.users || []).map(user => (
+                                    <div
+                                      key={user.user_id}
+                                      className={`flex items-center gap-2 p-3 rounded-lg transition-all w-full h-full min-h-[50px] ${dragUserId === user.user_id
+                                        ? 'opacity-50 transform scale-95 bg-blue-100'
+                                        : 'hover:bg-white hover:shadow-sm border border-gray-100'
+                                        }`}
+                                      draggable
+                                      onDragStart={() => {
+                                        handleDragStart(user.user_id);
+                                        setSelectedGroupId(team.group_id);
+                                      }}
+                                      onDragEnd={handleDragEnd}
+                                      onDrag={(e) => {
+                                        e.preventDefault()
+                                        document.body.style.overflow = 'auto'
+                                      }}
+                                      style={{
+                                        cursor: dragUserId === user.user_id ? 'grabbing' : 'grab',
+                                        touchAction: 'pan-y',
+                                        userSelect: 'none',
+                                        WebkitUserSelect: 'none',
+                                        MozUserSelect: 'none',
+                                        msUserSelect: 'none',
+                                        pointerEvents: 'auto'
+                                      }}
+                                    >
+                                      <Avatar className="h-6 w-6 flex-shrink-0">
+                                        <AvatarFallback className="bg-blue-100 text-blue-600 text-xs">
+                                          {user.user_name.charAt(0)}
+                                        </AvatarFallback>
+                                      </Avatar>
+                                      <div className="flex-1 min-w-0 flex flex-col justify-center">
+                                        <p className="font-medium text-xs truncate">{user.user_name}</p>
+                                        <p className="text-xs text-gray-500 truncate">{user.email}</p>
+                                      </div>
+                                      <div className="flex items-center gap-1 flex-shrink-0">
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={e => {
+                                            e.stopPropagation();
+                                            handleUserDetail(user);
+                                          }}
+                                          className="h-6 w-6 p-0"
+                                        >
+                                          <Eye className="h-3 w-3" />
+                                        </Button>
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={e => {
+                                            e.stopPropagation();
+                                            handleUserTeamAssignment(user);
+                                          }}
+                                          className="h-6 w-6 p-0"
+                                        >
+                                          <Users className="h-3 w-3" />
+                                        </Button>
                                         <AlertDialog>
                                           <AlertDialogTrigger asChild>
-                                            <Button 
-                                              size="icon" 
-                                              variant="ghost" 
-                                              className="h-8 w-8"
+                                            <Button
+                                              variant="ghost"
+                                              size="sm"
+                                              onClick={e => e.stopPropagation()}
+                                              className="h-6 w-6 p-0 text-orange-500 hover:text-orange-700"
+                                              title="팀에서 제거"
                                             >
-                                              <Trash2 className="h-4 w-4 text-red-500" />
+                                              <ShieldX className="h-3 w-3" />
                                             </Button>
                                           </AlertDialogTrigger>
                                           <AlertDialogContent>
                                             <AlertDialogHeader>
-                                              <AlertDialogTitle>팀 삭제 확인</AlertDialogTitle>
+                                              <AlertDialogTitle>팀에서 사용자 제거</AlertDialogTitle>
                                               <AlertDialogDescription>
-                                                정말 '{team.group_name}' 팀을 삭제하시겠습니까? 
-                                                {team.users && team.users.length > 0 && (
-                                                  <span className="block mt-2 text-red-600 font-medium">
-                                                    ⚠️ 이 팀에는 {team.users.length}명의 사용자가 있습니다. 
-                                                    삭제하기 전에 모든 사용자를 다른 팀으로 이동해주세요.
-                                                  </span>
-                                                )}
+                                                정말 이 사용자를 현재 팀에서 제거하시겠습니까?
                                               </AlertDialogDescription>
                                             </AlertDialogHeader>
                                             <AlertDialogFooter>
                                               <AlertDialogCancel>취소</AlertDialogCancel>
-                                              <AlertDialogAction 
-                                                onClick={() => handleDeleteGroup(team.group_id)}
-                                                className="bg-red-600 hover:bg-red-700"
+                                              <AlertDialogAction
+                                                onClick={() => handleRemoveUserFromTeam(user.user_id, team.group_id)}
+                                                className="bg-orange-600 hover:bg-orange-700"
                                               >
-                                                삭제
+                                                제거
                                               </AlertDialogAction>
                                             </AlertDialogFooter>
                                           </AlertDialogContent>
                                         </AlertDialog>
-                                      )}
+                                      </div>
                                     </div>
-                                  </div>
-                                </CardHeader>
-                                <CardContent
-                                  className={`min-h-[120px] transition-colors`}
-                                >
-                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                    {(team.users || []).map(user => (
-                                      <div
-                                        key={user.user_id}
-                                        className={`flex items-center gap-2 p-3 rounded-lg transition-all w-full h-full min-h-[50px] ${
-                                          dragUserId === user.user_id 
-                                            ? 'opacity-50 transform scale-95 bg-blue-100' 
-                                            : 'hover:bg-white hover:shadow-sm border border-gray-100'
-                                        }`}
-                                        draggable
-                                        onDragStart={() => {
-                                          handleDragStart(user.user_id);
-                                          setSelectedGroupId(team.group_id);
-                                        }}
-                                        onDragEnd={handleDragEnd}
-                                        onDrag={(e) => {
-                                          e.preventDefault()
-                                          document.body.style.overflow = 'auto'
-                                        }}
-                                        style={{ 
-                                          cursor: dragUserId === user.user_id ? 'grabbing' : 'grab',
-                                          touchAction: 'pan-y',
-                                          userSelect: 'none',
-                                          WebkitUserSelect: 'none',
-                                          MozUserSelect: 'none',
-                                          msUserSelect: 'none',
-                                          pointerEvents: 'auto'
-                                        }}
-                                      >
-                                        <Avatar className="h-6 w-6 flex-shrink-0">
-                                          <AvatarFallback className="bg-blue-100 text-blue-600 text-xs">
-                                            {user.user_name.charAt(0)}
-                                          </AvatarFallback>
-                                        </Avatar>
-                                        <div className="flex-1 min-w-0 flex flex-col justify-center">
-                                          <p className="font-medium text-xs truncate">{user.user_name}</p>
-                                          <p className="text-xs text-gray-500 truncate">{user.email}</p>
-                                        </div>
-                                        <div className="flex items-center gap-1 flex-shrink-0">
-                                          <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={e => {
-                                              e.stopPropagation();
-                                              handleUserDetail(user);
-                                            }}
-                                            className="h-6 w-6 p-0"
-                                          >
-                                            <Eye className="h-3 w-3" />
-                                          </Button>
-                                          <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={e => {
-                                              e.stopPropagation();
-                                              handleUserTeamAssignment(user);
-                                            }}
-                                            className="h-6 w-6 p-0"
-                                          >
-                                            <Users className="h-3 w-3" />
-                                          </Button>
-                                           <AlertDialog>
-                                             <AlertDialogTrigger asChild>
-                                               <Button
-                                                 variant="ghost"
-                                                 size="sm"
-                                                 onClick={e => e.stopPropagation()}
-                                                 className="h-6 w-6 p-0 text-orange-500 hover:text-orange-700"
-                                                 title="팀에서 제거"
-                                               >
-                                                 <ShieldX className="h-3 w-3" />
-                                               </Button>
-                                             </AlertDialogTrigger>
-                                            <AlertDialogContent>
-                                              <AlertDialogHeader>
-                                                <AlertDialogTitle>팀에서 사용자 제거</AlertDialogTitle>
-                                                <AlertDialogDescription>
-                                                  정말 이 사용자를 현재 팀에서 제거하시겠습니까?
-                                                </AlertDialogDescription>
-                                              </AlertDialogHeader>
-                                              <AlertDialogFooter>
-                                                <AlertDialogCancel>취소</AlertDialogCancel>
-                                                <AlertDialogAction 
-                                                  onClick={() => handleRemoveUserFromTeam(user.user_id, team.group_id)}
-                                                  className="bg-orange-600 hover:bg-orange-700"
-                                                >
-                                                  제거
-                                                </AlertDialogAction>
-                                              </AlertDialogFooter>
-                                            </AlertDialogContent>
-                                          </AlertDialog>
-                                        </div>
-                                      </div>
-                                    ))}
-                                    {(!team.users || team.users.length === 0) && (
-                                      <div className="col-span-2 text-center py-4 text-gray-400 border-2 border-dashed border-gray-200 rounded-lg">
-                                        <p className="text-sm">사용자를 여기에 드래그하세요</p>
-                                      </div>
-                                    )}
-                                  </div>
-                                </CardContent>
-                              </Card>
-                            ))}
+                                  ))}
+                                  {(!team.users || team.users.length === 0) && (
+                                    <div className="col-span-2 text-center py-4 text-gray-400 border-2 border-dashed border-gray-200 rounded-lg">
+                                      <p className="text-sm">사용자를 여기에 드래그하세요</p>
+                                    </div>
+                                  )}
+                                </div>
+                              </CardContent>
+                            </Card>
+                          ))}
                         </div>
                       </div>
                     </CardContent>
@@ -1010,14 +1037,13 @@ export default function AdministratorPage() {
                             {teams.map(team => {
                               const teamTokens = hfTokens.filter(t => t.group_id === team.group_id)
                               if (teamTokens.length === 0) return null
-                              
+
                               return (
                                 <Card key={team.group_id} className="shadow-sm">
                                   <CardHeader className="pb-3">
                                     <CardTitle className="text-base font-semibold flex items-center gap-2">
-                                      <div className={`w-3 h-3 rounded-full ${
-                                        team.group_id === 1 ? 'bg-red-500' : 'bg-green-500'
-                                      }`}></div>
+                                      <div className={`w-3 h-3 rounded-full ${team.group_id === 1 ? 'bg-red-500' : 'bg-green-500'
+                                        }`}></div>
                                       {team.group_name} ({teamTokens.length}개 토큰)
                                     </CardTitle>
                                   </CardHeader>
@@ -1043,7 +1069,7 @@ export default function AdministratorPage() {
                                 </Card>
                               )
                             })}
-                            
+
                             {hfTokens.filter(t => t.group_id).length === 0 && (
                               <div className="text-center py-8 text-gray-400">
                                 <Key className="h-8 w-8 mx-auto mb-2 opacity-50" />
@@ -1060,16 +1086,16 @@ export default function AdministratorPage() {
               <div className="h-8" />
               {/* 그룹 상세/사용자 관리 (모달로 이동) */}
               <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
-              <DialogContent className="max-w-3xl">
-              <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-              <ShieldCheck className="h-5 w-5 text-blue-600" />
-              {selectedTeam?.group_name} 그룹 사용자 관리
-              </DialogTitle>
-                <DialogDescription>
-                    사용자를 드래그하여 그룹에 추가하거나 제거할 수 있습니다. 왼쪽에서 오른쪽으로 드래그하면 그룹에 추가되고, 오른쪽에서 왼쪽으로 드래그하면 그룹에서 제거됩니다.
-                  </DialogDescription>
-                </DialogHeader>
+                <DialogContent className="max-w-3xl">
+                  <DialogHeader>
+                    <DialogTitle className="flex items-center gap-2">
+                      <ShieldCheck className="h-5 w-5 text-blue-600" />
+                      {selectedTeam?.group_name} 그룹 사용자 관리
+                    </DialogTitle>
+                    <DialogDescription>
+                      사용자를 드래그하여 그룹에 추가하거나 제거할 수 있습니다. 왼쪽에서 오른쪽으로 드래그하면 그룹에 추가되고, 오른쪽에서 왼쪽으로 드래그하면 그룹에서 제거됩니다.
+                    </DialogDescription>
+                  </DialogHeader>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-8 py-4">
                     {/* 전체 사용자 목록 */}
                     <Card className="shadow-none border bg-white">
@@ -1100,19 +1126,19 @@ export default function AdministratorPage() {
                               onDragStart={() => handleDragStart(user.user_id)}
                               onDragEnd={handleDragEnd}
                               onDrag={(e) => {
-                                        // 드래그 중에도 스크롤 허용
-                                        e.preventDefault()
-                                        document.body.style.overflow = 'auto'
-                                      }}
-                                      style={{ 
-                                        cursor: dragUserId === user.user_id ? 'grabbing' : 'grab',
-                                        touchAction: 'pan-y',
-                                        userSelect: 'none',
-                                        WebkitUserSelect: 'none',
-                                        MozUserSelect: 'none',
-                                        msUserSelect: 'none',
-                                        pointerEvents: 'auto'
-                                      }}
+                                // 드래그 중에도 스크롤 허용
+                                e.preventDefault()
+                                document.body.style.overflow = 'auto'
+                              }}
+                              style={{
+                                cursor: dragUserId === user.user_id ? 'grabbing' : 'grab',
+                                touchAction: 'pan-y',
+                                userSelect: 'none',
+                                WebkitUserSelect: 'none',
+                                MozUserSelect: 'none',
+                                msUserSelect: 'none',
+                                pointerEvents: 'auto'
+                              }}
                             >
                               <User className="h-4 w-4 text-gray-500 flex-shrink-0" />
                               <div className="flex-1 min-w-0 flex flex-col justify-center">
@@ -1124,8 +1150,8 @@ export default function AdministratorPage() {
                           {otherUsers.filter(user =>
                             user.user_name.includes(searchTerm) || user.email.includes(searchTerm)
                           ).length === 0 && (
-                            <li className="text-sm text-gray-400 py-4 text-center">추가 가능한 사용자가 없습니다.</li>
-                          )}
+                              <li className="text-sm text-gray-400 py-4 text-center">추가 가능한 사용자가 없습니다.</li>
+                            )}
                         </ul>
                       </CardContent>
                     </Card>
@@ -1150,19 +1176,19 @@ export default function AdministratorPage() {
                               onDragStart={() => handleDragStart(user.user_id)}
                               onDragEnd={handleDragEnd}
                               onDrag={(e) => {
-                                        // 드래그 중에도 스크롤 허용
-                                        e.preventDefault()
-                                        document.body.style.overflow = 'auto'
-                                      }}
-                                      style={{ 
-                                        cursor: dragUserId === user.user_id ? 'grabbing' : 'grab',
-                                        touchAction: 'pan-y',
-                                        userSelect: 'none',
-                                        WebkitUserSelect: 'none',
-                                        MozUserSelect: 'none',
-                                        msUserSelect: 'none',
-                                        pointerEvents: 'auto'
-                                      }}
+                                // 드래그 중에도 스크롤 허용
+                                e.preventDefault()
+                                document.body.style.overflow = 'auto'
+                              }}
+                              style={{
+                                cursor: dragUserId === user.user_id ? 'grabbing' : 'grab',
+                                touchAction: 'pan-y',
+                                userSelect: 'none',
+                                WebkitUserSelect: 'none',
+                                MozUserSelect: 'none',
+                                msUserSelect: 'none',
+                                pointerEvents: 'auto'
+                              }}
                             >
                               <User className="h-4 w-4 text-gray-500 flex-shrink-0" />
                               <div className="flex-1 min-w-0 flex flex-col justify-center">
@@ -1212,7 +1238,7 @@ export default function AdministratorPage() {
                                     </AlertDialogHeader>
                                     <AlertDialogFooter>
                                       <AlertDialogCancel>취소</AlertDialogCancel>
-                                      <AlertDialogAction 
+                                      <AlertDialogAction
                                         onClick={() => {
                                           handleDeleteUser(user.user_id)
                                           setIsUserDetailOpen(false)
@@ -1250,7 +1276,7 @@ export default function AdministratorPage() {
                           </AlertDialogHeader>
                           <AlertDialogFooter>
                             <AlertDialogCancel>취소</AlertDialogCancel>
-                            <AlertDialogAction 
+                            <AlertDialogAction
                               onClick={async () => {
                                 await handleDeleteGroup(selectedTeam.group_id)
                                 setIsModalOpen(false)
@@ -1268,13 +1294,13 @@ export default function AdministratorPage() {
               </Dialog>
               {/* 토큰 상세 정보 모달 */}
               <Dialog open={isTokenDetailOpen} onOpenChange={setIsTokenDetailOpen}>
-              <DialogContent>
-              <DialogHeader>
-              <DialogTitle>토큰 상세 정보</DialogTitle>
-                <DialogDescription>
-                    허깅페이스 토큰의 상세 정보를 확인하고 팀 할당을 관리할 수 있습니다.
-                  </DialogDescription>
-                </DialogHeader>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>토큰 상세 정보</DialogTitle>
+                    <DialogDescription>
+                      허깅페이스 토큰의 상세 정보를 확인하고 팀 할당을 관리할 수 있습니다.
+                    </DialogDescription>
+                  </DialogHeader>
                   {selectedTokenDetail && (
                     <div className="space-y-4">
                       <div>
@@ -1359,7 +1385,7 @@ export default function AdministratorPage() {
                                   await AdminService.assignTokenToTeam(selectedTokenDetail.hf_manage_id, Number(e.target.value))
                                   await fetchHFTokens()
                                   setIsTokenDetailOpen(false)
-                                  
+
                                   toast({
                                     title: "토큰 할당 완료",
                                     description: `'${selectedTokenDetail.hf_token_nickname}' 토큰이 '${team?.group_name || '팀'}'에 성공적으로 할당되었습니다.`,
@@ -1385,14 +1411,14 @@ export default function AdministratorPage() {
                           </select>
                         )}
                         {selectedTokenDetail.group_id && (
-                          <Button 
-                            variant="outline" 
+                          <Button
+                            variant="outline"
                             onClick={async () => {
                               try {
                                 await AdminService.unassignToken(selectedTokenDetail.hf_manage_id)
                                 await fetchHFTokens()
                                 setIsTokenDetailOpen(false)
-                                
+
                                 toast({
                                   title: "토큰 할당 해제 완료",
                                   description: `'${selectedTokenDetail.hf_token_nickname}' 토큰의 할당이 성공적으로 해제되었습니다.`,
@@ -1424,13 +1450,13 @@ export default function AdministratorPage() {
                             </AlertDialogHeader>
                             <AlertDialogFooter>
                               <AlertDialogCancel>취소</AlertDialogCancel>
-                              <AlertDialogAction 
+                              <AlertDialogAction
                                 onClick={async () => {
                                   try {
                                     await AdminService.deleteHFToken(selectedTokenDetail.hf_manage_id)
                                     await fetchHFTokens()
                                     setIsTokenDetailOpen(false)
-                                    
+
                                     toast({
                                       title: "토큰 삭제 완료",
                                       description: `'${selectedTokenDetail.hf_token_nickname}' 토큰이 성공적으로 삭제되었습니다.`,
@@ -1444,7 +1470,7 @@ export default function AdministratorPage() {
                                       variant: "destructive",
                                     })
                                   }
-                                }} 
+                                }}
                                 className="bg-red-600 hover:bg-red-700"
                               >
                                 삭제
@@ -1478,7 +1504,7 @@ export default function AdministratorPage() {
                           <p className="text-gray-600">{selectedUserDetail.email}</p>
                         </div>
                       </div>
-                      
+
                       <div className="space-y-3">
                         <div>
                           <span className="font-semibold">사용자 ID:</span>
@@ -1513,23 +1539,23 @@ export default function AdministratorPage() {
                       <div className="pt-4 border-t">
                         <h4 className="font-semibold mb-2">소속 팀</h4>
                         <div className="space-y-2">
-                          {teams.filter(team => 
+                          {teams.filter(team =>
                             team.users?.some(user => user.user_id === selectedUserDetail.user_id)
                           ).map(team => (
                             <div key={team.group_id} className="flex items-center justify-between p-2 bg-gray-50 rounded">
                               <span className="font-medium">{team.group_name}</span>
                             </div>
                           ))}
-                          {teams.filter(team => 
+                          {teams.filter(team =>
                             team.users?.some(user => user.user_id === selectedUserDetail.user_id)
                           ).length === 0 && (
-                            <p className="text-gray-500 text-sm">소속된 팀이 없습니다.</p>
-                          )}
+                              <p className="text-gray-500 text-sm">소속된 팀이 없습니다.</p>
+                            )}
                         </div>
                       </div>
 
                       <div className="flex justify-end gap-2 pt-4">
-                        <Button 
+                        <Button
                           variant="outline"
                           onClick={() => {
                             setIsUserDetailOpen(false)
@@ -1551,7 +1577,7 @@ export default function AdministratorPage() {
                             </AlertDialogHeader>
                             <AlertDialogFooter>
                               <AlertDialogCancel>취소</AlertDialogCancel>
-                              <AlertDialogAction 
+                              <AlertDialogAction
                                 onClick={() => {
                                   handleDeleteUser(selectedUserDetail.user_id)
                                   setIsUserDetailOpen(false)
@@ -1608,13 +1634,13 @@ export default function AdministratorPage() {
                       </div>
 
                       <div className="flex justify-end gap-2 pt-4">
-                        <Button 
+                        <Button
                           variant="outline"
                           onClick={() => setIsUserTeamAssignmentOpen(false)}
                         >
                           취소
                         </Button>
-                        <Button 
+                        <Button
                           onClick={handleAssignUserToTeam}
                           disabled={!selectedTeamForUserAssignment}
                           className="bg-blue-600 hover:bg-blue-700"
