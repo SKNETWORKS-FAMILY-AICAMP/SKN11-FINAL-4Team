@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from app.database import get_db
 from app.core.security import get_current_user
-from app.models.user import Team
+from app.core.permissions import check_admin_permission
 from app.schemas.hf_token import (
     HFTokenManage,
     HFTokenManageCreate,
@@ -23,27 +23,6 @@ from app.core.encryption import decrypt_sensitive_data
 
 router = APIRouter()
 
-# 관리자 그룹 ID (1번은 관리자 그룹으로 예약)
-ADMIN_GROUP_ID = 1
-
-
-def check_admin_permission(current_user: dict, db: Session):
-    """관리자 권한 체크 - 그룹 1번에 속한 사용자를 관리자로 간주"""
-    user_id = current_user.get("sub")
-    # 그룹 1번이 관리자 그룹이라고 가정
-    admin_team = db.query(Team).filter(Team.group_id == 1).first()
-    if admin_team:
-        # 현재 사용자가 관리자 그룹에 속해있는지 확인
-        from app.models.user import User
-        user_in_admin_team = (
-            db.query(Team)
-            .join(Team.users)
-            .filter(Team.group_id == 1, User.user_id == user_id)
-            .first()
-        )
-        if user_in_admin_team:
-            return True
-    return False
 
 
 class TokenAssignmentRequest(BaseModel):

@@ -22,7 +22,7 @@ from app.schemas.board import (
     SimpleContentRequest,
     SimpleContentResponse,
 )
-from app.api.v1.endpoints.auth import get_current_user
+from app.core.security import get_current_user
 from app.services.content_generation_service import (
     get_content_generation_workflow,
     generate_content_for_board,
