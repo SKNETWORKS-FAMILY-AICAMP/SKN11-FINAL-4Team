@@ -4,8 +4,8 @@ import json
 import logging
 import time
 import tempfile
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, APIRouter
+from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 from vllm.engine.arg_utils import AsyncEngineArgs
 from vllm.engine.async_llm_engine import AsyncLLMEngine
@@ -16,14 +16,28 @@ import uvicorn
 import uuid
 from enum import Enum
 
+# Speech Generator 관련 임포트
+from pipeline.speech_generator import SpeechGenerator, CharacterProfile, Gender
+
 # 환경 변수 설정
 os.environ["VLLM_USE_V1"] = "0"
+
+# OpenAI API 키 설정 (Speech Generator용)
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="vLLM LoRA Influencer API", version="1.0.0")
+
+# Speech Generator 초기화
+speech_generator = None
+if OPENAI_API_KEY:
+    speech_generator = SpeechGenerator(api_key=OPENAI_API_KEY)
+    logger.info("✅ Speech Generator 초기화 완료")
+else:
+    logger.warning("⚠️ OPENAI_API_KEY가 설정되지 않아 Speech Generator 기능이 비활성화됩니다")
 
 # 파인튜닝 상태 Enum
 class FineTuningStatus(Enum):
@@ -80,6 +94,22 @@ class FineTuningStatusResponse(BaseModel):
     progress: Optional[Dict[str, Any]] = None
     error_message: Optional[str] = None
     hf_model_url: Optional[str] = None
+
+# Speech Generator 관련 모델
+class VLLMCharacterProfile(BaseModel):
+    name: str
+    description: str
+    age_range: Optional[str] = None
+    gender: Gender
+    personality: str
+    mbti: Optional[str] = None
+
+    class Config:
+        use_enum_values = True
+
+class VLLMQAGenerationResponse(BaseModel):
+    question: str
+    responses: Dict[str, List[Dict[str, Any]]]
 
 # 전역 변수
 engine: AsyncLLMEngine = None
@@ -663,8 +693,54 @@ async def get_stats():
         "finetuning_tasks_count": len(finetuning_tasks),
         "max_loras": 8,
         "max_lora_rank": 64,
-        "lora_enabled": True
+        "lora_enabled": True,
+        "speech_generator_enabled": speech_generator is not None
     }
+
+# Speech Generator 엔드포인트
+@app.post("/generate_qa", response_model=VLLMQAGenerationResponse)
+async def generate_qa_for_character_vllm(
+    character_profile: VLLMCharacterProfile
+):
+    """
+    캐릭터 프로필에 대한 질문과 3가지 톤 변형 응답을 생성합니다.
+    """
+    if not speech_generator:
+        raise HTTPException(
+            status_code=503, 
+            detail="Speech Generator가 활성화되지 않았습니다. OPENAI_API_KEY를 설정해주세요."
+        )
+    
+    try:
+        # Pydantic 모델을 dataclass로 변환
+        vllm_char_profile = CharacterProfile(
+            name=character_profile.name,
+            description=character_profile.description,
+            age_range=character_profile.age_range,
+            gender=character_profile.gender,
+            personality=character_profile.personality,
+            mbti=character_profile.mbti
+        )
+
+        question, responses_data = speech_generator.generate_character_random_tones_sync(vllm_char_profile)
+
+        # 응답 구조 정리
+        if question in responses_data:
+            actual_responses = responses_data[question]
+        else:
+            if responses_data:
+                actual_responses = list(responses_data.values())[0]
+            else:
+                actual_responses = {}
+
+        return VLLMQAGenerationResponse(
+            question=question,
+            responses=actual_responses
+        )
+
+    except Exception as e:
+        logger.error(f"❌ Speech Generator 오류: {e}")
+        raise HTTPException(status_code=500, detail=f"Speech Generator 오류: {str(e)}")
 
 if __name__ == "__main__":
     uvicorn.run(
