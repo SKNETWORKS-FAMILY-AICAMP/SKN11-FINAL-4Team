@@ -21,7 +21,7 @@ from app.database import get_db
 from app.services.influencers.crud import get_influencer_by_id
 from app.models.influencer import BatchKey
 from app.core.config import settings
-from pipeline.speech_generator import CharacterProfile, Gender, SpeechGenerator
+from vllm.pipeline.speech_generator import CharacterProfile, Gender, SpeechGenerator
 
 
 class QAGenerationStatus(Enum):

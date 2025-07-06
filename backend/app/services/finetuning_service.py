@@ -14,8 +14,15 @@ from dataclasses import dataclass
 from enum import Enum
 
 from app.services.s3_service import get_s3_service
+from app.services.vllm_client import get_vllm_client, vllm_health_check
 from app.core.encryption import decrypt_sensitive_data
 from app.models.influencer import AIInfluencer
+from app.utils.finetuning_utils import (
+    create_system_message, 
+    convert_qa_data_for_finetuning,
+    validate_qa_data,
+    format_model_name_for_korean
+)
 
 logger = logging.getLogger(__name__)
 
@@ -61,65 +68,8 @@ class InfluencerFineTuningService:
         self.base_model = os.getenv('FINETUNING_BASE_MODEL', 'LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct')
     
     def _convert_korean_to_english(self, korean_name: str) -> str:
-        """
-        한글 이름을 영문으로 변환
-        Args:
-            korean_name: 한글 이름
-        Returns:
-            영문 변환된 이름
-        """
-        # 한글을 로마자로 변환하는 간단한 매핑
-        korean_to_roman = {
-            'ㄱ': 'g', 'ㄴ': 'n', 'ㄷ': 'd', 'ㄹ': 'r', 'ㅁ': 'm', 'ㅂ': 'b', 'ㅅ': 's',
-            'ㅇ': '', 'ㅈ': 'j', 'ㅊ': 'ch', 'ㅋ': 'k', 'ㅌ': 't', 'ㅍ': 'p', 'ㅎ': 'h',
-            'ㅏ': 'a', 'ㅑ': 'ya', 'ㅓ': 'eo', 'ㅕ': 'yeo', 'ㅗ': 'o', 'ㅛ': 'yo', 'ㅜ': 'u',
-            'ㅠ': 'yu', 'ㅡ': 'eu', 'ㅣ': 'i', 'ㅐ': 'ae', 'ㅒ': 'yae', 'ㅔ': 'e', 'ㅖ': 'ye',
-            'ㅘ': 'wa', 'ㅙ': 'wae', 'ㅚ': 'oe', 'ㅝ': 'wo', 'ㅞ': 'we', 'ㅟ': 'wi', 'ㅢ': 'ui'
-        }
-        
-        # 간단한 한글 단어 매핑 (일반적인 이름들)
-        name_mapping = {
-            '루시우': 'lucio',
-            '아나': 'ana', 
-            '메르시': 'mercy',
-            '트레이서': 'tracer',
-            '위도우메이커': 'widowmaker',
-            '솔져': 'soldier',
-            '라인하르트': 'reinhardt',
-            '디바': 'dva',
-            '윈스턴': 'winston',
-            '겐지': 'genji',
-            '한조': 'hanzo',
-            '맥크리': 'mccree',
-            '파라': 'pharah',
-            '리퍼': 'reaper',
-            '토르비욘': 'torbjorn',
-            '바스티온': 'bastion',
-            '시메트라': 'symmetra',
-            '젠야타': 'zenyatta'
-        }
-        
-        # 직접 매핑이 있는 경우 사용
-        if korean_name in name_mapping:
-            return name_mapping[korean_name]
-        
-        # 간단한 변환: 영문자와 숫자만 남기고 나머지는 제거
-        result = ""
-        for char in korean_name:
-            if char.isalnum():
-                if 'a' <= char <= 'z' or 'A' <= char <= 'Z' or '0' <= char <= '9':
-                    result += char.lower()
-                else:
-                    # 한글인 경우 간단히 처리
-                    result += 'ko'
-            elif char in ['-', '_']:
-                result += char
-        
-        # 결과가 비어있거나 너무 짧으면 기본값 사용
-        if not result or len(result) < 2:
-            result = f"influencer_{hash(korean_name) % 10000}"
-        
-        return result
+        """한글 이름을 영문으로 변환 (공통 유틸리티 사용)"""
+        return format_model_name_for_korean(korean_name)
     
     def _get_hf_info_from_influencer(self, influencer_data, db) -> tuple[str, str]:
         """
@@ -174,76 +124,6 @@ class InfluencerFineTuningService:
             logger.error(f"허깅페이스 정보 가져오기 실패: {e}", exc_info=True)
             raise
     
-    def convert_qa_data_for_finetuning(self, qa_data: List[Dict], influencer_name: str, 
-                                     personality: str, style_info: str = "") -> List[Dict]:
-        """
-        QA 데이터를 파인튜닝용 형식으로 변환
-        Args:
-            qa_data: S3에서 가져온 QA 쌍 데이터
-            influencer_name: 인플루언서 이름
-            personality: 성격 정보
-            style_info: 스타일 정보
-        Returns:
-            파인튜닝용 데이터
-        """
-        finetuning_data = []
-        
-        # 시스템 메시지 생성
-        system_message = self._create_system_message(influencer_name, personality, style_info)
-        
-        for qa_pair in qa_data:
-            question = qa_pair.get('question', '').strip()
-            answer = qa_pair.get('answer', '').strip()
-            
-            if not question:
-                logger.error(f"QA 쌍에서 'question' 필드를 찾을 수 없거나 비어 있습니다: {qa_pair}")
-            if not answer:
-                logger.error(f"QA 쌍에서 'answer' 필드를 찾을 수 없거나 비어 있습니다: {qa_pair}")
-
-            if question and answer:
-                # EXAONE 모델용 채팅 형식으로 변환
-                formatted_data = {
-                    "messages": [
-                        {"role": "system", "content": system_message},
-                        {"role": "user", "content": question},
-                        {"role": "assistant", "content": answer}
-                    ]
-                }
-                finetuning_data.append(formatted_data)
-        
-        logger.info(f"QA 데이터 변환 완료: {len(qa_data)}개 → {len(finetuning_data)}개")
-        return finetuning_data
-    
-    def _create_system_message(self, influencer_name: str, personality: str, style_info: str = "") -> str:
-        """
-        인플루언서용 시스템 메시지 생성
-        Args:
-            influencer_name: 인플루언서 이름
-            personality: 성격 정보
-            style_info: 스타일 정보
-        Returns:
-            시스템 메시지
-        """
-        system_msg = f"""당신은 {influencer_name}입니다.
-
-성격과 특징:
-{personality}
-
-"""
-        
-        if style_info:
-            system_msg += f"""스타일 정보:
-{style_info}
-
-"""
-        
-        system_msg += f"""이 캐릭터의 성격과 말투를 완벽하게 재현하여 답변해주세요.
-- 항상 캐릭터의 개성이 드러나도록 답변하세요
-- 일관된 말투와 어조를 유지하세요
-- 캐릭터의 특징적인 표현이나 어미를 사용하세요
-- 자연스럽고 매력적인 대화를 이끌어가세요"""
-        
-        return system_msg
     
     def download_qa_data_from_s3(self, s3_url: str) -> Optional[List[Dict]]:
         """
@@ -354,11 +234,11 @@ class InfluencerFineTuningService:
             personality = getattr(influencer_data, 'influencer_personality', '친근하고 활발한 성격')
             style_info = getattr(influencer_data, 'influencer_description', '')
             
-            # 시스템 메시지 생성
-            system_message = self._create_system_message(influencer_name, personality, style_info)
+            # 시스템 메시지 생성 (공통 유틸리티 사용)
+            system_message = create_system_message(influencer_name, personality, style_info)
 
-            # QA 데이터 변환
-            finetuning_data = self.convert_qa_data_for_finetuning(
+            # QA 데이터 변환 (공통 유틸리티 사용)
+            finetuning_data = convert_qa_data_for_finetuning(
                 qa_data, influencer_name, personality, style_info
             )
             
@@ -369,9 +249,9 @@ class InfluencerFineTuningService:
             logger.error(f"파인튜닝 데이터 준비 실패: {e}")
             raise
     
-    def run_finetuning(self, qa_data: List[Dict], system_message: str, hf_repo_id: str, hf_token: str, epochs: int = 5) -> Optional[str]:
+    async def run_finetuning(self, qa_data: List[Dict], system_message: str, hf_repo_id: str, hf_token: str, epochs: int = 5) -> Optional[str]:
         """
-        파인튜닝 실행
+        파인튜닝 실행 (VLLM 서버 우선, 로컬 폴백)
         Args:
             qa_data: 훈련 데이터 (QA 쌍 리스트)
             system_message: 시스템 메시지
@@ -384,6 +264,83 @@ class InfluencerFineTuningService:
         try:
             logger.info(f"파인튜닝 시작: {hf_repo_id}")
 
+            # VLLM 서버 상태 확인
+            if await vllm_health_check():
+                try:
+                    logger.info(f"🚀 VLLM 서버에서 파인튜닝 실행: {hf_repo_id}")
+                    
+                    # 인플루언서 정보 추출 (QA 데이터에서)
+                    influencer_name = hf_repo_id.split('/')[-1].replace('-finetuned', '')
+                    personality = "친근하고 활발한 성격"  # 기본값
+                    
+                    vllm_client = await get_vllm_client()
+                    result = await vllm_client.start_finetuning(
+                        influencer_id=influencer_name,
+                        influencer_name=influencer_name,
+                        personality=personality,
+                        qa_data=qa_data,
+                        hf_repo_id=hf_repo_id,
+                        hf_token=hf_token,
+                        training_epochs=epochs
+                    )
+                    
+                    task_id = result.get("task_id")
+                    if task_id:
+                        # 파인튜닝 완료까지 대기 (폴링)
+                        return await self._wait_for_vllm_finetuning(task_id, vllm_client)
+                    else:
+                        raise Exception("VLLM 파인튜닝 작업 시작 실패")
+                        
+                except Exception as e:
+                    logger.warning(f"VLLM 파인튜닝 실패, 로컬로 폴백: {e}")
+                    return await self._run_local_finetuning(qa_data, system_message, hf_repo_id, hf_token, epochs)
+            else:
+                logger.info(f"🔧 로컬에서 파인튜닝 실행: {hf_repo_id}")
+                return await self._run_local_finetuning(qa_data, system_message, hf_repo_id, hf_token, epochs)
+
+        except Exception as e:
+            logger.error(f"파인튜닝 실행 실패: {e}")
+            return None
+    
+    async def _wait_for_vllm_finetuning(self, task_id: str, vllm_client, timeout: int = 3600) -> Optional[str]:
+        """VLLM 파인튜닝 완료 대기"""
+        import asyncio
+        
+        start_time = datetime.now()
+        
+        while True:
+            try:
+                status = await vllm_client.get_finetuning_status(task_id)
+                current_status = status.get("status")
+                
+                logger.info(f"VLLM 파인튜닝 상태: {current_status}")
+                
+                if current_status == "completed":
+                    hf_model_url = status.get("hf_model_url")
+                    logger.info(f"✅ VLLM 파인튜닝 완료: {hf_model_url}")
+                    return hf_model_url
+                    
+                elif current_status == "failed":
+                    error_msg = status.get("error_message", "알 수 없는 오류")
+                    logger.error(f"❌ VLLM 파인튜닝 실패: {error_msg}")
+                    return None
+                
+                # 타임아웃 확인
+                elapsed = (datetime.now() - start_time).total_seconds()
+                if elapsed > timeout:
+                    logger.error(f"⏰ VLLM 파인튜닝 타임아웃: {timeout}초")
+                    return None
+                
+                # 10초 대기
+                await asyncio.sleep(10)
+                
+            except Exception as e:
+                logger.error(f"VLLM 파인튜닝 상태 확인 실패: {e}")
+                return None
+    
+    async def _run_local_finetuning(self, qa_data: List[Dict], system_message: str, hf_repo_id: str, hf_token: str, epochs: int) -> Optional[str]:
+        """로컬 파인튜닝 실행 (기존 로직)"""
+        try:
             # 현재 디렉토리를 pipeline 폴더로 변경
             original_dir = os.getcwd()
             pipeline_dir = os.path.join(os.path.dirname(__file__), '../../pipeline')
@@ -408,7 +365,7 @@ class InfluencerFineTuningService:
                 )
 
                 if hf_model_url:
-                    logger.info(f"파인튜닝 완료: {hf_model_url}")
+                    logger.info(f"로컬 파인튜닝 완료: {hf_model_url}")
                     return hf_model_url
                 else:
                     raise Exception("파인튜닝 실행 실패 또는 모델 URL 반환 실패")
@@ -418,7 +375,7 @@ class InfluencerFineTuningService:
                 os.chdir(original_dir)
 
         except Exception as e:
-            logger.error(f"파인튜닝 실행 실패: {e}")
+            logger.error(f"로컬 파인튜닝 실행 실패: {e}")
             return None
     
     def start_finetuning_task(self, influencer_id: str, qa_task_id: str, 
@@ -485,7 +442,7 @@ class InfluencerFineTuningService:
         
         return task_id
     
-    def execute_finetuning_task(self, task_id: str, influencer_data: AIInfluencer, hf_token: str, db=None) -> bool:
+    async def execute_finetuning_task(self, task_id: str, influencer_data: AIInfluencer, hf_token: str, db=None) -> bool:
         """
         파인튜닝 작업 실행
         Args:
@@ -517,7 +474,7 @@ class InfluencerFineTuningService:
             task.status = FineTuningStatus.TRAINING
             task.updated_at = datetime.now()
             
-            hf_model_url = self.run_finetuning(
+            hf_model_url = await self.run_finetuning(
                 qa_data=finetuning_qa_data,
                 system_message=system_message,
                 hf_repo_id=task.hf_repo_id,

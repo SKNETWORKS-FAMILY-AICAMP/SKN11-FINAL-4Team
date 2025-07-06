@@ -129,7 +129,6 @@ export default function TestModelPage() {
       try {
         setModelsLoading(true)
         const data = await ModelService.getInfluencers()
-        console.log('Fetched models:', data) // 디버깅용 로그
         setAvailableModels(data)
       } catch (error) {
         console.error('Failed to fetch models:', error)

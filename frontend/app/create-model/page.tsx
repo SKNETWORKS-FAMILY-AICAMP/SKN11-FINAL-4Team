@@ -183,8 +183,6 @@ export default function CreateModelPage() {
       // 실제 인플루언서 생성 API 호출
       const response = await ModelService.createInfluencer(createInfluencerData)
       
-      console.log('인플루언서 생성 성공:', response)
-      
       // 성공 알림 표시
       const presetInfo = formData.selectedPresetId ? 
         `\n• 선택된 프리셋: ${stylePresets.find(p => p.style_preset_id === formData.selectedPresetId)?.style_preset_name}` : 

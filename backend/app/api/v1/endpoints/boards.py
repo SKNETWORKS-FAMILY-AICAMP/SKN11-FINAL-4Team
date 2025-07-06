@@ -13,7 +13,7 @@ from app.schemas.board import (
     Board as BoardSchema,
     BoardWithInfluencer,
 )
-from app.api.v1.endpoints.auth import get_current_user
+from app.core.security import get_current_user
 
 router = APIRouter()
 

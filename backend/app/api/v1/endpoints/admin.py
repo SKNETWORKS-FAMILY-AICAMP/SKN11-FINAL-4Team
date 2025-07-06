@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from app.database import get_db
 from app.core.security import get_current_user
+from app.core.permissions import check_admin_permission
 from app.models.user import Team, User, HFTokenManage, user_group
 from app.schemas.hf_token import (
     HFTokenManage as HFTokenManageSchema,
@@ -22,27 +23,6 @@ from app.services.hf_token_service import get_hf_token_service
 from app.core.encryption import decrypt_sensitive_data
 
 router = APIRouter()
-
-# 관리자 그룹 ID (1번은 관리자 그룹으로 예약)
-ADMIN_GROUP_ID = 1
-
-
-def check_admin_permission(current_user: dict, db: Session):
-    """관리자 권한 체크 - 그룹 1번에 속한 사용자를 관리자로 간주"""
-    user_id = current_user.get("sub")
-    # 그룹 1번이 관리자 그룹이라고 가정
-    admin_team = db.query(Team).filter(Team.group_id == 1).first()
-    if admin_team:
-        # 현재 사용자가 관리자 그룹에 속해있는지 확인
-        user_in_admin_team = (
-            db.query(Team)
-            .join(Team.users)
-            .filter(Team.group_id == 1, User.user_id == user_id)
-            .first()
-        )
-        if user_in_admin_team:
-            return True
-    return False
 
 
 class AdminStatsResponse(BaseModel):
@@ -76,11 +56,8 @@ async def get_admin_dashboard_stats(
     관리자 대시보드 통계 정보 조회
     """
     try:
-        if not check_admin_permission(current_user, db):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="관리자 권한이 필요합니다"
-            )
+        # 새로운 공통 권한 체크 함수 사용 (예외 자동 발생)
+        check_admin_permission(current_user, db)
 
         # 통계 정보 수집
         total_users = db.query(User).count()
@@ -124,11 +101,8 @@ async def admin_create_hf_token(
     생성과 동시에 특정 팀에 할당할 수도 있음
     """
     try:
-        if not check_admin_permission(current_user, db):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="관리자 권한이 필요합니다"
-            )
+        # 새로운 공통 권한 체크 함수 사용 (예외 자동 발생)
+        check_admin_permission(current_user, db)
 
         service = get_hf_token_service()
         
@@ -174,11 +148,8 @@ async def admin_get_all_hf_tokens(
     관리자용 허깅페이스 토큰 전체 목록 조회
     """
     try:
-        if not check_admin_permission(current_user, db):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="관리자 권한이 필요합니다"
-            )
+        # 새로운 공통 권한 체크 함수 사용 (예외 자동 발생)
+        check_admin_permission(current_user, db)
 
         service = get_hf_token_service()
         
@@ -228,11 +199,8 @@ async def admin_assign_token_to_team(
     관리자가 특정 토큰을 특정 팀에 할당
     """
     try:
-        if not check_admin_permission(current_user, db):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="관리자 권한이 필요합니다"
-            )
+        # 새로운 공통 권한 체크 함수 사용 (예외 자동 발생)
+        check_admin_permission(current_user, db)
 
         # 토큰 존재 확인
         token = db.query(HFTokenManage).filter(
@@ -284,11 +252,8 @@ async def admin_unassign_token(
     관리자가 토큰 할당 해제 (미할당 상태로 변경)
     """
     try:
-        if not check_admin_permission(current_user, db):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="관리자 권한이 필요합니다"
-            )
+        # 새로운 공통 권한 체크 함수 사용 (예외 자동 발생)
+        check_admin_permission(current_user, db)
 
         # 토큰 존재 확인
         token = db.query(HFTokenManage).filter(
@@ -339,11 +304,8 @@ async def admin_delete_hf_token(
     관리자가 허깅페이스 토큰 삭제
     """
     try:
-        if not check_admin_permission(current_user, db):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="관리자 권한이 필요합니다"
-            )
+        # 새로운 공통 권한 체크 함수 사용 (예외 자동 발생)
+        check_admin_permission(current_user, db)
 
         service = get_hf_token_service()
         success = service.delete_hf_token(db, token_id, current_user)
@@ -396,11 +358,8 @@ async def admin_get_all_teams(
     관리자가 모든 팀 목록 조회 (토큰 할당용)
     """
     try:
-        if not check_admin_permission(current_user, db):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="관리자 권한이 필요합니다"
-            )
+        # 새로운 공통 권한 체크 함수 사용 (예외 자동 발생)
+        check_admin_permission(current_user, db)
 
         teams = db.query(Team).all()
         

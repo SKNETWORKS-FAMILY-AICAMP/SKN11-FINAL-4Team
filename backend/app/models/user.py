@@ -81,8 +81,8 @@ class HFTokenManage(Base, TimestampMixin):
     group_id = Column(
         Integer,
         ForeignKey("TEAM.group_id"),
-        nullable=False,
-        comment="그룹 고유 식별자",
+        nullable=True,  # 할당되지 않은 토큰 허용
+        comment="그룹 고유 식별자 (NULL 가능 - 할당되지 않은 토큰)",
     )
     hf_token_value = Column(
         Text, nullable=False, comment="허깅페이스 실제 토큰 값 (암호화)"

@@ -59,31 +59,7 @@ class TeamWithUsers(Team):
     users: List[User] = []
 
 
-# HFToken 스키마
-class HFTokenManageBase(BaseModel):
-    group_id: int
-    hf_token_value: str
-    hf_token_nickname: str
-    hf_user_name: str
-
-
-class HFTokenManageCreate(HFTokenManageBase):
-    pass
-
-
-class HFTokenManageUpdate(BaseModel):
-    hf_token_value: Optional[str] = None
-    hf_token_nickname: Optional[str] = None
-    hf_user_name: Optional[str] = None
-
-
-class HFTokenManage(HFTokenManageBase):
-    hf_manage_id: str
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
-
-    class Config:
-        from_attributes = True
+# HFToken 스키마는 app.schemas.hf_token에서 import 사용
 
 
 # SystemLog 스키마
