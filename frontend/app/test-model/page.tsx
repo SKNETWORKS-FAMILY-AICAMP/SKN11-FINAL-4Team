@@ -240,7 +240,10 @@ export default function TestModelPage() {
                     </div>
                   ))}
                   {isLoading && (
-                    <div className="text-center text-gray-400">AI 응답 생성 중...</div>
+                    <div className="text-center text-gray-400">
+                      <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-gray-900 mx-auto mb-2"></div>
+                      AI 응답 생성 중... (환경에 따라 최대 5분 소요될 수 있습니다)
+                    </div>
                   )}
                 </div>
               </CardContent>

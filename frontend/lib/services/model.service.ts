@@ -162,7 +162,9 @@ export class ModelService {
    * 멀티 채팅 (모델 테스트)
    */
   static async multiChat(request: MultiChatRequest): Promise<MultiChatResponse> {
-    return await apiClient.post<MultiChatResponse>('/api/v1/model-test/multi-chat', request)
+    return await apiClient.post<MultiChatResponse>('/api/v1/model-test/multi-chat', request, {
+      timeout: 300000  // 5분으로 증가
+    })
   }
 
 }
