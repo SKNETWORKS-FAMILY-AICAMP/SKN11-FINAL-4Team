@@ -9,5 +9,11 @@ from app.main import app
 
 if __name__ == "__main__":
     uvicorn.run(
-        "app.main:app", host="localhost", port=8000, reload=False, log_level="info"
+        "app.main:app", 
+        host="localhost", 
+        port=8000, 
+        reload=False, 
+        log_level="info",
+        timeout_keep_alive=300,  # 5분
+        timeout_graceful_shutdown=300  # 5분
     )

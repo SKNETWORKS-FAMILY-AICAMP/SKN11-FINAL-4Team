@@ -317,21 +317,15 @@ async def admin_delete_hf_token(
                 detail="토큰을 찾을 수 없습니다"
             )
         
-        # 해당 토큰을 사용하는 인플루언서가 있는지 확인
-        from app.models.influencer import AIInfluencer
-        using_influencers = db.query(AIInfluencer).filter(
-            AIInfluencer.hf_manage_id == token_id
-        ).count()
+        # 토큰 삭제 (서비스에서 인플루언서 사용 여부도 확인)
+        service = get_hf_token_service()
+        success = service.delete_hf_token(db, token_id, current_user)
         
-        if using_influencers > 0:
+        if not success:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"해당 토큰을 사용하는 인플루언서가 {using_influencers}개 존재합니다. 먼저 인플루언서의 토큰 연결을 해제해주세요."
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="토큰을 찾을 수 없습니다"
             )
-        
-        # 토큰 삭제
-        db.delete(token)
-        db.commit()
         
         return {"message": "토큰이 성공적으로 삭제되었습니다"}
 
@@ -356,11 +350,8 @@ async def admin_update_hf_token(
     관리자가 허깅페이스 토큰 수정
     """
     try:
-        if not check_admin_permission(current_user, db):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="관리자 권한이 필요합니다"
-            )
+        # 새로운 공통 권한 체크 함수 사용 (예외 자동 발생)
+        check_admin_permission(current_user, db)
 
         service = get_hf_token_service()
         token = service.update_hf_token(db, token_id, token_data, current_user)
