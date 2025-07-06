@@ -219,7 +219,7 @@ export default function DashboardPage() {
             <div className="flex-1 flex justify-end">
               {hasPermission('model', 'create') && (
                 <Link href="/create-model">
-                  <Button className="flex items-center space-x-2">
+                  <Button className="flex items-center space-x-2 text-white bg-blue-600 hover:bg-blue-700">
                     <Plus className="h-4 w-4" />
                     <span>새 AI 인플루언서 생성</span>
                   </Button>

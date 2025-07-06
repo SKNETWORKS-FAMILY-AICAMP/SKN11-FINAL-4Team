@@ -2,7 +2,7 @@ from sqlalchemy.orm import Session
 from typing import List
 import uuid
 
-from app.models.influencer import StylePreset
+from app.models import StylePreset
 from app.schemas.influencer import StylePresetCreate
 
 

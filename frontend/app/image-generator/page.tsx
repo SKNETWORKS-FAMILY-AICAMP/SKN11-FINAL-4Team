@@ -697,7 +697,7 @@ export default function ImageGeneratorPage() {
                   <Button 
                     onClick={handleGenerateImage}
                     disabled={!prompt.trim() || isGenerating}
-                    className="w-full"
+                    className="w-full text-white bg-blue-600 hover:bg-blue-700"
                     size="lg"
                   >
                     {isGenerating ? (

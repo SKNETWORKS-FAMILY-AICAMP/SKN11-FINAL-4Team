@@ -11,7 +11,6 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 from app.models.base import Base, TimestampMixin
-from app.models.influencer import AIInfluencer
 import uuid
 
 # User-Team 다대다 관계 테이블 (실제 DB 구조에 맞춤)

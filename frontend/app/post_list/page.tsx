@@ -460,7 +460,7 @@ function PostListContent() {
             </Dialog>
             <div className="flex-1 flex justify-end">
               <Link href="/create-post">
-                <Button className="flex items-center space-x-2">
+                <Button className="flex items-center space-x-2 text-white bg-blue-600 hover:bg-blue-700">
                   <Plus className="h-4 w-4" />
                   <span>새 게시글 작성</span>
                 </Button>
