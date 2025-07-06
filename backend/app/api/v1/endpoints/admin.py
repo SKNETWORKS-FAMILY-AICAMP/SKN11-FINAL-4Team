@@ -24,7 +24,6 @@ from app.core.encryption import decrypt_sensitive_data
 
 router = APIRouter()
 
-
 class AdminStatsResponse(BaseModel):
     """관리자 대시보드 통계 응답"""
     total_users: int
@@ -307,17 +306,81 @@ async def admin_delete_hf_token(
         # 새로운 공통 권한 체크 함수 사용 (예외 자동 발생)
         check_admin_permission(current_user, db)
 
-        service = get_hf_token_service()
-        success = service.delete_hf_token(db, token_id, current_user)
+        # 토큰 존재 확인
+        token = db.query(HFTokenManage).filter(
+            HFTokenManage.hf_manage_id == token_id
+        ).first()
         
-        if not success:
+        if not token:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="토큰을 찾을 수 없습니다"
             )
         
+        # 해당 토큰을 사용하는 인플루언서가 있는지 확인
+        from app.models.influencer import AIInfluencer
+        using_influencers = db.query(AIInfluencer).filter(
+            AIInfluencer.hf_manage_id == token_id
+        ).count()
+        
+        if using_influencers > 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"해당 토큰을 사용하는 인플루언서가 {using_influencers}개 존재합니다. 먼저 인플루언서의 토큰 연결을 해제해주세요."
+            )
+        
+        # 토큰 삭제
+        db.delete(token)
+        db.commit()
+        
         return {"message": "토큰이 성공적으로 삭제되었습니다"}
 
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+
+
+@router.put("/hf-tokens/{token_id}", response_model=HFTokenManageSchema)
+async def admin_update_hf_token(
+    token_id: str,
+    token_data: HFTokenManageUpdate,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    관리자가 허깅페이스 토큰 수정
+    """
+    try:
+        if not check_admin_permission(current_user, db):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="관리자 권한이 필요합니다"
+            )
+
+        service = get_hf_token_service()
+        token = service.update_hf_token(db, token_id, token_data, current_user)
+        
+        if not token:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="토큰을 찾을 수 없습니다"
+            )
+        
+        # 응답에서 토큰 값은 마스킹 처리
+        token_dict = token.__dict__.copy()
+        if 'hf_token_value' in token_dict:
+            # 복호화 후 마스킹
+            decrypted_value = decrypt_sensitive_data(token_dict['hf_token_value'])
+            token_dict['hf_token_masked'] = service.mask_token_value(decrypted_value)
+            del token_dict['hf_token_value']
+        
+        return HFTokenManageSchema(**token_dict)
+        
     except HTTPException:
         raise
     except Exception as e:

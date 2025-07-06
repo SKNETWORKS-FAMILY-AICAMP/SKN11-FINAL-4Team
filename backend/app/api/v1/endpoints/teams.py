@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from typing import List
 from pydantic import BaseModel
 
@@ -46,19 +46,20 @@ async def get_teams(
         )
         if user_in_admin_team:
             # 관리자는 모든 팀 조회 가능
-            teams = db.query(Team).offset(skip).limit(limit).all()
+            teams = db.query(Team).options(joinedload(Team.users)).offset(skip).limit(limit).all()
         else:
             # 일반 사용자는 자신이 속한 팀만 조회
             teams = (
                 db.query(Team)
                 .join(Team.users)
+                .options(joinedload(Team.users))
                 .filter(User.user_id == user_id)
                 .offset(skip)
                 .limit(limit)
                 .all()
             )
     else:
-        teams = db.query(Team).offset(skip).limit(limit).all()
+        teams = db.query(Team).options(joinedload(Team.users)).offset(skip).limit(limit).all()
 
     return teams
 
@@ -70,7 +71,7 @@ async def get_team(
     db: Session = Depends(get_db),
 ):
     """특정 팀 조회"""
-    team = db.query(Team).filter(Team.group_id == group_id).first()
+    team = db.query(Team).options(joinedload(Team.users)).filter(Team.group_id == group_id).first()
     if team is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Team not found"
