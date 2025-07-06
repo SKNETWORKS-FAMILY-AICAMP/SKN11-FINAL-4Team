@@ -26,8 +26,6 @@ if settings.DEBUG:
             logging.StreamHandler(),  # 콘솔 출력
         ]
     )
-    # 개발 환경에서는 SQLAlchemy 로그도 표시
-    logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
     logging.getLogger('app').setLevel(logging.DEBUG)
 else:
     # 프로덕션 환경에서는 기존 설정 유지
@@ -35,14 +33,16 @@ else:
         level=getattr(logging, settings.LOG_LEVEL), 
         format=settings.LOG_FORMAT
     )
-    # 외부 라이브러리 로그 비활성화
-    logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
-    logging.getLogger('sqlalchemy.pool').setLevel(logging.WARNING)
-    logging.getLogger('sqlalchemy.dialects').setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
-# 공통으로 비활성화할 로그들
+# SQLAlchemy 로그 완전 비활성화 (개발/프로덕션 공통)
+logging.getLogger('sqlalchemy.engine').setLevel(logging.CRITICAL)
+logging.getLogger('sqlalchemy.pool').setLevel(logging.CRITICAL)
+logging.getLogger('sqlalchemy.dialects').setLevel(logging.CRITICAL)
+logging.getLogger('sqlalchemy.orm').setLevel(logging.CRITICAL)
+
+# 기타 외부 라이브러리 로그 비활성화
 logging.getLogger('httpx').setLevel(logging.WARNING)
 logging.getLogger('httpcore').setLevel(logging.WARNING)
 

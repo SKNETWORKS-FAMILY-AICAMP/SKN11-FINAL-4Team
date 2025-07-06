@@ -47,6 +47,11 @@ from app.services.finetuning_service import (
 from datetime import datetime
 from app.models.influencer import StylePreset
 from fastapi import HTTPException
+from typing import Dict, Any
+from openai import OpenAI
+import os
+import json
+from pydantic import BaseModel
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -652,3 +657,256 @@ async def handle_openai_batch_webhook(
 
         print(f"상세 오류: {traceback.format_exc()}")
         return {"error": f"웹훅 처리 실패: {str(e)}"}
+
+
+# 말투 생성 요청 스키마
+class ToneGenerationRequest(BaseModel):
+    personality: str
+    name: Optional[str] = None
+    description: Optional[str] = None
+    mbti: Optional[str] = None
+    gender: Optional[str] = None
+    age: Optional[str] = None
+
+
+# 말투 생성 관련 API
+@router.post("/generate-tones")
+async def generate_conversation_tones(
+    request: ToneGenerationRequest,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """성격 기반 말투 생성 API"""
+    
+    if not request.personality.strip():
+        raise HTTPException(status_code=400, detail="성격 정보를 입력해주세요")
+    
+    try:
+        # OpenAI 클라이언트 초기화
+        openai_api_key = os.getenv("OPENAI_API_KEY")
+        if not openai_api_key:
+            raise HTTPException(status_code=500, detail="OpenAI API 키가 설정되지 않았습니다")
+        
+        client = OpenAI(api_key=openai_api_key)
+        
+        # 캐릭터 정보 구성
+        character_info = f"""
+        이름: {request.name or '미지정'}
+        설명: {request.description or '미지정'}
+        성격: {request.personality}
+        MBTI: {request.mbti or '미지정'}
+        성별: {request.gender or '미지정'}
+        나이: {request.age or '미지정'}
+        """.strip()
+        
+        # 말투 생성을 위한 질문 생성
+        question = await _generate_question_for_character(client, character_info)
+        
+        # 3가지 말투 생성
+        conversation_examples = await _generate_three_tones(client, character_info, question)
+        
+        return {
+            "personality": request.personality,
+            "character_info": character_info,
+            "question": question,
+            "conversation_examples": conversation_examples,
+            "generated_at": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"말투 생성 중 오류: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"말투 생성 중 오류가 발생했습니다: {str(e)}")
+
+
+@router.post("/regenerate-tones")
+async def regenerate_conversation_tones(
+    request: ToneGenerationRequest,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """말투 재생성 API"""
+    
+    if not request.personality.strip():
+        raise HTTPException(status_code=400, detail="성격 정보를 입력해주세요")
+    
+    try:
+        # OpenAI 클라이언트 초기화
+        openai_api_key = os.getenv("OPENAI_API_KEY")
+        if not openai_api_key:
+            raise HTTPException(status_code=500, detail="OpenAI API 키가 설정되지 않았습니다")
+        
+        client = OpenAI(api_key=openai_api_key)
+        
+        # 캐릭터 정보 구성
+        character_info = f"""
+        이름: {request.name or '미지정'}
+        설명: {request.description or '미지정'}
+        성격: {request.personality}
+        MBTI: {request.mbti or '미지정'}
+        성별: {request.gender or '미지정'}
+        나이: {request.age or '미지정'}
+        """.strip()
+        
+        # 새로운 질문 생성 (더 높은 temperature로 다양성 확보)
+        question = await _generate_question_for_character(client, character_info, temperature=0.9)
+        
+        # 3가지 말투 재생성 (더 높은 temperature로 다양성 확보)
+        conversation_examples = await _generate_three_tones(client, character_info, question, temperature=1.0)
+        
+        return {
+            "personality": request.personality,
+            "character_info": character_info,
+            "question": question,
+            "conversation_examples": conversation_examples,
+            "generated_at": datetime.now().isoformat(),
+            "regenerated": True
+        }
+        
+    except Exception as e:
+        logger.error(f"말투 재생성 중 오류: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"말투 재생성 중 오류가 발생했습니다: {str(e)}")
+
+
+async def _generate_question_for_character(client: OpenAI, character_info: str, temperature: float = 0.6) -> str:
+    """캐릭터 정보에 어울리는 질문을 GPT가 생성하도록 합니다."""
+    prompt = f"""
+당신은 아래 캐릭터 정보를 바탕으로, 이 캐릭터가 가장 잘 드러날 수 있는 상황이나 일상적인 질문 하나를 한 문장으로 작성해주세요.
+
+[캐릭터 정보]
+{character_info}
+
+조건:
+- 질문은 반드시 하나만 작성해주세요.
+- 질문은 일상적인 대화에서 자연스럽게 나올 수 있는 것이어야 합니다.
+- 질문의 말투나 단어 선택도 캐릭터가 잘 드러나도록 유도해주세요.
+"""
+
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": "당신은 캐릭터 기반 대화 시나리오 생성 도우미입니다."},
+            {"role": "user", "content": prompt}
+        ],
+        max_tokens=100,
+        temperature=temperature
+    )
+
+    return response.choices[0].message.content.strip()
+
+
+async def _generate_three_tones(client: OpenAI, character_info: str, question: str, temperature: float = 0.9) -> List[Dict[str, str]]:
+    """캐릭터 정보를 바탕으로 3가지 다른 말투를 생성합니다."""
+    
+    conversation_examples = []
+    
+    for i in range(3):
+        # 각 말투에 대한 시스템 프롬프트 생성
+        system_prompt = await _generate_system_prompt_for_tone(client, character_info, i+1)
+        
+        # 시스템 프롬프트를 사용해 질문에 대답
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": question}
+            ],
+            max_tokens=500,
+            temperature=temperature
+        )
+        
+        generated_text = response.choices[0].message.content.strip()
+        
+        # 말투 요약 생성
+        tone_summary = await _summarize_speech_style(client, system_prompt)
+        
+        conversation_examples.append({
+            "title": tone_summary.get("description", f"말투 {i+1}"),
+            "example": generated_text,
+            "tone": tone_summary.get("description", f"말투 {i+1}"),
+            "hashtags": tone_summary.get("hashtags", f"#말투{i+1}"),
+            "system_prompt": system_prompt
+        })
+    
+    return conversation_examples
+
+
+async def _generate_system_prompt_for_tone(client: OpenAI, character_info: str, tone_variation: int) -> str:
+    """캐릭터 정보를 기반으로 특정 말투에 대한 시스템 프롬프트를 생성합니다."""
+    
+    tone_instructions = {
+        1: "주어진 캐릭터 정보를 바탕으로 첫 번째 독특하고 창의적인 말투로 답변하세요. 캐릭터의 특성을 반영하되 예상치 못한 방식으로 표현해주세요.",
+        2: "주어진 캐릭터 정보를 바탕으로 두 번째 독특하고 창의적인 말투로 답변하세요. 첫 번째와는 완전히 다른 새로운 스타일로 표현해주세요.",
+        3: "주어진 캐릭터 정보를 바탕으로 세 번째 독특하고 창의적인 말투로 답변하세요. 앞의 두 가지와는 전혀 다른 참신한 방식으로 표현해주세요."
+    }
+    
+    tone_instruction = tone_instructions.get(tone_variation, "캐릭터의 스타일을 반영한 창의적 말투를 사용하세요.")
+    
+    prompt = f"""
+    [요청 조건]
+    다음 캐릭터 정보에 기반하여 GPT의 말투 생성에 적합하도록 system prompt를 구성해주세요.
+    1. [캐릭터 정보]의 '설명'과 '성격'은 사용자가 입력한 의미를 유지하면서, GPT가 캐릭터의 말투를 자연스럽게 생성할 수 있도록 더 명확하고 생생하게 표현해주세요. 단, 새로운 설정을 추가하거나 의미를 바꾸면 안 돼요.
+    2. 이어서 해당 캐릭터 특성을 잘 반영한 [말투 지시사항]과 [주의사항]을 작성해주세요. 표현 방식, 말투, 감정 전달 방식 등 말투에 필요한 구체적인 특징이 드러나야 해요.
+    3. 전체 출력 포맷은 아래와 같아야 해요:
+
+    당신은 이제 캐릭터처럼 대화해야 합니다.
+
+    [캐릭터 정보]
+    {character_info}
+
+    [말투 지시사항]
+    {tone_instruction}
+
+    [주의사항]
+    {{캐릭터 특성에 따라 GPT가 직접 판단한 주의사항}}
+
+    모든 내용은 캐릭터 말투 생성을 위한 system prompt 용도로 사용되므로, 형식과 말투의 일관성을 유지해주세요.
+    """.strip()
+
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": "아래 캐릭터 정보로 system prompt 전체를 구성해주세요. 문장 표현은 매끄럽고 정리된 스타일로 해주세요."},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.7,
+        max_tokens=1000
+    )
+
+    return response.choices[0].message.content.strip()
+
+
+async def _summarize_speech_style(client: OpenAI, system_prompt: str) -> Dict[str, str]:
+    """말투의 시스템 프롬프트를 기반으로 그 말투의 특징을 요약합니다."""
+    system_instruction = """
+    주어진 말투의 system prompt를 기반으로 그 말투의 특징을 요약해주세요. 반드시 아래 형식을 그대로 지켜서 JSON으로 출력하세요.
+
+    형식:
+    {
+        "hashtags": "#키워드1 #키워드2 #키워드3",
+        "description": "말투 설명 (한 문장, '~말투'로 끝나야 함)"
+    }
+
+    조건:
+    1. 말투 스타일을 MZ 느낌나게 키워드 3개를 생성해 해시태그 형식으로 작성해 주세요.
+    2. 말투 스타일을 한 문장으로 요약해주세요. 반드시 '말투'로 끝나야 합니다. 서술어 없이 명사형으로 끝납니다.
+    3. 출력 형식은 반드시 JSON 형식으로 반환해주세요. (추가 설명 없이)
+    """
+
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": system_instruction},
+            {"role": "user", "content": f"말투 지시사항:\n{system_prompt}"}
+        ],
+        max_tokens=200,
+        temperature=0.7
+    )
+
+    try:
+        return json.loads(response.choices[0].message.content)
+    except Exception as e:
+        logger.error(f"말투 요약 파싱 실패: {e}")
+        return {
+            "hashtags": "#GPT #응답파싱 #실패",
+            "description": "말투 요약 실패한 말투"
+        }

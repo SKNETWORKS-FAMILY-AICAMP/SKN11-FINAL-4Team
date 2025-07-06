@@ -10,6 +10,7 @@ import time
 import random
 import tempfile
 import logging
+import requests
 from typing import List, Dict, Optional
 from openai import OpenAI
 from datetime import datetime
@@ -100,8 +101,9 @@ class InfluencerQAGenerator:
         
         # 스타일 프리셋에서 정보 추출
         if style_preset:
-            gender = gender_map.get(style_preset.get('influencer_gender', 3), Gender.NON_BINARY)
-            age = age_group_map.get(style_preset.get('influencer_age_group', 2), 25)
+            gender = gender_map.get(style_preset.get('influencer_gender'), Gender.NON_BINARY)
+            age_group = style_preset.get('influencer_age_group')
+            age_range = f"{age_group_map.get(age_group, 25)}대" if age_group else "알 수 없음"
             personality = style_preset.get('influencer_personality', '친근하고 활발한 성격')
             
             # 설명에 스타일 정보 추가
@@ -112,23 +114,25 @@ class InfluencerQAGenerator:
                 description = f"헤어스타일: {hairstyle}, 스타일: {style}, 말투: {speech}"
         else:
             gender = Gender.NON_BINARY
-            age = 25
+            age_range = "알 수 없음"
             personality = '친근하고 활발한 성격'
             
         # MBTI 정보 추출
         if mbti:
-            mbti_type = mbti.get('mbti_name', 'ENFP')
+            mbti_type = mbti.get('mbti_name')
+            if not mbti_type:
+                mbti_type = "알 수 없음"
             # 성격에 MBTI 특성 추가
             mbti_traits = mbti.get('mbti_traits', '')
             if mbti_traits:
                 personality += f" ({mbti_traits})"
         else:
-            mbti_type = 'ENFP'  # 기본값
+            mbti_type = "알 수 없음"
             
         return CharacterProfile(
             name=name,
             description=description,
-            age=age,
+            age_range=age_range,
             gender=gender,
             personality=personality,
             mbti=mbti_type
@@ -137,6 +141,7 @@ class InfluencerQAGenerator:
     def create_qa_batch_requests(self, character: CharacterProfile, num_requests: int = None) -> List[Dict]:
         """
         인플루언서 캐릭터를 위한 QA 생성 배치 요청 생성
+        VLLM 서버의 /generate_qa 엔드포인트를 사용하여 QA 생성
         Args:
             character: 캐릭터 프로필
             num_requests: 생성할 QA 개수 (None이면 환경변수 QA_GENERATION_COUNT 사용)
@@ -145,56 +150,121 @@ class InfluencerQAGenerator:
         """
         if num_requests is None:
             num_requests = settings.QA_GENERATION_COUNT
-        # 다양한 질문 주제들
-        question_topics = [
-            "일상생활과 취미",
-            "패션과 뷰티",
-            "여행과 맛집",
-            "연애와 관계",
-            "직업과 커리어", 
-            "건강과 운동",
-            "문화와 엔터테인먼트",
-            "소셜미디어와 트렌드",
-            "자기계발과 성장",
-            "가족과 친구들",
-            "쇼핑과 소비",
-            "음식과 요리",
-            "스트레스와 힐링",
-            "미래와 꿈",
-            "추억과 경험"
-        ]
+        
+        # VLLM 서버 URL 설정
+        vllm_server_url = getattr(settings, 'VLLM_SERVER_URL', 'http://localhost:8001')
         
         requests = []
         
-        # 캐릭터 프롬프트 생성
-        character_prompt = self.speech_generator.create_character_prompt(character)
+        # VLLM 서버에 요청할 캐릭터 프로필 데이터 준비
+        character_data = {
+            "name": character.name,
+            "description": character.description,
+            "age_range": character.age_range,
+            "gender": character.gender.value if character.gender else "없음",
+            "personality": character.personality,
+            "mbti": character.mbti
+        }
         
         for i in range(num_requests):
-            topic = random.choice(question_topics)
-            
-            request = {
-                "custom_id": f"influencer_qa_{character.name}_{i+1}",
-                "method": "POST",
-                "url": "/v1/chat/completions",
-                "body": {
-                    "model": "gpt-4o-mini",
-                    "messages": [
-                        {
-                            "role": "system",
-                            "content": character_prompt
-                        },
-                        {
-                            "role": "user",
-                            "content": f"'{topic}' 주제에 대한 자연스러운 질문을 하나 만들고, 당신의 캐릭터와 말투로 답변해주세요. 형식: Q: [질문] A: [답변]"
+            # VLLM 서버의 /generate_qa 엔드포인트 호출
+            try:
+                response = requests.post(
+                    f"{vllm_server_url}/generate_qa",
+                    json=character_data,
+                    timeout=30
+                )
+                
+                if response.status_code == 200:
+                    qa_data = response.json()
+                    question = qa_data.get('question', '')
+                    responses = qa_data.get('responses', {})
+                    
+                    # 각 말투별 응답을 배치 요청으로 변환
+                    for tone_name, tone_responses in responses.items():
+                        if tone_responses and len(tone_responses) > 0:
+                            tone_response = tone_responses[0]  # 첫 번째 응답 사용
+                            
+                            request = {
+                                "custom_id": f"influencer_qa_{character.name}_{i+1}_{tone_name}",
+                                "method": "POST",
+                                "url": "/v1/chat/completions",
+                                "body": {
+                                    "model": "gpt-4o-mini",
+                                    "messages": [
+                                        {
+                                            "role": "system",
+                                            "content": "QA 쌍을 생성하는 역할입니다."
+                                        },
+                                        {
+                                            "role": "user",
+                                            "content": f"Q: {question} A: {tone_response.get('text', '')}"
+                                        }
+                                    ],
+                                    "max_tokens": 300,
+                                    "temperature": 0.8
+                                }
+                            }
+                            requests.append(request)
+                            
+                            # 한 번에 너무 많은 요청을 보내지 않도록 제한
+                            if len(requests) >= num_requests:
+                                break
+                    
+                    if len(requests) >= num_requests:
+                        break
+                        
+                else:
+                    print(f"VLLM 서버 요청 실패: {response.status_code} - {response.text}")
+                    # 실패 시 기본 QA 생성
+                    request = {
+                        "custom_id": f"influencer_qa_{character.name}_{i+1}_fallback",
+                        "method": "POST",
+                        "url": "/v1/chat/completions",
+                        "body": {
+                            "model": "gpt-4o-mini",
+                            "messages": [
+                                {
+                                    "role": "system",
+                                    "content": f"당신은 {character.name}라는 캐릭터입니다. 성격: {character.personality}"
+                                },
+                                {
+                                    "role": "user",
+                                    "content": "일상적인 질문 하나와 그에 대한 답변을 생성해주세요. 형식: Q: [질문] A: [답변]"
+                                }
+                            ],
+                            "max_tokens": 300,
+                            "temperature": 0.8
                         }
-                    ],
-                    "max_tokens": 300,
-                    "temperature": 0.8
+                    }
+                    requests.append(request)
+                    
+            except Exception as e:
+                print(f"VLLM 서버 연결 오류: {e}")
+                # 연결 오류 시 기본 QA 생성
+                request = {
+                    "custom_id": f"influencer_qa_{character.name}_{i+1}_error",
+                    "method": "POST",
+                    "url": "/v1/chat/completions",
+                    "body": {
+                        "model": "gpt-4o-mini",
+                        "messages": [
+                            {
+                                "role": "system",
+                                "content": f"당신은 {character.name}라는 캐릭터입니다. 성격: {character.personality}"
+                            },
+                            {
+                                "role": "user",
+                                "content": "일상적인 질문 하나와 그에 대한 답변을 생성해주세요. 형식: Q: [질문] A: [답변]"
+                            }
+                        ],
+                        "max_tokens": 300,
+                        "temperature": 0.8
+                    }
                 }
-            }
-            requests.append(request)
+                requests.append(request)
         
-        return requests
+        return requests[:num_requests]  # 요청한 개수만큼만 반환
     
     def save_batch_file(self, requests: List[Dict], task_id: str) -> str:
         """배치 요청을 JSONL 파일로 저장"""
