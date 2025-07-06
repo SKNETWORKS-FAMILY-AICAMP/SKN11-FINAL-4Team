@@ -29,20 +29,38 @@ ADMIN_GROUP_ID = 1
 
 def check_admin_permission(current_user: dict, db: Session):
     """관리자 권한 체크 - 그룹 1번에 속한 사용자를 관리자로 간주"""
-    user_id = current_user.get("sub")
-    # 그룹 1번이 관리자 그룹이라고 가정
-    admin_team = db.query(Team).filter(Team.group_id == 1).first()
-    if admin_team:
+    try:
+        user_id = current_user.get("sub")
+        if not user_id:
+            print(f"❌ 사용자 ID가 없습니다: {current_user}")
+            return False
+        
+        print(f"🔍 관리자 권한 확인 중: user_id={user_id}")
+        
+        # 그룹 1번이 관리자 그룹이라고 가정
+        admin_team = db.query(Team).filter(Team.group_id == 1).first()
+        if not admin_team:
+            print("❌ 관리자 그룹(그룹 1)을 찾을 수 없습니다")
+            return False
+        
         # 현재 사용자가 관리자 그룹에 속해있는지 확인
-        user_in_admin_team = (
-            db.query(Team)
-            .join(Team.users)
-            .filter(Team.group_id == 1, User.user_id == user_id)
-            .first()
-        )
+        # user_group 테이블을 직접 조회
+        from app.models.user import user_group
+        user_in_admin_team = db.query(user_group).filter(
+            user_group.c.user_id == user_id,
+            user_group.c.group_id == 1
+        ).first()
+        
         if user_in_admin_team:
+            print(f"✅ 관리자 권한 확인됨: {user_id}")
             return True
-    return False
+        else:
+            print(f"❌ 관리자 권한 없음: {user_id}")
+            return False
+            
+    except Exception as e:
+        print(f"❌ 관리자 권한 확인 중 오류: {e}")
+        return False
 
 
 class AdminStatsResponse(BaseModel):
@@ -339,6 +357,63 @@ async def admin_delete_hf_token(
     관리자가 허깅페이스 토큰 삭제
     """
     try:
+        # 관리자 권한 확인
+        if not check_admin_permission(current_user, db):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="관리자 권한이 필요합니다"
+            )
+
+        # 토큰 존재 확인
+        token = db.query(HFTokenManage).filter(
+            HFTokenManage.hf_manage_id == token_id
+        ).first()
+        
+        if not token:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="토큰을 찾을 수 없습니다"
+            )
+        
+        # 해당 토큰을 사용하는 인플루언서가 있는지 확인
+        from app.models.influencer import AIInfluencer
+        using_influencers = db.query(AIInfluencer).filter(
+            AIInfluencer.hf_manage_id == token_id
+        ).count()
+        
+        if using_influencers > 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"해당 토큰을 사용하는 인플루언서가 {using_influencers}개 존재합니다. 먼저 인플루언서의 토큰 연결을 해제해주세요."
+            )
+        
+        # 토큰 삭제
+        db.delete(token)
+        db.commit()
+        
+        return {"message": "토큰이 성공적으로 삭제되었습니다"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+
+
+@router.put("/hf-tokens/{token_id}", response_model=HFTokenManageSchema)
+async def admin_update_hf_token(
+    token_id: str,
+    token_data: HFTokenManageUpdate,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    관리자가 허깅페이스 토큰 수정
+    """
+    try:
         if not check_admin_permission(current_user, db):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -346,16 +421,24 @@ async def admin_delete_hf_token(
             )
 
         service = get_hf_token_service()
-        success = service.delete_hf_token(db, token_id, current_user)
+        token = service.update_hf_token(db, token_id, token_data, current_user)
         
-        if not success:
+        if not token:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="토큰을 찾을 수 없습니다"
             )
         
-        return {"message": "토큰이 성공적으로 삭제되었습니다"}
-
+        # 응답에서 토큰 값은 마스킹 처리
+        token_dict = token.__dict__.copy()
+        if 'hf_token_value' in token_dict:
+            # 복호화 후 마스킹
+            decrypted_value = decrypt_sensitive_data(token_dict['hf_token_value'])
+            token_dict['hf_token_masked'] = service.mask_token_value(decrypted_value)
+            del token_dict['hf_token_value']
+        
+        return HFTokenManageSchema(**token_dict)
+        
     except HTTPException:
         raise
     except Exception as e:
