@@ -4,8 +4,8 @@ import json
 import logging
 import time
 import tempfile
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, APIRouter
+from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 from vllm.engine.arg_utils import AsyncEngineArgs
 from vllm.engine.async_llm_engine import AsyncLLMEngine
@@ -16,14 +16,28 @@ import uvicorn
 import uuid
 from enum import Enum
 
+# Speech Generator 관련 임포트
+from pipeline.speech_generator import SpeechGenerator, CharacterProfile, Gender
+
 # 환경 변수 설정
 os.environ["VLLM_USE_V1"] = "0"
+
+# OpenAI API 키 설정 (Speech Generator용)
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="vLLM LoRA Influencer API", version="1.0.0")
+
+# Speech Generator 초기화
+speech_generator = None
+if OPENAI_API_KEY:
+    speech_generator = SpeechGenerator(api_key=OPENAI_API_KEY)
+    logger.info("✅ Speech Generator 초기화 완료")
+else:
+    logger.warning("⚠️ OPENAI_API_KEY가 설정되지 않아 Speech Generator 기능이 비활성화됩니다")
 
 # 파인튜닝 상태 Enum
 class FineTuningStatus(Enum):
@@ -80,6 +94,22 @@ class FineTuningStatusResponse(BaseModel):
     progress: Optional[Dict[str, Any]] = None
     error_message: Optional[str] = None
     hf_model_url: Optional[str] = None
+
+# Speech Generator 관련 모델
+class VLLMCharacterProfile(BaseModel):
+    name: str
+    description: str
+    age_range: Optional[str] = None
+    gender: Gender
+    personality: str
+    mbti: Optional[str] = None
+
+    class Config:
+        use_enum_values = True
+
+class VLLMQAGenerationResponse(BaseModel):
+    question: str
+    responses: Dict[str, List[Dict[str, Any]]]
 
 # 전역 변수
 engine: AsyncLLMEngine = None
@@ -231,26 +261,30 @@ async def execute_finetuning(task_id: str):
         task["updated_at"] = time.time()
         logger.error(f"❌ 파인튜닝 실패: {task_id}, {e}")
 
+from pipeline import fine_custom
+
 async def run_finetuning_pipeline(qa_data: List[Dict], system_message: str, 
                                 hf_token: str, hf_repo_id: str, training_epochs: int) -> Optional[str]:
     """파인튜닝 파이프라인 실행"""
     try:
-        # 파인튜닝 로직을 여기에 구현
-        # 실제로는 pipeline/fine_custom.py를 호출하거나 
-        # 직접 transformers 라이브러리를 사용하여 파인튜닝 수행
-        
-        # 임시로 성공 응답 반환 (실제 구현 시 수정 필요)
         logger.info(f"🔄 파인튜닝 파이프라인 실행: {hf_repo_id}")
         
-        # 여기서 실제 파인튜닝 코드 실행
-        # 예: subprocess로 fine_custom.py 실행하거나
-        # 직접 transformers 라이브러리 사용
+        # fine_custom.py의 main 함수를 별도의 스레드에서 실행
+        hf_model_url = await asyncio.to_thread(
+            fine_custom.main,
+            qa_data=qa_data,
+            system_message=system_message,
+            hf_token=hf_token,
+            hf_repo_id=hf_repo_id,
+            training_epochs=training_epochs
+        )
         
-        await asyncio.sleep(2)  # 임시 대기
-        
-        hf_model_url = f"https://huggingface.co/{hf_repo_id}"
-        return hf_model_url
-        
+        if hf_model_url:
+            logger.info(f"✅ 파인튜닝 파이프라인 실행 완료: {hf_repo_id}")
+            return hf_model_url
+        else:
+            raise Exception("파인튜닝 실행 실패: 모델 URL을 반환하지 못했습니다.")
+            
     except Exception as e:
         logger.error(f"❌ 파인튜닝 파이프라인 실행 실패: {e}")
         return None
@@ -286,14 +320,24 @@ def convert_qa_data_for_finetuning(qa_data: List[Dict], influencer_name: str,
                                  personality: str, style_info: str = "") -> List[Dict]:
     """QA 데이터를 파인튜닝용 형식으로 변환 (VLLM 서버용)"""
     finetuning_data = []
-    
+
+    logger.info(f"convert_qa_data_for_finetuning: Received {len(qa_data)} QA pairs.")
+    if not qa_data:
+        logger.warning("convert_qa_data_for_finetuning: qa_data is empty.")
+        return []
+
     # 시스템 메시지 생성
     system_message = create_system_message(influencer_name, personality, style_info)
-    
-    for qa_pair in qa_data:
+
+    for i, qa_pair in enumerate(qa_data):
         question = qa_pair.get('question', '').strip()
         answer = qa_pair.get('answer', '').strip()
-        
+
+        if not question:
+            logger.warning(f"convert_qa_data_for_finetuning: QA pair {i} has empty question: {qa_pair}")
+        if not answer:
+            logger.warning(f"convert_qa_data_for_finetuning: QA pair {i} has empty answer: {qa_pair}")
+
         if question and answer:
             # EXAONE 모델용 채팅 형식으로 변환
             formatted_data = {
@@ -304,7 +348,9 @@ def convert_qa_data_for_finetuning(qa_data: List[Dict], influencer_name: str,
                 ]
             }
             finetuning_data.append(formatted_data)
-    
+        else:
+            logger.warning(f"convert_qa_data_for_finetuning: Skipping invalid QA pair {i}: {qa_pair}")
+
     logger.info(f"QA 데이터 변환 완료: {len(qa_data)}개 → {len(finetuning_data)}개")
     return finetuning_data
 
@@ -339,6 +385,11 @@ def clean_response(response: str, influencer_name: str) -> str:
 @app.get("/")
 async def root():
     return {"message": "vLLM LoRA Influencer API가 실행 중입니다!"}
+
+@app.get("/health")
+async def health_check():
+    """서버 상태 확인 엔드포인트"""
+    return {"status": "ok", "message": "vLLM LoRA Influencer API 서버가 정상적으로 실행 중입니다."}
 
 @app.post("/load_adapter")
 async def load_lora_adapter(request: LoRALoadRequest):
@@ -663,8 +714,54 @@ async def get_stats():
         "finetuning_tasks_count": len(finetuning_tasks),
         "max_loras": 8,
         "max_lora_rank": 64,
-        "lora_enabled": True
+        "lora_enabled": True,
+        "speech_generator_enabled": speech_generator is not None
     }
+
+# Speech Generator 엔드포인트
+@app.post("/generate_qa", response_model=VLLMQAGenerationResponse)
+async def generate_qa_for_character_vllm(
+    character_profile: VLLMCharacterProfile
+):
+    """
+    캐릭터 프로필에 대한 질문과 3가지 톤 변형 응답을 생성합니다.
+    """
+    if not speech_generator:
+        raise HTTPException(
+            status_code=503, 
+            detail="Speech Generator가 활성화되지 않았습니다. OPENAI_API_KEY를 설정해주세요."
+        )
+    
+    try:
+        # Pydantic 모델을 dataclass로 변환
+        vllm_char_profile = CharacterProfile(
+            name=character_profile.name,
+            description=character_profile.description,
+            age_range=character_profile.age_range,
+            gender=character_profile.gender,
+            personality=character_profile.personality,
+            mbti=character_profile.mbti
+        )
+
+        question, responses_data = speech_generator.generate_character_random_tones_sync(vllm_char_profile)
+
+        # 응답 구조 정리
+        if question in responses_data:
+            actual_responses = responses_data[question]
+        else:
+            if responses_data:
+                actual_responses = list(responses_data.values())[0]
+            else:
+                actual_responses = {}
+
+        return VLLMQAGenerationResponse(
+            question=question,
+            responses=actual_responses
+        )
+
+    except Exception as e:
+        logger.error(f"❌ Speech Generator 오류: {e}")
+        raise HTTPException(status_code=500, detail=f"Speech Generator 오류: {str(e)}")
 
 if __name__ == "__main__":
     uvicorn.run(

@@ -16,6 +16,13 @@ from datasets import Dataset
 from huggingface_hub import HfApi
 import os
 
+# bitsandbytes 임포트 (QLoRA 사용 시 필요)
+try:
+    from bitsandbytes.quantization import BitsAndBytesConfig
+except ImportError:
+    print("bitsandbytes가 설치되지 않았거나 로드할 수 없습니다. QLoRA는 비활성화됩니다.")
+    BitsAndBytesConfig = None
+
 # GPU 설정 확인
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
