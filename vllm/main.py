@@ -320,14 +320,24 @@ def convert_qa_data_for_finetuning(qa_data: List[Dict], influencer_name: str,
                                  personality: str, style_info: str = "") -> List[Dict]:
     """QA 데이터를 파인튜닝용 형식으로 변환 (VLLM 서버용)"""
     finetuning_data = []
-    
+
+    logger.info(f"convert_qa_data_for_finetuning: Received {len(qa_data)} QA pairs.")
+    if not qa_data:
+        logger.warning("convert_qa_data_for_finetuning: qa_data is empty.")
+        return []
+
     # 시스템 메시지 생성
     system_message = create_system_message(influencer_name, personality, style_info)
-    
-    for qa_pair in qa_data:
+
+    for i, qa_pair in enumerate(qa_data):
         question = qa_pair.get('question', '').strip()
         answer = qa_pair.get('answer', '').strip()
-        
+
+        if not question:
+            logger.warning(f"convert_qa_data_for_finetuning: QA pair {i} has empty question: {qa_pair}")
+        if not answer:
+            logger.warning(f"convert_qa_data_for_finetuning: QA pair {i} has empty answer: {qa_pair}")
+
         if question and answer:
             # EXAONE 모델용 채팅 형식으로 변환
             formatted_data = {
@@ -338,7 +348,9 @@ def convert_qa_data_for_finetuning(qa_data: List[Dict], influencer_name: str,
                 ]
             }
             finetuning_data.append(formatted_data)
-    
+        else:
+            logger.warning(f"convert_qa_data_for_finetuning: Skipping invalid QA pair {i}: {qa_pair}")
+
     logger.info(f"QA 데이터 변환 완료: {len(qa_data)}개 → {len(finetuning_data)}개")
     return finetuning_data
 
@@ -373,6 +385,11 @@ def clean_response(response: str, influencer_name: str) -> str:
 @app.get("/")
 async def root():
     return {"message": "vLLM LoRA Influencer API가 실행 중입니다!"}
+
+@app.get("/health")
+async def health_check():
+    """서버 상태 확인 엔드포인트"""
+    return {"status": "ok", "message": "vLLM LoRA Influencer API 서버가 정상적으로 실행 중입니다."}
 
 @app.post("/load_adapter")
 async def load_lora_adapter(request: LoRALoadRequest):
