@@ -73,7 +73,6 @@ class AIInfluencer(Base, TimestampMixin):
 
     influencer_id = Column(
         String(255),
-        primary_key=True,
         default=lambda: str(uuid.uuid4()),
         comment="인플루언서 고유 식별자",
     )
@@ -166,13 +165,10 @@ class AIInfluencer(Base, TimestampMixin):
     voice_option = Column(Boolean, default=False, comment="음성 생성 옵션")
     image_option = Column(Boolean, default=False, comment="이미지 생성 옵션")
 
-    # 복합 기본키 설정
+    # 기본키 설정
     __table_args__ = (
         sa.PrimaryKeyConstraint(
             "influencer_id",
-            "user_id",
-            "group_id",
-            "hf_manage_id",
             name="pk_ai_influencer",
         ),
     )
