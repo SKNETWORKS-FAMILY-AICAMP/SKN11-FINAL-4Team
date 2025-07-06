@@ -261,26 +261,30 @@ async def execute_finetuning(task_id: str):
         task["updated_at"] = time.time()
         logger.error(f"❌ 파인튜닝 실패: {task_id}, {e}")
 
+from pipeline import fine_custom
+
 async def run_finetuning_pipeline(qa_data: List[Dict], system_message: str, 
                                 hf_token: str, hf_repo_id: str, training_epochs: int) -> Optional[str]:
     """파인튜닝 파이프라인 실행"""
     try:
-        # 파인튜닝 로직을 여기에 구현
-        # 실제로는 pipeline/fine_custom.py를 호출하거나 
-        # 직접 transformers 라이브러리를 사용하여 파인튜닝 수행
-        
-        # 임시로 성공 응답 반환 (실제 구현 시 수정 필요)
         logger.info(f"🔄 파인튜닝 파이프라인 실행: {hf_repo_id}")
         
-        # 여기서 실제 파인튜닝 코드 실행
-        # 예: subprocess로 fine_custom.py 실행하거나
-        # 직접 transformers 라이브러리 사용
+        # fine_custom.py의 main 함수를 별도의 스레드에서 실행
+        hf_model_url = await asyncio.to_thread(
+            fine_custom.main,
+            qa_data=qa_data,
+            system_message=system_message,
+            hf_token=hf_token,
+            hf_repo_id=hf_repo_id,
+            training_epochs=training_epochs
+        )
         
-        await asyncio.sleep(2)  # 임시 대기
-        
-        hf_model_url = f"https://huggingface.co/{hf_repo_id}"
-        return hf_model_url
-        
+        if hf_model_url:
+            logger.info(f"✅ 파인튜닝 파이프라인 실행 완료: {hf_repo_id}")
+            return hf_model_url
+        else:
+            raise Exception("파인튜닝 실행 실패: 모델 URL을 반환하지 못했습니다.")
+            
     except Exception as e:
         logger.error(f"❌ 파인튜닝 파이프라인 실행 실패: {e}")
         return None
