@@ -8,7 +8,7 @@ import { Navigation } from "@/components/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { ModelService, StylePreset } from "@/lib/services/model.service"
+import { ModelService, StylePreset, ToneGenerationRequest, ConversationExample } from "@/lib/services/model.service"
 import { useAuth } from "@/hooks/use-auth"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -65,6 +65,8 @@ export default function CreateModelPage() {
   const { user } = useAuth()
   const [showToneExamples, setShowToneExamples] = useState(false)
   const [customToneInput, setCustomToneInput] = useState("")
+  const [generatingTones, setGeneratingTones] = useState(false)
+  const [generatedTones, setGeneratedTones] = useState<ConversationExample[]>([])
 
   useEffect(() => {
     // 임시: 하드코딩 데이터 fetch처럼 세팅
@@ -219,10 +221,10 @@ export default function CreateModelPage() {
       }
 
       // 백엔드 API 호출 데이터 준비
-      const createInfluencerData = {
+      const createInfluencerData: any = {
         user_id: user.user_id,
         group_id: user.teams[0].group_id, // 첫 번째 팀의 group_id 사용
-        style_preset_id: formData.selectedPresetId || "", // 빈 문자열로 전달
+        // style_preset_id를 전달하지 않음 - 항상 새로운 프리셋이 생성됨
         mbti_id: undefined,
         influencer_name: formData.name,
         influencer_description: formData.description,
@@ -231,31 +233,68 @@ export default function CreateModelPage() {
         learning_status: 0, // 초기 상태
         influencer_model_repo: "",
         chatbot_option: true,
+      }
+
+      // 프리셋 모드에 따른 데이터 추가
+      if (inputMethodTab === "preset" && formData.selectedPresetId) {
+        // 프리셋 선택 모드: 선택된 프리셋의 데이터 사용
+        const selectedPreset = stylePresets.find(p => p.style_preset_id === formData.selectedPresetId)
+        if (selectedPreset) {
+          createInfluencerData.personality = selectedPreset.personality || selectedPreset.influencer_personality
+          createInfluencerData.tone = selectedPreset.tone || selectedPreset.influencer_speech
+          createInfluencerData.model_type = selectedPreset.modelType || (selectedPreset.influencer_type === 1 ? "character" : selectedPreset.influencer_type === 2 ? "human" : "object")
+          createInfluencerData.mbti = selectedPreset.mbti
+          createInfluencerData.gender = selectedPreset.gender || (selectedPreset.influencer_gender === 0 ? "male" : selectedPreset.influencer_gender === 1 ? "female" : "other")
+          createInfluencerData.age = selectedPreset.age || (selectedPreset.influencer_age_group === 1 ? "10" : selectedPreset.influencer_age_group === 2 ? "20" : selectedPreset.influencer_age_group === 3 ? "30" : selectedPreset.influencer_age_group === 4 ? "40" : "50")
+          createInfluencerData.hair_style = selectedPreset.hairStyle || selectedPreset.influencer_hairstyle
+          createInfluencerData.mood = selectedPreset.mood
+          
+          // 디버깅용 정보
+          createInfluencerData.selected_preset_name = selectedPreset.style_preset_name
+        }
+      } else {
+        // 직접 입력 모드: 사용자가 입력한 데이터 사용
+        createInfluencerData.personality = formData.personality
+        createInfluencerData.tone = formData.tone || formData.customTones[0] || ""
+        createInfluencerData.model_type = formData.modelType
+        createInfluencerData.mbti = formData.mbti !== "none" ? formData.mbti : undefined
+        createInfluencerData.gender = formData.gender !== "none" ? formData.gender : undefined
+        createInfluencerData.age = formData.age
         
-        // 프리셋 자동 생성을 위한 추가 데이터 (프리셋이 선택되지 않은 경우에만 사용)
-        personality: formData.personality,
-        tone: formData.tone || formData.customTones[0] || "",
-        model_type: formData.modelType,
-        mbti: formData.mbti,
-        gender: formData.gender,
-        age: formData.age,
-        hair_style: formData.hairStyle,
-        mood: formData.mood,
-        
-        // 선택된 프리셋 정보 (디버깅용)
-        selected_preset_name: formData.selectedPresetId ? 
-          stylePresets.find(p => p.style_preset_id === formData.selectedPresetId)?.style_preset_name : null
+        // 이미지 생성 방법에 따른 데이터 추가
+        if (formData.imageMethod === "prompt") {
+          createInfluencerData.hair_style = formData.hairStyle
+          createInfluencerData.mood = formData.mood
+        }
       }
 
       // 실제 인플루언서 생성 API 호출
       const response = await ModelService.createInfluencer(createInfluencerData)
       
-      // 성공 알림 표시
-      const presetInfo = formData.selectedPresetId ? 
-        `\n• 선택된 프리셋: ${stylePresets.find(p => p.style_preset_id === formData.selectedPresetId)?.style_preset_name}` : 
-        '\n• 사용자 정의 설정으로 생성'
+      // 성공 알림 표시 (선택된 탭에 따라 다른 메시지)
+      let successMessage = `🎉 AI 인플루언서 "${formData.name}"가 생성되었습니다!\n\n`
       
-      alert(`🎉 AI 인플루언서 "${formData.name}"가 생성되었습니다!${presetInfo}\n\n다음 작업이 백그라운드에서 자동으로 진행됩니다:\n• 2,000개 QA 쌍 생성\n• S3에 데이터 업로드\n• QLoRA 4비트 양자화 파인튜닝\n• Hugging Face에 모델 업로드\n\n완료 시 이메일과 웹 알림을 받으실 수 있습니다.`)
+      if (inputMethodTab === "preset" && formData.selectedPresetId) {
+        const selectedPreset = stylePresets.find(p => p.style_preset_id === formData.selectedPresetId)
+        successMessage += `• 프리셋 기반으로 생성: ${selectedPreset?.style_preset_name}\n`
+        successMessage += `• 성격: ${selectedPreset?.influencer_personality || selectedPreset?.personality}\n`
+        successMessage += `• 말투: ${selectedPreset?.influencer_speech || selectedPreset?.tone}\n`
+      } else {
+        successMessage += `• 직접 입력으로 생성\n`
+        successMessage += `• 성격: ${formData.personality}\n`
+        successMessage += `• 말투: ${formData.tone || formData.customTones[0] || "사용자 정의"}\n`
+        successMessage += `• 모델 유형: ${formData.modelType === "character" ? "캐릭터형" : formData.modelType === "human" ? "사람형" : "사물형"}\n`
+        
+        if (formData.imageMethod === "prompt") {
+          successMessage += `• 이미지: 프롬프트 생성 (${formData.hairStyle}, ${formData.mood})\n`
+        } else {
+          successMessage += `• 이미지: 파일 업로드\n`
+        }
+      }
+      
+      successMessage += `\n다음 작업이 백그라운드에서 자동으로 진행됩니다:\n• 2,000개 QA 쌍 생성\n• S3에 데이터 업로드\n• QLoRA 4비트 양자화 파인튜닝\n• Hugging Face에 모델 업로드\n\n완료 시 이메일과 웹 알림을 받으실 수 있습니다.`
+      
+      alert(successMessage)
       
       setIsLoading(false)
       router.push("/dashboard")
@@ -269,8 +308,42 @@ export default function CreateModelPage() {
     }
   }
 
-  // 성격 기반 대화 예시 생성
-  const generateConversationExamples = (personality: string) => {
+  // API를 통한 말투 생성
+  const generateConversationExamples = async (personality: string, isRegeneration: boolean = false) => {
+    if (!personality.trim()) {
+      alert('성격을 먼저 입력해주세요.')
+      return
+    }
+
+    setGeneratingTones(true)
+    
+    try {
+      const request: ToneGenerationRequest = {
+        personality: personality,
+        name: formData.name || undefined,
+        description: formData.description || undefined,
+        mbti: formData.mbti || undefined,
+        gender: formData.gender || undefined,
+        age: formData.age || undefined
+      }
+
+      const response = isRegeneration 
+        ? await ModelService.regenerateTones(request)
+        : await ModelService.generateTones(request)
+      
+      setGeneratedTones(response.conversation_examples)
+      setShowToneExamples(true)
+      
+    } catch (error) {
+      console.error('말투 생성 실패:', error)
+      alert('말투 생성에 실패했습니다. 다시 시도해주세요.')
+    } finally {
+      setGeneratingTones(false)
+    }
+  }
+
+  // 기존 로직 (하드코딩된 예시)
+  const generateStaticConversationExamples = (personality: string) => {
     if (!(personality || '').trim()) return []
     const personalityLower = (personality || '').toLowerCase()
 
@@ -399,7 +472,7 @@ export default function CreateModelPage() {
     return uniqueConversations.slice(0, 3)
   }
 
-  const conversationExamples = generateConversationExamples(formData.personality)
+  const conversationExamples = generatedTones.length > 0 ? generatedTones : generateStaticConversationExamples(formData.personality)
 
   // 프리셋 기반 동적 옵션 추출
   const uniqueModelTypes = Array.from(new Set(stylePresets.map(p => p.influencer_type)));
@@ -590,14 +663,26 @@ export default function CreateModelPage() {
                     <TabsTrigger value="custom">직접 입력</TabsTrigger>
                   </TabsList>
                   <TabsContent value="recommend">
-                    <Button
-                      className="mb-4"
-                      onClick={() => setShowToneExamples(true)}
-                      disabled={!formData.personality.trim()}
-                      type="button"
-                    >
-                      {showToneExamples ? '말투 재생성' : '말투 생성'}
-                    </Button>
+                    <div className="flex gap-2 mb-4">
+                      <Button
+                        onClick={() => generateConversationExamples(formData.personality, false)}
+                        disabled={!formData.personality.trim() || generatingTones}
+                        type="button"
+                      >
+                        {generatingTones ? '생성 중...' : '말투 생성'}
+                      </Button>
+                      
+                      {showToneExamples && (
+                        <Button
+                          variant="outline"
+                          onClick={() => generateConversationExamples(formData.personality, true)}
+                          disabled={!formData.personality.trim() || generatingTones}
+                          type="button"
+                        >
+                          {generatingTones ? '재생성 중...' : '말투 재생성'}
+                        </Button>
+                      )}
+                    </div>
                     {showToneExamples && conversationExamples.length > 0 ? (
                       <div className="space-y-4 mb-4">
                         <div className="flex items-center space-x-2 text-sm text-blue-600">
@@ -615,9 +700,14 @@ export default function CreateModelPage() {
                               }}
                             >
                               <CardHeader className="pb-3">
-                                <div className="flex items-center space-x-2">
-                                  <MessageCircle className="h-4 w-4 text-blue-600" />
-                                  <CardTitle className="text-sm">{example.title}</CardTitle>
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center space-x-2">
+                                    <MessageCircle className="h-4 w-4 text-blue-600" />
+                                    <CardTitle className="text-sm">{example.title}</CardTitle>
+                                  </div>
+                                  {example.hashtags && (
+                                    <span className="text-xs text-gray-500">{example.hashtags}</span>
+                                  )}
                                 </div>
                               </CardHeader>
                               <CardContent className="pt-0">
@@ -660,7 +750,26 @@ export default function CreateModelPage() {
                         </Button>
                       </div>
                       <ul className="space-y-1">
-                        {formData.customTones && formData.customTones.length > 0 ? (
+                        {generatedTones.length > 0 ? (
+                          generatedTones.map((tone, idx) => (
+                            <li key={idx} className="flex items-center gap-2 bg-gray-50 rounded px-3 py-2">
+                              <span className="flex-1 text-sm">{tone.title} - {tone.tone}</span>
+                              <Button 
+                                type="button" 
+                                size="sm" 
+                                variant="outline"
+                                onClick={() => {
+                                  setFormData(prev => ({
+                                    ...prev,
+                                    customTones: [tone.tone]
+                                  }))
+                                }}
+                              >
+                                선택
+                              </Button>
+                            </li>
+                          ))
+                        ) : formData.customTones && formData.customTones.length > 0 ? (
                           formData.customTones.map((tone, idx) => (
                             <li key={idx} className="flex items-center gap-2 bg-gray-50 rounded px-3 py-2">
                               <span className="flex-1 text-sm">{tone}</span>

@@ -49,7 +49,7 @@ export interface ModelMBTI {
 export interface CreateInfluencerRequest {
   user_id: string
   group_id: number
-  style_preset_id: string
+  style_preset_id?: string  // 선택적 필드로 변경 - 빈 문자열이나 undefined면 새로운 프리셋 생성
   mbti_id?: number
   influencer_name: string
   image_url?: string
@@ -83,6 +83,32 @@ export interface MultiChatResponse {
     influencer_id: string
     response: string
   }>
+}
+
+export interface ToneGenerationRequest {
+  personality: string
+  name?: string
+  description?: string
+  mbti?: string
+  gender?: string
+  age?: string
+}
+
+export interface ConversationExample {
+  title: string
+  example: string
+  tone: string
+  hashtags: string
+  system_prompt: string
+}
+
+export interface ToneGenerationResponse {
+  personality: string
+  character_info: string
+  question: string
+  conversation_examples: ConversationExample[]
+  generated_at: string
+  regenerated?: boolean
 }
 
 
@@ -163,6 +189,24 @@ export class ModelService {
    */
   static async multiChat(request: MultiChatRequest): Promise<MultiChatResponse> {
     return await apiClient.post<MultiChatResponse>('/api/v1/model-test/multi-chat', request)
+  }
+
+  /**
+   * 말투 생성
+   */
+  static async generateTones(request: ToneGenerationRequest): Promise<ToneGenerationResponse> {
+    return await apiClient.post<ToneGenerationResponse>('/api/v1/influencers/generate-tones', request, {
+      timeout: 60000 // 1분 타임아웃
+    })
+  }
+
+  /**
+   * 말투 재생성
+   */
+  static async regenerateTones(request: ToneGenerationRequest): Promise<ToneGenerationResponse> {
+    return await apiClient.post<ToneGenerationResponse>('/api/v1/influencers/regenerate-tones', request, {
+      timeout: 60000 // 1분 타임아웃
+    })
   }
 
 }
