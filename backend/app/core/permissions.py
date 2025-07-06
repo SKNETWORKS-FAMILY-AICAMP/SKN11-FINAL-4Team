@@ -34,7 +34,6 @@ def check_admin_permission(user: Union[User, Dict[str, Any]], db: Session = None
     """
     try:
         user_id = None
-        print('ㅅㅏㅇㅛㅇㅈㅏ',user)
         if isinstance(user, User):
             db_user = user
             user_id = db_user.user_id
