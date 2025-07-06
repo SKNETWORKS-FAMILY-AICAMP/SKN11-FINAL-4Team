@@ -265,38 +265,38 @@ class InfluencerFineTuningService:
             logger.info(f"파인튜닝 시작: {hf_repo_id}")
 
             # VLLM 서버 상태 확인
-            if await vllm_health_check():
-                try:
-                    logger.info(f"🚀 VLLM 서버에서 파인튜닝 실행: {hf_repo_id}")
+            if not await vllm_health_check():
+                logger.error("VLLM 서버가 비활성화되었거나 연결할 수 없습니다.")
+                return None
+
+            try:
+                logger.info(f"🚀 VLLM 서버에서 파인튜닝 실행: {hf_repo_id}")
+                
+                # 인플루언서 정보 추출 (QA 데이터에서)
+                influencer_name = hf_repo_id.split('/')[-1].replace('-finetuned', '')
+                personality = "친근하고 활발한 성격"  # 기본값
+                
+                vllm_client = await get_vllm_client()
+                result = await vllm_client.start_finetuning(
+                    influencer_id=influencer_name,
+                    influencer_name=influencer_name,
+                    personality=personality,
+                    qa_data=qa_data,
+                    hf_repo_id=hf_repo_id,
+                    hf_token=hf_token,
+                    training_epochs=epochs
+                )
+                
+                task_id = result.get("task_id")
+                if task_id:
+                    # 파인튜닝 완료까지 대기 (폴링)
+                    return await self._wait_for_vllm_finetuning(task_id, vllm_client)
+                else:
+                    raise Exception("VLLM 파인튜닝 작업 시작 실패")
                     
-                    # 인플루언서 정보 추출 (QA 데이터에서)
-                    influencer_name = hf_repo_id.split('/')[-1].replace('-finetuned', '')
-                    personality = "친근하고 활발한 성격"  # 기본값
-                    
-                    vllm_client = await get_vllm_client()
-                    result = await vllm_client.start_finetuning(
-                        influencer_id=influencer_name,
-                        influencer_name=influencer_name,
-                        personality=personality,
-                        qa_data=qa_data,
-                        hf_repo_id=hf_repo_id,
-                        hf_token=hf_token,
-                        training_epochs=epochs
-                    )
-                    
-                    task_id = result.get("task_id")
-                    if task_id:
-                        # 파인튜닝 완료까지 대기 (폴링)
-                        return await self._wait_for_vllm_finetuning(task_id, vllm_client)
-                    else:
-                        raise Exception("VLLM 파인튜닝 작업 시작 실패")
-                        
-                except Exception as e:
-                    logger.warning(f"VLLM 파인튜닝 실패, 로컬로 폴백: {e}")
-                    return await self._run_local_finetuning(qa_data, system_message, hf_repo_id, hf_token, epochs)
-            else:
-                logger.info(f"🔧 로컬에서 파인튜닝 실행: {hf_repo_id}")
-                return await self._run_local_finetuning(qa_data, system_message, hf_repo_id, hf_token, epochs)
+            except Exception as e:
+                logger.error(f"VLLM 파인튜닝 실행 중 오류: {e}")
+                return None
 
         except Exception as e:
             logger.error(f"파인튜닝 실행 실패: {e}")
@@ -609,14 +609,8 @@ class InfluencerFineTuningService:
                 db=db
             )
             
-            # 파인튜닝 실행 (백그라운드에서)
-            import asyncio
-            from functools import partial
-            
-            # 동기 함수를 비동기로 실행
-            loop = asyncio.get_event_loop()
-            execute_task = partial(self.execute_finetuning_task, task_id, influencer_data, hf_token, db)
-            success = await loop.run_in_executor(None, execute_task)
+            # 파인튜닝 실행
+            success = await self.execute_finetuning_task(task_id, influencer_data, hf_token, db)
             
             if success:
                 logger.info(f"✅ 인플루언서 파인튜닝 자동 시작 성공: {influencer_id}")

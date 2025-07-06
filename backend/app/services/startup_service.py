@@ -15,6 +15,7 @@ from app.database import get_db
 # batch_job_service 제거됨 - BatchKey 모델 직접 사용
 from app.services.finetuning_service import get_finetuning_service
 from app.models.influencer import BatchKey as BatchJob
+from app.services.influencers.qa_generator import QAGenerationStatus
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
@@ -58,8 +59,12 @@ class StartupService:
                     from app.services.batch_monitor import BatchMonitor # 순환 참조 방지를 위해 여기서 import
                     monitor = BatchMonitor()
                     for job in in_progress_jobs:
-                        await monitor.check_and_update_single_job(job, db)
-                    db.commit()
+                        try:
+                            await monitor.check_and_update_single_job(job, db)
+                            db.commit() # 개별 작업 처리 후 커밋
+                        except Exception as e:
+                            logger.error(f"❌ 진행 중이던 배치 작업 {job.batch_key_id} 처리 중 오류: {e}", exc_info=True)
+                            db.rollback() # 오류 발생 시 롤백
                 else:
                     logger.info("✅ 진행 중이던 배치 작업 없음")
 
@@ -98,17 +103,18 @@ class StartupService:
                                 job.s3_qa_file_url = s3_url
                                 job.is_uploaded_to_s3 = True
                                 job.updated_at = datetime.now()
+                                db.commit() # 개별 작업 처리 후 커밋
                                 logger.info(f"✅ S3 업로드 성공: {s3_url}")
                             else:
                                 logger.error(f"❌ S3 업로드 실패: task_id={job.task_id}")
 
                         except Exception as e:
                             logger.error(f"❌ S3 업로드 처리 중 오류: task_id={job.task_id}, error={e}")
+                            db.rollback() # 오류 발생 시 롤백
                         finally:
                             if tmp_file_path and os.path.exists(tmp_file_path):
                                 os.remove(tmp_file_path)
                     
-                    db.commit()
                 else:
                     logger.info("✅ S3 업로드 누락 작업 없음")
 
@@ -146,7 +152,7 @@ class StartupService:
                             logger.info(f"✅ 이미 파인튜닝 완료됨: influencer_id={batch_job.influencer_id}")
                             # 파인튜닝 시작 플래그 업데이트 (중복 시작 방지)
                             batch_job.is_finetuning_started = True
-                            db.commit()
+                            db.commit() # 개별 작업 처리 후 커밋
                             continue
                         
                         logger.info(f"🚀 파인튜닝 자동 재시작: task_id={batch_job.task_id}, influencer_id={batch_job.influencer_id}")
@@ -161,8 +167,8 @@ class StartupService:
                         if success:
                             # 파인튜닝 시작 표시 (BatchKey 모델 직접 사용)
                             batch_job.is_finetuning_started = True
-                            batch_job.updated_at = datetime.now()
-                            db.commit()
+                            batch_job.status = QAGenerationStatus.FINALIZED.value # 최종 완료 상태로 업데이트
+                            db.commit() # 개별 작업 처리 후 커밋
                             
                             restarted_count += 1
                             logger.info(f"✅ 파인튜닝 자동 재시작 완료: task_id={batch_job.task_id}")
@@ -171,6 +177,7 @@ class StartupService:
                     
                     except Exception as e:
                         logger.error(f"❌ 파인튜닝 재시작 중 오류: task_id={batch_job.task_id}, error={str(e)}")
+                        db.rollback() # 오류 발생 시 롤백
                         continue
                 
                 if restarted_count > 0:
@@ -206,9 +213,12 @@ class StartupService:
                 
                 cleaned_count = len(old_failed_jobs)
                 for job in old_failed_jobs:
-                    db.delete(job)
-                
-                db.commit()
+                    try:
+                        db.delete(job)
+                        db.commit() # 개별 삭제 후 커밋
+                    except Exception as e:
+                        logger.error(f"❌ 오래된 배치 작업 {job.batch_key_id} 정리 중 오류: {e}", exc_info=True)
+                        db.rollback() # 오류 발생 시 롤백
                 
                 if cleaned_count > 0:
                     logger.info(f"🗑️ {cleaned_count}개의 오래된 실패 작업 정리 완료")

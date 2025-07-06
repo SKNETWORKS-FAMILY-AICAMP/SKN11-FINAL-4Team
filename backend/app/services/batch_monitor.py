@@ -90,7 +90,7 @@ class BatchMonitor:
 
             # 상태에 따른 처리
             if current_status == 'completed':
-                await self._handle_completed_batch(batch_key, db)
+                await self._handle_completed_batch(batch_key, db, batch_status)
             elif current_status == 'failed':
                 await self._handle_failed_batch(batch_key, batch_status, db)
             elif current_status in ['validating', 'in_progress']:
@@ -100,6 +100,7 @@ class BatchMonitor:
 
         except Exception as e:
             logger.error(f"❌ 배치 {batch_key.batch_key_id} 처리 중 오류: {e}", exc_info=True)
+            db.rollback() # 오류 발생 시 롤백
 
     async def _check_batch_status(self):
         """모든 진행 중인 배치 작업 상태 확인"""
@@ -121,10 +122,13 @@ class BatchMonitor:
             for batch_key in pending_batches:
                 await self.check_and_update_single_job(batch_key, db)
                 
+        except Exception as e:
+            logger.error(f"❌ _check_batch_status 처리 중 오류: {e}", exc_info=True)
+            db.rollback() # 오류 발생 시 롤백
         finally:
             db.close()
     
-    async def _handle_completed_batch(self, batch_key: BatchKey, db: Session):
+    async def _handle_completed_batch(self, batch_key: BatchKey, db: Session, batch_status: Dict):
         """완료된 배치 처리"""
         logger.info(f"✅ 배치 완료 감지: {batch_key.batch_key_id}")
         logger.info(f"📊 배치 상세 정보: task_id={batch_key.task_id}, influencer_id={batch_key.influencer_id}, openai_batch_id={batch_key.openai_batch_id}")
@@ -149,7 +153,7 @@ class BatchMonitor:
                 # 파인튜닝 시작 (AUTO_FINETUNING_ENABLED가 true인 경우)
                 if settings.AUTO_FINETUNING_ENABLED:
                     logger.info(f"🚀 자동 파인튜닝 시작: batch_key_id={batch_key.batch_key_id}")
-                    await self._start_finetuning(batch_key)
+                    await self._start_finetuning(batch_key, db) # db 세션 전달
                 else:
                     logger.info(f"⏸️ 자동 파인튜닝 비활성화됨: AUTO_FINETUNING_ENABLED={settings.AUTO_FINETUNING_ENABLED}")
                 
@@ -158,27 +162,36 @@ class BatchMonitor:
                 
         except Exception as e:
             logger.error(f"❌ 완료된 배치 {batch_key.batch_key_id} 처리 중 오류: {e}", exc_info=True)
+            db.rollback() # 오류 발생 시 롤백
     
     async def _handle_failed_batch(self, batch_key: BatchKey, batch_status: Dict, db: Session):
         """실패한 배치 처리"""
         logger.error(f"❌ 배치 실패 감지: {batch_key.batch_key_id}")
         
-        batch_key.status = 'failed'
-        batch_key.error_message = f"OpenAI 배치 작업 실패: {batch_status.get('status', 'Unknown error')}"
-        batch_key.completed_at = datetime.now()
-        
-        db.commit()
-        
-        logger.error(f"💥 배치 {batch_key.batch_key_id} 실패로 표시됨")
+        try:
+            batch_key.status = 'failed'
+            batch_key.error_message = f"OpenAI 배치 작업 실패: {batch_status.get('status', 'Unknown error')}"
+            batch_key.completed_at = datetime.now()
+            
+            db.commit()
+            
+            logger.error(f"💥 배치 {batch_key.batch_key_id} 실패로 표시됨")
+        except Exception as e:
+            logger.error(f"❌ 실패 배치 {batch_key.batch_key_id} 처리 중 오류: {e}", exc_info=True)
+            db.rollback() # 오류 발생 시 롤백
     
     async def _handle_processing_batch(self, batch_key: BatchKey, db: Session):
         """진행 중인 배치 상태 업데이트"""
-        if batch_key.status != 'batch_processing':
-            batch_key.status = 'batch_processing'
-            db.commit()
-            logger.debug(f"🔄 배치 {batch_key.batch_key_id} 상태를 processing으로 업데이트")
+        try:
+            if batch_key.status != 'batch_processing':
+                batch_key.status = 'batch_processing'
+                db.commit()
+                logger.debug(f"🔄 배치 {batch_key.batch_key_id} 상태를 processing으로 업데이트")
+        except Exception as e:
+            logger.error(f"❌ 진행 중인 배치 {batch_key.batch_key_id} 처리 중 오류: {e}", exc_info=True)
+            db.rollback() # 오류 발생 시 롤백
     
-    async def _start_finetuning(self, batch_key: BatchKey):
+    async def _start_finetuning(self, batch_key: BatchKey, db: Session):
         """파인튜닝 시작"""
         try:
             if batch_key.is_finetuning_started:
@@ -194,16 +207,13 @@ class BatchMonitor:
             
             if result:
                 # 파인튜닝 시작 플래그 업데이트
-                db: Session = next(get_db())
-                try:
-                    batch_key.is_finetuning_started = True
-                    db.commit()
-                    logger.info(f"✅ 배치 {batch_key.batch_key_id} 파인튜닝 시작 완료")
-                finally:
-                    db.close()
+                batch_key.is_finetuning_started = True
+                db.commit()
+                logger.info(f"✅ 배치 {batch_key.batch_key_id} 파인튜닝 시작 완료")
             
         except Exception as e:
             logger.error(f"❌ 배치 {batch_key.batch_key_id} 파인튜닝 시작 실패: {e}", exc_info=True)
+            db.rollback() # 오류 발생 시 롤백
 
 
 # 전역 모니터 인스턴스

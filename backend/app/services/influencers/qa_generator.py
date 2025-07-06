@@ -33,27 +33,8 @@ class QAGenerationStatus(Enum):
     BATCH_COMPLETED = "batch_completed"
     PROCESSING_RESULTS = "processing_results"
     COMPLETED = "completed"
+    FINALIZED = "finalized"
     FAILED = "failed"
-
-
-@dataclass
-class QAGenerationTask:
-    task_id: str
-    influencer_id: str
-    status: QAGenerationStatus
-    batch_id: Optional[str] = None
-    total_qa_pairs: int = settings.QA_GENERATION_COUNT
-    generated_qa_pairs: int = 0
-    error_message: Optional[str] = None
-    s3_urls: Optional[Dict] = None
-    created_at: datetime = None
-    updated_at: datetime = None
-    
-    def __post_init__(self):
-        if self.created_at is None:
-            self.created_at = datetime.now()
-        if self.updated_at is None:
-            self.updated_at = datetime.now()
 
 
 class InfluencerQAGenerator:
@@ -65,9 +46,6 @@ class InfluencerQAGenerator:
         """
         self.client = OpenAI(api_key=api_key or os.getenv('OPENAI_API_KEY'))
         self.speech_generator = SpeechGenerator(api_key)
-# batch_service 제거됨 - BatchKey 모델 직접 사용
-        # 메모리 기반 tasks는 웹훅 모드에서만 사용 (하위 호환성)
-        self.tasks: Dict[str, QAGenerationTask] = {}
         
     def influencer_to_character_profile(self, influencer_data: dict, style_preset: dict = None, mbti: dict = None) -> CharacterProfile:
         """
@@ -154,7 +132,7 @@ class InfluencerQAGenerator:
         # VLLM 서버 URL 설정
         vllm_server_url = getattr(settings, 'VLLM_SERVER_URL', 'http://localhost:8001')
         
-        requests = []
+        batch_requests = []
         
         # VLLM 서버에 요청할 캐릭터 프로필 데이터 준비
         character_data = {
@@ -205,13 +183,13 @@ class InfluencerQAGenerator:
                                     "temperature": 0.8
                                 }
                             }
-                            requests.append(request)
+                            batch_requests.append(request)
                             
                             # 한 번에 너무 많은 요청을 보내지 않도록 제한
-                            if len(requests) >= num_requests:
+                            if len(batch_requests) >= num_requests:
                                 break
                     
-                    if len(requests) >= num_requests:
+                    if len(batch_requests) >= num_requests:
                         break
                         
                 else:
@@ -264,7 +242,7 @@ class InfluencerQAGenerator:
                 }
                 requests.append(request)
         
-        return requests[:num_requests]  # 요청한 개수만큼만 반환
+        return batch_requests[:num_requests]  # 요청한 개수만큼만 반환
     
     def save_batch_file(self, requests: List[Dict], task_id: str) -> str:
         """배치 요청을 JSONL 파일로 저장"""
@@ -415,25 +393,32 @@ class InfluencerQAGenerator:
         # 작업 ID 생성
         task_id = f"qa_{influencer_id}_{int(time.time())}"
         print(f"🎨 QA Generator: 작업 시작 - task_id={task_id}, influencer_id={influencer_id}")
-        
-        # 웹훅 모드에서는 메모리에도 저장 (하위 호환성)
-        use_webhook = settings.OPENAI_MONITORING_MODE == 'webhook'
-        if use_webhook:
-            task = QAGenerationTask(
-                task_id=task_id,
-                influencer_id=influencer_id,
-                status=QAGenerationStatus.PENDING
-            )
-            self.tasks[task_id] = task
-            print(f"웹훅 모드: 메모리에 작업 저장: task_id={task_id}")
+
+        # BatchKey 모델을 사용하여 DB에 작업 기록
+        import uuid
+        batch_key_entry = BatchKey(
+            batch_key_id=str(uuid.uuid4()),
+            task_id=task_id,
+            influencer_id=influencer_id,
+            status=QAGenerationStatus.PENDING.value,
+            total_qa_pairs=settings.QA_GENERATION_COUNT
+        )
+        db.add(batch_key_entry)
         
         try:
+            db.commit()
+            db.refresh(batch_key_entry)
+
             # 인플루언서 데이터 가져오기
             user_id = "system"  # 시스템 작업으로 처리
             influencer_data = get_influencer_by_id(db, user_id, influencer_id)
             
             if not influencer_data:
                 raise Exception(f"인플루언서를 찾을 수 없습니다: {influencer_id}")
+
+            # 상태 업데이트: PROCESSING
+            batch_key_entry.status = QAGenerationStatus.PROCESSING.value
+            db.commit()
             
             # 인플루언서 → 캐릭터 프로필 변환
             character = self.influencer_to_character_profile(
@@ -443,41 +428,21 @@ class InfluencerQAGenerator:
             )
             
             # 배치 요청 생성
-            if use_webhook:
-                task.status = QAGenerationStatus.PROCESSING
-            
-            requests = self.create_qa_batch_requests(character)
+            batch_requests = self.create_qa_batch_requests(character)
             
             # 배치 파일 저장
-            batch_file_path = self.save_batch_file(requests, task_id)
+            batch_file_path = self.save_batch_file(batch_requests, task_id)
             
             # 배치 작업 제출
             batch_id = self.submit_batch_job(batch_file_path, task_id)
             
-            # DB에 배치 작업 저장 (BatchKey 모델 직접 사용)
-            import uuid
-            batch_key = BatchKey(
-                batch_key_id=str(uuid.uuid4()),
-                batch_key=batch_id,  # OpenAI 배치 ID를 batch_key로 사용
-                task_id=task_id,
-                influencer_id=influencer_id,
-                openai_batch_id=batch_id,
-                input_file_id=batch_file_path,
-                status="pending",
-                total_qa_pairs=settings.QA_GENERATION_COUNT  # 환경변수에서 읽은 값으로 설정
-            )
-            
-            db.add(batch_key)
+            # DB에 배치 정보 업데이트
+            batch_key_entry.openai_batch_id = batch_id
+            batch_key_entry.input_file_id = batch_file_path
+            batch_key_entry.status = QAGenerationStatus.BATCH_SUBMITTED.value
             db.commit()
-            db.refresh(batch_key)
             
-            print(f"✅ 배치 작업 DB에 저장: task_id={task_id}, batch_id={batch_id}")
-            
-            # 웹훅 모드에서는 메모리 상태도 업데이트
-            if use_webhook:
-                task.batch_id = batch_id
-                task.status = QAGenerationStatus.BATCH_SUBMITTED
-                task.updated_at = datetime.now()
+            print(f"✅ 배치 작업 DB에 저장 및 상태 업데이트: task_id={task_id}, batch_id={batch_id}")
             
             print(f"🎉 QA Generator: 작업 완료 - Task ID: {task_id}, Batch ID: {batch_id}, QA 개수: {settings.QA_GENERATION_COUNT}")
             return task_id
@@ -488,52 +453,13 @@ class InfluencerQAGenerator:
             import traceback
             print(f"🔍 QA Generator: 상세 에러 정보 - {traceback.format_exc()}")
             
-            # 웹훅 모드에서는 메모리 상태도 업데이트
-            if use_webhook and task_id in self.tasks:
-                self.tasks[task_id].status = QAGenerationStatus.FAILED
-                self.tasks[task_id].error_message = error_msg
-                self.tasks[task_id].updated_at = datetime.now()
+            # DB에 오류 상태 업데이트
+            db.rollback() # 오류 발생 시 롤백
+            batch_key_entry.status = QAGenerationStatus.FAILED.value
+            batch_key_entry.error_message = error_msg
+            db.commit()
             
-            # QA 생성 작업에서는 예외를 re-raise하지 않음
             return task_id
-    
-    def get_task_status(self, task_id: str) -> Optional[QAGenerationTask]:
-        """작업 상태 조회"""
-        print(f"작업 상태 조회: task_id={task_id}")
-        print(f"현재 저장된 작업 수: {len(self.tasks)}")
-        print(f"저장된 작업 ID들: {list(self.tasks.keys())}")
-        
-        task = self.tasks.get(task_id)
-        if task:
-            print(f"작업 찾음: status={task.status.value}")
-        else:
-            print(f"작업을 찾을 수 없음")
-        
-        return task
-    
-    def update_task_status(self, task_id: str):
-        """작업 상태 업데이트 (배치 상태 확인)"""
-        task = self.tasks.get(task_id)
-        if not task or not task.batch_id:
-            return
-        
-        try:
-            batch_status = self.check_batch_status(task.batch_id)
-            
-            if batch_status['status'] == 'completed':
-                task.status = QAGenerationStatus.BATCH_COMPLETED
-            elif batch_status['status'] == 'failed':
-                task.status = QAGenerationStatus.FAILED
-                task.error_message = "배치 작업 실패"
-            elif batch_status['status'] in ['validating', 'in_progress']:
-                task.status = QAGenerationStatus.BATCH_PROCESSING
-            
-            task.updated_at = datetime.now()
-            
-        except Exception as e:
-            task.status = QAGenerationStatus.FAILED
-            task.error_message = f"상태 확인 오류: {str(e)}"
-            task.updated_at = datetime.now()
     
     def complete_qa_generation(self, task_id: str, db: Session) -> bool:
         """QA 생성 완료 처리 - 폴링/웹훅 모드 모두 지원"""
@@ -568,14 +494,12 @@ class InfluencerQAGenerator:
             self.save_qa_pairs_to_db(batch_key.influencer_id, qa_pairs, db)
             logger.info(f"💾 QA 쌍 DB 저장 완료")
             
-            # 웹훅 모드에서는 메모리 상태도 업데이트
-            if settings.OPENAI_MONITORING_MODE == 'webhook':
-                task = self.tasks.get(task_id)
-                if task:
-                    task.status = QAGenerationStatus.COMPLETED
-                    task.generated_qa_pairs = len(qa_pairs)
-                    task.updated_at = datetime.now()
-                    logger.info(f"🧠 메모리 상태 업데이트 완료 (웹훅 모드)")
+            # BatchKey 상태 업데이트
+            batch_key.status = QAGenerationStatus.COMPLETED.value
+            batch_key.generated_qa_pairs = len(qa_pairs)
+            batch_key.completed_at = datetime.now()
+            db.commit()
+            logger.info(f"🧠 BatchKey 상태 업데이트 완료 (DB)")
             
             logger.info(f"✅ QA 생성 완료 - Task ID: {task_id}, QA 쌍: {len(qa_pairs)}개")
             return True
@@ -583,12 +507,11 @@ class InfluencerQAGenerator:
         except Exception as e:
             logger.error(f"❌ QA 생성 완료 처리 실패: task_id={task_id}, error={e}", exc_info=True)
             
-            # 웹훅 모드에서는 메모리 상태도 업데이트
-            if settings.OPENAI_MONITORING_MODE == 'webhook':
-                task = self.tasks.get(task_id)
-                if task:
-                    task.status = QAGenerationStatus.FAILED
-                    task.error_message = f"결과 처리 오류: {str(e)}"
-                    task.updated_at = datetime.now()
+            # DB에 오류 상태 업데이트
+            if batch_key:
+                db.rollback() # 오류 발생 시 롤백
+                batch_key.status = QAGenerationStatus.FAILED.value
+                batch_key.error_message = f"결과 처리 오류: {str(e)}"
+                db.commit()
             
             return False

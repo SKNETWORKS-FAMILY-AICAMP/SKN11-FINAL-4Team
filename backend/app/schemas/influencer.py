@@ -193,3 +193,12 @@ class APICallAggregationUpdate(BaseModel):
 
 class APICallAggregation(APICallAggregationBase, TimestampSchema):
     api_call_id: str
+
+
+# 파인튜닝 웹훅 요청 스키마
+class FinetuningWebhookRequest(BaseModel):
+    task_id: str
+    influencer_id: str
+    status: str  # FineTuningStatus의 문자열 값
+    hf_model_url: Optional[str] = None
+    error_message: Optional[str] = None

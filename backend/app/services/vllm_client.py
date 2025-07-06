@@ -26,17 +26,13 @@ class VLLMClientError(Exception):
 @dataclass
 class VLLMServerConfig:
     """VLLM 서버 설정"""
-    host: str = "localhost"
-    port: int = 8000
+    base_url: str
     timeout: int = 300
     
     @property
-    def base_url(self) -> str:
-        return f"http://{self.host}:{self.port}"
-    
-    @property
     def ws_url(self) -> str:
-        return f"ws://{self.host}:{self.port}"
+        # HTTP -> WS 변환 (http:// -> ws://, https:// -> wss://)
+        return self.base_url.replace("http://", "ws://").replace("https://", "wss://")
 
 
 class VLLMClient:
@@ -262,32 +258,15 @@ class VLLMWebSocketClient:
             logger.info("🔌 VLLM WebSocket 연결 종료")
 
 
-# 싱글톤 클라이언트 인스턴스
-_vllm_client_instance = None
 _vllm_config = VLLMServerConfig(
-    host=getattr(settings, 'VLLM_HOST', 'localhost'),
-    port=getattr(settings, 'VLLM_PORT', 8000),
+    base_url=settings.VLLM_BASE_URL,
     timeout=getattr(settings, 'VLLM_TIMEOUT', 300)
 )
 
 
 async def get_vllm_client() -> VLLMClient:
     """VLLM 클라이언트 의존성 주입용 함수"""
-    global _vllm_client_instance
-    
-    if _vllm_client_instance is None:
-        _vllm_client_instance = VLLMClient(_vllm_config)
-    
-    return _vllm_client_instance
-
-
-async def close_vllm_client():
-    """VLLM 클라이언트 종료"""
-    global _vllm_client_instance
-    
-    if _vllm_client_instance:
-        await _vllm_client_instance.client.aclose()
-        _vllm_client_instance = None
+    return VLLMClient(_vllm_config)
 
 
 # 편의 함수들

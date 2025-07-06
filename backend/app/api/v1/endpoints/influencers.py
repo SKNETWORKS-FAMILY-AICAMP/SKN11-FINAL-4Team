@@ -13,6 +13,7 @@ from app.schemas.influencer import (
     StylePreset as StylePresetSchema,
     StylePresetCreate,
     ModelMBTI as ModelMBTISchema,
+    FinetuningWebhookRequest,
 )
 from app.core.security import get_current_user
 from app.services.influencers.crud import (
@@ -38,14 +39,14 @@ from app.services.background_tasks import (
     get_background_task_manager,
     BackgroundTaskManager,
 )
-from fastapi import Request
-from app.services.influencers.qa_generator import QAGenerationTask, QAGenerationStatus
+from fastapi import Request, status
+from app.services.influencers.qa_generator import QAGenerationStatus
 from app.services.finetuning_service import (
     get_finetuning_service,
     InfluencerFineTuningService,
 )
 from datetime import datetime
-from app.models.influencer import StylePreset
+from app.models.influencer import StylePreset, BatchKey
 from fastapi import HTTPException
 from typing import Dict, Any
 from openai import OpenAI
@@ -388,29 +389,30 @@ async def get_qa_generation_status(
             "s3_urls": s3_urls,
             "created_at": batch_key_entry.created_at,
             "updated_at": batch_key_entry.updated_at,
-            "is_running": task_manager.is_task_running(
-                task_id
-            ),  # 백그라운드 태스크 매니저에서 실행 여부 확인
+            "is_running": batch_key_entry.status in [QAGenerationStatus.PENDING.value, QAGenerationStatus.PROCESSING.value, QAGenerationStatus.BATCH_SUBMITTED.value, QAGenerationStatus.BATCH_PROCESSING.value], # DB 상태 기반으로 실행 여부 판단
             "openai_batch_status": openai_batch_status,  # 실제 OpenAI 상태 추가
         }
     else:
-        # 해당 인플루언서의 모든 작업 조회
-        all_tasks = task_manager.get_all_qa_tasks()
+        # 해당 인플루언서의 모든 작업 조회 (DB에서)
+        all_tasks_from_db = db.query(BatchKey).filter(BatchKey.influencer_id == influencer_id).order_by(BatchKey.created_at.desc()).all()
+        
         influencer_tasks = [
             {
                 "task_id": task.task_id,
-                "status": task.status.value,
-                "batch_id": task.batch_id,
+                "status": task.status,
+                "batch_id": task.openai_batch_id,
                 "total_qa_pairs": task.total_qa_pairs,
                 "generated_qa_pairs": task.generated_qa_pairs,
                 "error_message": task.error_message,
-                "s3_urls": task.s3_urls,
+                "s3_urls": {
+                    "processed_qa_url": task.s3_qa_file_url,
+                    "raw_results_url": task.s3_processed_file_url
+                } if task.s3_qa_file_url or task.s3_processed_file_url else None,
                 "created_at": task.created_at,
                 "updated_at": task.updated_at,
-                "is_running": task_manager.is_task_running(task.task_id),
+                "is_running": task.status in [QAGenerationStatus.PENDING.value, QAGenerationStatus.PROCESSING.value, QAGenerationStatus.BATCH_SUBMITTED.value, QAGenerationStatus.BATCH_PROCESSING.value],
             }
-            for task in all_tasks.values()
-            if task.influencer_id == influencer_id
+            for task in all_tasks_from_db
         ]
 
         return {
@@ -439,24 +441,27 @@ async def cancel_qa_generation(
 
         raise HTTPException(status_code=404, detail="인플루언서를 찾을 수 없습니다")
 
-    # 작업 존재 확인
-    task = task_manager.qa_generator.get_task_status(task_id)
-    if not task or task.influencer_id != influencer_id:
-        from fastapi import HTTPException
-
+    # 작업 존재 확인 및 상태 업데이트
+    batch_key_entry = db.query(BatchKey).filter(BatchKey.task_id == task_id).first()
+    if not batch_key_entry or batch_key_entry.influencer_id != influencer_id:
         raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다")
 
-    # 작업 취소
-    success = task_manager.cancel_task(task_id)
+    # 이미 완료되거나 실패한 작업은 취소할 수 없음
+    if batch_key_entry.status in [QAGenerationStatus.COMPLETED.value, QAGenerationStatus.FAILED.value, QAGenerationStatus.BATCH_COMPLETED.value]:
+        raise HTTPException(status_code=400, detail="이미 완료되었거나 실패한 작업은 취소할 수 없습니다.")
+
+    # 상태를 취소로 변경
+    batch_key_entry.status = QAGenerationStatus.FAILED.value # 취소도 실패로 간주
+    batch_key_entry.error_message = "사용자에 의해 취소됨"
+    db.commit()
+
+    # TODO: OpenAI 배치 작업 자체를 취소하는 로직 추가 필요 (API 지원 시)
+    # 현재는 DB 상태만 업데이트
 
     return {
-        "message": (
-            "작업 취소 요청이 처리되었습니다"
-            if success
-            else "작업을 취소할 수 없습니다"
-        ),
+        "message": "작업 취소 요청이 처리되었습니다",
         "task_id": task_id,
-        "cancelled": success,
+        "cancelled": True,
     }
 
 
@@ -464,30 +469,35 @@ async def cancel_qa_generation(
 async def get_all_qa_tasks_status(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
-    task_manager: BackgroundTaskManager = Depends(get_background_task_manager),
 ):
     """모든 QA 생성 작업 상태 조회 (관리자용)"""
-    all_tasks = task_manager.get_all_qa_tasks()
+    # 모든 BatchKey 작업 조회 (DB에서)
+    all_tasks_from_db = db.query(BatchKey).order_by(BatchKey.created_at.desc()).all()
+
+    tasks_data = [
+        {
+            "task_id": task.task_id,
+            "influencer_id": task.influencer_id,
+            "status": task.status,
+            "batch_id": task.openai_batch_id,
+            "total_qa_pairs": task.total_qa_pairs,
+            "generated_qa_pairs": task.generated_qa_pairs,
+            "error_message": task.error_message,
+            "s3_urls": {
+                "processed_qa_url": task.s3_qa_file_url,
+                "raw_results_url": task.s3_processed_file_url
+            } if task.s3_qa_file_url or task.s3_processed_file_url else None,
+            "created_at": task.created_at,
+            "updated_at": task.updated_at,
+            "is_running": task.status in [QAGenerationStatus.PENDING.value, QAGenerationStatus.PROCESSING.value, QAGenerationStatus.BATCH_SUBMITTED.value, QAGenerationStatus.BATCH_PROCESSING.value],
+        }
+        for task in all_tasks_from_db
+    ]
 
     return {
-        "total_tasks": len(all_tasks),
-        "running_tasks": task_manager.get_running_tasks_count(),
-        "tasks": [
-            {
-                "task_id": task.task_id,
-                "influencer_id": task.influencer_id,
-                "status": task.status.value,
-                "batch_id": task.batch_id,
-                "total_qa_pairs": task.total_qa_pairs,
-                "generated_qa_pairs": task.generated_qa_pairs,
-                "error_message": task.error_message,
-                "s3_urls": task.s3_urls,
-                "created_at": task.created_at,
-                "updated_at": task.updated_at,
-                "is_running": task_manager.is_task_running(task.task_id),
-            }
-            for task in all_tasks.values()
-        ],
+        "total_tasks": len(tasks_data),
+        "running_tasks": len([t for t in tasks_data if t["is_running"]]),
+        "tasks": tasks_data,
     }
 
 
@@ -568,7 +578,6 @@ async def get_all_finetuning_tasks_status(
 async def handle_openai_batch_webhook(
     request: Request,
     db: Session = Depends(get_db),
-    task_manager: BackgroundTaskManager = Depends(get_background_task_manager),
 ):
     """OpenAI 배치 작업 완료 웹훅 처리"""
     try:
@@ -584,28 +593,21 @@ async def handle_openai_batch_webhook(
 
         print(f"🎯 OpenAI 웹훅 수신: batch_id={batch_id}, status={batch_status}")
 
-        # 해당 배치 ID를 가진 작업 찾기
-        all_tasks = task_manager.get_all_qa_tasks()
-        matching_task = None
-        task_id = None
+        # 해당 배치 ID를 가진 작업 찾기 (DB에서)
+        from app.models.influencer import BatchKey
+        batch_key_entry = db.query(BatchKey).filter(BatchKey.openai_batch_id == batch_id).first()
 
-        for tid, task in all_tasks.items():
-            if task.batch_id == batch_id:
-                matching_task = task
-                task_id = tid
-                break
-
-        if not matching_task:
-            print(f"⚠️ 해당 배치 ID를 가진 작업을 찾을 수 없음: batch_id={batch_id}")
+        if not batch_key_entry:
+            print(f"⚠️ 해당 배치 ID를 가진 BatchKey를 찾을 수 없음: batch_id={batch_id}")
             return {"error": "작업을 찾을 수 없습니다"}
 
         print(
-            f"✅ 작업 발견: task_id={task_id}, influencer_id={matching_task.influencer_id}"
+            f"✅ BatchKey 발견: task_id={batch_key_entry.task_id}, influencer_id={batch_key_entry.influencer_id}"
         )
 
         # 배치 완료 시 즉시 처리
         if batch_status == "completed":
-            print(f"🚀 배치 완료, 즉시 결과 처리 시작: task_id={task_id}")
+            print(f"🚀 배치 완료, 즉시 결과 처리 시작: task_id={batch_key_entry.task_id}")
 
             # 환경변수로 자동 처리 제어
             auto_qa_enabled = (
@@ -616,39 +618,47 @@ async def handle_openai_batch_webhook(
                 print(
                     f"🔒 자동 QA 처리가 비활성화되어 있습니다 (AUTO_FINETUNING_ENABLED=false)"
                 )
+                # DB 상태만 업데이트
+                batch_key_entry.status = QAGenerationStatus.BATCH_COMPLETED.value
+                db.commit()
                 return {
                     "message": "자동 QA 처리가 비활성화되어 있습니다",
-                    "task_id": task_id,
+                    "task_id": batch_key_entry.task_id,
                 }
 
             # 상태 업데이트
-            matching_task.status = QAGenerationStatus.BATCH_COMPLETED
-            matching_task.updated_at = datetime.now()
+            batch_key_entry.status = QAGenerationStatus.BATCH_COMPLETED.value
+            db.commit()
 
             # 백그라운드에서 결과 처리 및 S3 업로드 실행
             import asyncio
             from app.database import get_db
+            from app.services.influencers.qa_generator import InfluencerQAGenerator
 
             async def process_webhook_result():
                 """웹훅 결과 처리를 위한 별도 DB 세션 사용"""
                 webhook_db = next(get_db())
                 try:
-                    await task_manager._process_and_upload_results(task_id, webhook_db)
+                    qa_generator_instance = InfluencerQAGenerator() # 새로운 인스턴스 생성
+                    await qa_generator_instance.complete_qa_generation(batch_key_entry.task_id, webhook_db)
                 finally:
                     webhook_db.close()
 
             asyncio.create_task(process_webhook_result())
 
-            return {"message": "배치 완료 웹훅 처리 시작", "task_id": task_id}
+            return {"message": "배치 완료 웹훅 처리 시작", "task_id": batch_key_entry.task_id}
 
         elif batch_status == "failed":
-            print(f"❌ 배치 실패: task_id={task_id}")
-            matching_task.status = QAGenerationStatus.FAILED
-            matching_task.error_message = "OpenAI 배치 작업 실패"
-            matching_task.updated_at = datetime.now()
+            print(f"❌ 배치 실패: task_id={batch_key_entry.task_id}")
+            batch_key_entry.status = QAGenerationStatus.FAILED.value
+            batch_key_entry.error_message = "OpenAI 배치 작업 실패"
+            db.commit()
 
-            return {"message": "배치 실패 처리 완료", "task_id": task_id}
+            return {"message": "배치 실패 처리 완료", "task_id": batch_key_entry.task_id}
 
+        # 그 외 상태 (예: validating, in_progress)는 DB에 업데이트
+        batch_key_entry.status = batch_status
+        db.commit()
         return {"message": "웹훅 수신", "batch_id": batch_id, "status": batch_status}
 
     except Exception as e:
@@ -659,14 +669,45 @@ async def handle_openai_batch_webhook(
         return {"error": f"웹훅 처리 실패: {str(e)}"}
 
 
-# 말투 생성 요청 스키마
-class ToneGenerationRequest(BaseModel):
-    personality: str
-    name: Optional[str] = None
-    description: Optional[str] = None
-    mbti: Optional[str] = None
-    gender: Optional[str] = None
-    age: Optional[str] = None
+@router.post("/webhooks/finetuning-complete")
+async def handle_finetuning_webhook(
+    webhook_data: FinetuningWebhookRequest,
+    db: Session = Depends(get_db),
+):
+    """파인튜닝 완료 웹훅 처리"""
+    logger.info(f"🎯 파인튜닝 웹훅 수신: task_id={webhook_data.task_id}, status={webhook_data.status}")
+
+    try:
+        batch_key_entry = db.query(BatchKey).filter(BatchKey.task_id == webhook_data.task_id).first()
+
+        if not batch_key_entry:
+            logger.warning(f"⚠️ 해당 task_id를 가진 BatchKey를 찾을 수 없음: {webhook_data.task_id}")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="작업을 찾을 수 없습니다")
+
+        if webhook_data.status == "completed":
+            batch_key_entry.status = QAGenerationStatus.FINALIZED.value
+            batch_key_entry.hf_model_url = webhook_data.hf_model_url
+            batch_key_entry.completed_at = datetime.now()
+            logger.info(f"✅ 파인튜닝 완료: task_id={webhook_data.task_id}, 모델 URL={webhook_data.hf_model_url}")
+        elif webhook_data.status == "failed":
+            batch_key_entry.status = QAGenerationStatus.FAILED.value
+            batch_key_entry.error_message = webhook_data.error_message
+            batch_key_entry.completed_at = datetime.now()
+            logger.error(f"❌ 파인튜닝 실패: task_id={webhook_data.task_id}, 오류={webhook_data.error_message}")
+        else:
+            # 기타 상태 업데이트 (예: processing, validating 등)
+            batch_key_entry.status = webhook_data.status
+            logger.info(f"🔄 파인튜닝 상태 업데이트: task_id={webhook_data.task_id}, 상태={webhook_data.status}")
+        
+        db.commit()
+        return {"message": "파인튜닝 웹훅 처리 완료", "task_id": webhook_data.task_id, "status": webhook_data.status}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ 파인튜닝 웹훅 처리 중 오류: {str(e)}", exc_info=True)
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"파인튜닝 웹훅 처리 실패: {str(e)}")
 
 
 # 말투 생성 관련 API
