@@ -21,6 +21,7 @@ async def generate_qa_for_character_vllm_endpoint(
     캐릭터 프로필에 대한 질문과 3가지 톤 변형 응답을 생성합니다.
     """
     if not speech_generator:
+        logger.error("❌ Speech Generator가 활성화되지 않았습니다. OPENAI_API_KEY를 확인해주세요. (generate_qa endpoint)")
         raise HTTPException(
             status_code=503, 
             detail="Speech Generator가 활성화되지 않았습니다. OPENAI_API_KEY를 설정해주세요."

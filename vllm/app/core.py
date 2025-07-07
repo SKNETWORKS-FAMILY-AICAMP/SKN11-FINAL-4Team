@@ -59,6 +59,10 @@ speech_generator: SpeechGenerator = None
 
 # 환경 변수
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+if OPENAI_API_KEY:
+    logger.info("✅ OPENAI_API_KEY 환경 변수가 설정되었습니다.")
+else:
+    logger.warning("⚠️ OPENAI_API_KEY 환경 변수가 설정되지 않았습니다. Speech Generator 기능이 제한될 수 있습니다.")
 FINETUNING_WEBHOOK_URL = os.getenv("FINETUNING_WEBHOOK_URL")
 
 async def send_finetuning_webhook(task_id: str, status: str, hf_model_url: Optional[str] = None, error_message: Optional[str] = None):
@@ -253,7 +257,7 @@ async def initialize_vllm_engine():
             speech_generator = SpeechGenerator(api_key=OPENAI_API_KEY)
             logger.info("✅ Speech Generator 초기화 완료")
         else:
-            logger.warning("⚠️ OPENAI_API_KEY가 설정되지 않아 Speech Generator 기능이 비활성화됩니다")
+            logger.warning("⚠️ OPENAI_API_KEY가 설정되지 않아 Speech Generator 기능이 비활성화됩니다. /speech 엔드포인트가 작동하지 않습니다.")
         
         # 토크나이저 초기화 (chat template 사용을 위해)
         try:
