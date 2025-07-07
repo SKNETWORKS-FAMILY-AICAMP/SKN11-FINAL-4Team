@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query, BackgroundTasks
+from fastapi import APIRouter, Depends, Query, BackgroundTasks, HTTPException
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import os
@@ -45,131 +45,14 @@ from app.services.finetuning_service import (
     InfluencerFineTuningService,
 )
 from datetime import datetime
-from app.models.influencer import StylePreset
-from fastapi import HTTPException
+from app.models import StylePreset, BatchKey
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-@router.get("", response_model=List[AIInfluencerSchema])
-async def get_influencers(
-    skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=100),
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
-):
-    """사용자별 AI 인플루언서 목록 조회"""
-    user_id = current_user.get("sub")
-
-    return get_influencers_list(db, user_id, skip, limit)
-
-
-@router.get("/{influencer_id}", response_model=AIInfluencerWithDetails)
-async def get_influencer(
-    influencer_id: str,
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
-):
-    """특정 AI 인플루언서 조회"""
-    user_id = current_user.get("sub")
-    return get_influencer_by_id(db, user_id, influencer_id)
-
-
-@router.post("", response_model=AIInfluencerSchema)
-async def createnew_influencer(
-    influencer_data: AIInfluencerCreate,
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
-):
-    """새 AI 인플루언서 생성"""
-    user_id = current_user.get("sub")
-    logger.info(
-        f"🚀 API: 인플루언서 생성 요청 - user_id: {user_id}, name: {influencer_data.influencer_name}"
-    )
-
-    # 인플루언서 생성
-    influencer = create_influencer(db, user_id, influencer_data)
-
-    # 환경변수로 자동 QA 생성 제어
-    auto_qa_enabled = os.getenv("AUTO_FINETUNING_ENABLED", "true").lower() == "true"
-    logger.info(f"🔧 자동 QA 생성 설정: {auto_qa_enabled}")
-
-    if auto_qa_enabled:
-        logger.info(
-            f"⚡ 백그라운드 QA 생성 작업 시작 - influencer_id: {influencer.influencer_id}"
-        )
-        # 백그라운드에서 QA 생성 작업 시작
-        background_tasks.add_task(
-            generate_influencer_qa_background, influencer.influencer_id
-        )
-    else:
-        logger.info("⏸️ 자동 QA 생성이 비활성화되어 있습니다")
-
-    logger.info(f"✅ API: 인플루언서 생성 완료 - ID: {influencer.influencer_id}")
-    return influencer
-
-
-@router.put("/{influencer_id}", response_model=AIInfluencerSchema)
-async def update_existing_influencer(
-    influencer_id: str,
-    influencer_update: AIInfluencerUpdate,
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
-):
-    """AI 인플루언서 정보 수정"""
-    user_id = current_user.get("sub")
-    return update_influencer(db, user_id, influencer_id, influencer_update)
-
-    # 인플루언서 소유권 확인 (사용자 직접 소유 또는 팀 소유)
-    user = db.query(User).filter(User.user_id == user_id).first()
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found"
-        )
-
-    user_group_ids = [group.group_id for group in user.teams]
-
-    query = db.query(AIInfluencer).filter(AIInfluencer.influencer_id == influencer_id)
-    if user_group_ids:
-        query = query.filter(
-            (AIInfluencer.group_id.in_(user_group_ids))
-            | (AIInfluencer.user_id == user_id)
-        )
-    else:
-        query = query.filter(AIInfluencer.user_id == user_id)
-
-    influencer = query.first()
-
-    if influencer is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Influencer not found"
-        )
-
-    # 업데이트할 필드들
-    update_data = influencer_update.dict(exclude_unset=True)
-    for field, value in update_data.items():
-        setattr(influencer, field, value)
-
-    db.commit()
-    db.refresh(influencer)
-    return influencer
-
-
-@router.delete("/{influencer_id}")
-async def delete_existing_influencer(
-    influencer_id: str,
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
-):
-    """AI 인플루언서 삭제"""
-    user_id = current_user.get("sub")
-    return delete_influencer(db, user_id, influencer_id)
-
-
-# 스타일 프리셋 관련 API
-@router.get("/style-presets/", response_model=List[StylePresetSchema])
+# 스타일 프리셋 관련 API (구체적인 경로를 먼저 정의)
+@router.get("/style-presets", response_model=List[StylePresetSchema])
 async def get_style_presets_list(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=100),
@@ -177,10 +60,19 @@ async def get_style_presets_list(
     current_user: dict = Depends(get_current_user),
 ):
     """스타일 프리셋 목록 조회"""
-    return get_style_presets(db, skip, limit)
+    logger.info(f"🎯 스타일 프리셋 목록 조회 API 호출됨 - skip: {skip}, limit: {limit}")
+    try:
+        # StylePreset 모델만 직접 사용하여 순환 참조 문제 회피
+        from app.models.influencer import StylePreset
+        presets = db.query(StylePreset).offset(skip).limit(limit).all()
+        logger.info(f"✅ 프리셋 조회 성공 - 개수: {len(presets)}")
+        return presets
+    except Exception as e:
+        logger.error(f"❌ 프리셋 조회 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"프리셋 조회 중 오류 발생: {str(e)}")
 
 
-@router.post("/style-presets/", response_model=StylePresetSchema)
+@router.post("/style-presets", response_model=StylePresetSchema)
 async def create_new_style_preset(
     preset_data: StylePresetCreate,
     db: Session = Depends(get_db),
@@ -188,47 +80,6 @@ async def create_new_style_preset(
 ):
     """새 스타일 프리셋 생성"""
     return create_style_preset(db, preset_data)
-
-
-@router.put("/style-presets/{style_preset_id}", response_model=StylePresetSchema)
-async def update_style_preset(
-    style_preset_id: str,
-    preset_update: StylePresetCreate,  # 또는 별도의 Update 스키마 사용 가능
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
-):
-    """스타일 프리셋 수정"""
-    preset = (
-        db.query(StylePreset)
-        .filter(StylePreset.style_preset_id == style_preset_id)
-        .first()
-    )
-    if not preset:
-        raise HTTPException(status_code=404, detail="StylePreset not found")
-    for field, value in preset_update.dict(exclude_unset=True).items():
-        setattr(preset, field, value)
-    db.commit()
-    db.refresh(preset)
-    return preset
-
-
-@router.delete("/style-presets/{style_preset_id}")
-async def delete_style_preset(
-    style_preset_id: str,
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
-):
-    """스타일 프리셋 삭제"""
-    preset = (
-        db.query(StylePreset)
-        .filter(StylePreset.style_preset_id == style_preset_id)
-        .first()
-    )
-    if not preset:
-        raise HTTPException(status_code=404, detail="StylePreset not found")
-    db.delete(preset)
-    db.commit()
-    return {"message": "StylePreset deleted"}
 
 
 @router.get("/style-presets/{style_preset_id}", response_model=StylePresetSchema)
@@ -249,13 +100,104 @@ async def get_style_preset_by_id(
 
 
 # MBTI 관련 API
-@router.get("/mbti/", response_model=List[ModelMBTISchema])
+@router.get("/mbti", response_model=List[ModelMBTISchema])
 async def get_mbti_options(
     db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)
 ):
     """MBTI 목록 조회"""
     return get_mbti_list(db)
 
+
+# 인플루언서 관련 API
+@router.get("", response_model=List[AIInfluencerSchema])
+async def get_influencers(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=100),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """사용자별 AI 인플루언서 목록 조회"""
+    user_id = current_user.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User ID not found")
+
+    return get_influencers_list(db, user_id, skip, limit)
+
+
+@router.get("/{influencer_id}", response_model=AIInfluencerWithDetails)
+async def get_influencer(
+    influencer_id: str,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """특정 AI 인플루언서 조회"""
+    user_id = current_user.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User ID not found")
+    return get_influencer_by_id(db, user_id, influencer_id)
+
+
+@router.post("", response_model=AIInfluencerSchema)
+async def createnew_influencer(
+    influencer_data: AIInfluencerCreate,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """새 AI 인플루언서 생성"""
+    user_id = current_user.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User ID not found")
+    
+    logger.info(f"🚀 API: 인플루언서 생성 요청 - user_id: {user_id}, name: {influencer_data.influencer_name}")
+    
+    # 인플루언서 생성
+    influencer = create_influencer(db, user_id, influencer_data)
+
+    # 환경변수로 자동 QA 생성 제어
+    auto_qa_enabled = os.getenv("AUTO_FINETUNING_ENABLED", "true").lower() == "true"
+    logger.info(f"🔧 자동 QA 생성 설정: {auto_qa_enabled}")
+
+    if auto_qa_enabled:
+        logger.info(
+            f"⚡ 백그라운드 QA 생성 작업 시작 - influencer_id: {influencer.influencer_id}"
+        )
+        # 백그라운드에서 QA 생성 작업 시작
+        background_tasks.add_task(
+            generate_influencer_qa_background,
+            str(influencer.influencer_id)
+        )
+    else:
+        logger.info("⏸️ 자동 QA 생성이 비활성화되어 있습니다")
+
+    logger.info(f"✅ API: 인플루언서 생성 완료 - ID: {influencer.influencer_id}")
+    return influencer
+
+
+@router.put("/{influencer_id}", response_model=AIInfluencerSchema)
+async def update_existing_influencer(
+    influencer_id: str,
+    influencer_update: AIInfluencerUpdate,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """AI 인플루언서 정보 수정"""
+    user_id = current_user.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User ID not found")
+    return update_influencer(db, user_id, influencer_id, influencer_update)
+
+@router.delete("/{influencer_id}")
+async def delete_existing_influencer(
+    influencer_id: str,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """AI 인플루언서 삭제"""
+    user_id = current_user.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User ID not found")
+    return delete_influencer(db, user_id, influencer_id)
 
 # Instagram 비즈니스 계정 연동 관련 API
 @router.post("/{influencer_id}/instagram/connect")
@@ -267,6 +209,8 @@ async def connect_instagram_business(
 ):
     """AI 인플루언서에 Instagram 비즈니스 계정 연동"""
     user_id = current_user.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User ID not found")
     print(f"🔍 DEBUG request: {request}")
     return await connect_instagram_account(db, user_id, influencer_id, request)
 
@@ -279,6 +223,8 @@ async def disconnect_instagram_business(
 ):
     """AI 인플루언서에서 Instagram 비즈니스 계정 연동 해제"""
     user_id = current_user.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User ID not found")
     return disconnect_instagram_account(db, user_id, influencer_id)
 
 
@@ -290,6 +236,8 @@ async def get_instagram_connection_status(
 ):
     """AI 인플루언서의 Instagram 연동 상태 조회"""
     user_id = current_user.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User ID not found")
     return await get_instagram_status(db, user_id, influencer_id)
 
 
@@ -304,10 +252,12 @@ async def trigger_qa_generation(
     """AI 인플루언서의 QA 생성 수동 트리거"""
     user_id = current_user.get("sub")
 
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User ID not found")
+    
     # 인플루언서 존재 확인
     influencer = get_influencer_by_id(db, user_id, influencer_id)
     if not influencer:
-        from fastapi import HTTPException
 
         raise HTTPException(status_code=404, detail="인플루언서를 찾을 수 없습니다")
 
@@ -315,12 +265,8 @@ async def trigger_qa_generation(
     auto_qa_enabled = os.getenv("AUTO_FINETUNING_ENABLED", "true").lower() == "true"
 
     if not auto_qa_enabled:
-        from fastapi import HTTPException
-
-        raise HTTPException(
-            status_code=403, detail="자동 QA 생성이 비활성화되어 있습니다"
-        )
-
+        raise HTTPException(status_code=403, detail="자동 QA 생성이 비활성화되어 있습니다")
+    
     # 백그라운드에서 QA 생성 작업 시작
     background_tasks.add_task(generate_influencer_qa_background, influencer_id)
 
@@ -337,45 +283,40 @@ async def get_qa_generation_status(
 ):
     """AI 인플루언서의 QA 생성 상태 조회"""
     user_id = current_user.get("sub")
-
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User ID not found")
+    
     # 인플루언서 존재 확인
     influencer = get_influencer_by_id(db, user_id, influencer_id)
     if not influencer:
-        from fastapi import HTTPException
-
         raise HTTPException(status_code=404, detail="인플루언서를 찾을 수 없습니다")
-
-    from app.models.influencer import BatchKey
-
+    
     if task_id:
         # 특정 작업 상태 조회 (DB에서)
         batch_key_entry = db.query(BatchKey).filter(BatchKey.task_id == task_id).first()
-
-        if not batch_key_entry or batch_key_entry.influencer_id != influencer_id:
-            from fastapi import HTTPException
-
+        
+        if not batch_key_entry or str(batch_key_entry.influencer_id) != influencer_id:
             raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다")
 
         # 실시간 OpenAI 배치 상태 확인
         openai_batch_status = None
         if batch_key_entry.openai_batch_id:
             try:
-                openai_batch_status = task_manager.qa_generator.check_batch_status(
-                    batch_key_entry.openai_batch_id
-                )
+                openai_batch_status = task_manager.qa_generator.check_batch_status(str(batch_key_entry.openai_batch_id))
+
             except Exception as e:
                 openai_batch_status = {"error": f"OpenAI 상태 조회 실패: {str(e)}"}
 
         s3_urls = {}
         if batch_key_entry.s3_qa_file_url:
-            s3_urls["processed_qa_url"] = batch_key_entry.s3_qa_file_url
+            s3_urls["processed_qa_url"] = str(batch_key_entry.s3_qa_file_url)
         if batch_key_entry.s3_processed_file_url:
-            s3_urls["raw_results_url"] = batch_key_entry.s3_processed_file_url
+            s3_urls["raw_results_url"] = str(batch_key_entry.s3_processed_file_url)
 
         return {
             "task_id": batch_key_entry.task_id,
-            "influencer_id": batch_key_entry.influencer_id,
-            "status": batch_key_entry.status,  # DB에서 직접 상태 가져옴
+            "influencer_id": str(batch_key_entry.influencer_id),
+            "status": batch_key_entry.status, # DB에서 직접 상태 가져옴
             "batch_id": batch_key_entry.openai_batch_id,
             "total_qa_pairs": batch_key_entry.total_qa_pairs,
             "generated_qa_pairs": batch_key_entry.generated_qa_pairs,
@@ -426,19 +367,17 @@ async def cancel_qa_generation(
 ):
     """AI 인플루언서의 QA 생성 작업 취소"""
     user_id = current_user.get("sub")
-
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User ID not found")
+    
     # 인플루언서 존재 확인
     influencer = get_influencer_by_id(db, user_id, influencer_id)
     if not influencer:
-        from fastapi import HTTPException
-
         raise HTTPException(status_code=404, detail="인플루언서를 찾을 수 없습니다")
 
     # 작업 존재 확인
     task = task_manager.qa_generator.get_task_status(task_id)
     if not task or task.influencer_id != influencer_id:
-        from fastapi import HTTPException
-
         raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다")
 
     # 작업 취소
@@ -496,12 +435,12 @@ async def get_finetuning_status(
 ):
     """AI 인플루언서의 파인튜닝 상태 조회"""
     user_id = current_user.get("sub")
-
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User ID not found")
+    
     # 인플루언서 존재 확인
     influencer = get_influencer_by_id(db, user_id, influencer_id)
     if not influencer:
-        from fastapi import HTTPException
-
         raise HTTPException(status_code=404, detail="인플루언서를 찾을 수 없습니다")
 
     # 해당 인플루언서의 파인튜닝 작업 조회
