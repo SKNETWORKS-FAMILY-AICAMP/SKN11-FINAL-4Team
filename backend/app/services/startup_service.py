@@ -16,9 +16,10 @@ from app.database import get_db
 # batch_job_service 제거됨 - BatchKey 모델 직접 사용
 from app.services.finetuning_service import get_finetuning_service
 from app.models.influencer import BatchKey as BatchJob, AIInfluencer
+from app.models.user import HFTokenManage
 from app.services.influencers.qa_generator import QAGenerationStatus
 from app.services.vllm_client import vllm_load_adapter_if_needed
-from app.services.hf_token_service import get_hf_token_service
+from app.core.encryption import decrypt_sensitive_data
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
@@ -278,26 +279,35 @@ class StartupService:
                 
                 logger.info(f"💬 챗봇 활성화된 인플루언서 {len(chat_enabled_influencers)}개 발견")
                 
-                # HF 토큰 서비스 초기화
-                hf_token_service = get_hf_token_service()
-                
                 loaded_count = 0
                 for influencer in chat_enabled_influencers:
                     try:
-                        # 그룹 ID로 HF 토큰 조회 (시스템 사용자로 조회)
-                        system_user = {"user_id": "system", "username": "system"}
-                        hf_tokens = hf_token_service.get_hf_tokens_by_group(db, influencer.group_id, system_user, limit=1)
+                        # 인플루언서에 직접 연결된 HF 토큰 조회
+                        hf_token_record = None
+                        if influencer.hf_manage_id:
+                            # 1. 인플루언서에 직접 할당된 토큰 조회
+                            hf_token_record = db.query(HFTokenManage).filter(
+                                HFTokenManage.hf_manage_id == influencer.hf_manage_id
+                            ).first()
                         
-                        if not hf_tokens:
+                        if not hf_token_record:
+                            # 2. 같은 그룹의 첫 번째 토큰 사용
+                            hf_token_record = db.query(HFTokenManage).filter(
+                                HFTokenManage.group_id == influencer.group_id
+                            ).first()
+                        
+                        if not hf_token_record:
                             logger.warning(f"⚠️ 인플루언서 {influencer.influencer_id}의 HF 토큰을 찾을 수 없습니다.")
                             continue
                         
-                        # 첫 번째 토큰 사용 및 복호화
-                        hf_token_record = hf_tokens[0]
-                        decrypted_token = hf_token_service.get_decrypted_token(db, hf_token_record.hf_manage_id, system_user)
-                        
-                        if not decrypted_token:
-                            logger.warning(f"⚠️ 인플루언서 {influencer.influencer_id}의 HF 토큰 복호화에 실패했습니다.")
+                        # 토큰 복호화
+                        try:
+                            decrypted_token = decrypt_sensitive_data(hf_token_record.hf_token_value)
+                            if not decrypted_token:
+                                logger.warning(f"⚠️ 인플루언서 {influencer.influencer_id}의 HF 토큰 복호화에 실패했습니다.")
+                                continue
+                        except Exception as decrypt_error:
+                            logger.warning(f"⚠️ 인플루언서 {influencer.influencer_id}의 HF 토큰 복호화 중 오류: {decrypt_error}")
                             continue
                         
                         # vLLM 어댑터 로드
