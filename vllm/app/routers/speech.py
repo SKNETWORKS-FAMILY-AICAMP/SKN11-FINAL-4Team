@@ -17,6 +17,7 @@ router = APIRouter()
 async def generate_qa_for_character_vllm_endpoint(
     character_profile: VLLMCharacterProfile
 ):
+    logger.info(f"🔍 generate_qa endpoint 호출됨. speech_generator: {id(speech_generator) if speech_generator else 'None'}, type: {type(speech_generator)}")
     """
     캐릭터 프로필에 대한 질문과 3가지 톤 변형 응답을 생성합니다.
     """
