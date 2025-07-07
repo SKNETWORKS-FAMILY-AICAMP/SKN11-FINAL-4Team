@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent } from "@/components/ui/card"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { tokenUtils } from "@/lib/auth"
+import { ModelService } from "@/lib/services/model.service"
 import {
   Send,
   Bot,
@@ -47,11 +48,15 @@ export default function ChatPage() {
   const loadModelData = async () => {
     setIsModelLoading(true)
     try {
-      const response = await fetch(`/api/influencers/${params.id}`, {
-        headers: {
-          'Authorization': `Bearer ${tokenUtils.getToken()}`,
-        },
+      const data = await ModelService.getInfluencer(params.id as string)
+      setModel({
+        id: data.influencer_id,
+        name: data.influencer_name,
+        description: data.influencer_description || '',
+        learning_status: data.learning_status,
+        chatbot_option: data.chatbot_option,
       })
+
 
       if (response.ok) {
         const data = await response.json()
@@ -68,7 +73,7 @@ export default function ChatPage() {
         console.error('Failed to load model data:', response.status)
       }
     } catch (error) {
-      console.error('Error loading model data:', error)
+      console.error("Error loading model data:", error)
     } finally {
       setIsModelLoading(false)
     }

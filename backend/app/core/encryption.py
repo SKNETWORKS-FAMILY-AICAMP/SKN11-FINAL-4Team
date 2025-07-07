@@ -9,12 +9,13 @@ from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 import logging
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 
 class AESEncryption:
-    def __init__(self, password: str = None):
+    def __init__(self, password: Optional[str] = None):
         """
         AES256 암호화 클래스 초기화
         Args:
@@ -118,8 +119,16 @@ def encrypt_sensitive_data(plaintext: str) -> str:
 
 def decrypt_sensitive_data(encrypted_text: str) -> str:
     """민감한 데이터 복호화 헬퍼 함수"""
-    encryption = get_encryption()
-    return encryption.decrypt(encrypted_text)
+    if not encrypted_text:
+        return ""
+    
+    try:
+        encryption = get_encryption()
+        return encryption.decrypt(encrypted_text)
+    except Exception as e:
+        logger.warning(f"복호화 실패: {e}")
+        # 복호화 실패 시 빈 문자열 반환 (넘어감)
+        return ""
 
 
 def test_encryption():

@@ -22,7 +22,10 @@ from app.services.influencers.crud import (
     update_influencer,
     delete_influencer,
 )
-from app.services.influencers.style_presets import get_style_presets, create_style_preset
+from app.services.influencers.style_presets import (
+    get_style_presets,
+    create_style_preset,
+)
 from app.services.influencers.mbti import get_mbti_list
 from app.services.influencers.instagram import (
     InstagramConnectRequest,
@@ -33,11 +36,14 @@ from app.services.influencers.instagram import (
 from app.services.background_tasks import (
     generate_influencer_qa_background,
     get_background_task_manager,
-    BackgroundTaskManager
+    BackgroundTaskManager,
 )
 from fastapi import Request
 from app.services.influencers.qa_generator import QAGenerationTask, QAGenerationStatus
-from app.services.finetuning_service import get_finetuning_service, InfluencerFineTuningService
+from app.services.finetuning_service import (
+    get_finetuning_service,
+    InfluencerFineTuningService,
+)
 from datetime import datetime
 from app.models import StylePreset, BatchKey
 
@@ -147,13 +153,15 @@ async def createnew_influencer(
     
     # 인플루언서 생성
     influencer = create_influencer(db, user_id, influencer_data)
-    
+
     # 환경변수로 자동 QA 생성 제어
-    auto_qa_enabled = os.getenv('AUTO_FINETUNING_ENABLED', 'true').lower() == 'true'
+    auto_qa_enabled = os.getenv("AUTO_FINETUNING_ENABLED", "true").lower() == "true"
     logger.info(f"🔧 자동 QA 생성 설정: {auto_qa_enabled}")
-    
+
     if auto_qa_enabled:
-        logger.info(f"⚡ 백그라운드 QA 생성 작업 시작 - influencer_id: {influencer.influencer_id}")
+        logger.info(
+            f"⚡ 백그라운드 QA 생성 작업 시작 - influencer_id: {influencer.influencer_id}"
+        )
         # 백그라운드에서 QA 생성 작업 시작
         background_tasks.add_task(
             generate_influencer_qa_background,
@@ -161,7 +169,7 @@ async def createnew_influencer(
         )
     else:
         logger.info("⏸️ 자동 QA 생성이 비활성화되어 있습니다")
-    
+
     logger.info(f"✅ API: 인플루언서 생성 완료 - ID: {influencer.influencer_id}")
     return influencer
 
@@ -179,7 +187,6 @@ async def update_existing_influencer(
         raise HTTPException(status_code=401, detail="User ID not found")
     return update_influencer(db, user_id, influencer_id, influencer_update)
 
-
 @router.delete("/{influencer_id}")
 async def delete_existing_influencer(
     influencer_id: str,
@@ -191,7 +198,6 @@ async def delete_existing_influencer(
     if not user_id:
         raise HTTPException(status_code=401, detail="User ID not found")
     return delete_influencer(db, user_id, influencer_id)
-
 
 # Instagram 비즈니스 계정 연동 관련 API
 @router.post("/{influencer_id}/instagram/connect")
@@ -245,26 +251,25 @@ async def trigger_qa_generation(
 ):
     """AI 인플루언서의 QA 생성 수동 트리거"""
     user_id = current_user.get("sub")
+
     if not user_id:
         raise HTTPException(status_code=401, detail="User ID not found")
     
     # 인플루언서 존재 확인
     influencer = get_influencer_by_id(db, user_id, influencer_id)
     if not influencer:
+
         raise HTTPException(status_code=404, detail="인플루언서를 찾을 수 없습니다")
-    
+
     # 환경변수로 자동 QA 생성 제어
-    auto_qa_enabled = os.getenv('AUTO_FINETUNING_ENABLED', 'true').lower() == 'true'
-    
+    auto_qa_enabled = os.getenv("AUTO_FINETUNING_ENABLED", "true").lower() == "true"
+
     if not auto_qa_enabled:
         raise HTTPException(status_code=403, detail="자동 QA 생성이 비활성화되어 있습니다")
     
     # 백그라운드에서 QA 생성 작업 시작
-    background_tasks.add_task(
-        generate_influencer_qa_background,
-        influencer_id
-    )
-    
+    background_tasks.add_task(generate_influencer_qa_background, influencer_id)
+
     return {"message": "QA 생성 작업이 시작되었습니다", "influencer_id": influencer_id}
 
 
@@ -292,15 +297,16 @@ async def get_qa_generation_status(
         
         if not batch_key_entry or str(batch_key_entry.influencer_id) != influencer_id:
             raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다")
-        
+
         # 실시간 OpenAI 배치 상태 확인
         openai_batch_status = None
         if batch_key_entry.openai_batch_id:
             try:
                 openai_batch_status = task_manager.qa_generator.check_batch_status(str(batch_key_entry.openai_batch_id))
+
             except Exception as e:
                 openai_batch_status = {"error": f"OpenAI 상태 조회 실패: {str(e)}"}
-        
+
         s3_urls = {}
         if batch_key_entry.s3_qa_file_url:
             s3_urls["processed_qa_url"] = str(batch_key_entry.s3_qa_file_url)
@@ -318,8 +324,10 @@ async def get_qa_generation_status(
             "s3_urls": s3_urls,
             "created_at": batch_key_entry.created_at,
             "updated_at": batch_key_entry.updated_at,
-            "is_running": task_manager.is_task_running(task_id), # 백그라운드 태스크 매니저에서 실행 여부 확인
-            "openai_batch_status": openai_batch_status  # 실제 OpenAI 상태 추가
+            "is_running": task_manager.is_task_running(
+                task_id
+            ),  # 백그라운드 태스크 매니저에서 실행 여부 확인
+            "openai_batch_status": openai_batch_status,  # 실제 OpenAI 상태 추가
         }
     else:
         # 해당 인플루언서의 모든 작업 조회
@@ -335,17 +343,17 @@ async def get_qa_generation_status(
                 "s3_urls": task.s3_urls,
                 "created_at": task.created_at,
                 "updated_at": task.updated_at,
-                "is_running": task_manager.is_task_running(task.task_id)
+                "is_running": task_manager.is_task_running(task.task_id),
             }
             for task in all_tasks.values()
             if task.influencer_id == influencer_id
         ]
-        
+
         return {
             "influencer_id": influencer_id,
             "tasks": influencer_tasks,
             "total_tasks": len(influencer_tasks),
-            "running_tasks": len([t for t in influencer_tasks if t["is_running"]])
+            "running_tasks": len([t for t in influencer_tasks if t["is_running"]]),
         }
 
 
@@ -366,19 +374,23 @@ async def cancel_qa_generation(
     influencer = get_influencer_by_id(db, user_id, influencer_id)
     if not influencer:
         raise HTTPException(status_code=404, detail="인플루언서를 찾을 수 없습니다")
-    
+
     # 작업 존재 확인
     task = task_manager.qa_generator.get_task_status(task_id)
     if not task or task.influencer_id != influencer_id:
         raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다")
-    
+
     # 작업 취소
     success = task_manager.cancel_task(task_id)
-    
+
     return {
-        "message": "작업 취소 요청이 처리되었습니다" if success else "작업을 취소할 수 없습니다",
+        "message": (
+            "작업 취소 요청이 처리되었습니다"
+            if success
+            else "작업을 취소할 수 없습니다"
+        ),
         "task_id": task_id,
-        "cancelled": success
+        "cancelled": success,
     }
 
 
@@ -390,7 +402,7 @@ async def get_all_qa_tasks_status(
 ):
     """모든 QA 생성 작업 상태 조회 (관리자용)"""
     all_tasks = task_manager.get_all_qa_tasks()
-    
+
     return {
         "total_tasks": len(all_tasks),
         "running_tasks": task_manager.get_running_tasks_count(),
@@ -406,10 +418,10 @@ async def get_all_qa_tasks_status(
                 "s3_urls": task.s3_urls,
                 "created_at": task.created_at,
                 "updated_at": task.updated_at,
-                "is_running": task_manager.is_task_running(task.task_id)
+                "is_running": task_manager.is_task_running(task.task_id),
             }
             for task in all_tasks.values()
-        ]
+        ],
     }
 
 
@@ -430,10 +442,10 @@ async def get_finetuning_status(
     influencer = get_influencer_by_id(db, user_id, influencer_id)
     if not influencer:
         raise HTTPException(status_code=404, detail="인플루언서를 찾을 수 없습니다")
-    
+
     # 해당 인플루언서의 파인튜닝 작업 조회
     tasks = finetuning_service.get_tasks_by_influencer(influencer_id)
-    
+
     return {
         "influencer_id": influencer_id,
         "finetuning_tasks": [
@@ -447,12 +459,12 @@ async def get_finetuning_status(
                 "error_message": task.error_message,
                 "training_epochs": task.training_epochs,
                 "created_at": task.created_at,
-                "updated_at": task.updated_at
+                "updated_at": task.updated_at,
             }
             for task in tasks
         ],
         "total_tasks": len(tasks),
-        "latest_task": tasks[-1].__dict__ if tasks else None
+        "latest_task": tasks[-1].__dict__ if tasks else None,
     }
 
 
@@ -464,7 +476,7 @@ async def get_all_finetuning_tasks_status(
 ):
     """모든 파인튜닝 작업 상태 조회 (관리자용)"""
     all_tasks = finetuning_service.get_all_tasks()
-    
+
     return {
         "total_tasks": len(all_tasks),
         "tasks": [
@@ -479,10 +491,10 @@ async def get_all_finetuning_tasks_status(
                 "error_message": task.error_message,
                 "training_epochs": task.training_epochs,
                 "created_at": task.created_at,
-                "updated_at": task.updated_at
+                "updated_at": task.updated_at,
             }
             for task in all_tasks.values()
-        ]
+        ],
     }
 
 
@@ -496,52 +508,61 @@ async def handle_openai_batch_webhook(
     try:
         # 웹훅 데이터 파싱
         webhook_data = await request.json()
-        
+
         # 배치 ID와 상태 추출
         batch_id = webhook_data.get("data", {}).get("id")
         batch_status = webhook_data.get("data", {}).get("status")
-        
+
         if not batch_id:
             return {"error": "배치 ID가 없습니다"}
-        
+
         print(f"🎯 OpenAI 웹훅 수신: batch_id={batch_id}, status={batch_status}")
-        
+
         # 해당 배치 ID를 가진 작업 찾기
         all_tasks = task_manager.get_all_qa_tasks()
         matching_task = None
         task_id = None
-        
+
         for tid, task in all_tasks.items():
             if task.batch_id == batch_id:
                 matching_task = task
                 task_id = tid
                 break
-        
+
         if not matching_task:
             print(f"⚠️ 해당 배치 ID를 가진 작업을 찾을 수 없음: batch_id={batch_id}")
             return {"error": "작업을 찾을 수 없습니다"}
-        
-        print(f"✅ 작업 발견: task_id={task_id}, influencer_id={matching_task.influencer_id}")
-        
+
+        print(
+            f"✅ 작업 발견: task_id={task_id}, influencer_id={matching_task.influencer_id}"
+        )
+
         # 배치 완료 시 즉시 처리
         if batch_status == "completed":
             print(f"🚀 배치 완료, 즉시 결과 처리 시작: task_id={task_id}")
-            
+
             # 환경변수로 자동 처리 제어
-            auto_qa_enabled = os.getenv('AUTO_FINETUNING_ENABLED', 'true').lower() == 'true'
-            
+            auto_qa_enabled = (
+                os.getenv("AUTO_FINETUNING_ENABLED", "true").lower() == "true"
+            )
+
             if not auto_qa_enabled:
-                print(f"🔒 자동 QA 처리가 비활성화되어 있습니다 (AUTO_FINETUNING_ENABLED=false)")
-                return {"message": "자동 QA 처리가 비활성화되어 있습니다", "task_id": task_id}
-            
+                print(
+                    f"🔒 자동 QA 처리가 비활성화되어 있습니다 (AUTO_FINETUNING_ENABLED=false)"
+                )
+                return {
+                    "message": "자동 QA 처리가 비활성화되어 있습니다",
+                    "task_id": task_id,
+                }
+
             # 상태 업데이트
             matching_task.status = QAGenerationStatus.BATCH_COMPLETED
             matching_task.updated_at = datetime.now()
-            
+
             # 백그라운드에서 결과 처리 및 S3 업로드 실행
             import asyncio
             from app.database import get_db
-            
+
             async def process_webhook_result():
                 """웹훅 결과 처리를 위한 별도 DB 세션 사용"""
                 webhook_db = next(get_db())
@@ -549,23 +570,24 @@ async def handle_openai_batch_webhook(
                     await task_manager._process_and_upload_results(task_id, webhook_db)
                 finally:
                     webhook_db.close()
-            
+
             asyncio.create_task(process_webhook_result())
-            
+
             return {"message": "배치 완료 웹훅 처리 시작", "task_id": task_id}
-        
+
         elif batch_status == "failed":
             print(f"❌ 배치 실패: task_id={task_id}")
             matching_task.status = QAGenerationStatus.FAILED
             matching_task.error_message = "OpenAI 배치 작업 실패"
             matching_task.updated_at = datetime.now()
-            
+
             return {"message": "배치 실패 처리 완료", "task_id": task_id}
-        
+
         return {"message": "웹훅 수신", "batch_id": batch_id, "status": batch_status}
-        
+
     except Exception as e:
         print(f"❌ 웹훅 처리 중 오류: {str(e)}")
         import traceback
+
         print(f"상세 오류: {traceback.format_exc()}")
         return {"error": f"웹훅 처리 실패: {str(e)}"}

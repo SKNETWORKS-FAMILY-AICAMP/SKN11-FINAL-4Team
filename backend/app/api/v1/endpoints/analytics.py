@@ -9,7 +9,7 @@ from app.models.influencer import APICallAggregation, InfluencerAPI, AIInfluence
 from app.models.board import Board
 from app.models.user import User
 from app.schemas.influencer import APICallAggregation as APICallAggregationSchema
-from app.api.v1.endpoints.auth import get_current_user
+from app.core.security import get_current_user
 
 router = APIRouter()
 

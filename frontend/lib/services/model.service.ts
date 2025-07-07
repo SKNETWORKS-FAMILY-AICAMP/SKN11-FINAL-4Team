@@ -70,6 +70,21 @@ export interface UpdateInfluencerRequest {
   chatbot_option?: boolean
 }
 
+export interface MultiChatRequest {
+  influencers: Array<{
+    influencer_id: string
+    influencer_model_repo: string
+  }>
+  message: string
+}
+
+export interface MultiChatResponse {
+  results: Array<{
+    influencer_id: string
+    response: string
+  }>
+}
+
 
 export class ModelService {
   /**
@@ -141,6 +156,15 @@ export class ModelService {
    */
   static async getMBTIList(): Promise<ModelMBTI[]> {
     return await apiClient.get<ModelMBTI[]>('/api/v1/influencers/mbti')
+  }
+
+  /**
+   * 멀티 채팅 (모델 테스트)
+   */
+  static async multiChat(request: MultiChatRequest): Promise<MultiChatResponse> {
+    return await apiClient.post<MultiChatResponse>('/api/v1/model-test/multi-chat', request, {
+      timeout: 300000  // 5분으로 증가
+    })
   }
 
 }

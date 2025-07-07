@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from datetime import datetime
-from typing import Dict
+from typing import Dict, List
 import json
 import logging
 import os
@@ -15,7 +15,9 @@ from app.schemas.instagram import (
     InstagramStatus,
     InstagramAccountInfo,
     InstagramDMRequest,
-    InstagramDMResponse
+    InstagramDMResponse,
+    InstagramMedia,
+    InstagramInsights
 )
 from app.core.instagram_service import InstagramService
 from app.core.security import get_current_user
@@ -738,3 +740,35 @@ async def instagram_dm_webhook_verification(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"웹훅 검증에 실패했습니다: {str(e)}"
         )
+
+@router.get("/media/{influencer_id}", response_model=List[InstagramMedia])
+async def get_influencer_media(
+    influencer_id: str,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    influencer = db.query(AIInfluencer).filter(AIInfluencer.influencer_id == influencer_id, AIInfluencer.user_id == current_user.get("sub")).first()
+    if not influencer or not influencer.instagram_access_token:
+        raise HTTPException(status_code=404, detail="인플루언서를 찾을 수 없거나 인스타그램에 연결되지 않았습니다.")
+    
+    media_data = await instagram_service.get_user_media(influencer.instagram_id, influencer.instagram_access_token)
+    return media_data
+
+@router.get("/insights/{influencer_id}", response_model=List[InstagramInsights])
+async def get_influencer_insights(
+    influencer_id: str,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    influencer = db.query(AIInfluencer).filter(AIInfluencer.influencer_id == influencer_id, AIInfluencer.user_id == current_user.get("sub")).first()
+    if not influencer or not influencer.instagram_access_token or influencer.instagram_account_type != 'BUSINESS':
+        raise HTTPException(status_code=404, detail="비즈니스 계정이 아니거나, 인플루언서를 찾을 수 없거나, 인스타그램에 연결되지 않았습니다.")
+    
+    # 이 예제에서는 최근 5개 미디어의 인사이트를 가져옵니다.
+    media_data = await instagram_service.get_user_media(influencer.instagram_id, influencer.instagram_access_token, limit=5)
+    insights_data = []
+    for media in media_data:
+        insights = await instagram_service.get_media_insights(media['id'], influencer.instagram_access_token)
+        insights_data.extend(insights.get('data', []))
+    
+    return insights_data

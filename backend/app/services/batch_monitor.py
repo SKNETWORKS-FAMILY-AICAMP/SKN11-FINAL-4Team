@@ -90,7 +90,7 @@ class BatchMonitor:
 
             # 상태에 따른 처리
             if current_status == 'completed':
-                await self._handle_completed_batch(batch_key, db)
+                await self._handle_completed_batch(batch_key, batch_status, db)
             elif current_status == 'failed':
                 await self._handle_failed_batch(batch_key, batch_status, db)
             elif current_status in ['validating', 'in_progress']:
@@ -124,7 +124,7 @@ class BatchMonitor:
         finally:
             db.close()
     
-    async def _handle_completed_batch(self, batch_key: BatchKey, db: Session):
+    async def _handle_completed_batch(self, batch_key: BatchKey, batch_status: dict, db: Session):
         """완료된 배치 처리"""
         logger.info(f"✅ 배치 완료 감지: {batch_key.batch_key_id}")
         logger.info(f"📊 배치 상세 정보: task_id={batch_key.task_id}, influencer_id={batch_key.influencer_id}, openai_batch_id={batch_key.openai_batch_id}")

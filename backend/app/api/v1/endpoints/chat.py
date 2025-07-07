@@ -7,7 +7,7 @@ from app.database import get_db
 from app.models.influencer import ChatMessage, AIInfluencer
 from app.models.user import User
 from app.schemas.influencer import ChatMessageCreate, ChatMessage as ChatMessageSchema
-from app.api.v1.endpoints.auth import get_current_user
+from app.core.security import get_current_user
 
 router = APIRouter()
 
