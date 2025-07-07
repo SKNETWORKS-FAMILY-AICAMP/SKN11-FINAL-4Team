@@ -5,7 +5,7 @@ import uuid
 import logging
 
 from app.models import GenerateRequest, GenerateResponse
-from app.core import engine, loaded_adapters
+from app import core
 from app.utils.prompt_utils import create_chat_prompt
 from app.utils.response_utils import clean_response
 
@@ -16,8 +16,15 @@ router = APIRouter()
 @router.post("/generate", response_model=GenerateResponse)
 async def generate_response_endpoint(request: GenerateRequest):
     """인플루언서 응답 생성"""
-    if engine is None:
+    logger.info(f"🔄 응답 생성 엔드포인트 호출됨")
+    logger.info(f"📋 요청 데이터: {request.dict()}")
+    
+    logger.info(f"🔍 현재 엔진 상태 확인: {core.engine}")
+    if core.engine is None:
+        logger.error("❌ 엔진이 초기화되지 않았습니다.")
         raise HTTPException(status_code=500, detail="엔진이 초기화되지 않았습니다.")
+    
+    logger.info(f"✅ 엔진 상태 확인 완료: {type(core.engine)}")
     
     try:
         # 프롬프트 생성 (무조건 chat template 사용)
@@ -44,13 +51,13 @@ async def generate_response_endpoint(request: GenerateRequest):
         used_adapter = False
         
         if request.model_id:
-            if request.model_id not in loaded_adapters:
+            if request.model_id not in core.loaded_adapters:
                 raise HTTPException(
                     status_code=400,
                     detail=f"어댑터 {request.model_id}가 로드되지 않았습니다. 먼저 /load_adapter를 사용하세요."
                 )
             
-            adapter_info = loaded_adapters[request.model_id]
+            adapter_info = core.loaded_adapters[request.model_id]
             lora_request = LoRARequest(
                 lora_name=request.model_id,
                 lora_int_id=adapter_info["lora_int_id"],
@@ -64,7 +71,7 @@ async def generate_response_endpoint(request: GenerateRequest):
         
         # 비동기 생성
         results = []
-        async for output in engine.generate(
+        async for output in core.engine.generate(
             formatted_prompt,
             sampling_params,
             request_id=request_id,
@@ -93,5 +100,8 @@ async def generate_response_endpoint(request: GenerateRequest):
         )
         
     except Exception as e:
-        logger.error(f"❌ 응답 생성 실패: {e}")
+        logger.error(f"❌ 응답 생성 엔드포인트에서 예외 발생: {str(e)}")
+        logger.error(f"❌ 예외 타입: {type(e).__name__}")
+        import traceback
+        logger.error(f"❌ 전체 스택 트레이스: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"응답 생성 실패: {str(e)}")
