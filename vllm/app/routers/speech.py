@@ -41,7 +41,7 @@ class FastToneGenerationResponse(BaseModel):
     question: str
     responses: Dict[str, List[Dict[str, Any]]]  # 톤별 응답들
     generation_time_seconds: float
-    method: str = "langchain_parallel"
+    method: str = "parallel_processing"
 
 @router.post("/generate_qa", response_model=ToneGenerationResponse)
 async def generate_character_qa(request: Dict[str, Any]):
@@ -127,7 +127,7 @@ async def generate_character_qa(request: Dict[str, Any]):
 @router.post("/generate_qa_fast", response_model=FastToneGenerationResponse)
 async def generate_character_qa_fast(request: Dict[str, Any]):
     """
-    🚀 LangChain 기반 고속 어투 생성 (병렬 처리)
+    🚀 고속 어투 생성 (병렬 처리)
     기존 순차 처리 대비 3-5배 빠른 속도
     """
     try:
@@ -139,18 +139,18 @@ async def generate_character_qa_fast(request: Dict[str, Any]):
             # 기존 형식: {...} (직접 character 데이터)
             character_data = request
         
-        logger.info(f"🚀 LangChain 고속 어투 생성 시작: {character_data.get('name', 'Unknown')}")
+        logger.info(f"🚀 고속 어투 생성 시작: {character_data.get('name', 'Unknown')}")
         
         # OpenAI API 키 확인
         api_key = os.getenv('OPENAI_API_KEY')
         if not api_key:
             raise HTTPException(status_code=500, detail="OpenAI API 키가 설정되지 않았습니다.")
         
-        # LangChain 어투 생성기 인스턴스 생성
+        # 고속 어투 생성기 인스턴스 생성
         tone_generator = get_langchain_tone_generator(api_key=api_key)
         
-        # 캐릭터 데이터 변환 (LangChain용)
-        langchain_character_data = {
+        # 캐릭터 데이터 변환 (고속 처리용)
+        fast_character_data = {
             "name": character_data.get('name', '캐릭터'),
             "description": character_data.get('description', ''),
             "personality": character_data.get('personality', '친근한 성격'),
@@ -177,14 +177,14 @@ async def generate_character_qa_fast(request: Dict[str, Any]):
         start_time = asyncio.get_event_loop().time()
         
         responses = await tone_generator.generate_3_tones_parallel(
-            character_data=langchain_character_data,
+            character_data=fast_character_data,
             question=question
         )
         
         end_time = asyncio.get_event_loop().time()
         generation_time = end_time - start_time
         
-        logger.info(f"✅ LangChain 어투 생성 완료: {generation_time:.2f}초")
+        logger.info(f"✅ 고속 어투 생성 완료: {generation_time:.2f}초")
         
         return FastToneGenerationResponse(
             question=question,
@@ -193,7 +193,7 @@ async def generate_character_qa_fast(request: Dict[str, Any]):
         )
         
     except Exception as e:
-        logger.error(f"❌ LangChain 어투 생성 실패: {e}")
+        logger.error(f"❌ 고속 어투 생성 실패: {e}")
         raise HTTPException(status_code=500, detail=f"고속 어투 생성 중 오류가 발생했습니다: {str(e)}")
 
 @router.post("/generate_tone")
