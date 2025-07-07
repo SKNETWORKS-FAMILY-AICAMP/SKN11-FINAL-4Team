@@ -20,6 +20,7 @@ from abc import ABC, abstractmethod
 from pydantic import BaseModel
 from app.core.config import settings
 import logging
+import re
 
 # OpenAI 패키지 안전한 import
 try:
@@ -166,8 +167,11 @@ class OpenAIService(AIContentGeneratorInterface):
             # 해시태그 추출
             hashtags = self._extract_hashtags(content, request.hashtags)
 
+            # 본문에서 해시태그 제거
+            clean_content = re.sub(r"#\w+", "", content).strip()
+
             return ContentGenerationResponse(
-                social_media_content=content,
+                social_media_content=clean_content,
                 english_prompt_for_comfyui=comfyui_prompt,
                 hashtags=hashtags,
                 metadata={
@@ -203,8 +207,11 @@ class OpenAIService(AIContentGeneratorInterface):
         # 해시태그 처리
         hashtags = self._extract_hashtags(content, request.hashtags)
 
+        # 본문에서 해시태그 제거
+        clean_content = re.sub(r"#\w+", "", content).strip()
+
         return ContentGenerationResponse(
-            social_media_content=content,
+            social_media_content=clean_content,
             english_prompt_for_comfyui=comfyui_prompt,
             hashtags=hashtags,
             metadata={
@@ -395,8 +402,6 @@ class OpenAIService(AIContentGeneratorInterface):
         self, content: str, additional_hashtags: Optional[str] = None
     ) -> List[str]:
         """콘텐츠에서 해시태그 추출"""
-        import re
-
         # 콘텐츠에서 해시태그 추출
         hashtags = re.findall(r"#\w+", content)
 

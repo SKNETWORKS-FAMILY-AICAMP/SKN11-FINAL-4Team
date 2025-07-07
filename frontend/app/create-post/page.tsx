@@ -81,6 +81,8 @@ export default function CreatePostPage() {
   const [showPreview, setShowPreview] = useState(false)
   const [generated, setGenerated] = useState<{ content: string, hashtags: string[] } | null>(null)
   const [isEnhancing, setIsEnhancing] = useState(false)
+  const [converted, setConverted] = useState<string | null>(null)
+  const [isConverting, setIsConverting] = useState(false)
 
   // 발행 설정 상태
   const [publishType, setPublishType] = useState<'immediate' | 'scheduled'>('immediate')
@@ -251,12 +253,18 @@ export default function CreatePostPage() {
     setIsEnhancing(true);
     setError(null);
     try {
+      // 선택한 인플루언서에서 group_id 추출
+      const selectedInfluencer = influencers.find(
+        (inf) => inf.influencer_id === formData.influencer_id
+      );
       // /full-enhance 엔드포인트로 요청
       const res: any = await apiClient.post('/api/v1/boards/full-enhance', {
         topic: formData.board_topic,
         platform: PLATFORM_OPTIONS[formData.board_platform].label.toLowerCase(),
         include_content: formData.board_description,
         influencer_id: formData.influencer_id,
+        team_id: selectedInfluencer?.group_id, // group_id를 team_id로 보냄
+        user_id: user?.user_id, // 로그인한 유저의 user_id를 body에 포함
       });
       setGenerated({
         content: res.social_media_content,
@@ -269,12 +277,59 @@ export default function CreatePostPage() {
     }
   };
 
-  // 승인 함수
+  // 인플루언서 말투 변환 함수
+  const convertToInfluencerStyle = async () => {
+    if (!generated?.content || !formData.influencer_id) return;
+    setIsConverting(true);
+    setError(null);
+
+    // 인플루언서 정보 가져오기
+    const selectedInfluencer = influencers.find(
+      (inf) => inf.influencer_id === formData.influencer_id
+    );
+    if (!selectedInfluencer) {
+      setError("인플루언서를 찾을 수 없습니다.");
+      setIsConverting(false);
+      return;
+    }
+
+    const modelRepo = selectedInfluencer.influencer_model_repo;
+
+    try {
+      const response = await apiClient.post('/api/v1/model-test/multi-chat', {
+        influencers: [
+          {
+            influencer_id: selectedInfluencer.influencer_id,
+            influencer_model_repo: modelRepo,
+          },
+        ],
+        message: generated.content,
+      });
+      setConverted((response as any).results?.[0]?.response || "");
+    } catch (err) {
+      setError("인플루언서 말투 변환에 실패했습니다.");
+    } finally {
+      setIsConverting(false);
+    }
+  };
+
+  // AI 생성 승인
   const approveGenerated = () => {
     if (!generated) return;
     handleInputChange('board_description', generated.content);
     handleInputChange('board_hashtag', generated.hashtags.map((tag: string) => tag.replace(/^#+/, '')));
     setGenerated(null);
+    setConverted(null);
+  };
+
+  // 인플루언서 말투 변환 승인
+  const approveConverted = () => {
+    if (!converted) return;
+    // 해시태그 제거
+    const cleanContent = converted.replace(/#\w+/g, '').replace(/\s{2,}/g, ' ').trim();
+    handleInputChange('board_description', cleanContent);
+    setGenerated(null);
+    setConverted(null);
   };
 
   // 폼 제출 (게시글 저장)
@@ -588,8 +643,14 @@ export default function CreatePostPage() {
                       rows={3}
                       className="mt-2"
                     />
-
-                    {/* 향상된 내용 표시 */}
+                    {/* 인플루언서 말투로 변환 버튼: AI 생성 승인 후, 변환 전 상태에서만 노출 */}
+                    {formData.board_description && !converted && (
+                      <div className="mt-2">
+                        <Button onClick={convertToInfluencerStyle} disabled={isConverting} variant="secondary" type="button">
+                          {isConverting ? '변환 중...' : '인플루언서 말투로 변환'}
+                        </Button>
+                      </div>
+                    )}
                     {generated && (
                       <div className="mt-4 space-y-4">
                         <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
@@ -604,7 +665,7 @@ export default function CreatePostPage() {
                           <div className="flex space-x-2 mt-4">
                             <Button type="button" onClick={approveGenerated} className="flex items-center space-x-2">
                               <span>✓</span>
-                              <span>승인</span>
+                              <span>AI 생성 승인</span>
                             </Button>
                           </div>
                         </div>
@@ -748,7 +809,16 @@ export default function CreatePostPage() {
                     )}
                   </div>
 
-
+                  {/* AI 생성 승인이 된 경우에만 인플루언서 말투 변환 버튼 노출 */}
+                  {converted && (
+                    <div className="mt-4 space-y-4">
+                      <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                        <h4 className="font-medium text-blue-900 mb-2 flex items-center">인플루언서 말투 미리보기</h4>
+                        <div className="text-sm text-blue-800 whitespace-pre-wrap bg-white p-3 rounded border mb-4">{converted}</div>
+                        <Button onClick={approveConverted} variant="default">말투 변환 승인</Button>
+                      </div>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 
