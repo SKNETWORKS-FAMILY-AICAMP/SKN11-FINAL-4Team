@@ -60,6 +60,7 @@ class StylePreset(StylePresetBase, TimestampSchema):
 class AIInfluencerBase(BaseModel):
     user_id: str
     group_id: int
+    hf_manage_id: Optional[str] = None
     style_preset_id: str
     mbti_id: Optional[int] = None
     influencer_name: str
@@ -69,6 +70,12 @@ class AIInfluencerBase(BaseModel):
     learning_status: int
     influencer_model_repo: str
     chatbot_option: bool
+    # Instagram 연동 정보
+    instagram_id: Optional[str] = None
+    instagram_username: Optional[str] = None
+    instagram_account_type: Optional[str] = None
+    instagram_is_active: Optional[bool] = None
+    instagram_connected_at: Optional[datetime] = None
 
 
 class AIInfluencerCreate(BaseSchema):
@@ -97,6 +104,7 @@ class AIInfluencerCreate(BaseSchema):
 
 
 class AIInfluencerUpdate(BaseModel):
+    hf_manage_id: Optional[str] = None
     style_preset_id: Optional[str] = None
     mbti_id: Optional[int] = None
     hf_manage_id: Optional[str] = None

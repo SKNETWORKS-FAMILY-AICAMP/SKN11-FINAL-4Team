@@ -78,32 +78,11 @@ export const getUserFromToken = (token: string): User | null => {
       teams: [] // JWT에서는 groups가 string[]이므로 빈 배열로 초기화
     }
   } catch (error) {
-    console.error('Error parsing user from token:', error)
     return null
   }
 }
 
-// 실제 팀 정보를 가져오는 함수
-export const fetchUserWithTeams = async (token: string): Promise<User | null> => {
-  try {
-    const response = await fetch('http://localhost:8000/api/v1/auth/me', {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-    })
-    
-    if (!response.ok) {
-      throw new Error('Failed to fetch user data')
-    }
-    
-    const userData = await response.json()
-    return userData
-  } catch (error) {
-    console.error('Error fetching user with teams:', error)
-    return null
-  }
-}
+
 
 export const hasPermission = (
   user: User | null,
@@ -127,10 +106,7 @@ export const hasAnyGroup = (user: User | null, groupNames: string[]): boolean =>
 
 export const isAdmin = (user: User | null): boolean => {
   if (!user || !user.teams) return false
-  console.log('isAdmin check:', { user_id: user.user_id, teams: user.teams })
-  const isAdminUser = user.teams.some(team => team.group_id === 1)
-  console.log('isAdmin result:', isAdminUser)
-  return isAdminUser
+  return user.teams.some(team => team.group_id === 1)
 }
 
 export const canAccessModel = (user: User | null, modelAllowedGroups?: string[]): boolean => {

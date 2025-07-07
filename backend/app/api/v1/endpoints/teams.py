@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from typing import List
 from pydantic import BaseModel
 
@@ -13,29 +13,10 @@ from app.schemas.user import (
     UserWithTeams,
 )
 from app.core.security import get_current_user
+from app.core.permissions import check_admin_permission
 
 router = APIRouter()
 
-# 관리자 그룹 ID (1번은 관리자 그룹으로 예약)
-ADMIN_GROUP_ID = 1
-
-
-def check_admin_permission(current_user: dict, db: Session):
-    """관리자 권한 체크 - 그룹 1번에 속한 사용자를 관리자로 간주"""
-    user_id = current_user.get("sub")
-    # 그룹 1번이 관리자 그룹이라고 가정
-    admin_team = db.query(Team).filter(Team.group_id == 1).first()
-    if admin_team:
-        # 현재 사용자가 관리자 그룹에 속해있는지 확인
-        user_in_admin_team = (
-            db.query(Team)
-            .join(Team.users)
-            .filter(Team.group_id == 1, User.user_id == user_id)
-            .first()
-        )
-        if user_in_admin_team:
-            return True
-    return False
 
 
 class BulkUserOperation(BaseModel):
@@ -65,19 +46,20 @@ async def get_teams(
         )
         if user_in_admin_team:
             # 관리자는 모든 팀 조회 가능
-            teams = db.query(Team).offset(skip).limit(limit).all()
+            teams = db.query(Team).options(joinedload(Team.users)).offset(skip).limit(limit).all()
         else:
             # 일반 사용자는 자신이 속한 팀만 조회
             teams = (
                 db.query(Team)
                 .join(Team.users)
+                .options(joinedload(Team.users))
                 .filter(User.user_id == user_id)
                 .offset(skip)
                 .limit(limit)
                 .all()
             )
     else:
-        teams = db.query(Team).offset(skip).limit(limit).all()
+        teams = db.query(Team).options(joinedload(Team.users)).offset(skip).limit(limit).all()
 
     return teams
 
@@ -89,7 +71,7 @@ async def get_team(
     db: Session = Depends(get_db),
 ):
     """특정 팀 조회"""
-    team = db.query(Team).filter(Team.group_id == group_id).first()
+    team = db.query(Team).options(joinedload(Team.users)).filter(Team.group_id == group_id).first()
     if team is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Team not found"

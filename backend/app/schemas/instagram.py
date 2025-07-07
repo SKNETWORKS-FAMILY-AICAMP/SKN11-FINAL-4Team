@@ -1,5 +1,5 @@
-from pydantic import BaseModel
-from typing import Optional
+from pydantic import BaseModel, Field
+from typing import Optional, List
 from datetime import datetime
 
 class InstagramConnectRequest(BaseModel):
@@ -47,3 +47,25 @@ class InstagramDMResponse(BaseModel):
     message: str
     response_text: Optional[str] = None
     timestamp: Optional[datetime] = None
+
+class InstagramMedia(BaseModel):
+    id: str
+    caption: Optional[str] = None
+    media_type: str
+    media_url: str
+    permalink: str
+    timestamp: datetime
+    like_count: Optional[int] = Field(None, alias='like_count')
+    comments_count: Optional[int] = Field(None, alias='comments_count')
+    thumbnail_url: Optional[str] = None
+
+class InstagramInsightsValue(BaseModel):
+    value: int
+    end_time: datetime
+
+class InstagramInsights(BaseModel):
+    name: str
+    period: str
+    values: List[InstagramInsightsValue]
+    title: str
+    description: str

@@ -50,6 +50,7 @@ class User(Base, TimestampMixin):
     ai_influencers = relationship("AIInfluencer", back_populates="user")
 
 
+
 class Team(Base, TimestampMixin):
     """팀 모델 (실제 DB 구조에 맞춤)"""
 
@@ -81,8 +82,8 @@ class HFTokenManage(Base, TimestampMixin):
     group_id = Column(
         Integer,
         ForeignKey("TEAM.group_id"),
-        nullable=False,
-        comment="그룹 고유 식별자",
+        nullable=True,  # 할당되지 않은 토큰 허용
+        comment="그룹 고유 식별자 (NULL 가능 - 할당되지 않은 토큰)",
     )
     hf_token_value = Column(
         Text, nullable=False, comment="허깅페이스 실제 토큰 값 (암호화)"
@@ -95,6 +96,7 @@ class HFTokenManage(Base, TimestampMixin):
     )
 
     # 관계
+    ai_influencers = relationship("AIInfluencer", back_populates="hf_token")
     team = relationship("Team", back_populates="hf_tokens")
 
 

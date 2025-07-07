@@ -114,6 +114,21 @@ class Settings(BaseSettings):
     OPENAI_MONITORING_MODE: str = os.getenv("OPENAI_MONITORING_MODE", "webhook")  # webhook 또는 polling
     OPENAI_POLLING_INTERVAL_MINUTES: int = int(os.getenv("OPENAI_POLLING_INTERVAL_MINUTES", "7"))  # 폴링 간격 (분)
     OPENAI_WEBHOOK_URL: str = os.getenv("OPENAI_WEBHOOK_URL", "http://localhost:8000/api/v1/influencers/webhooks/openai/batch-complete")
+    
+    # VLLM 서버 설정
+    VLLM_HOST: str = os.getenv("VLLM_HOST", "localhost")
+    VLLM_PORT: int = int(os.getenv("VLLM_PORT", "8000"))
+    VLLM_TIMEOUT: int = int(os.getenv("VLLM_TIMEOUT", "300"))  # 5분
+    VLLM_ENABLED: bool = os.getenv("VLLM_ENABLED", "true").lower() == "true"
+    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
+    VLLM_BASE_URL: Optional[str] = None
+
+    def __init__(self, **values):
+        super().__init__(**values)
+        if self.VLLM_ENABLED:
+            self.VLLM_BASE_URL = f"http://{self.VLLM_HOST}:{self.VLLM_PORT}/v1"
+        else:
+            self.VLLM_BASE_URL = None
 
     # 추가 환경 변수들 (누락된 것들)
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")

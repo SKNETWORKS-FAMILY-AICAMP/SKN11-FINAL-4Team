@@ -89,3 +89,4 @@ class Board(Base, TimestampMixin):
 
     # 관계
     influencer = relationship("AIInfluencer", back_populates="boards")
+

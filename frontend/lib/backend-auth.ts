@@ -17,28 +17,21 @@ export interface SocialLoginRequest {
 
 export class BackendAuthService {
   static async exchangeCodeForToken(provider: string, code: string, redirectUri?: string): Promise<BackendAuthResponse> {
-    console.log('백엔드 API 호출:', {
-      provider,
-      code: code?.substring(0, 20) + '...',
-      redirectUri
-    })
-
     const data: SocialLoginRequest = {
       provider,
       code,
       redirect_uri: redirectUri
     }
 
-    const result = await apiClient.post<BackendAuthResponse>('/api/auth/social-login', data, {
+    const result = await apiClient.post<BackendAuthResponse>('/api/v1/auth/social-login', data, {
       requireAuth: false
     })
 
-    console.log('백엔드 성공 응답:', result)
     return result
   }
 
   static async verifyToken(): Promise<User> {
-    return await apiClient.get<User>('/api/auth/me')
+    return await apiClient.get<User>('/api/v1/auth/me')
   }
 
   static async authenticateWithUserInfo(provider: string, userInfo: any): Promise<BackendAuthResponse> {
@@ -47,13 +40,13 @@ export class BackendAuthService {
       user_info: userInfo
     }
 
-    return await apiClient.post<BackendAuthResponse>('/api/auth/social-login', data, {
+    return await apiClient.post<BackendAuthResponse>('/api/v1/auth/social-login', data, {
       requireAuth: false
     })
   }
 
   static async refreshToken(refreshToken: string): Promise<BackendAuthResponse> {
-    return await apiClient.post<BackendAuthResponse>('/api/auth/refresh', {
+    return await apiClient.post<BackendAuthResponse>('/api/v1/auth/refresh', {
       refresh_token: refreshToken
     }, {
       requireAuth: false
@@ -62,7 +55,7 @@ export class BackendAuthService {
 
   static async logout(): Promise<void> {
     try {
-      await apiClient.post('/api/auth/logout', {}, {
+      await apiClient.post('/api/v1/auth/logout', {}, {
         timeout: 5000 // 짧은 타임아웃
       })
     } catch (error) {

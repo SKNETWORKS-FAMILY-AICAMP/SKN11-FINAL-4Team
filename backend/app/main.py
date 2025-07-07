@@ -112,6 +112,8 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan,
+    # 타임아웃 설정 추가
+    timeout=300,  # 5분
 )
 
 # CORS 미들웨어 설정
