@@ -131,13 +131,13 @@ class InfluencerQAGenerator:
     def create_qa_batch_requests(self, character: CharacterProfile, num_requests: int = None, system_prompt: str = None) -> List[Dict]:
         """
         인플루언서 캐릭터를 위한 QA 생성 배치 요청 생성
-        VLLM 서버의 비동기 QA 생성 엔드포인트를 사용
+        VLLM 서버에서 직접 OpenAI Batch API 형식의 JSONL을 생성
         Args:
             character: 캐릭터 프로필
             num_requests: 생성할 QA 개수 (None이면 환경변수 QA_GENERATION_COUNT 사용)
             system_prompt: 시스템 프롬프트
         Returns:
-            배치 요청 리스트
+            배치 요청 리스트 (OpenAI Batch API 형식)
         """
         if num_requests is None:
             num_requests = settings.QA_GENERATION_COUNT
@@ -157,41 +157,34 @@ class InfluencerQAGenerator:
             "mbti": character.mbti
         }
         
-        # VLLM 서버에서 비동기 QA 생성 시작
+        # VLLM 서버에서 JSONL 생성 작업 시작
         try:
-            print(f"VLLM 서버에 {num_requests}개 QA 생성 작업 시작 요청...")
+            print(f"VLLM 서버에 {num_requests}개 QA JSONL 생성 작업 시작 요청...")
             
-            # 비동기 QA 생성 작업 시작
+            # JSONL 생성 작업 시작
             response = requests.post(
-                f"{vllm_server_url}/speech/start_qa_generation",
+                f"{vllm_server_url}/speech/generate_qa_batch_jsonl",
                 json={
                     "characters": [character_data] * num_requests,
                     "num_qa_per_character": 1
                 },
-                timeout=30  # 작업 시작 요청은 빠르게 처리
+                timeout=30
             )
             
             if response.status_code == 200:
                 task_data = response.json()
                 task_id = task_data.get('task_id')
                 
-                print(f"VLLM 서버 QA 생성 작업 시작 성공: task_id={task_id}")
+                print(f"VLLM 서버 QA JSONL 생성 작업 시작 성공: task_id={task_id}")
                 
                 # 작업 완료까지 대기
-                qa_results = self._wait_for_qa_generation_completion(vllm_server_url, task_id)
+                batch_requests = self._wait_for_qa_jsonl_completion(vllm_server_url, task_id)
                 
-                if qa_results:
-                    # 생성된 QA들을 배치 요청으로 변환
-                    batch_requests = self._create_qa_batch_requests_from_results(
-                        qa_results=qa_results,
-                        character=character,
-                        system_prompt=system_prompt
-                    )
-                    
-                    print(f"배치 요청 생성 완료: {len(batch_requests)}개")
+                if batch_requests:
+                    print(f"QA JSONL 생성 완료: {len(batch_requests)}개 배치 요청")
                     return batch_requests
                 else:
-                    print("QA 생성 작업이 실패했습니다.")
+                    print("QA JSONL 생성 작업이 실패했습니다.")
                     return self._create_fallback_qa_requests(
                         character=character,
                         system_prompt=system_prompt,
@@ -199,7 +192,7 @@ class InfluencerQAGenerator:
                     )
                         
             else:
-                print(f"VLLM 서버 QA 생성 작업 시작 실패: {response.status_code} - {response.text}")
+                print(f"VLLM 서버 QA JSONL 생성 작업 시작 실패: {response.status_code} - {response.text}")
                 return self._create_fallback_qa_requests(
                     character=character,
                     system_prompt=system_prompt,
@@ -207,35 +200,35 @@ class InfluencerQAGenerator:
                 )
                 
         except Exception as e:
-            print(f"VLLM 서버 QA 생성 오류: {e}")
+            print(f"VLLM 서버 QA JSONL 생성 오류: {e}")
             return self._create_fallback_qa_requests(
                 character=character,
                 system_prompt=system_prompt,
                 count=num_requests
             )
     
-    def _wait_for_qa_generation_completion(self, vllm_server_url: str, task_id: str, max_wait_time: int = 1800) -> List[Dict]:
+    def _wait_for_qa_jsonl_completion(self, vllm_server_url: str, task_id: str, max_wait_time: int = 1800) -> List[Dict]:
         """
-        QA 생성 작업이 완료될 때까지 대기하고 결과를 반환
+        QA JSONL 생성 작업이 완료될 때까지 대기하고 결과를 반환
         Args:
             vllm_server_url: VLLM 서버 URL
             task_id: 작업 ID
             max_wait_time: 최대 대기 시간 (초, 기본 30분)
         Returns:
-            QA 결과 리스트
+            OpenAI Batch API 형식의 배치 요청 리스트
         """
         import time
         
         start_time = time.time()
         check_interval = 5  # 5초마다 상태 확인
         
-        print(f"QA 생성 작업 완료 대기 중: task_id={task_id}")
+        print(f"QA JSONL 생성 작업 완료 대기 중: task_id={task_id}")
         
         while time.time() - start_time < max_wait_time:
             try:
                 # 작업 상태 확인
                 status_response = requests.get(
-                    f"{vllm_server_url}/speech/qa_generation_status/{task_id}",
+                    f"{vllm_server_url}/speech/qa_jsonl_status/{task_id}",
                     timeout=10
                 )
                 
@@ -245,41 +238,42 @@ class InfluencerQAGenerator:
                     progress = status_data.get('progress', 0)
                     completed = status_data.get('completed', 0)
                     total = status_data.get('total_requests', 0)
+                    batch_requests_count = status_data.get('batch_requests_count', 0)
                     
-                    print(f"QA 생성 진행 상황: {progress:.1f}% ({completed}/{total})")
+                    print(f"QA JSONL 생성 진행 상황: {progress:.1f}% ({completed}/{total}), 배치 요청: {batch_requests_count}개")
                     
                     if status == "completed":
                         # 결과 가져오기
                         result_response = requests.get(
-                            f"{vllm_server_url}/speech/qa_generation_results/{task_id}",
+                            f"{vllm_server_url}/speech/qa_jsonl_results/{task_id}",
                             timeout=30
                         )
                         
                         if result_response.status_code == 200:
                             result_data = result_response.json()
-                            results = result_data.get('results', [])
-                            print(f"QA 생성 완료: {len(results)}개 결과")
-                            return results
+                            batch_requests = result_data.get('batch_requests', [])
+                            print(f"QA JSONL 생성 완료: {len(batch_requests)}개 배치 요청")
+                            return batch_requests
                         else:
-                            print(f"QA 생성 결과 가져오기 실패: {result_response.status_code}")
+                            print(f"QA JSONL 결과 가져오기 실패: {result_response.status_code}")
                             return []
                     
                     elif status == "failed":
-                        print("QA 생성 작업이 실패했습니다.")
+                        print("QA JSONL 생성 작업이 실패했습니다.")
                         return []
                     
                     # 아직 진행 중이면 대기
                     time.sleep(check_interval)
                     
                 else:
-                    print(f"QA 생성 상태 확인 실패: {status_response.status_code}")
+                    print(f"QA JSONL 상태 확인 실패: {status_response.status_code}")
                     time.sleep(check_interval)
                     
             except Exception as e:
-                print(f"QA 생성 상태 확인 오류: {e}")
+                print(f"QA JSONL 상태 확인 오류: {e}")
                 time.sleep(check_interval)
         
-        print(f"QA 생성 작업 시간 초과: {max_wait_time}초")
+        print(f"QA JSONL 생성 작업 시간 초과: {max_wait_time}초")
         return []
 
     def _create_fallback_qa_requests(self, character: CharacterProfile, system_prompt: str, count: int) -> List[Dict]:
