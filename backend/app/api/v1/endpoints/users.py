@@ -178,7 +178,9 @@ async def get_user_teams(
     db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
 ):
     """현재 사용자의 팀 목록 조회"""
-    user = db.query(User).filter(User.user_id == current_user["sub"]).first()
+    from sqlalchemy.orm import joinedload
+    
+    user = db.query(User).options(joinedload(User.teams)).filter(User.user_id == current_user["sub"]).first()
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
@@ -189,7 +191,7 @@ async def get_user_teams(
             "group_name": team.group_name,
             "group_description": team.group_description,
         }
-        for team in user.groups
+        for team in user.teams
     ]
 
 
@@ -206,7 +208,9 @@ async def get_user_teams_by_id(
             detail="Only administrators can view other users' teams",
         )
 
-    user = db.query(User).filter(User.user_id == user_id).first()
+    from sqlalchemy.orm import joinedload
+    
+    user = db.query(User).options(joinedload(User.teams)).filter(User.user_id == user_id).first()
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
@@ -217,5 +221,5 @@ async def get_user_teams_by_id(
             "group_name": team.group_name,
             "group_description": team.group_description,
         }
-        for team in user.groups
+        for team in user.teams
     ]

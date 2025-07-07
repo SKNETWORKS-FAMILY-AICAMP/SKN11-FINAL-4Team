@@ -28,7 +28,6 @@ export async function GET(request: NextRequest) {
     if (response.ok) {
       workflows = await response.json()
     } else {
-      console.log('Backend workflows not available, using fallback')
     }
     
     return NextResponse.json({

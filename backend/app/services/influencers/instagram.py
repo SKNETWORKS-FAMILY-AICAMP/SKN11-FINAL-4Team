@@ -13,9 +13,11 @@ class InstagramConnectRequest(BaseModel):
     redirect_uri: str
 
 
-def get_user_with_groups(db: Session, user_id: str):
-    """사용자 정보와 그룹 정보를 조회"""
-    user = db.query(User).filter(User.user_id == user_id).first()
+def get_user_with_teams(db: Session, user_id: str):
+    """사용자 정보와 팀 정보를 조회"""
+    from sqlalchemy.orm import joinedload
+    
+    user = db.query(User).options(joinedload(User.teams)).filter(User.user_id == user_id).first()
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -26,8 +28,8 @@ def get_user_with_groups(db: Session, user_id: str):
 
 def get_influencer_with_permission(db: Session, user_id: str, influencer_id: str):
     """권한 확인 후 인플루언서 조회"""
-    user = get_user_with_groups(db, user_id)
-    user_group_ids = [group.group_id for group in user.groups]
+    user = get_user_with_teams(db, user_id)
+    user_group_ids = [team.group_id for team in user.teams]
     
     query = db.query(AIInfluencer).filter(AIInfluencer.influencer_id == influencer_id)
     if user_group_ids:

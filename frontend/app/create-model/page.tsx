@@ -75,12 +75,9 @@ export default function CreateModelPage() {
     // 실제 API에서 프리셋 데이터 가져오기
     const fetchStylePresets = async () => {
       setLoadingPresets(true);
-      console.log('🔄 프리셋 데이터 로드 시작...');
       
       try {
-        console.log('📡 API 호출: ModelService.getStylePresets()');
         const presets = await ModelService.getStylePresets();
-        console.log('✅ 프리셋 데이터 로드 성공:', presets);
         setStylePresets(presets);
       } catch (error) {
         console.error('❌ 프리셋 데이터 로드 실패:', error);
@@ -98,24 +95,19 @@ export default function CreateModelPage() {
         setStylePresets([]);
       } finally {
         setLoadingPresets(false);
-        console.log('🏁 프리셋 데이터 로드 완료');
       }
     };
 
     // 허깅페이스 토큰 데이터 가져오기
     const fetchHuggingFaceTokens = async () => {
       if (!user || !user.teams || user.teams.length === 0) {
-        console.log('사용자 팀 정보가 없어 허깅페이스 토큰을 가져올 수 없습니다.');
         return;
       }
 
       setLoadingTokens(true);
-      console.log('🔄 허깅페이스 토큰 데이터 로드 시작...');
       
       try {
-        console.log('📡 API 호출: ModelService.getHuggingFaceTokens()');
         const tokens = await ModelService.getHuggingFaceTokens(user.teams[0].group_id);
-        console.log('✅ 허깅페이스 토큰 데이터 로드 성공:', tokens);
         setHuggingFaceTokens(tokens);
       } catch (error) {
         console.error('❌ 허깅페이스 토큰 데이터 로드 실패:', error);
@@ -133,7 +125,6 @@ export default function CreateModelPage() {
         setHuggingFaceTokens([]);
       } finally {
         setLoadingTokens(false);
-        console.log('🏁 허깅페이스 토큰 데이터 로드 완료');
       }
     };
 
@@ -308,7 +299,6 @@ export default function CreateModelPage() {
           createInfluencerData.mood = formData.mood;
         }
       }
-      console.log(JSON.stringify(createInfluencerData))
       // 실제 인플루언서 생성 API 호출
       const response = await ModelService.createInfluencer(createInfluencerData)
       

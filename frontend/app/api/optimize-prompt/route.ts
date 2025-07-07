@@ -44,7 +44,6 @@ export async function POST(request: NextRequest) {
     }
 
     const optimizationResult = await response.json()
-    console.log('Optimization result:', optimizationResult)
     
     return NextResponse.json({
       success: true,

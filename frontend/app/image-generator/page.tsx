@@ -167,7 +167,6 @@ export default function ImageGeneratorPage() {
 
     try {
       // 1단계: 프롬프트 최적화 (임시 비활성화)
-      console.log('Step 1: Optimizing prompt... (temporarily disabled)')
       let optimizedPrompt = prompt
       
       // TODO: 백엔드 재시작 후 아래 코드 활성화
@@ -190,10 +189,6 @@ export default function ImageGeneratorPage() {
         const optimizationData = await optimizationResponse.json()
         if (optimizationData.success) {
           optimizedPrompt = optimizationData.optimized_prompt
-          console.log('Prompt optimized:', {
-            original: prompt,
-            optimized: optimizedPrompt
-          })
         }
       } else {
         console.warn('Prompt optimization failed, using original prompt')
@@ -201,7 +196,6 @@ export default function ImageGeneratorPage() {
       */
 
       // 2단계: 최적화된 프롬프트로 이미지 생성
-      console.log('Step 2: Generating image with optimized prompt...')
       const selectedSizeData = PRESET_SIZES.find(size => size.id === selectedSize)
       const response = await fetch('/api/comfyui/generate', {
         method: 'POST',
@@ -225,7 +219,6 @@ export default function ImageGeneratorPage() {
       
       if (data.success) {
         const jobId = data.job_id || data.prompt_id
-        console.log('Received job ID:', jobId, 'Full response:', data)
         
         // 백엔드에서 즉시 완료된 이미지를 반환한 경우
         if (data.status === 'completed' && data.image_url) {
@@ -255,7 +248,6 @@ export default function ImageGeneratorPage() {
           
           setImages(prev => [newImage, ...prev])
           setPrompt("")
-          console.log('Image added to gallery:', newImage)
           return
         }
         
