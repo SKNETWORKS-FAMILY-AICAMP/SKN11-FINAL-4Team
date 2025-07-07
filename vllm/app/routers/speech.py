@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 import logging
 
 from app.models import (
@@ -6,8 +6,8 @@ from app.models import (
     VLLMQuestionRequest, VLLMQuestionResponse, VLLMBatchQuestionRequest, VLLMBatchQuestionResponse,
     VLLMToneRequest, VLLMToneResponse, VLLMBatchToneRequest, VLLMBatchToneResponse
 )
-from app.core import speech_generator
-from pipeline.speech_generator import CharacterProfile # CharacterProfile은 pipeline.speech_generator에서 가져옴
+from app.core import get_speech_generator
+from pipeline.speech_generator import SpeechGenerator, CharacterProfile
 
 logger = logging.getLogger(__name__)
 
@@ -15,19 +15,13 @@ router = APIRouter()
 
 @router.post("/generate_qa", response_model=VLLMQAGenerationResponse)
 async def generate_qa_for_character_vllm_endpoint(
-    character_profile: VLLMCharacterProfile
+    character_profile: VLLMCharacterProfile,
+    speech_generator: SpeechGenerator = Depends(get_speech_generator)
 ):
-    logger.info(f"🔍 generate_qa endpoint 호출됨. speech_generator: {id(speech_generator) if speech_generator else 'None'}, type: {type(speech_generator)}")
+    logger.info(f"🔍 /generate_qa endpoint called. speech_generator id: {id(speech_generator)}")
     """
     캐릭터 프로필에 대한 질문과 3가지 톤 변형 응답을 생성합니다.
     """
-    if not speech_generator:
-        logger.error("❌ Speech Generator가 활성화되지 않았습니다. OPENAI_API_KEY를 확인해주세요. (generate_qa endpoint)")
-        raise HTTPException(
-            status_code=503, 
-            detail="Speech Generator가 활성화되지 않았습니다. OPENAI_API_KEY를 설정해주세요."
-        )
-    
     try:
         # Pydantic 모델을 dataclass로 변환
         vllm_char_profile = CharacterProfile(
@@ -61,17 +55,12 @@ async def generate_qa_for_character_vllm_endpoint(
 
 @router.post("/generate_qa_batch", response_model=VLLMBatchQAResponse)
 async def generate_qa_batch_for_characters(
-    batch_request: VLLMBatchQARequest
+    batch_request: VLLMBatchQARequest,
+    speech_generator: SpeechGenerator = Depends(get_speech_generator)
 ):
     """
     여러 캠릭터 프로필에 대한 질문과 응답을 배치로 생성합니다.
     """
-    if not speech_generator:
-        raise HTTPException(
-            status_code=503, 
-            detail="Speech Generator가 활성화되지 않았습니다. OPENAI_API_KEY를 설정해주세요."
-        )
-    
     results = []
     errors = []
     success_count = 0
@@ -122,17 +111,12 @@ async def generate_qa_batch_for_characters(
 
 @router.post("/generate_questions", response_model=VLLMQuestionResponse)
 async def generate_questions_only(
-    request: VLLMQuestionRequest
+    request: VLLMQuestionRequest,
+    speech_generator: SpeechGenerator = Depends(get_speech_generator)
 ):
     """
     캐릭터 프로필에 대한 질문만 생성합니다.
     """
-    if not speech_generator:
-        raise HTTPException(
-            status_code=503, 
-            detail="Speech Generator가 활성화되지 않았습니다. OPENAI_API_KEY를 설정해주세요."
-        )
-    
     try:
         # Pydantic 모델을 dataclass로 변환
         character_profile = CharacterProfile(
@@ -160,17 +144,12 @@ async def generate_questions_only(
 
 @router.post("/generate_questions_batch", response_model=VLLMBatchQuestionResponse)
 async def generate_questions_batch(
-    batch_request: VLLMBatchQuestionRequest
+    batch_request: VLLMBatchQuestionRequest,
+    speech_generator: SpeechGenerator = Depends(get_speech_generator)
 ):
     """
     여러 캠릭터 프로필에 대한 질문만 배치로 생성합니다.
     """
-    if not speech_generator:
-        raise HTTPException(
-            status_code=503, 
-            detail="Speech Generator가 활성화되지 않았습니다. OPENAI_API_KEY를 설정해주세요."
-        )
-    
     results = []
     errors = []
     success_count = 0
@@ -214,17 +193,12 @@ async def generate_questions_batch(
 
 @router.post("/generate_tones", response_model=VLLMToneResponse)
 async def generate_tones_only(
-    request: VLLMToneRequest
+    request: VLLMToneRequest,
+    speech_generator: SpeechGenerator = Depends(get_speech_generator)
 ):
     """
     주어진 질문들에 대한 말투 변형 응답만 생성합니다.
     """
-    if not speech_generator:
-        raise HTTPException(
-            status_code=503, 
-            detail="Speech Generator가 활성화되지 않았습니다. OPENAI_API_KEY를 설정해주세요."
-        )
-    
     try:
         # Pydantic 모델을 dataclass로 변환
         character_profile = CharacterProfile(
@@ -258,17 +232,12 @@ async def generate_tones_only(
 
 @router.post("/generate_tones_batch", response_model=VLLMBatchToneResponse)
 async def generate_tones_batch(
-    batch_request: VLLMBatchToneRequest
+    batch_request: VLLMBatchToneRequest,
+    speech_generator: SpeechGenerator = Depends(get_speech_generator)
 ):
     """
     여러 말투 요청을 배치로 처리합니다.
     """
-    if not speech_generator:
-        raise HTTPException(
-            status_code=503, 
-            detail="Speech Generator가 활성화되지 않았습니다. OPENAI_API_KEY를 설정해주세요."
-        )
-    
     results = []
     errors = []
     success_count = 0

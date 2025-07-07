@@ -49,20 +49,32 @@ async def get_available_gpu_memory_mb() -> int:
         return 0
 
 
+from fastapi import HTTPException
+
 # 전역 변수
 engine: AsyncLLMEngine = None
 tokenizer = None  # 토크나이저 전역 변수 추가
 loaded_adapters: Dict[str, Dict[str, Any]] = {}
 finetuning_tasks: Dict[str, Dict[str, Any]] = {}  # 파인튜닝 작업 저장
 finetuning_queue: asyncio.Queue = None # 파인튜닝 작업을 위한 큐
-speech_generator: SpeechGenerator = None
 
 # 환경 변수
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-if OPENAI_API_KEY:
-    logger.info("✅ OPENAI_API_KEY 환경 변수가 설정되었습니다.")
-else:
-    logger.warning("⚠️ OPENAI_API_KEY 환경 변수가 설정되지 않았습니다. Speech Generator 기능이 제한될 수 있습니다.")
+FINETUNING_WEBHOOK_URL = os.getenv("FINETUNING_WEBHOOK_URL")
+
+def get_speech_generator() -> SpeechGenerator:
+    """
+    SpeechGenerator 인스턴스를 생성하고 반환하는 의존성 주입 함수.
+    OPENAI_API_KEY가 설정되지 않은 경우 HTTPException을 발생시킵니다.
+    """
+    if not OPENAI_API_KEY:
+        logger.error("❌ Speech Generator를 초기화할 수 없습니다. OPENAI_API_KEY가 설정되지 않았습니다.")
+        raise HTTPException(
+            status_code=503,
+            detail="Speech Generator is not available due to missing OPENAI_API_KEY."
+        )
+    logger.info("✅ SpeechGenerator 인스턴스 생성")
+    return SpeechGenerator(api_key=OPENAI_API_KEY)
 FINETUNING_WEBHOOK_URL = os.getenv("FINETUNING_WEBHOOK_URL")
 
 async def send_finetuning_webhook(task_id: str, status: str, hf_model_url: Optional[str] = None, error_message: Optional[str] = None):
@@ -248,17 +260,10 @@ async def finetuning_worker():
             finetuning_queue.task_done()
 
 async def initialize_vllm_engine():
-    global engine, speech_generator, tokenizer
+    global engine, tokenizer
     logger.info("🚀 vLLM LoRA 엔진 초기화 중...")
     
     try:
-        # Speech Generator 먼저 초기화 (vLLM 엔진과 독립적)
-        if OPENAI_API_KEY:
-            speech_generator = SpeechGenerator(api_key=OPENAI_API_KEY)
-            logger.info("✅ Speech Generator 초기화 완료")
-        else:
-            logger.warning("⚠️ OPENAI_API_KEY가 설정되지 않아 Speech Generator 기능이 비활성화됩니다. /speech 엔드포인트가 작동하지 않습니다.")
-        
         # 토크나이저 초기화 (chat template 사용을 위해)
         try:
             from transformers import AutoTokenizer
