@@ -310,6 +310,17 @@ export class AdminService {
   }
 
   /**
+   * 허깅페이스 토큰 수정 (관리자만)
+   */
+  static async updateHFToken(tokenId: string, data: {
+    hf_token_nickname?: string
+    hf_user_name?: string
+    hf_token_value?: string
+  }): Promise<AdminHFToken> {
+    return await apiClient.put<AdminHFToken>(`/api/v1/admin/hf-tokens/${tokenId}`, data)
+  }
+
+  /**
    * 관리자용 팀 목록 조회 (토큰 할당용, 추가 정보 포함)
    */
   static async getAdminTeams(): Promise<AdminTeamInfo[]> {

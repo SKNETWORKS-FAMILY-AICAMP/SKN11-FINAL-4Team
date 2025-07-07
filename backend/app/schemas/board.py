@@ -9,17 +9,26 @@ class BoardBase(BaseModel):
     influencer_id: str
     user_id: str
     team_id: int
+    group_id: int
     board_topic: str
     board_description: Optional[str] = None
     board_platform: int
     board_hash_tag: Optional[str] = None
     board_status: int = 1
     image_url: str
-    published_at: Optional[datetime] = None
 
 
-class BoardCreate(BoardBase):
-    pass
+class BoardCreate(BaseModel):
+    influencer_id: str
+    team_id: int
+    board_topic: str
+    board_description: Optional[str] = None
+    board_platform: int
+    board_hash_tag: Optional[str] = None
+    board_status: int = 1
+    image_url: str
+    scheduled_at: Optional[str] = None  # 예약 발행 시간 (ISO 형식 문자열)
+    # user_id와 published_at는 제외 (백엔드에서 자동으로 설정됨)
 
 
 class BoardUpdate(BaseModel):
@@ -29,7 +38,6 @@ class BoardUpdate(BaseModel):
     board_hash_tag: Optional[str] = None
     board_status: Optional[int] = None
     image_url: Optional[str] = None
-    published_at: Optional[datetime] = None
 
 
 class Board(BoardBase, TimestampSchema):
@@ -59,8 +67,8 @@ class AIContentGenerationRequest(BaseModel):
     image_width: int = 1024
     image_height: int = 1024
     
-    # 예약 발행 (옵션)
-    reservation_at: Optional[datetime] = None
+    # 예약 발행 (옵션) - 나중에 구현
+    # reservation_at: Optional[datetime] = None
 
 
 class AIContentGenerationResponse(BaseModel):

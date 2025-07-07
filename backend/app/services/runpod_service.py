@@ -30,7 +30,7 @@ class RunPodPodResponse(BaseModel):
     """RunPod 인스턴스 정보"""
     pod_id: str
     status: str  # STARTING, RUNNING, STOPPED, FAILED
-    runtime: Dict[str, Any]
+    runtime: Optional[Dict[str, Any]] = None
     endpoint_url: Optional[str] = None
     cost_per_hour: Optional[float] = None
 
@@ -40,61 +40,109 @@ class RunPodService:
     
     def __init__(self):
         self.api_key = settings.RUNPOD_API_KEY
-        self.base_url = "https://api.runpod.ai/graphql"
+        self.base_url = "https://api.runpod.io/graphql"
         self.template_id = settings.RUNPOD_TEMPLATE_ID
-        self.use_mock = not bool(self.api_key and self.template_id)
         
-        logger.info(f"RunPod Service initialized (Mock mode: {self.use_mock})")
+        # Mock 모드 제거 - 실제 API 키가 없으면 오류 발생
+        if not self.api_key or not self.template_id:
+            raise ValueError(
+                f"RunPod 설정이 필요합니다: "
+                f"API_KEY={'설정됨' if self.api_key else '없음'}, "
+                f"TEMPLATE_ID={'설정됨' if self.template_id else '없음'}"
+            )
+        
+        logger.info(f"RunPod Service initialized (API Key: {'***' + self.api_key[-4:] if len(self.api_key) > 4 else '***'}, Template: {self.template_id})")
     
     async def create_pod(self, request_id: str) -> RunPodPodResponse:
         """ComfyUI 서버 인스턴스 생성"""
         
-        if self.use_mock:
-            return await self._create_mock_pod(request_id)
-        
         try:
-            # GraphQL 쿼리 - Pod 생성
-            mutation = """
-            mutation podRentInterruptable($input: PodRentInterruptableInput!) {
-                podRentInterruptable(input: $input) {
-                    id
-                    desiredStatus
-                    runtime {
-                        uptimeInSeconds
-                        ports {
-                            ip
-                            isIpPublic
-                            privatePort
-                            publicPort
+            # 커스텀 템플릿 사용 여부 확인
+            if self.template_id:
+                # 커스텀 템플릿을 사용한 Pod 생성
+                mutation = """
+                mutation podRentInterruptable($input: PodRentInterruptableInput!) {
+                    podRentInterruptable(input: $input) {
+                        id
+                        desiredStatus
+                        runtime {
+                            uptimeInSeconds
+                            ports {
+                                ip
+                                isIpPublic
+                                privatePort
+                                publicPort
+                            }
+                        }
+                        machine {
+                            podHostId
                         }
                     }
-                    machine {
-                        podHostId
+                }
+                """
+                
+                variables = {
+                    "input": {
+                        "bidPerGpu": 0.3,  # 시간당 최대 비용 (USD)
+                        "gpuCount": 1,
+                        "volumeInGb": 50,  # 커스텀 모델용 볼륨
+                        "containerDiskInGb": 30,
+                        "minVcpuCount": 4,
+                        "minMemoryInGb": 20,
+                        "gpuTypeId": settings.RUNPOD_GPU_TYPE,
+                        "name": f"custom-comfyui-{request_id[:8]}",
+                        "templateId": self.template_id,  # 커스텀 템플릿 ID 사용
+                        "ports": "8188/http,7860/http,22/tcp",  # 추가 포트
+                        "env": [
+                            {"key": "RUNPOD_AI_API_KEY", "value": "your-api-key"},
+                            {"key": "COMFYUI_FLAGS", "value": "--listen 0.0.0.0 --port 8188"},
+                            {"key": "AUTO_DOWNLOAD_MODELS", "value": "true"}
+                        ]
                     }
                 }
-            }
-            """
-            
-            variables = {
-                "input": {
-                    "bidPerGpu": 0.2,  # 시간당 최대 비용 (USD)
-                    "gpuCount": 1,
-                    "volumeInGb": 0,
-                    "containerDiskInGb": 50,
-                    "minVcpuCount": 2,
-                    "minMemoryInGb": 15,
-                    "gpuTypeId": settings.RUNPOD_GPU_TYPE,
-                    "name": f"comfyui-{request_id[:8]}",
-                    "imageName": "runpod/comfyui:latest",  # ComfyUI 이미지
-                    "dockerArgs": "",
-                    "ports": "8188/http",
-                    "volumeMountPath": "/workspace",
-                    "env": [
-                        {"key": "JUPYTER_PASSWORD", "value": "rp123456789"},
-                        {"key": "ENABLE_TENSORBOARD", "value": "1"}
-                    ]
+            else:
+                # 기본 ComfyUI 이미지 사용 (폴백)
+                mutation = """
+                mutation podRentInterruptable($input: PodRentInterruptableInput!) {
+                    podRentInterruptable(input: $input) {
+                        id
+                        desiredStatus
+                        runtime {
+                            uptimeInSeconds
+                            ports {
+                                ip
+                                isIpPublic
+                                privatePort
+                                publicPort
+                            }
+                        }
+                        machine {
+                            podHostId
+                        }
+                    }
                 }
-            }
+                """
+                
+                variables = {
+                    "input": {
+                        "bidPerGpu": 0.2,  # 시간당 최대 비용 (USD)
+                        "gpuCount": 1,
+                        "volumeInGb": 0,
+                        "containerDiskInGb": 50,
+                        "minVcpuCount": 2,
+                        "minMemoryInGb": 15,
+                        "gpuTypeId": settings.RUNPOD_GPU_TYPE,
+                        "name": f"comfyui-{request_id[:8]}",
+                        "imageName": "runpod/comfyui:latest",  # 기본 ComfyUI 이미지
+                        "dockerArgs": "",
+                        "ports": "8188/http",
+                        "volumeMountPath": "/workspace",
+                        "env": [
+                            {"key": "JUPYTER_PASSWORD", "value": "rp123456789"},
+                            {"key": "ENABLE_TENSORBOARD", "value": "1"}
+                        ]
+                    }
+                }
             
             headers = {
                 "Content-Type": "application/json",
@@ -128,7 +176,8 @@ class RunPodService:
                     if pod_data.get("runtime") and pod_data["runtime"].get("ports"):
                         for port in pod_data["runtime"]["ports"]:
                             if port["privatePort"] == 8188:
-                                endpoint_url = f"https://{port['ip']}:{port['publicPort']}"
+                                # ComfyUI는 HTTP 프로토콜 사용
+                                endpoint_url = f"http://{port['ip']}:{port['publicPort']}"
                                 break
                     
                     return RunPodPodResponse(
@@ -141,14 +190,10 @@ class RunPodService:
                     
         except Exception as e:
             logger.error(f"RunPod 인스턴스 생성 실패: {e}")
-            # 실패 시 Mock 모드로 fallback
-            return await self._create_mock_pod(request_id)
+            raise RuntimeError(f"RunPod Pod 생성 실패: {e}")
     
     async def get_pod_status(self, pod_id: str) -> RunPodPodResponse:
         """Pod 상태 조회"""
-        
-        if self.use_mock:
-            return await self._get_mock_pod_status(pod_id)
         
         try:
             # GraphQL 쿼리 - Pod 상태 조회
@@ -205,7 +250,8 @@ class RunPodService:
                     if pod_data.get("runtime") and pod_data["runtime"].get("ports"):
                         for port in pod_data["runtime"]["ports"]:
                             if port["privatePort"] == 8188:
-                                endpoint_url = f"https://{port['ip']}:{port['publicPort']}"
+                                # ComfyUI는 HTTP 프로토콜 사용
+                                endpoint_url = f"http://{port['ip']}:{port['publicPort']}"
                                 break
                     
                     return RunPodPodResponse(
@@ -217,14 +263,10 @@ class RunPodService:
                     
         except Exception as e:
             logger.error(f"RunPod 상태 조회 실패: {e}")
-            return await self._get_mock_pod_status(pod_id)
+            raise RuntimeError(f"RunPod 상태 조회 실패: {e}")
     
     async def terminate_pod(self, pod_id: str) -> bool:
         """Pod 종료 (강화된 로직)"""
-        
-        if self.use_mock:
-            logger.info(f"Mock 모드: Pod {pod_id} 종료 시뮬레이션")
-            return True
         
         if not pod_id:
             logger.error("Pod ID가 제공되지 않음")
@@ -354,28 +396,6 @@ class RunPodService:
         except:
             return False
     
-    # Mock 메서드들
-    async def _create_mock_pod(self, request_id: str) -> RunPodPodResponse:
-        """Mock Pod 생성"""
-        pod_id = f"mock-pod-{request_id[:8]}"
-        logger.info(f"Mock RunPod 인스턴스 생성: {pod_id}")
-        
-        return RunPodPodResponse(
-            pod_id=pod_id,
-            status="RUNNING",
-            runtime={"uptimeInSeconds": 0},
-            endpoint_url="http://mock-comfyui-server:8188",
-            cost_per_hour=0.0
-        )
-    
-    async def _get_mock_pod_status(self, pod_id: str) -> RunPodPodResponse:
-        """Mock Pod 상태"""
-        return RunPodPodResponse(
-            pod_id=pod_id,
-            status="RUNNING",
-            runtime={"uptimeInSeconds": 300},
-            endpoint_url="http://mock-comfyui-server:8188"
-        )
 
 
 # 싱글톤 패턴

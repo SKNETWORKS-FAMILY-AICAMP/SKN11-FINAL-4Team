@@ -71,38 +71,86 @@ export default function CreateModelPage() {
   const [loadingTokens, setLoadingTokens] = useState(false)
 
   useEffect(() => {
-    // 실제 API 호출로 프리셋 데이터 가져오기
-    const fetchPresets = async () => {
+    // 실제 API에서 프리셋 데이터 가져오기
+    const fetchStylePresets = async () => {
       setLoadingPresets(true);
+      console.log('🔄 프리셋 데이터 로드 시작...');
+      
       try {
+        console.log('📡 API 호출: ModelService.getStylePresets()');
         const presets = await ModelService.getStylePresets();
+        console.log('✅ 프리셋 데이터 로드 성공:', presets);
         setStylePresets(presets);
       } catch (error) {
-        console.error("Failed to fetch style presets:", error);
-        alert("프리셋을 불러오는 데 실패했습니다.");
+        console.error('❌ 프리셋 데이터 로드 실패:', error);
+        console.error('오류 상세 정보:', {
+          name: error instanceof Error ? error.name : 'Unknown',
+          message: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : 'No stack trace'
+        });
+        
+        // 사용자에게 에러 알림
+        const errorMessage = error instanceof Error ? error.message : '알 수 없는 오류';
+        alert(`프리셋 데이터를 불러오는데 실패했습니다.\n\n오류: ${errorMessage}\n\n기본 프리셋을 사용합니다.`);
+        
+        // 에러 발생 시 기본 프리셋 데이터 사용
+        setStylePresets([
+          {
+            style_preset_id: "preset1",
+            style_preset_name: "밝고 긍정적인 캐릭터",
+            influencer_type: 1,
+            influencer_gender: 1,
+            influencer_age_group: 2,
+            influencer_hairstyle: "긴 생머리",
+            influencer_style: "밝고 경쾌한",
+            influencer_personality: "밝고 긍정적",
+            influencer_speech: "존댓말"
+          },
+          {
+            style_preset_id: "preset2",
+            style_preset_name: "차분하고 신중한 사람형",
+            influencer_type: 2,
+            influencer_gender: 0,
+            influencer_age_group: 3,
+            influencer_hairstyle: "단정한 숏컷",
+            influencer_style: "차분하고 신뢰감 있는",
+            influencer_personality: "차분하고 신중함",
+            influencer_speech: "공손함"
+          }
+        ]);
       } finally {
         setLoadingPresets(false);
+        console.log('🏁 프리셋 데이터 로드 완료');
       }
     };
 
-    // 허깅페이스 토큰 목록 가져오기
-    const fetchHuggingFaceTokens = async () => {
-      if (!user?.teams?.[0]?.group_id) return;
-      
-      setLoadingTokens(true);
-      try {
-        const tokens = await ModelService.getHuggingFaceTokens(user.teams[0].group_id);
-        setHuggingFaceTokens(tokens);
-      } catch (error) {
-        console.error("Failed to fetch HuggingFace tokens:", error);
-      } finally {
-        setLoadingTokens(false);
-      }
-    };
+    fetchStylePresets();
+  }, [])
 
-    fetchPresets();
-    fetchHuggingFaceTokens();
-  }, [user]);
+  useEffect(() => {
+    if (formData.imageMethod === "prompt" && pendingPreset) {
+      setFormData(prev => ({
+        ...prev,
+        modelType: pendingPreset.influencer_type === 1 ? "character" : 
+                   pendingPreset.influencer_type === 2 ? "human" : 
+                   pendingPreset.influencer_type === 3 ? "objects" : "",
+        hairStyle: pendingPreset.influencer_hairstyle ?? "",
+        mood: pendingPreset.influencer_style ?? "",
+        personality: pendingPreset.influencer_personality ?? "",
+        customTones: pendingPreset.influencer_speech ? [pendingPreset.influencer_speech] : [],
+        tone: "",
+        mbti: "", // MBTI는 별도로 설정 필요
+        gender: pendingPreset.influencer_gender === 0 ? "male" : 
+                pendingPreset.influencer_gender === 1 ? "female" : "other",
+        age: pendingPreset.influencer_age_group === 1 ? "10" :
+             pendingPreset.influencer_age_group === 2 ? "20" :
+             pendingPreset.influencer_age_group === 3 ? "30" :
+             pendingPreset.influencer_age_group === 4 ? "40" :
+             pendingPreset.influencer_age_group === 5 ? "50" : "",
+      }));
+      setPendingPreset(null);
+    }
+  }, [formData.imageMethod, pendingPreset]);
 
   // 성격(personality)이 바뀌면 추천 말투 숨김
   useEffect(() => {
@@ -182,18 +230,14 @@ export default function CreateModelPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     
-    // 공통 필수 필드 검증
-    if (!formData.name.trim()) {
-      alert("AI 인플루언서 이름을 입력해주세요.");
-      return;
-    }
-    if (!formData.description.trim()) {
-      alert("설명을 입력해주세요.");
-      return;
-    }
-
-    // 직접 입력 모드일 때만 추가 검증
-    if (formData.selectedPresetId === "manual") {
+    // 프리셋 모드 검증
+    if (formData.selectedPresetId && formData.selectedPresetId !== "manual") {
+      if (!formData.selectedPresetId) {
+        alert("프리셋을 선택해주세요.")
+        return
+      }
+    } else {
+      // 직접 입력 모드 검증
       if (!formData.modelType) {
         alert("모델 유형을 선택해주세요.");
         return;
@@ -617,9 +661,14 @@ export default function CreateModelPage() {
                 <Select
                   value={formData.selectedPresetId || "manual"}
                   onValueChange={presetId => handlePresetSelect(presetId)}
+                  disabled={loadingPresets}
                 >
                   <SelectTrigger className="w-full">
-                    <SelectValue placeholder="프리셋을 선택하면 아래 입력란이 자동으로 채워집니다" />
+                    <SelectValue placeholder={
+                      loadingPresets 
+                        ? "프리셋 로딩 중..." 
+                        : "프리셋을 선택하면 아래 입력란이 자동으로 채워집니다"
+                    } />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="manual">직접 입력</SelectItem>
@@ -630,6 +679,9 @@ export default function CreateModelPage() {
                     ))}
                   </SelectContent>
                 </Select>
+                {loadingPresets && (
+                  <p className="text-xs text-gray-500 mt-1">프리셋 데이터를 불러오는 중...</p>
+                )}
               </div>
               {/* 아래 입력란은 항상 노출, 프리셋 선택 시 값만 자동 채움 */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -956,9 +1008,19 @@ export default function CreateModelPage() {
             </CardContent>
           </Card>
 
-          <Button type="submit" disabled={isLoading}>
-            {isLoading ? '생성 중...' : '생성하기'}
-          </Button>
+          <div className="flex justify-end gap-4">
+            <Button 
+              type="button" 
+              variant="outline" 
+              onClick={() => router.push("/dashboard")}
+              disabled={isLoading}
+            >
+              취소
+            </Button>
+            <Button type="submit" disabled={isLoading} className="bg-blue-600 hover:bg-blue-700 text-white">
+              {isLoading ? '생성 중...' : '생성하기'}
+            </Button>
+          </div>
         </form>
       </div>
     </div>

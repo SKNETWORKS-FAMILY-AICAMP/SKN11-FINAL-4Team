@@ -173,13 +173,32 @@ async def multi_chat(request: MultiChatRequest, db: Session = Depends(get_db), c
             logger.info(f"Loading base model: {base_model_name}")
             
             try:
+                # GPU 사용 가능 여부 확인
+                import torch
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+                logger.info(f"Using device: {device}")
+                
+                # GPU 메모리 최적화 설정
+                if device == "cuda":
+                    # GPU 메모리 캐시 정리
+                    torch.cuda.empty_cache()
+                    logger.info(f"GPU memory before loading: {torch.cuda.memory_allocated() / 1024**3:.2f} GB")
+                
                 base_model = AutoModelForCausalLM.from_pretrained(
-                    base_model_name, trust_remote_code=True, token=decrypted_token
+                    base_model_name, 
+                    trust_remote_code=True, 
+                    token=decrypted_token,
+                    device_map="auto" if device == "cuda" else None,  # GPU 자동 매핑
+                    torch_dtype=torch.float16 if device == "cuda" else torch.float32  # GPU에서 half precision 사용
                 )
                 tokenizer = AutoTokenizer.from_pretrained(
                     base_model_name, trust_remote_code=True, token=decrypted_token
                 )
-                logger.info(f"Successfully loaded base model and tokenizer")
+                logger.info(f"Successfully loaded base model and tokenizer on {device}")
+                
+                # GPU 메모리 사용량 로깅
+                if device == "cuda":
+                    logger.info(f"GPU memory after loading: {torch.cuda.memory_allocated() / 1024**3:.2f} GB")
             except Exception as base_model_error:
                 logger.error(f"Failed to load base model: {base_model_error}")
                 results.append(
@@ -279,9 +298,14 @@ async def multi_chat(request: MultiChatRequest, db: Session = Depends(get_db), c
             logger.info(f"Generating text for influencer {influencer_info.influencer_id}")
             try:
                 inputs = tokenizer(full_input, return_tensors="pt")
+                
+                # GPU 사용 시 입력을 GPU로 이동
+                if device == "cuda":
+                    inputs = {k: v.to(device) for k, v in inputs.items()}
+                
                 outputs = model.generate(**inputs, max_new_tokens=100)
                 full_response = tokenizer.decode(outputs[0], skip_special_tokens=True)
-                logger.info(f"Successfully generated text for influencer {influencer_info.influencer_id}")
+                logger.info(f"Successfully generated text for influencer {influencer_info.influencer_id} on {device}")
                 
                 # 시스템 프롬프트와 사용자 메시지 제거하여 순수 응답만 추출
                 logger.info(f"Full response: {full_response}")
@@ -292,7 +316,7 @@ async def multi_chat(request: MultiChatRequest, db: Session = Depends(get_db), c
                 
                 # 1. 어시스턴트 응답 마커로 정확한 응답 부분 추출
                 assistant_markers = [
-                    "어시스턴트:", "Assistant:", "assistant:", 
+                    "[|assistant|]", "[|Assistant|]", "어시스턴트:", "Assistant:", "assistant:", 
                     "AI:", "ai:", "답변:", "응답:"
                 ]
                 
@@ -335,10 +359,13 @@ async def multi_chat(request: MultiChatRequest, db: Session = Depends(get_db), c
                 
                 # 정확한 시스템 프롬프트 패턴만 제거
                 exact_system_patterns = [
-                    r"^너는.*?AI 인플루언서야\.\s*",  # 시작 부분의 시스템 프롬프트
+                    r"^\[\\|system\\|\].*?AI 인플루언서야\.\s*",  # [|system|] 시작 부분
+                    r"^너는.*?AI 인플루언서야\.\s*",  # 기존 시작 부분의 시스템 프롬프트
+                    r"\[\\|system\\|\].*?AI 인플루언서야\.\s*",  # [|system|] 포함된 패턴
                     r"설명:.*?\n",  # 설명 라인
                     r"성격:.*?\n",  # 성격 라인
                     r"한국어로만 대답해\.\s*",  # 언어 지시
+                    r"\[\\|user\\|\].*?\n",  # [|user|] 패턴 제거
                 ]
                 
                 for pattern in exact_system_patterns:

@@ -90,7 +90,7 @@ class BatchMonitor:
 
             # 상태에 따른 처리
             if current_status == 'completed':
-                await self._handle_completed_batch(batch_key, db, batch_status)
+                await self._handle_completed_batch(batch_key, batch_status, db)
             elif current_status == 'failed':
                 await self._handle_failed_batch(batch_key, batch_status, db)
             elif current_status in ['validating', 'in_progress']:

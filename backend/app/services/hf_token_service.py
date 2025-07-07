@@ -171,7 +171,14 @@ class HFTokenService:
             수정된 토큰 관리 객체
         """
         try:
-            token = self.get_hf_token_by_id(db, hf_manage_id, current_user)
+            # 관리자 권한 확인 (토큰 수정은 관리자만 가능)
+            if not self._check_admin_permission(db, current_user):
+                raise Exception("토큰 수정은 관리자만 가능합니다")
+            
+            # 토큰 존재 확인
+            token = db.query(HFTokenManage).filter(
+                HFTokenManage.hf_manage_id == hf_manage_id
+            ).first()
             if not token:
                 raise Exception("토큰을 찾을 수 없습니다")
             
@@ -226,7 +233,14 @@ class HFTokenService:
             삭제 성공 여부
         """
         try:
-            token = self.get_hf_token_by_id(db, hf_manage_id, current_user)
+            # 관리자 권한 확인 (토큰 삭제는 관리자만 가능)
+            if not self._check_admin_permission(db, current_user):
+                raise Exception("토큰 삭제는 관리자만 가능합니다")
+            
+            # 토큰 존재 확인
+            token = db.query(HFTokenManage).filter(
+                HFTokenManage.hf_manage_id == hf_manage_id
+            ).first()
             if not token:
                 raise Exception("토큰을 찾을 수 없습니다")
             
