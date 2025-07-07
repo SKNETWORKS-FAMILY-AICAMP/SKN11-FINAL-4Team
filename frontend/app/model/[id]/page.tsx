@@ -220,7 +220,7 @@ function ModelDetailContent() {
   const loadModelData = async () => {
     setIsModelLoading(true)
     try {
-      const data = await ModelService.getInfluencer(params.id)
+      const data = await ModelService.getInfluencer(params.id as string)
       setModel({
         ...data,
         id: data.influencer_id,
@@ -253,7 +253,6 @@ function ModelDetailContent() {
     try {
       const updatedData = await ModelService.updateInfluencer(params.id as string, {
         influencer_name: model.name,
-        influencer_description: model.description,
       })
       setModel((prev: any) => ({
         ...prev,
@@ -325,7 +324,7 @@ function ModelDetailContent() {
           
           try {
             // 백엔드에 code 전송하여 토큰 교환 및 계정 연동
-            const data = await ModelService.connectInstagram(params.id, {
+            const data = await ModelService.connectInstagram(params.id as string, {
               instagram_access_token: code,
               instagram_user_id: '',
               instagram_username: '',
@@ -378,7 +377,7 @@ function ModelDetailContent() {
   const handleInstagramDisconnect = async () => {
     try {
       // API 호출하여 Instagram 연동 해제
-      await ModelService.disconnectInstagram(params.id)
+      await ModelService.disconnectInstagram(params.id as string)
       
       setInstagramStatus({
         is_connected: false
@@ -414,7 +413,7 @@ function ModelDetailContent() {
           } else {
             // API로 추가 확인 (기존 방식 유지)
             try {
-              const data = await ModelService.getInstagramStatus(params.id)
+              const data = await ModelService.getInstagramStatus(params.id as string)
               setInstagramStatus({
                 is_connected: data.connected,
                 instagram_info: data.instagram_username ? {

@@ -368,7 +368,6 @@ export default function CreateModelPage() {
     
     try {
       const request: ToneGenerationRequest = {
-        influencer_id: "temp_influencer_id", // 임시 ID, 실제 인플루언서 ID는 생성 후 저장
         personality: personality,
         name: formData.name || undefined,
         description: formData.description || undefined,

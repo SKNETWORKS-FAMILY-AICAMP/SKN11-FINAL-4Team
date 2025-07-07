@@ -3,10 +3,10 @@ import { NextRequest, NextResponse } from 'next/server'
 // 특정 이미지 삭제
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { imageId: string } }
+  { params }: { params: Promise<{ imageId: string }> }
 ) {
   try {
-    const imageId = params.imageId
+    const { imageId } = await params
     
     if (!imageId) {
       return NextResponse.json(
@@ -41,10 +41,10 @@ export async function DELETE(
 // 특정 이미지 정보 가져오기
 export async function GET(
   request: NextRequest,
-  { params }: { params: { imageId: string } }
+  { params }: { params: Promise<{ imageId: string }> }
 ) {
   try {
-    const imageId = params.imageId
+    const { imageId } = await params
     
     if (!imageId) {
       return NextResponse.json(

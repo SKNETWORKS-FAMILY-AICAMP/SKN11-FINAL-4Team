@@ -569,7 +569,7 @@ export default function ImageGeneratorPage() {
           image: uploadedImageUrl,
           mask: maskData,
           prompt: inpaintPrompt,
-          model: selectedModel,
+          model: 'default', // 워크플로우에서 정의된 모델 사용
           steps,
           cfg_scale: cfgScale
         })
@@ -727,8 +727,8 @@ export default function ImageGeneratorPage() {
                         </Select>
                         {selectedWorkflow && (
                           <p className="text-sm text-gray-600 mt-1">
-                            {Array.isArray(workflows) ? workflows.find(w => w.id === selectedWorkflow)?.description : null || 
-                             (selectedWorkflow === 'custom_workflow' ? '커스텀 워크플로우가 자동으로 선택되었습니다.' : '')}
+                            {Array.isArray(workflows) ? workflows.find(w => w.id === selectedWorkflow)?.description || 
+                             (selectedWorkflow === 'custom_workflow' ? '커스텀 워크플로우가 자동으로 선택되었습니다.' : '') : ''}
                           </p>
                         )}
                       </div>
@@ -803,7 +803,7 @@ export default function ImageGeneratorPage() {
                       <div className="space-y-2 text-sm">
                         <div className="flex justify-between">
                           <span className="text-gray-600">워크플로우:</span>
-                          <span className="font-medium">{Array.isArray(workflows) ? workflows.find(w => w.id === selectedWorkflow)?.name : null || '기본'}</span>
+                          <span className="font-medium">{Array.isArray(workflows) ? workflows.find(w => w.id === selectedWorkflow)?.name || '기본' : '기본'}</span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-gray-600">스타일:</span>

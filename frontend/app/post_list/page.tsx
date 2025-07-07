@@ -362,7 +362,7 @@ function PostListContent() {
   // 고유한 모델 목록 추출
   const uniqueModels = Array.from(new Set(posts.map(post => post.modelName)))
   // 고유한 플랫폼 목록 추출
-  const uniquePlatforms = Array.from(new Set(posts.map(post => post.platform)))
+  const uniquePlatforms = Array.from(new Set(posts.map(post => post.platform).filter(Boolean))) as string[]
 
   const filteredPosts = posts.filter((post) => {
     const matchesSearch = 
@@ -372,7 +372,7 @@ function PostListContent() {
     
     const matchesStatus = statusFilter === "all" || post.status === statusFilter
     const matchesModel = modelFilter === "all" || post.modelName === modelFilter
-    const matchesPlatform = platformFilter.length === 0 || platformFilter.includes(post.platform)
+    const matchesPlatform = platformFilter.length === 0 || (post.platform && platformFilter.includes(post.platform))
     return matchesSearch && matchesStatus && matchesModel && matchesPlatform
   })
 
