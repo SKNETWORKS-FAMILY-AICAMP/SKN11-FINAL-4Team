@@ -20,53 +20,17 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
 # Hugging Face 토큰 및 repo_id 설정 (환경 변수에서 가져오기)
-HF_TOKEN = os.getenv("HF_TOKEN")
-HF_REPO_ID = os.getenv("HF_REPO_ID", "Snowfall0601/Exaone-lucio_finetuned")  # 기본값 설정
 
-if not HF_TOKEN:
-    print("WARNING: HF_TOKEN 환경 변수가 설정되지 않았습니다. 업로드를 건너뜁니다.")
-print(f"업로드 대상 저장소: {HF_REPO_ID}")
 
 class ExaoneDataPreprocessor:
     def __init__(self, tokenizer, max_length=2048):
         self.tokenizer = tokenizer
         self.max_length = max_length
         
-    def create_chat_format(self, instruction, output, system_msg=None):
+    def create_chat_format(self, instruction, output, system_msg: str):
         """EXAONE 채팅 형식으로 데이터 변환"""
-        if system_msg is None:
-            system_msg = "You are EXAONE model from LG AI Research, a helpful assistant."
-        character_name = "루시우"    
-        character_personality = "자신감이 넘치는 말투를 사용하며, 대사 끝마다 '자', '어', '고' 등의 어미를 사용하여 확신에 찬 톤을 사용합니다."
-    
         messages = [
-            {"role": "system", "content": """당신은 루시우, 오버워치 세계관의 유명한 브라질 출신 DJ이자 자유와 정의를 위해 싸우는 히어로입니다.
-
-밝고 낙천적이며 긍정 에너지가 넘치고, 음악과 리듬에 대한 열정을 행동으로 표현합니다. 사람들을 응원하고 돕는 것을 좋아하며, 팀워크를 중요하게 생각합니다.
-
-✔ 성격:
-- 에너제틱하고 쾌활함
-- 낙천적이고 긍정적인 사고방식
-- 정의감과 책임감이 강함
-- 유머와 장난기가 많고 말투에 활기가 넘침
-- 어려운 상황에서도 희망을 잃지 않음
-
-✔ 말투 특징:
-- 감탄사와 의성어 사용: “하하!”, “붐!”, “리듬을 타자!”, “좋았어!”
-- 짧고 리듬감 있는 문장
-- 팀을 북돋우는 격려 위주의 말: “할 수 있어!”, “가자!”, “우리 팀 최고야!”
-- 음악, 리듬, 파티 같은 키워드를 자주 언급
-- 영어 섞인 표현은 최소화, 한글 기준에서 활기찬 표현 유지
-
-✔ 예시 발언:
-- “내 음악으로 분위기 살려볼까?”
-- “신나게 가보자고!”
-- “우리가 함께라면 뭐든 할 수 있어!”
-- “비트 나간다! 모두 집중!”
-- “달려보자, 리듬을 타!”
-
-이 캐릭터는 진지한 상황에서도 긍정적인 활력으로 팀의 사기를 끌어올리며, 자신의 음악과 에너지로 모두를 하나로 만드는 인물입니다.
-"""},
+            {"role": "system", "content": system_msg},
             {"role": "user", "content": instruction},
             {"role": "assistant", "content": output}
         ]
@@ -174,31 +138,18 @@ def setup_lora_config(model):
     )
     return lora_config
 
-def prepare_dataset(tokenizer, max_length=1024):  # max_length 줄임
+def prepare_dataset(tokenizer, qa_data: list[dict], system_message: str, max_length=1024):  # max_length 줄임
     """데이터셋 준비 (예시 데이터)"""
-    
-    # JSON 파일에서 데이터 로드
-    try:
-        with open('new_qa.json', 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        data_list = data['data']
-        print(f"JSON 파일에서 {len(data_list)}개 데이터 로드됨")
-    except FileNotFoundError:
-        print("new_qa.json 파일을 찾을 수 없습니다. 예시 데이터를 사용합니다.")
-        data_list = [
-            {"question": "안녕하세요", "answer": "안녕하세요! 무엇을 도와드릴까요?"},
-            {"question": "오늘 날씨 어때?", "answer": "죄송하지만 실시간 날씨 정보는 제공할 수 없습니다."},
-            {"question": "파이썬이 뭐야?", "answer": "파이썬은 간단하고 배우기 쉬운 프로그래밍 언어입니다."},
-        ]
     
     # 데이터 전처리
     preprocessor = ExaoneDataPreprocessor(tokenizer, max_length)
     
     formatted_data = []
-    for item in data_list:
+    for item in qa_data:
         formatted_text = preprocessor.create_chat_format(
             item["question"], 
-            item["answer"]
+            item["answer"],
+            system_msg=system_message
         )
         formatted_data.append({"text": formatted_text})
     
@@ -231,13 +182,13 @@ def prepare_dataset(tokenizer, max_length=1024):  # max_length 줄임
     
     return tokenized_dataset
 
-def setup_training_arguments(output_dir="./exaone-lora-results-system-custom"):
+def setup_training_arguments(training_epochs: int, output_dir="./exaone-lora-results-system-custom"):
     """훈련 인수 설정"""
     training_args = TrainingArguments(
         output_dir=output_dir,
         per_device_train_batch_size=1,
         gradient_accumulation_steps=4,  # 줄임
-        num_train_epochs=5,  # 테스트용으로 1 에포크
+        num_train_epochs=training_epochs,  # 테스트용으로 1 에포크
         learning_rate=2e-4,  # 학습률 줄임
         lr_scheduler_type="linear",  # 더 안정적인 스케줄러
         warmup_steps=10,  # warmup_ratio 대신 steps 사용
@@ -261,41 +212,43 @@ def setup_training_arguments(output_dir="./exaone-lora-results-system-custom"):
     
     return training_args
 
-def upload_to_huggingface(output_dir):
+def upload_to_huggingface(output_dir, hf_token, hf_repo_id):
     """파인튜닝된 모델을 Hugging Face Hub에 업로드"""
-    if not HF_TOKEN:
+    if not hf_token:
         print("HF_TOKEN이 설정되지 않아 업로드를 건너뜁니다.")
-        return
+        return f"https://huggingface.co/{hf_repo_id}"  # 토큰이 없어도 URL은 반환
     
     try:
         print(f"\n=== Hugging Face Hub 업로드 시작 ===")
         api = HfApi()
         
         # 1. 저장소 생성
-        print(f"저장소 생성 중: {HF_REPO_ID}")
+        print(f"저장소 생성 중: {hf_repo_id}")
         api.create_repo(
-            repo_id=HF_REPO_ID,
+            repo_id=hf_repo_id,
             repo_type="model",
             private=False,
-            token=HF_TOKEN,
+            token=hf_token,
             exist_ok=True,
         )
         
         # 2. 모델 파일 업로드
-        print(f"모델 업로드 중: {output_dir} -> {HF_REPO_ID}")
+        print(f"모델 업로드 중: {output_dir} -> {hf_repo_id}")
         api.upload_folder(
-            repo_id=HF_REPO_ID,
+            repo_id=hf_repo_id,
             folder_path=output_dir,
             repo_type="model",
-            token=HF_TOKEN,
+            token=hf_token,
         )
         
-        print(f"✅ 업로드 완료! 모델 URL: https://huggingface.co/{HF_REPO_ID}")
+        print(f"✅ 업로드 완료! 모델 URL: https://huggingface.co/{hf_repo_id}")
+        return f"https://huggingface.co/{hf_repo_id}"
         
     except Exception as e:
         print(f"❌ 업로드 실패: {e}")
+        return f"https://huggingface.co/{hf_repo_id}"  # 실패해도 URL은 반환
 
-def main():
+def main(qa_data: list[dict], system_message: str, hf_token: str, hf_repo_id: str, training_epochs: int) -> str:
     """메인 훈련 함수"""
     
     # 환경 변수 설정
@@ -341,7 +294,7 @@ def main():
         return
     
     # 7. 데이터셋 준비
-    train_dataset = prepare_dataset(tokenizer)
+    train_dataset = prepare_dataset(tokenizer, qa_data, system_message)
     print(f"훈련 데이터셋 크기: {len(train_dataset)}")
     
     # 데이터셋을 train/eval로 분할 (조기 종료를 위한 validation 데이터 필요)
@@ -393,7 +346,7 @@ def main():
         }
     
     # 9. 훈련 인수 설정
-    training_args = setup_training_arguments()
+    training_args = setup_training_arguments(training_epochs)
     
     # 10. 조기 종료 콜백 설정
     early_stopping_callback = EarlyStoppingCallback(
@@ -469,9 +422,15 @@ def main():
     print(f"모델이 {training_args.output_dir}에 저장되었습니다.")
     
     # 15. Hugging Face Hub에 업로드
-    upload_to_huggingface(training_args.output_dir)
+    hf_model_url = upload_to_huggingface(training_args.output_dir, hf_token, hf_repo_id)
+    
+    # 16. HuggingFace 모델 URL 반환
+    print(f"✅ 파인튜닝 완료! 모델 URL: {hf_model_url}")
+    return hf_model_url
 
 if __name__ == "__main__":
     # 훈련 실행
-    main()
+    # 이 스크립트는 직접 실행되지 않고, vllm/app/core.py에서 호출됩니다.
+    # 따라서 main 함수에 인자를 직접 전달하지 않습니다.
+    pass
     
