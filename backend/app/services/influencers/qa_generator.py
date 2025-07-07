@@ -131,20 +131,21 @@ class InfluencerQAGenerator:
     def create_qa_batch_requests(self, character: CharacterProfile, num_requests: int = None, system_prompt: str = None) -> List[Dict]:
         """
         인플루언서 캐릭터를 위한 QA 생성 배치 요청 생성
-        VLLM 서버의 /generate_qa 엔드포인트를 사용하여 QA 생성
+        VLLM 서버의 비동기 QA 생성 엔드포인트를 사용
         Args:
             character: 캐릭터 프로필
             num_requests: 생성할 QA 개수 (None이면 환경변수 QA_GENERATION_COUNT 사용)
+            system_prompt: 시스템 프롬프트
         Returns:
             배치 요청 리스트
         """
         if num_requests is None:
             num_requests = settings.QA_GENERATION_COUNT
         
+        print(f"QA 생성 요청: {num_requests}개 (환경변수 QA_GENERATION_COUNT: {settings.QA_GENERATION_COUNT})")
+        
         # VLLM 서버 URL 설정
         vllm_server_url = getattr(settings, 'VLLM_SERVER_URL', 'http://localhost:8001')
-        
-        batch_requests = []
         
         # VLLM 서버에 요청할 캐릭터 프로필 데이터 준비
         character_data = {
@@ -156,185 +157,142 @@ class InfluencerQAGenerator:
             "mbti": character.mbti
         }
         
-        # VLLM 서버에서 질문 생성 후 시스템 프롬프트로 답변 생성
+        # VLLM 서버에서 비동기 QA 생성 시작
         try:
-            # 시스템 프롬프트가 있을 때만 새로운 방식 사용
-            if system_prompt:
-                # 1단계: 캐릭터 정보로 질문 생성
-                response = requests.post(
-                    f"{vllm_server_url}/speech/generate_questions_for_character",
-                    json={
-                        "character_info": character_data,
-                        "num_questions": num_requests
-                    },
-                    timeout=120
-                )
-                
-                if response.status_code == 200:
-                    questions_data = response.json()
-                    questions = questions_data.get('questions', [])
-                    
-                    print(f"VLLM 서버 캐릭터 질문 생성 성공: {len(questions)}개")
-                    
-                    # 2단계: 각 질문에 대해 시스템 프롬프트(캐릭터 정의)로 답변하는 배치 요청 생성
-                    for i, question in enumerate(questions):
-                        request = {
-                            "custom_id": f"influencer_qa_{character.name}_{i+1}",
-                            "method": "POST", 
-                            "url": "/v1/chat/completions",
-                            "body": {
-                                "model": "gpt-4o-mini",
-                                "messages": [
-                                    {
-                                        "role": "system",
-                                        "content": system_prompt  # 캐릭터 정의
-                                    },
-                                    {
-                                        "role": "user",
-                                        "content": question
-                                    }
-                                ],
-                                "max_tokens": 500,
-                                "temperature": 0.7
-                            }
-                        }
-                        
-                        batch_requests.append(request)
-                        
-                else:
-                    print(f"VLLM 서버 질문 생성 실패: {response.status_code} - {response.text}")
-                    # 폴백: 기존 방식 사용
-                    return self._fallback_qa_generation(character, system_prompt, num_requests)
-                    
-            else:
-                print("시스템 프롬프트가 없어 기존 방식으로 QA 생성")
-                return self._fallback_qa_generation(character, system_prompt, num_requests)
-                
-        except Exception as e:
-            print(f"VLLM 서버 QA 생성 오류: {e}")
-            # 폴백: 기존 방식 사용
-            return self._fallback_qa_generation(character, system_prompt, num_requests)
+            print(f"VLLM 서버에 {num_requests}개 QA 생성 작업 시작 요청...")
             
-        return batch_requests
-    
-    def _fallback_qa_generation(self, character, system_prompt=None, num_requests=None):
-        """기존 방식의 QA 생성 (폴백용)"""
-        if num_requests is None:
-            num_requests = settings.QA_GENERATION_COUNT
-            
-        vllm_server_url = getattr(settings, 'VLLM_SERVER_URL', 'http://localhost:8001')
-        batch_requests = []
-        
-        # 캐릭터 데이터 준비
-        character_data = {
-            "name": character.name,
-            "description": character.description,
-            "age_range": character.age_range,
-            "gender": character.gender.value if hasattr(character.gender, 'value') else character.gender if character.gender else "없음",
-            "personality": character.personality,
-            "mbti": character.mbti
-        }
-        
-        # 1단계: 질문 생성
-        questions = []
-        try:
+            # 비동기 QA 생성 작업 시작
             response = requests.post(
-                f"{vllm_server_url}/speech/generate_questions_batch",
+                f"{vllm_server_url}/speech/start_qa_generation",
                 json={
                     "characters": [character_data] * num_requests,
-                    "num_questions_per_character": 1
+                    "num_qa_per_character": 1
                 },
-                timeout=60
+                timeout=30  # 작업 시작 요청은 빠르게 처리
             )
             
             if response.status_code == 200:
-                question_data = response.json()
-                results = question_data.get('results', [])
+                task_data = response.json()
+                task_id = task_data.get('task_id')
                 
-                for result in results:
-                    questions.extend(result.get('questions', []))
+                print(f"VLLM 서버 QA 생성 작업 시작 성공: task_id={task_id}")
+                
+                # 작업 완료까지 대기
+                qa_results = self._wait_for_qa_generation_completion(vllm_server_url, task_id)
+                
+                if qa_results:
+                    # 생성된 QA들을 배치 요청으로 변환
+                    batch_requests = self._create_qa_batch_requests_from_results(
+                        qa_results=qa_results,
+                        character=character,
+                        system_prompt=system_prompt
+                    )
                     
-        except Exception as e:
-            print(f"폴백 질문 생성 오류: {e}")
-            
-        # 2단계: 말투 생성  
-        if questions:
-            try:
-                tone_requests = []
-                for i in range(0, len(questions), 10):
-                    batch_questions = questions[i:i+10]
-                    tone_requests.append({
-                        "character": character_data,
-                        "questions": batch_questions,
-                        "num_tone_variations": 3
-                    })
-                
-                response = requests.post(
-                    f"{vllm_server_url}/speech/generate_tones_batch",
-                    json={"requests": tone_requests},
-                    timeout=120
+                    print(f"배치 요청 생성 완료: {len(batch_requests)}개")
+                    return batch_requests
+                else:
+                    print("QA 생성 작업이 실패했습니다.")
+                    return self._create_fallback_qa_requests(
+                        character=character,
+                        system_prompt=system_prompt,
+                        count=num_requests
+                    )
+                        
+            else:
+                print(f"VLLM 서버 QA 생성 작업 시작 실패: {response.status_code} - {response.text}")
+                return self._create_fallback_qa_requests(
+                    character=character,
+                    system_prompt=system_prompt,
+                    count=num_requests
                 )
                 
-                if response.status_code == 200:
-                    tone_data = response.json()
-                    results = tone_data.get('results', [])
-                    
-                    for tone_result in results:
-                        responses = tone_result.get('responses', {})
-                        
-                        for question, tone_responses in responses.items():
-                            for tone_name, tone_response_list in tone_responses.items():
-                                if tone_response_list and len(tone_response_list) > 0:
-                                    tone_response = tone_response_list[0]
-                                    
-                                    system_content = system_prompt if system_prompt else "QA 쌍을 생성하는 역할입니다."
-                                    
-                                    request = {
-                                        "custom_id": f"influencer_qa_{character.name}_{len(batch_requests)+1}_{tone_name}",
-                                        "method": "POST",
-                                        "url": "/v1/chat/completions",
-                                        "body": {
-                                            "model": "gpt-4o-mini",
-                                            "messages": [
-                                                {
-                                                    "role": "system",
-                                                    "content": system_content
-                                                },
-                                                {
-                                                    "role": "user",
-                                                    "content": f"Q: {question}\nA: {tone_response.get('text', '')}"
-                                                }
-                                            ],
-                                            "max_tokens": 300,
-                                            "temperature": 0.8
-                                        }
-                                    }
-                                    batch_requests.append(request)
-                                    
-                                    # 요청수 제한
-                                    if len(batch_requests) >= num_requests:
-                                        break
-                            
-                            if len(batch_requests) >= num_requests:
-                                break
-                        
-                        if len(batch_requests) >= num_requests:
-                            break
+        except Exception as e:
+            print(f"VLLM 서버 QA 생성 오류: {e}")
+            return self._create_fallback_qa_requests(
+                character=character,
+                system_prompt=system_prompt,
+                count=num_requests
+            )
+    
+    def _wait_for_qa_generation_completion(self, vllm_server_url: str, task_id: str, max_wait_time: int = 1800) -> List[Dict]:
+        """
+        QA 생성 작업이 완료될 때까지 대기하고 결과를 반환
+        Args:
+            vllm_server_url: VLLM 서버 URL
+            task_id: 작업 ID
+            max_wait_time: 최대 대기 시간 (초, 기본 30분)
+        Returns:
+            QA 결과 리스트
+        """
+        import time
+        
+        start_time = time.time()
+        check_interval = 5  # 5초마다 상태 확인
+        
+        print(f"QA 생성 작업 완료 대기 중: task_id={task_id}")
+        
+        while time.time() - start_time < max_wait_time:
+            try:
+                # 작업 상태 확인
+                status_response = requests.get(
+                    f"{vllm_server_url}/speech/qa_generation_status/{task_id}",
+                    timeout=10
+                )
                 
+                if status_response.status_code == 200:
+                    status_data = status_response.json()
+                    status = status_data.get('status')
+                    progress = status_data.get('progress', 0)
+                    completed = status_data.get('completed', 0)
+                    total = status_data.get('total_requests', 0)
+                    
+                    print(f"QA 생성 진행 상황: {progress:.1f}% ({completed}/{total})")
+                    
+                    if status == "completed":
+                        # 결과 가져오기
+                        result_response = requests.get(
+                            f"{vllm_server_url}/speech/qa_generation_results/{task_id}",
+                            timeout=30
+                        )
+                        
+                        if result_response.status_code == 200:
+                            result_data = result_response.json()
+                            results = result_data.get('results', [])
+                            print(f"QA 생성 완료: {len(results)}개 결과")
+                            return results
+                        else:
+                            print(f"QA 생성 결과 가져오기 실패: {result_response.status_code}")
+                            return []
+                    
+                    elif status == "failed":
+                        print("QA 생성 작업이 실패했습니다.")
+                        return []
+                    
+                    # 아직 진행 중이면 대기
+                    time.sleep(check_interval)
+                    
                 else:
-                    print(f"VLLM 서버 말투 생성 실패: {response.status_code} - {response.text}")
+                    print(f"QA 생성 상태 확인 실패: {status_response.status_code}")
+                    time.sleep(check_interval)
                     
             except Exception as e:
-                print(f"VLLM 서버 말투 생성 오류: {e}")
+                print(f"QA 생성 상태 확인 오류: {e}")
+                time.sleep(check_interval)
         
-        # VLLM 서버에서 생성된 QA가 부족하면 기본 QA로 채움
-        remaining_requests = num_requests - len(batch_requests)
-        for i in range(remaining_requests):
-            # 시스템 프롬프트 사용 (있는 경우)
-            fallback_system_content = system_prompt if system_prompt else f"당신은 {character.name}라는 캐릭터입니다. 성격: {character.personality}"
+        print(f"QA 생성 작업 시간 초과: {max_wait_time}초")
+        return []
+
+    def _create_fallback_qa_requests(self, character: CharacterProfile, system_prompt: str, count: int) -> List[Dict]:
+        """
+        VLLM 서버 실패 시 기본 QA 요청 생성 (폴백)
+        """
+        fallback_requests = []
+        
+        for i in range(count):
+            enhanced_system_prompt = f"{system_prompt}\n\n캐릭터 정보:\n- 이름: {character.name}\n- 성격: {character.personality}"
             
             request = {
-                "custom_id": f"influencer_qa_{character.name}_{len(batch_requests)+1}_fallback",
+                "custom_id": f"influencer_qa_fallback_{character.name}_{i + 1}",
                 "method": "POST",
                 "url": "/v1/chat/completions",
                 "body": {
@@ -342,20 +300,72 @@ class InfluencerQAGenerator:
                     "messages": [
                         {
                             "role": "system",
-                            "content": fallback_system_content
+                            "content": enhanced_system_prompt
                         },
                         {
                             "role": "user",
-                            "content": f"안녕하세요! 당신에 대해 알고 싶어요. 자신을 소개해 주세요."
+                            "content": f"당신은 {character.name}라는 캐릭터입니다. 성격: {character.personality}\n\n자신에 대해 질문하고 답변하는 QA 쌍을 생성해주세요."
                         }
                     ],
-                    "max_tokens": 300,
-                    "temperature": 0.8
+                    "max_tokens": 500,
+                    "temperature": 0.7
                 }
             }
-            batch_requests.append(request)
+            
+            fallback_requests.append(request)
         
-        return batch_requests[:num_requests]  # 요청한 개수만큼만 반환
+        print(f"폴백 QA 요청 생성 완료: {len(fallback_requests)}개")
+        return fallback_requests
+
+    def _create_qa_batch_requests_from_results(self, qa_results: List[Dict], character: CharacterProfile, system_prompt: str) -> List[Dict]:
+        """
+        VLLM 서버에서 생성된 QA 결과를 배치 요청으로 변환
+        Args:
+            qa_results: VLLM 서버에서 생성된 QA 결과 리스트
+            character: 캐릭터 프로필
+            system_prompt: 시스템 프롬프트
+        Returns:
+            배치 요청 리스트
+        """
+        batch_requests = []
+        
+        for i, qa_result in enumerate(qa_results):
+            question = qa_result.get('question', '')
+            responses = qa_result.get('responses', {})
+            
+            # 각 말투별 응답을 개별 배치 요청으로 생성
+            for tone_name, tone_responses in responses.items():
+                if tone_responses and len(tone_responses) > 0:
+                    tone_response = tone_responses[0]  # 첫 번째 응답 사용
+                    answer_text = tone_response.get('text', '')
+                    
+                    # 시스템 프롬프트와 캐릭터 정보를 결합
+                    enhanced_system_prompt = f"{system_prompt}\n\n캐릭터 정보:\n- 이름: {character.name}\n- 성격: {character.personality}\n- 말투: {tone_name}"
+                    
+                    request = {
+                        "custom_id": f"influencer_qa_{character.name}_{i + 1}_{tone_name}",
+                        "method": "POST",
+                        "url": "/v1/chat/completions",
+                        "body": {
+                            "model": "gpt-4o-mini",
+                            "messages": [
+                                {
+                                    "role": "system",
+                                    "content": enhanced_system_prompt
+                                },
+                                {
+                                    "role": "user",
+                                    "content": f"Q: {question}\nA: {answer_text}\n\n위 QA 쌍을 검토하고 개선해주세요."
+                                }
+                            ],
+                            "max_tokens": 500,
+                            "temperature": 0.7
+                        }
+                    }
+                    
+                    batch_requests.append(request)
+        
+        return batch_requests
     
     def save_batch_file(self, requests: List[Dict], task_id: str) -> str:
         """배치 요청을 JSONL 파일로 저장"""

@@ -53,6 +53,7 @@ export default function CreateModelPage() {
     mood: "",
     selectedPresetId: "manual", // 기본값을 "manual"로 설정하여 직접 입력 모드 시작
     huggingFaceToken: "",
+    systemPrompt: "", // systemPrompt 필드 추가
   })
   const [files, setFiles] = useState({
     imageSamples: null as File[] | null,
@@ -91,66 +92,54 @@ export default function CreateModelPage() {
         
         // 사용자에게 에러 알림
         const errorMessage = error instanceof Error ? error.message : '알 수 없는 오류';
-        alert(`프리셋 데이터를 불러오는데 실패했습니다.\n\n오류: ${errorMessage}\n\n기본 프리셋을 사용합니다.`);
+        alert(`프리셋 데이터를 불러오는데 실패했습니다.\n\n오류: ${errorMessage}`);
         
-        // 에러 발생 시 기본 프리셋 데이터 사용
-        setStylePresets([
-          {
-            style_preset_id: "preset1",
-            style_preset_name: "밝고 긍정적인 캐릭터",
-            influencer_type: 1,
-            influencer_gender: 1,
-            influencer_age_group: 2,
-            influencer_hairstyle: "긴 생머리",
-            influencer_style: "밝고 경쾌한",
-            influencer_personality: "밝고 긍정적",
-            influencer_speech: "존댓말"
-          },
-          {
-            style_preset_id: "preset2",
-            style_preset_name: "차분하고 신중한 사람형",
-            influencer_type: 2,
-            influencer_gender: 0,
-            influencer_age_group: 3,
-            influencer_hairstyle: "단정한 숏컷",
-            influencer_style: "차분하고 신뢰감 있는",
-            influencer_personality: "차분하고 신중함",
-            influencer_speech: "공손함"
-          }
-        ]);
+        // 에러 발생 시 빈 배열로 설정
+        setStylePresets([]);
       } finally {
         setLoadingPresets(false);
         console.log('🏁 프리셋 데이터 로드 완료');
       }
     };
 
-    fetchStylePresets();
-  }, [])
+    // 허깅페이스 토큰 데이터 가져오기
+    const fetchHuggingFaceTokens = async () => {
+      if (!user || !user.teams || user.teams.length === 0) {
+        console.log('사용자 팀 정보가 없어 허깅페이스 토큰을 가져올 수 없습니다.');
+        return;
+      }
 
-  useEffect(() => {
-    if (formData.imageMethod === "prompt" && pendingPreset) {
-      setFormData(prev => ({
-        ...prev,
-        modelType: pendingPreset.influencer_type === 1 ? "character" : 
-                   pendingPreset.influencer_type === 2 ? "human" : 
-                   pendingPreset.influencer_type === 3 ? "objects" : "",
-        hairStyle: pendingPreset.influencer_hairstyle ?? "",
-        mood: pendingPreset.influencer_style ?? "",
-        personality: pendingPreset.influencer_personality ?? "",
-        customTones: pendingPreset.influencer_speech ? [pendingPreset.influencer_speech] : [],
-        tone: "",
-        mbti: "", // MBTI는 별도로 설정 필요
-        gender: pendingPreset.influencer_gender === 0 ? "male" : 
-                pendingPreset.influencer_gender === 1 ? "female" : "other",
-        age: pendingPreset.influencer_age_group === 1 ? "10" :
-             pendingPreset.influencer_age_group === 2 ? "20" :
-             pendingPreset.influencer_age_group === 3 ? "30" :
-             pendingPreset.influencer_age_group === 4 ? "40" :
-             pendingPreset.influencer_age_group === 5 ? "50" : "",
-      }));
-      setPendingPreset(null);
-    }
-  }, [formData.imageMethod, pendingPreset]);
+      setLoadingTokens(true);
+      console.log('🔄 허깅페이스 토큰 데이터 로드 시작...');
+      
+      try {
+        console.log('📡 API 호출: ModelService.getHuggingFaceTokens()');
+        const tokens = await ModelService.getHuggingFaceTokens(user.teams[0].group_id);
+        console.log('✅ 허깅페이스 토큰 데이터 로드 성공:', tokens);
+        setHuggingFaceTokens(tokens);
+      } catch (error) {
+        console.error('❌ 허깅페이스 토큰 데이터 로드 실패:', error);
+        console.error('오류 상세 정보:', {
+          name: error instanceof Error ? error.name : 'Unknown',
+          message: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : 'No stack trace'
+        });
+        
+        // 사용자에게 에러 알림
+        const errorMessage = error instanceof Error ? error.message : '알 수 없는 오류';
+        alert(`허깅페이스 토큰 데이터를 불러오는데 실패했습니다.\n\n오류: ${errorMessage}`);
+        
+        // 에러 발생 시 빈 배열로 설정
+        setHuggingFaceTokens([]);
+      } finally {
+        setLoadingTokens(false);
+        console.log('🏁 허깅페이스 토큰 데이터 로드 완료');
+      }
+    };
+
+    fetchStylePresets();
+    fetchHuggingFaceTokens();
+  }, [user]) // user가 변경될 때마다 토큰 다시 가져오기
 
   // 성격(personality)이 바뀌면 추천 말투 숨김
   useEffect(() => {
