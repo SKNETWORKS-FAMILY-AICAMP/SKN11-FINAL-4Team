@@ -249,7 +249,7 @@ async def initialize_vllm_engine():
                 max_model_len=2048,
                 tensor_parallel_size=1,
                 trust_remote_code=True,
-                gpu_memory_utilization=0.8,
+                gpu_memory_utilization=0.5,
                 enable_lora=True,
                 max_loras=8,
                 max_lora_rank=64,

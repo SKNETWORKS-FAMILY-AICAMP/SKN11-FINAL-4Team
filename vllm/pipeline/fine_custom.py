@@ -145,15 +145,56 @@ def prepare_dataset(tokenizer, qa_data: list[dict], system_message: str, max_len
     preprocessor = ExaoneDataPreprocessor(tokenizer, max_length)
     
     formatted_data = []
-    for item in qa_data:
-        formatted_text = preprocessor.create_chat_format(
-            item["question"], 
-            item["answer"],
-            system_msg=system_message
-        )
-        formatted_data.append({"text": formatted_text})
+    print(f"prepare_dataset: Received {len(qa_data)} items")
+    if qa_data:
+        print(f"First item sample: {qa_data[0]}")
+    
+    for i, item in enumerate(qa_data):
+        # 이미 변환된 데이터인지 확인 (messages 키가 있는 경우)
+        if "messages" in item:
+            # 이미 변환된 형식에서 question/answer 추출
+            messages = item["messages"]
+            question = ""
+            answer = ""
+            
+            for msg in messages:
+                if msg.get("role") == "user":
+                    question = msg.get("content", "")
+                elif msg.get("role") == "assistant":
+                    answer = msg.get("content", "")
+            
+            if question and answer:
+                formatted_text = preprocessor.create_chat_format(
+                    question, 
+                    answer,
+                    system_msg=system_message
+                )
+                formatted_data.append({"text": formatted_text})
+        else:
+            # 원시 QA 형식
+            question = item.get("question", "")
+            answer = item.get("answer", "")
+            
+            if not question and not answer:
+                print(f"Warning: Item {i} has no question or answer: {item}")
+                continue
+            
+            if question and answer:
+                formatted_text = preprocessor.create_chat_format(
+                    question, 
+                    answer,
+                    system_msg=system_message
+                )
+                formatted_data.append({"text": formatted_text})
+            else:
+                print(f"Warning: Item {i} incomplete - question: '{question}', answer: '{answer}'")
     
     # Dataset 객체 생성
+    print(f"prepare_dataset: Successfully formatted {len(formatted_data)} items out of {len(qa_data)}")
+    
+    if not formatted_data:
+        raise ValueError("No valid QA data found after formatting. Check data structure.")
+    
     dataset = Dataset.from_list(formatted_data)
     
     # 토큰화
