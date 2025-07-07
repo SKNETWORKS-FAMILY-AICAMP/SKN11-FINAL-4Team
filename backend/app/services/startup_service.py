@@ -284,17 +284,27 @@ class StartupService:
                 loaded_count = 0
                 for influencer in chat_enabled_influencers:
                     try:
-                        # 그룹 ID로 HF 토큰 조회
-                        hf_token = hf_token_service.get_hf_token(influencer.group_id, db)
-                        if not hf_token:
+                        # 그룹 ID로 HF 토큰 조회 (시스템 사용자로 조회)
+                        system_user = {"user_id": "system", "username": "system"}
+                        hf_tokens = hf_token_service.get_hf_tokens_by_group(db, influencer.group_id, system_user, limit=1)
+                        
+                        if not hf_tokens:
                             logger.warning(f"⚠️ 인플루언서 {influencer.influencer_id}의 HF 토큰을 찾을 수 없습니다.")
+                            continue
+                        
+                        # 첫 번째 토큰 사용 및 복호화
+                        hf_token_record = hf_tokens[0]
+                        decrypted_token = hf_token_service.get_decrypted_token(db, hf_token_record.hf_manage_id, system_user)
+                        
+                        if not decrypted_token:
+                            logger.warning(f"⚠️ 인플루언서 {influencer.influencer_id}의 HF 토큰 복호화에 실패했습니다.")
                             continue
                         
                         # vLLM 어댑터 로드
                         logger.info(f"🔄 어댑터 로드 중: {influencer.influencer_model_repo}")
                         success = await vllm_load_adapter_if_needed(
                             influencer.influencer_model_repo,
-                            hf_token
+                            decrypted_token
                         )
                         
                         if success:
