@@ -14,12 +14,12 @@ from random import choice
 try:
     from app.utils.openai_client import get_openai_client
 except ImportError:
-    # 폴백: 직접 OpenAI 클라이언트 사용
-    from openai import OpenAI
+    # 폴백: 직접 AsyncOpenAI 클라이언트 사용
+    from openai import AsyncOpenAI
     
     def get_openai_client(api_key=None, **kwargs):
-        """폴백 OpenAI 클라이언트 생성"""
-        return OpenAI(api_key=api_key or os.getenv('OPENAI_API_KEY'), **kwargs)
+        """폴백 비동기 OpenAI 클라이언트 생성"""
+        return AsyncOpenAI(api_key=api_key or os.getenv('OPENAI_API_KEY'), **kwargs)
 
 class Gender(Enum):
     MALE = "남성"
@@ -54,9 +54,9 @@ class SpeechGenerator:
         try:
             self.client = get_openai_client(api_key=api_key, base_url=base_url)
         except Exception:
-            # 폴백: 직접 OpenAI 클라이언트 사용
-            from openai import OpenAI
-            self.client = OpenAI(api_key=api_key, base_url=base_url)
+            # 폴백: 직접 비동기 OpenAI 클라이언트 사용
+            from openai import AsyncOpenAI
+            self.client = AsyncOpenAI(api_key=api_key, base_url=base_url)
         
         self.valid_mbti_types = [
             'INTJ', 'INTP', 'ENTJ', 'ENTP',
@@ -431,7 +431,7 @@ class SpeechGenerator:
         
         for _ in range(num_qa_pairs):
             # 1. 질문 생성
-            question = self.generate_question_for_character(character)
+            question = await self.generate_question_for_character(character)
             
             # 2. 질문에 대한 응답 생성
             # 시스템 프롬프트가 제공되면 그것을 사용하고, 아니면 캐릭터 정보 기반으로 생성
@@ -439,7 +439,7 @@ class SpeechGenerator:
                 current_system_prompt = system_prompt
             else:
                 # 기본 말투 (말투1)에 대한 시스템 프롬프트 생성
-                current_system_prompt = self.create_character_prompt_for_random_tone(character, 1) 
+                current_system_prompt = await self.create_character_prompt_for_random_tone(character, 1) 
             
             try:
                 # 응답 생성 (OpenAI 래퍼 사용)
@@ -476,7 +476,7 @@ class SpeechGenerator:
             
         return qa_pairs
 
-    def create_batch_requests_for_character_tones(self, user_messages: List[str], character: CharacterProfile) -> List[Dict[str, Any]]:
+    async def create_batch_requests_for_character_tones(self, user_messages: List[str], character: CharacterProfile) -> List[Dict[str, Any]]:
         """
         하나의 캐릭터에 대해 3가지 랜덤 말투로 배치 요청을 생성합니다.
         
@@ -497,7 +497,7 @@ class SpeechGenerator:
             for j, (tone_num, tone_name) in enumerate(zip(tone_numbers, tone_names)):
                 # 각 말투마다 1개 응답 생성
                 for k in range(1):
-                    system_prompt = self.create_character_prompt_for_random_tone(character, tone_num)
+                    system_prompt = await self.create_character_prompt_for_random_tone(character, tone_num)
                     request = {
                         "custom_id": f"msg_{i}_tone_{j}_{tone_name}_{k+1}_{character.name}",
                         "method": "POST",
@@ -516,7 +516,7 @@ class SpeechGenerator:
         
         return requests
 
-    def create_batch_requests_for_characters(self, user_messages: List[str], characters: List[CharacterProfile]) -> List[Dict[str, Any]]:
+    async def create_batch_requests_for_characters(self, user_messages: List[str], characters: List[CharacterProfile]) -> List[Dict[str, Any]]:
         """
         캐릭터별 배치 요청을 위한 요청 객체들을 생성합니다.
         
@@ -531,7 +531,7 @@ class SpeechGenerator:
         
         for i, message in enumerate(user_messages):
             for j, character in enumerate(characters):
-                system_prompt = self.create_character_prompt(character)
+                system_prompt = await self.create_character_prompt_for_random_tone(character, 1)
                 request = {
                     "custom_id": f"msg_{i}_char_{j}_{character.name}",
                     "method": "POST",
@@ -550,7 +550,7 @@ class SpeechGenerator:
         
         return requests
 
-    def create_batch_requests(self, user_messages: List[str]) -> List[Dict[str, Any]]:
+    async def create_batch_requests(self, user_messages: List[str]) -> List[Dict[str, Any]]:
         """
         기본 말투별 배치 요청을 위한 요청 객체들을 생성합니다. (하위 호환성)
         
@@ -588,7 +588,7 @@ class SpeechGenerator:
             )
         ]
         
-        return self.create_batch_requests_for_characters(user_messages, default_characters)
+        return await self.create_batch_requests_for_characters(user_messages, default_characters)
 
     def create_batch_file(self, requests: List[Dict[str, Any]], filename: str = None) -> str:
         """
@@ -866,7 +866,7 @@ class SpeechGenerator:
         
         return results
 
-    def generate_character_random_tones_sync(self, character: CharacterProfile) -> Dict[str, Dict[str, List[Dict[str, Any]]]]:
+    async def generate_character_random_tones_sync(self, character: CharacterProfile) -> Dict[str, Dict[str, List[Dict[str, Any]]]]:
         
         tone_variations = {
         "말투1": 1,
