@@ -260,7 +260,13 @@ class InfluencerFineTuningService:
                                         qa_pairs.append({"question": default_question, "answer": message_content})
                                         logger.info(f"S3 QA 데이터: 기본 질문으로 QA 쌍 생성 - A: {message_content[:50]}...")
                             else:
-                                logger.warning(f"S3 QA 데이터: OpenAI 형식에서 Q: 또는 A: 키워드 없음: {message_content}")
+                                # 키워드가 없는 경우에도 QA 쌍 생성 시도
+                                if len(message_content.strip()) > 0:
+                                    default_question = "이에 대해 답변해 주세요."
+                                    qa_pairs.append({"question": default_question, "answer": message_content})
+                                    logger.info(f"S3 QA 데이터: 키워드 없는 응답으로 QA 쌍 생성 - A: {message_content[:50]}...")
+                                else:
+                                    logger.warning(f"S3 QA 데이터: OpenAI 형식에서 Q: 또는 A: 키워드 없음: {message_content}")
                     
                     # Case 4: Top-level list of QA pairs (less common for JSONL, but possible)
                     elif isinstance(data, list):
