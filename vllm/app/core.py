@@ -67,14 +67,15 @@ def get_speech_generator() -> SpeechGenerator:
     SpeechGenerator 인스턴스를 생성하고 반환하는 의존성 주입 함수.
     OPENAI_API_KEY가 설정되지 않은 경우 HTTPException을 발생시킵니다.
     """
-    if not OPENAI_API_KEY:
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
         logger.error("❌ Speech Generator를 초기화할 수 없습니다. OPENAI_API_KEY가 설정되지 않았습니다.")
         raise HTTPException(
             status_code=503,
             detail="Speech Generator is not available due to missing OPENAI_API_KEY."
         )
-    logger.info("✅ SpeechGenerator 인스턴스 생성")
-    return SpeechGenerator(api_key=OPENAI_API_KEY)
+    logger.info("✅ SpeechGenerator 인스턴스 생성 (for OpenAI API)")
+    return SpeechGenerator(api_key=api_key)
 FINETUNING_WEBHOOK_URL = os.getenv("FINETUNING_WEBHOOK_URL")
 
 async def send_finetuning_webhook(task_id: str, status: str, hf_model_url: Optional[str] = None, error_message: Optional[str] = None):

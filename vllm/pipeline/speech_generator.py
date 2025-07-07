@@ -37,7 +37,7 @@ class CharacterProfile:
                 raise ValueError(f"올바르지 않은 MBTI 타입: {self.mbti}")
         self.mbti = self.mbti.upper() if self.mbti else None
 
-class SpeechGenerator:    
+class SpeechGenerator:
     def __init__(self, api_key: str, base_url: Optional[str] = None):
         self.client = OpenAI(api_key=api_key, base_url=base_url)
         self.valid_mbti_types = [

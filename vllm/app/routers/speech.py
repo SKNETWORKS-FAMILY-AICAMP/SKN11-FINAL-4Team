@@ -13,6 +13,15 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+@router.get("/health")sync def health_check(speech_generator: SpeechGenerator = Depends(get_speech_generator)):
+    """
+    Speech Generator의 상태를 확인합니다.
+    이 엔드포인트를 호출하면 SpeechGenerator가 초기화되었는지 확인할 수 있습니다.
+    """
+    logger.info("🩺 Speech Generator health check successful.")
+    return {"status": "ok", "message": "Speech Generator is available."}
+
+
 @router.post("/generate_qa", response_model=VLLMQAGenerationResponse)
 async def generate_qa_for_character_vllm_endpoint(
     character_profile: VLLMCharacterProfile,
