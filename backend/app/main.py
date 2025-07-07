@@ -272,9 +272,7 @@ async def test_logs():
 # API 라우터 등록
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
-# 업로드된 파일 서빙을 위한 정적 파일 서비스
-upload_dir = Path("uploads")
-upload_dir.mkdir(exist_ok=True)
+# 정적 파일(이미지) 서빙
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 # 버전 없는 라우터 추가 (하위 호환성)

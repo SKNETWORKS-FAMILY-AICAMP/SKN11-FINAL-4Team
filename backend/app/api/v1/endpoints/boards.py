@@ -18,10 +18,11 @@ import logging
 import os
 import shutil
 from pathlib import Path
+from fastapi.responses import JSONResponse
 
 from app.database import get_db
 from app.models.board import Board
-from app.models.user import User
+from app.models.user import User, HFTokenManage
 from app.schemas.board import (
     BoardCreate,
     BoardUpdate,
@@ -46,6 +47,10 @@ from app.services.image_generation_workflow import (
 )
 from app.services.scheduler_service import scheduler_service
 from app.models.influencer import AIInfluencer
+from transformers import AutoModelForCausalLM, AutoTokenizer
+import torch
+import re
+from pydantic import BaseModel
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -1094,3 +1099,110 @@ async def full_enhance_content(
     workflow = get_content_generation_workflow()
     result = await workflow.generate_full_content(request)
     return result
+
+
+class InfluencerStyleRequest(BaseModel):
+    influencer_id: str
+    influencer_model_repo: str
+    text: str
+
+class InfluencerStyleResponse(BaseModel):
+    converted_text: str
+
+@router.post("/influencer-style/convert", response_model=InfluencerStyleResponse)
+async def convert_influencer_style(
+    request: InfluencerStyleRequest,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    user_id = current_user.get("sub")
+    # 사용자 정보 및 소속 그룹 확인
+    user = db.query(User).filter(User.user_id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    user_group_ids = [team.group_id for team in user.teams]
+    # 인플루언서 정보 확인
+    ai_influencer = (
+        db.query(AIInfluencer)
+        .filter(AIInfluencer.influencer_id == request.influencer_id)
+        .first()
+    )
+    if not ai_influencer:
+        raise HTTPException(status_code=404, detail="AI 인플루언서를 찾을 수 없습니다.")
+    # 그룹 권한 체크 (본인 소유 또는 소속 그룹)
+    if ai_influencer.group_id not in user_group_ids and ai_influencer.user_id != user_id:
+        raise HTTPException(status_code=403, detail="해당 인플루언서에 대한 접근 권한이 없습니다.")
+    # hf_manage_id 확인
+    if ai_influencer.hf_manage_id is None:
+        raise HTTPException(status_code=400, detail="허깅페이스 토큰이 설정되지 않았습니다.")
+    hf_token = (
+        db.query(HFTokenManage)
+        .filter(HFTokenManage.hf_manage_id == ai_influencer.hf_manage_id)
+        .first()
+    )
+    if not hf_token:
+        raise HTTPException(status_code=400, detail="허깅페이스 토큰을 찾을 수 없습니다.")
+    encrypted_token_value = getattr(hf_token, "hf_token_value", None)
+    if not encrypted_token_value:
+        raise HTTPException(status_code=400, detail="토큰 값이 없습니다.")
+    decrypted_token = decrypt_sensitive_data(encrypted_token_value)
+    # 프롬프트 생성
+    influencer_name = getattr(ai_influencer, "influencer_name", "이 인플루언서")
+    influencer_desc = getattr(ai_influencer, "influencer_description", None)
+    influencer_personality = getattr(ai_influencer, "influencer_personality", None)
+    # multi-chat 스타일 시스템 프롬프트
+    system_prompt = f"너는 {influencer_name}라는 AI 인플루언서야.\n"
+    if influencer_desc and str(influencer_desc).strip() != "":
+        system_prompt += f"설명: {influencer_desc}\n"
+    if influencer_personality and str(influencer_personality).strip() != "":
+        system_prompt += f"성격: {influencer_personality}\n"
+    system_prompt += "한국어로만 대답해.\n"
+    # 사용자 프롬프트
+    prompt = f"""
+아래 텍스트의 모든 문장과 단어를 빠짐없이, 순서와 의미를 바꾸지 말고 그대로 본문에 포함하되,
+{influencer_name}의 개성(말투, 사설, 스타일 등)이 자연스럽게 드러나도록 다시 써줘.
+정보는 절대 누락, 요약, 왜곡, 순서 변경 없이 모두 포함해야 하며,
+인플루언서 특유의 말투, 감탄, 짧은 코멘트, 사설 등은 자연스럽게 추가해도 된다.
+
+텍스트:
+{request.text}
+"""
+    # 모델 로드 (간단화, 실제 운영시 캐싱 필요)
+    model_name = request.influencer_model_repo
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True, token=decrypted_token)
+    model = AutoModelForCausalLM.from_pretrained(model_name, trust_remote_code=True, token=decrypted_token, device_map="auto" if device=="cuda" else None, torch_dtype=torch.float16 if device=="cuda" else torch.float32)
+    # 입력 생성
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": prompt}
+    ]
+    try:
+        full_input = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    except Exception:
+        full_input = system_prompt + "\n\n사용자: " + prompt + "\n\n어시스턴트: "
+    # 생성
+    input_ids = tokenizer(full_input, return_tensors="pt").input_ids.to(model.device)
+    gen_out = model.generate(input_ids, max_new_tokens=1024, do_sample=True, temperature=0.7)
+    output = tokenizer.decode(gen_out[0], skip_special_tokens=True)
+    # 후처리: 입력 프롬프트 부분 제거
+    answer = output.split("어시스턴트:")[-1].strip() if "어시스턴트:" in output else output.strip()
+    answer = re.sub(r"^\s+|\s+$", "", answer)
+    return InfluencerStyleResponse(converted_text=answer)
+
+
+@router.post("/upload-image-simple")
+async def upload_image_simple(file: UploadFile = File(...)):
+    """이미지 파일을 업로드하고 저장 경로를 반환"""
+    try:
+        # 파일명 중복 방지: uuid 추가
+        import uuid
+        ext = file.filename.split('.')[-1]
+        unique_filename = f"{uuid.uuid4()}.{ext}"
+        file_location = UPLOAD_DIR / unique_filename
+        with open(file_location, "wb") as buffer:
+            buffer.write(await file.read())
+        # 실제 서비스라면 S3 업로드 등으로 대체 가능
+        return {"file_url": f"/uploads/{unique_filename}"}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})

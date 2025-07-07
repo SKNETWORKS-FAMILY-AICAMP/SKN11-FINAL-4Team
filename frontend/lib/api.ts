@@ -31,7 +31,7 @@ class APIClient {
   ): Promise<T> {
     const {
       requireAuth = true,
-      timeout = 30000,
+      timeout = 300000,
       headers: customHeaders = {},
       ...fetchOptions
     } = options

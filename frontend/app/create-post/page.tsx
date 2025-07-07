@@ -83,6 +83,7 @@ export default function CreatePostPage() {
   const [isEnhancing, setIsEnhancing] = useState(false)
   const [converted, setConverted] = useState<string | null>(null)
   const [isConverting, setIsConverting] = useState(false)
+  const [showFullPreview, setShowFullPreview] = useState(false)
 
   // 발행 설정 상태
   const [publishType, setPublishType] = useState<'immediate' | 'scheduled'>('immediate')
@@ -318,18 +319,22 @@ export default function CreatePostPage() {
     if (!generated) return;
     handleInputChange('board_description', generated.content);
     handleInputChange('board_hashtag', generated.hashtags.map((tag: string) => tag.replace(/^#+/, '')));
-    setGenerated(null);
-    setConverted(null);
   };
 
   // 인플루언서 말투 변환 승인
+  // - 변환된 텍스트를 설명란(board_description)에 적용
+  // - 해시태그도 폼에 반영
+  // - 이미지 업로드 상태는 절대 변경하지 않음
   const approveConverted = () => {
     if (!converted) return;
-    // 해시태그 제거
+    // 해시태그 제거 후 설명란에 적용
     const cleanContent = converted.replace(/#\w+/g, '').replace(/\s{2,}/g, ' ').trim();
     handleInputChange('board_description', cleanContent);
-    setGenerated(null);
-    setConverted(null);
+    // AI 생성에서 받은 해시태그도 함께 폼에 추가
+    if (generated?.hashtags) {
+      handleInputChange('board_hashtag', generated.hashtags.map((tag: string) => tag.replace(/^#+/, '')));
+    }
+    // 이미지 업로드 상태(formData.uploaded_image)는 절대 변경하지 않음
   };
 
   // 폼 제출 (게시글 저장)
@@ -643,29 +648,76 @@ export default function CreatePostPage() {
                       rows={3}
                       className="mt-2"
                     />
-                    {/* 인플루언서 말투로 변환 버튼: AI 생성 승인 후, 변환 전 상태에서만 노출 */}
-                    {formData.board_description && !converted && (
-                      <div className="mt-2">
-                        <Button onClick={convertToInfluencerStyle} disabled={isConverting} variant="secondary" type="button">
-                          {isConverting ? '변환 중...' : '인플루언서 말투로 변환'}
-                        </Button>
-                      </div>
-                    )}
                     {generated && (
                       <div className="mt-4 space-y-4">
-                        <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+                        <div className="p-4 bg-green-50 border border-green-200 rounded-lg relative">
                           <h4 className="font-medium text-green-900 mb-2 flex items-center">AI가 생성한 본문</h4>
-                          <div className="text-sm text-green-800 whitespace-pre-wrap bg-white p-3 rounded border mb-4">{generated.content}</div>
+                          <div className="text-sm text-green-800 whitespace-pre-wrap bg-white p-3 rounded border mb-4 max-h-60 overflow-y-auto leading-relaxed">
+                            {generated.content}
+                          </div>
                           <h5 className="font-medium text-green-800 mb-2 flex items-center">자동 생성 해시태그</h5>
                           <div className="flex flex-wrap gap-2">
                             {generated.hashtags.map((tag: string, index: number) => (
                               <Badge key={index} variant="secondary" className="bg-green-100 text-green-800 border-green-300">{tag}</Badge>
                             ))}
                           </div>
-                          <div className="flex space-x-2 mt-4">
-                            <Button type="button" onClick={approveGenerated} className="flex items-center space-x-2">
+                          <span className="text-xs text-green-600 block mt-2">{generated.content.length}자 • 스크롤 또는 전체 보기로 확인</span>
+                          <div className="flex flex-wrap justify-end items-center gap-2 mt-6">
+                            <Button 
+                              type="button" 
+                              onClick={() => setShowFullPreview(true)} 
+                              variant="outline"
+                              size="sm"
+                              className="flex items-center gap-1 border-blue-300 hover:border-blue-500 hover:bg-blue-50 transition-colors"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                              전체 보기
+                            </Button>
+                            <Button
+                              onClick={convertToInfluencerStyle}
+                              disabled={isConverting}
+                              variant="outline"
+                              size="sm"
+                              className="flex items-center gap-1 font-semibold border-blue-400 hover:border-blue-600 hover:bg-blue-50 transition-colors"
+                            >
+                              {isConverting ? (
+                                <>
+                                  <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                                  변환 중...
+                                </>
+                              ) : (
+                                <>
+                                  <User className="h-5 w-5 mr-1" />
+                                  <span className="tracking-wide">✨ 인플루언서 말투로 변환</span>
+                                </>
+                              )}
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    {converted && (
+                      <div className="mt-4 space-y-4">
+                        <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg relative">
+                          <h4 className="font-medium text-blue-900 mb-2 flex items-center">인플루언서 말투 미리보기</h4>
+                          <div className="text-sm text-blue-800 whitespace-pre-wrap bg-white p-3 rounded border mb-4 max-h-60 overflow-y-auto leading-relaxed">
+                            {converted}
+                          </div>
+                          <span className="text-xs text-blue-600 block mt-2">{converted.length}자 • 스크롤 또는 전체 보기로 확인</span>
+                          <div className="flex flex-wrap justify-end items-center gap-2 mt-6">
+                            <Button 
+                              type="button" 
+                              onClick={() => setShowFullPreview(true)} 
+                              variant="outline"
+                              size="sm"
+                              className="flex items-center gap-1 border-blue-300 hover:border-blue-500 hover:bg-blue-50 transition-colors"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                              전체 보기
+                            </Button>
+                            <Button type="button" onClick={approveConverted} variant="outline" className="flex items-center space-x-2 border-blue-400 hover:border-blue-600 hover:bg-blue-50 transition-colors">
                               <span>✓</span>
-                              <span>AI 생성 승인</span>
+                              <span>폼에 적용 (해시태그 포함)</span>
                             </Button>
                           </div>
                         </div>
@@ -808,17 +860,6 @@ export default function CreatePostPage() {
                       </div>
                     )}
                   </div>
-
-                  {/* AI 생성 승인이 된 경우에만 인플루언서 말투 변환 버튼 노출 */}
-                  {converted && (
-                    <div className="mt-4 space-y-4">
-                      <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                        <h4 className="font-medium text-blue-900 mb-2 flex items-center">인플루언서 말투 미리보기</h4>
-                        <div className="text-sm text-blue-800 whitespace-pre-wrap bg-white p-3 rounded border mb-4">{converted}</div>
-                        <Button onClick={approveConverted} variant="default">말투 변환 승인</Button>
-                      </div>
-                    </div>
-                  )}
                 </CardContent>
               </Card>
 
@@ -1014,6 +1055,62 @@ export default function CreatePostPage() {
 
                 <div className="mt-6 flex justify-end">
                   <Button onClick={() => setShowPreview(false)}>
+                    확인
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 전체 미리보기 모달 */}
+        {showFullPreview && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+              <div className="p-6">
+                <div className="flex justify-between items-center mb-4">
+                  <h2 className="text-xl font-bold">전체 내용 미리보기</h2>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowFullPreview(false)}
+                  >
+                    ×
+                  </Button>
+                </div>
+
+                <div className="space-y-6">
+                  {converted && (
+                    <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                      <h3 className="font-medium text-blue-900 mb-3">인플루언서 말투 변환 결과</h3>
+                      <div className="text-sm text-blue-800 whitespace-pre-wrap bg-white p-4 rounded border leading-relaxed">
+                        {converted}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {generated && (
+                    <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+                      <h3 className="font-medium text-green-900 mb-3">AI 생성 원본</h3>
+                      <div className="text-sm text-green-800 whitespace-pre-wrap bg-white p-4 rounded border leading-relaxed">
+                        {generated.content}
+                      </div>
+                      <div className="mt-3">
+                        <h4 className="font-medium text-green-800 mb-2">생성된 해시태그</h4>
+                        <div className="flex flex-wrap gap-2">
+                          {generated.hashtags.map((tag: string, index: number) => (
+                            <Badge key={index} variant="secondary" className="bg-green-100 text-green-800 border-green-300">
+                              {tag}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="mt-6 flex justify-end">
+                  <Button onClick={() => setShowFullPreview(false)}>
                     확인
                   </Button>
                 </div>

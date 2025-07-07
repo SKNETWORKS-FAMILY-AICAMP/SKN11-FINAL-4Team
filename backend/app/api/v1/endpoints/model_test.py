@@ -134,15 +134,31 @@ async def multi_chat(request: MultiChatRequest, db: Session = Depends(get_db), c
                 continue
             decrypted_token = decrypt_sensitive_data(encrypted_token_value)
 
-            # 1. 인플루언서별 시스템 프롬프트 생성
+            # 1. 인플루언서별 시스템 프롬프트 생성 (말투 변환 특화)
+            # 스타일 프리셋에서 말투 예시 추출
+            style_preset = getattr(ai_influencer, "style_preset", None)
+            sample_speech = None
+            if style_preset is not None:
+                sample_speech = getattr(style_preset, "influencer_speech", None)
+            influencer_tone = getattr(ai_influencer, "influencer_tone", None)
+            desc = getattr(ai_influencer, "influencer_description", None)
+            personality = getattr(ai_influencer, "influencer_personality", None)
+
             system_prompt = f"""
 너는 {ai_influencer.influencer_name}라는 AI 인플루언서야.\n"""
-            desc = getattr(ai_influencer, "influencer_description", None)
             if desc is not None and str(desc).strip() != "":
                 system_prompt += f"설명: {desc}\n"
-            personality = getattr(ai_influencer, "influencer_personality", None)
             if personality is not None and str(personality).strip() != "":
                 system_prompt += f"성격: {personality}\n"
+            if influencer_tone is not None and str(influencer_tone).strip() != "":
+                system_prompt += f"말투: {influencer_tone}\n"
+            system_prompt += "아래 예시처럼 반드시 {0}의 말투, 어투, 구어체, 감탄사, 이모지, 유행어, 특유의 표현을 적극적으로 사용해서 답변해.\n".format(ai_influencer.influencer_name)
+            system_prompt += f"딱 봐도 {ai_influencer.influencer_name}만의 말투임을 알 수 있게 써줘.\n"
+            if sample_speech is not None and str(sample_speech).strip() != "":
+                system_prompt += f"예시: {sample_speech}\n"
+            else:
+                system_prompt += "예시가 없으면, 실제 인플루언서의 말투를 최대한 상상해서 써줘.\n"
+            system_prompt += "반드시 구어체로, 너무 딱딱하지 않게, 친근하고 개성 있게, 이모지와 감탄사도 섞어서 답변해.\n"
             system_prompt += "한국어로만 대답해.\n"
 
             # 2. 채팅 템플릿 형식으로 메시지 구성
@@ -292,7 +308,7 @@ async def multi_chat(request: MultiChatRequest, db: Session = Depends(get_db), c
                 if device == "cuda":
                     inputs = {k: v.to(device) for k, v in inputs.items()}
                 
-                outputs = model.generate(**inputs, max_new_tokens=100)
+                outputs = model.generate(**inputs, max_new_tokens=1024)
                 full_response = tokenizer.decode(outputs[0], skip_special_tokens=True)
                 logger.info(f"Successfully generated text for influencer {influencer_info.influencer_id} on {device}")
                 
