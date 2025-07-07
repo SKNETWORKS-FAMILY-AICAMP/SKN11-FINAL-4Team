@@ -71,12 +71,7 @@ async def run_finetuning_pipeline(qa_data: List[Dict], system_message: str,
         
         # fine_custom.py의 main 함수를 별도의 스레드에서 실행
         hf_model_url = await asyncio.to_thread(
-            fine_custom.main,
-            qa_data=qa_data,
-            system_message=system_message,
-            hf_token=hf_token,
-            hf_repo_id=hf_repo_id,
-            training_epochs=training_epochs
+            fine_custom.main
         )
         
         if hf_model_url:
