@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 import uuid
 import asyncio
 import os
@@ -44,7 +44,7 @@ class FastToneGenerationResponse(BaseModel):
     method: str = "langchain_parallel"
 
 @router.post("/generate_qa", response_model=ToneGenerationResponse)
-async def generate_character_qa(request: VLLMCharacterProfile):
+async def generate_character_qa(request: Dict[str, Any]):
     """
     캐릭터 기반 어투 생성 (기존 엔드포인트와 호환성 유지)
     3가지 다른 어투로 질문에 대한 답변을 생성합니다.
@@ -55,14 +55,22 @@ async def generate_character_qa(request: VLLMCharacterProfile):
         if not api_key:
             raise HTTPException(status_code=500, detail="OpenAI API 키가 설정되지 않았습니다.")
         
+        # 요청 형식 판단 및 character 데이터 추출
+        if 'character' in request:
+            # 새로운 형식: {"character": {...}}
+            character_data = request['character']
+        else:
+            # 기존 형식: {...} (직접 character 데이터)
+            character_data = request
+            
         # CharacterProfile 객체 생성
         character_profile = CharacterProfile(
-            name=request.name,
-            description=request.description,
-            age_range=request.age_range,
-            gender=Gender[request.gender.upper()] if request.gender else Gender.NON_BINARY,
-            personality=request.personality,
-            mbti=request.mbti
+            name=character_data.get('name', '캐릭터'),
+            description=character_data.get('description', ''),
+            age_range=character_data.get('age_range', '알 수 없음'),
+            gender=Gender[character_data.get('gender', 'NON_BINARY').upper()] if character_data.get('gender') else Gender.NON_BINARY,
+            personality=character_data.get('personality', '친근한 성격'),
+            mbti=character_data.get('mbti')
         )
         
         # SpeechGenerator 인스턴스 생성
@@ -117,13 +125,21 @@ async def generate_character_qa(request: VLLMCharacterProfile):
         raise HTTPException(status_code=500, detail=f"어투 생성 중 오류가 발생했습니다: {str(e)}")
 
 @router.post("/generate_qa_fast", response_model=FastToneGenerationResponse)
-async def generate_character_qa_fast(request: VLLMCharacterProfile):
+async def generate_character_qa_fast(request: Dict[str, Any]):
     """
     🚀 LangChain 기반 고속 어투 생성 (병렬 처리)
     기존 순차 처리 대비 3-5배 빠른 속도
     """
     try:
-        logger.info(f"🚀 LangChain 고속 어투 생성 시작: {request.character.name}")
+        # 요청 형식 판단 및 character 데이터 추출
+        if 'character' in request:
+            # 새로운 형식: {"character": {...}}
+            character_data = request['character']
+        else:
+            # 기존 형식: {...} (직접 character 데이터)
+            character_data = request
+        
+        logger.info(f"🚀 LangChain 고속 어투 생성 시작: {character_data.get('name', 'Unknown')}")
         
         # OpenAI API 키 확인
         api_key = os.getenv('OPENAI_API_KEY')
@@ -133,25 +149,25 @@ async def generate_character_qa_fast(request: VLLMCharacterProfile):
         # LangChain 어투 생성기 인스턴스 생성
         tone_generator = get_langchain_tone_generator(api_key=api_key)
         
-        # 캐릭터 데이터 변환
-        character_data = {
-            "name": request.character.name,
-            "description": request.character.description,
-            "personality": request.character.personality,
-            "mbti": request.character.mbti,
-            "age_range": request.character.age_range,
-            "gender": request.character.gender
+        # 캐릭터 데이터 변환 (LangChain용)
+        langchain_character_data = {
+            "name": character_data.get('name', '캐릭터'),
+            "description": character_data.get('description', ''),
+            "personality": character_data.get('personality', '친근한 성격'),
+            "mbti": character_data.get('mbti'),
+            "age_range": character_data.get('age_range', '알 수 없음'),
+            "gender": character_data.get('gender', 'NON_BINARY')
         }
         
         # 질문 생성 (기존 로직과 동일)
         speech_generator = SpeechGenerator(api_key=api_key)
         character_profile = CharacterProfile(
-            name=request.character.name,
-            description=request.character.description,
-            age_range=request.character.age_range,
-            gender=Gender[request.character.gender.upper()] if request.character.gender else Gender.NON_BINARY,
-            personality=request.character.personality,
-            mbti=request.character.mbti
+            name=character_data.get('name', '캐릭터'),
+            description=character_data.get('description', ''),
+            age_range=character_data.get('age_range', '알 수 없음'),
+            gender=Gender[character_data.get('gender', 'NON_BINARY').upper()] if character_data.get('gender') else Gender.NON_BINARY,
+            personality=character_data.get('personality', '친근한 성격'),
+            mbti=character_data.get('mbti')
         )
         
         question = await speech_generator.generate_question_for_character(character_profile)
@@ -161,7 +177,7 @@ async def generate_character_qa_fast(request: VLLMCharacterProfile):
         start_time = asyncio.get_event_loop().time()
         
         responses = await tone_generator.generate_3_tones_parallel(
-            character_data=character_data,
+            character_data=langchain_character_data,
             question=question
         )
         

@@ -61,11 +61,16 @@ class ToneGenerationService:
                 mbti=request.mbti
             )
             
+            # vLLM 서버가 기대하는 형식으로 래핑
+            vllm_request_data = {
+                "character": character_data
+            }
+            
             log_message = "vLLM 서버로 캐릭터 QA 재생성 요청" if is_regeneration else "vLLM 서버로 캐릭터 QA 생성 요청"
             logger.info(f"{log_message}: {character_data}")
             
             # vLLM 서버에서 어투 생성 (새로운 전용 엔드포인트 사용)
-            vllm_result = await ToneGenerationService._generate_tones_from_vllm(character_data)
+            vllm_result = await ToneGenerationService._generate_tones_from_vllm(vllm_request_data)
             
             if is_regeneration:
                 logger.info(f"vLLM 재생성 응답 완료: {vllm_result}")
@@ -141,11 +146,11 @@ class ToneGenerationService:
         return conversation_examples
     
     @staticmethod
-    async def _generate_tones_from_vllm(character_data: dict) -> dict:
+    async def _generate_tones_from_vllm(vllm_request_data: dict) -> dict:
         """vLLM 서버에서 어투 생성 (재시도 로직 없음)
         
         Args:
-            character_data: 캐릭터 데이터
+            vllm_request_data: vLLM 서버 요청 데이터 (character 객체 포함)
             
         Returns:
             dict: vLLM 서버 응답
@@ -161,24 +166,50 @@ class ToneGenerationService:
             )
             
             async with VLLMClient(vllm_config) as client:
-                # 🚀 LangChain 기반 고속 어투 생성 엔드포인트 호출
-                response = await client.client.post(
-                    "/speech/generate_qa_fast",  # 새로운 고속 병렬 처리 엔드포인트
-                    json=character_data,
-                    timeout=30  # LangChain이 빠르므로 타임아웃 단축
-                )
-                response.raise_for_status()
+                # 먼저 고속 엔드포인트 시도
+                try:
+                    # 🚀 LangChain 기반 고속 어투 생성 엔드포인트 호출
+                    response = await client.client.post(
+                        "/speech/generate_qa_fast",  # 새로운 고속 병렬 처리 엔드포인트
+                        json=vllm_request_data,
+                        timeout=30  # LangChain이 빠르므로 타임아웃 단축
+                    )
+                    response.raise_for_status()
+                    logger.info("✅ LangChain 고속 엔드포인트 사용")
+                    
+                except Exception as fast_error:
+                    logger.warning(f"⚠️ 고속 엔드포인트 실패, 기존 엔드포인트로 폴백: {fast_error}")
+                    
+                    # 폴백: 기존 엔드포인트 사용
+                    response = await client.client.post(
+                        "/speech/generate_qa",  # 기존 호환성 엔드포인트
+                        json=vllm_request_data,
+                        timeout=60  # 기존 방식은 더 오래 걸림
+                    )
+                    response.raise_for_status()
+                    logger.info("✅ 기존 엔드포인트 사용 (폴백)")
                 
                 result = response.json()
                 # LangChain 성능 정보 로깅
                 generation_time = result.get('generation_time_seconds', 0)
                 method = result.get('method', 'unknown')
-                logger.info(f"✅ vLLM 고속 어투 생성 성공: {character_data.get('name', 'Unknown')} "
+                character_name = vllm_request_data.get('character', {}).get('name', 'Unknown')
+                logger.info(f"✅ vLLM 고속 어투 생성 성공: {character_name} "
                           f"(소요시간: {generation_time:.2f}초, 방식: {method})")
                 return result
                 
         except Exception as e:
-            logger.error(f"❌ vLLM 어투 생성 실패: {e}")
+            character_name = vllm_request_data.get('character', {}).get('name', 'Unknown')
+            logger.error(f"❌ vLLM 어투 생성 실패 ({character_name}): {e}", exc_info=True)
+            
+            # 더 상세한 오류 정보 제공
+            if hasattr(e, 'response'):
+                try:
+                    error_detail = e.response.text if hasattr(e.response, 'text') else str(e)
+                    logger.error(f"❌ vLLM 서버 응답 오류: {error_detail}")
+                except:
+                    pass
+                    
             raise HTTPException(
                 status_code=503, 
                 detail=f"vLLM 서버에서 어투 생성에 실패했습니다: {str(e)}"
