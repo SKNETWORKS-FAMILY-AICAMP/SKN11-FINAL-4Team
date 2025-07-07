@@ -310,21 +310,12 @@ def main(qa_data: list[dict], system_message: str, hf_token: str, hf_repo_id: st
     if hasattr(model, 'enable_input_require_grads'):
         model.enable_input_require_grads()
     
-    # 5. 훈련 가능한 파라미터 출력
-    model.print_trainable_parameters()
     
     # 6. gradient 체크 - 더 자세한 확인
     print("\nGradient 설정 확인:")
     trainable_params = 0
     all_params = 0
     
-    for name, param in model.named_parameters():
-        all_params += param.numel()
-        if param.requires_grad:
-            trainable_params += param.numel()
-            print(f"  ✓ {name}: {param.shape} (requires_grad=True)")
-        else:
-            print(f"  ✗ {name}: {param.shape} (requires_grad=False)")
     
     print(f"총 파라미터: {all_params:,}")
     print(f"훈련 가능한 파라미터: {trainable_params:,}")
