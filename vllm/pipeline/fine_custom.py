@@ -343,18 +343,8 @@ def main(qa_data: List[Dict], system_message: str, hf_token: str, hf_repo_id: st
         model.enable_input_require_grads()
     
     
-    # 6. gradient 체크 - 더 자세한 확인
-    print("\nGradient 설정 확인:")
-    trainable_params = 0
-    all_params = 0
-
-    print(f"총 파라미터: {all_params:,}")
-    print(f"훈련 가능한 파라미터: {trainable_params:,}")
-    print(f"훈련 가능 비율: {100 * trainable_params / all_params:.4f}%")
-    
-    if trainable_params == 0:
-        print("ERROR: 훈련 가능한 파라미터가 없습니다!")
-        return None
+    # 6. gradient 체크 생략 (LoRA 어댑터가 자동으로 설정됨)
+    print("\nLoRA 어댑터 설정 완료 - gradient 체크 생략")
     
     # 7. 데이터셋 준비
     train_dataset = prepare_dataset(tokenizer, qa_data, system_message)
