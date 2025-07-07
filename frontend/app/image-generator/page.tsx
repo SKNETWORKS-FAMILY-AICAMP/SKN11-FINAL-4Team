@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useRef } from "react"
 import { Navigation } from "@/components/navigation"
-import { RequireAuth } from "@/components/auth/protected-route"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -592,8 +591,7 @@ export default function ImageGeneratorPage() {
   }
 
   return (
-    <RequireAuth>
-      <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50">
         <Navigation />
 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -1120,7 +1118,6 @@ export default function ImageGeneratorPage() {
             </TabsContent>
           </Tabs>
         </div>
-      </div>
-    </RequireAuth>
+    </div>
   )
 }

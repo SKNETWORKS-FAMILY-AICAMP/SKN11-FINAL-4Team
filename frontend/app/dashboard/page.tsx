@@ -3,7 +3,6 @@
 import { useState, useMemo, useEffect } from "react"
 import Link from "next/link"
 import { Navigation } from "@/components/navigation"
-import { RequireAuth } from "@/components/auth/protected-route"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -121,11 +120,10 @@ export default function DashboardPage() {
   }
 
   return (
-    <RequireAuth blockGroup={2}>
-      <div className="min-h-screen bg-gray-50">
-        <Navigation />
+    <div className="min-h-screen bg-gray-50">
+      <Navigation />
 
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           {/* 대시보드 타이틀 및 설명 */}
           <div className="mb-8">
             <h1 className="text-3xl font-bold text-gray-900">AI 인플루언서 대시보드</h1>
@@ -401,7 +399,6 @@ export default function DashboardPage() {
             </div>
           )}
         </div>
-      </div>
-    </RequireAuth>
+    </div>
   )
 }

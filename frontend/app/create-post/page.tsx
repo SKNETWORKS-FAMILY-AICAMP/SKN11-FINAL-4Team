@@ -4,7 +4,6 @@ import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { Navigation } from "@/components/navigation"
-import { RequireAuth } from "@/components/auth/protected-route"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -433,29 +432,26 @@ export default function CreatePostPage() {
   // 권한 확인
   if (!hasPermission('content', 'create')) {
     return (
-      <RequireAuth>
-        <div className="min-h-screen bg-gray-50">
-          <Navigation />
-          <div className="max-w-4xl mx-auto px-4 py-8">
-            <Card>
-              <CardContent className="p-6 text-center">
-                <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
-                <h2 className="text-xl font-semibold mb-2">접근 권한이 없습니다</h2>
-                <p className="text-gray-600 mb-4">게시글을 생성할 권한이 없습니다.</p>
-                <Link href="/dashboard">
-                  <Button>대시보드로 돌아가기</Button>
-                </Link>
-              </CardContent>
-            </Card>
-          </div>
+      <div className="min-h-screen bg-gray-50">
+        <Navigation />
+        <div className="max-w-4xl mx-auto px-4 py-8">
+          <Card>
+            <CardContent className="p-6 text-center">
+              <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
+              <h2 className="text-xl font-semibold mb-2">접근 권한이 없습니다</h2>
+              <p className="text-gray-600 mb-4">게시글을 생성할 권한이 없습니다.</p>
+              <Link href="/dashboard">
+                <Button>대시보드로 돌아가기</Button>
+              </Link>
+            </CardContent>
+          </Card>
         </div>
-      </RequireAuth>
+      </div>
     )
   }
 
   return (
-    <RequireAuth>
-      <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50">
         <Navigation />
 
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -988,6 +984,5 @@ export default function CreatePostPage() {
           </div>
         )}
       </div>
-    </RequireAuth>
   )
 }
