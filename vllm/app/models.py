@@ -45,6 +45,7 @@ class FineTuningRequest(BaseModel):
     hf_token: str
     training_epochs: int = 5
     style_info: Optional[str] = ""
+    is_converted: Optional[bool] = False
 
 class FineTuningResponse(BaseModel):
     task_id: str

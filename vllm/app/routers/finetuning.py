@@ -28,6 +28,7 @@ async def start_finetuning_endpoint(request: FineTuningRequest):
             "hf_token": request.hf_token,
             "training_epochs": request.training_epochs,
             "style_info": request.style_info,
+            "is_converted": getattr(request, 'is_converted', False),
             "status": FineTuningStatus.PENDING.value,
             "created_at": time.time(),
             "updated_at": time.time()

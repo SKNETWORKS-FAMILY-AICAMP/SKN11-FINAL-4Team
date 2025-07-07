@@ -276,6 +276,9 @@ class InfluencerFineTuningService:
                 influencer_name = hf_repo_id.split('/')[-1].replace('-finetuned', '')
                 personality = "친근하고 활발한 성격"  # 기본값
                 
+                # 이미 변환된 데이터인지 확인
+                is_already_converted = (qa_data and isinstance(qa_data[0], dict) and "messages" in qa_data[0])
+                
                 vllm_client = await get_vllm_client()
                 result = await vllm_client.start_finetuning(
                     influencer_id=influencer_name,
@@ -284,7 +287,9 @@ class InfluencerFineTuningService:
                     qa_data=qa_data,
                     hf_repo_id=hf_repo_id,
                     hf_token=hf_token,
-                    training_epochs=epochs
+                    training_epochs=epochs,
+                    style_info="",
+                    is_converted=is_already_converted
                 )
                 
                 task_id = result.get("task_id")

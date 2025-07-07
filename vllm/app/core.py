@@ -112,13 +112,22 @@ async def execute_finetuning(task_id: str):
             task["style_info"]
         )
         
-        # QA 데이터를 파인튜닝용 형식으로 변환
-        finetuning_data = convert_qa_data_for_finetuning(
-            task["qa_data"], 
-            task["influencer_name"],
-            task["personality"],
-            task["style_info"]
-        )
+        # QA 데이터 형식 확인 및 변환
+        qa_data = task["qa_data"]
+        is_converted = task.get("is_converted", False)
+        
+        # 이미 변환된 데이터인지 확인
+        if is_converted or (qa_data and isinstance(qa_data[0], dict) and "messages" in qa_data[0]):
+            logger.info("이미 변환된 파인튜닝 데이터 사용")
+            finetuning_data = qa_data
+        else:
+            logger.info("QA 데이터를 파인튜닝용 형식으로 변환")
+            finetuning_data = convert_qa_data_for_finetuning(
+                qa_data, 
+                task["influencer_name"],
+                task["personality"],
+                task["style_info"]
+            )
         
         # 2. 파인튜닝 실행
         task["status"] = FineTuningStatus.TRAINING.value

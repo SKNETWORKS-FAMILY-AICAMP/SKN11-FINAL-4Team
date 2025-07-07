@@ -147,7 +147,7 @@ class VLLMClient:
     async def start_finetuning(self, influencer_id: str, influencer_name: str,
                              personality: str, qa_data: List[Dict], hf_repo_id: str,
                              hf_token: str, training_epochs: int = 5,
-                             style_info: str = "") -> Dict[str, Any]:
+                             style_info: str = "", is_converted: bool = False) -> Dict[str, Any]:
         """파인튜닝 시작"""
         try:
             payload = {
@@ -158,7 +158,8 @@ class VLLMClient:
                 "hf_repo_id": hf_repo_id,
                 "hf_token": hf_token,
                 "training_epochs": training_epochs,
-                "style_info": style_info
+                "style_info": style_info,
+                "is_converted": is_converted
             }
             
             response = await self.client.post("/finetuning/start", json=payload)
