@@ -16,10 +16,38 @@ from app.utils.adapter_utils import get_base_model_from_adapter
 from app.utils.finetuning_utils import create_system_message, convert_qa_data_for_finetuning
 from pipeline import fine_custom
 import dotenv
+import re
 
 dotenv.load_dotenv()
 
 logger = logging.getLogger(__name__)
+
+async def get_available_gpu_memory_mb() -> int:
+    """nvidia-smi를 사용하여 사용 가능한 GPU 메모리 (MB)를 반환합니다."""
+    try:
+        # nvidia-smi 명령 실행
+        process = await asyncio.create_subprocess_shell(
+            "nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await process.communicate()
+
+        if process.returncode != 0:
+            logger.error(f"nvidia-smi 실행 오류: {stderr.decode().strip()}")
+            return 0
+
+        # 출력 파싱
+        output = stdout.decode().strip()
+        free_memory_mb = int(output.split('\n')[0])
+        return free_memory_mb
+    except FileNotFoundError:
+        logger.warning("nvidia-smi를 찾을 수 없습니다. GPU 메모리 확인을 건너뜁니다.")
+        return -1 # -1은 GPU를 찾을 수 없음을 의미
+    except Exception as e:
+        logger.error(f"GPU 메모리 확인 중 오류 발생: {e}")
+        return 0
+
 
 # 전역 변수
 engine: AsyncLLMEngine = None
@@ -175,9 +203,21 @@ async def execute_finetuning(task_id: str):
 
 async def finetuning_worker():
     """파인튜닝 작업을 큐에서 가져와 처리하는 워커"""
+    MIN_GPU_MEMORY_MB = 1024 * 10 # 10GB (예시 값, 실제 필요한 메모리에 따라 조정)
+
     while True:
         task_id = await finetuning_queue.get()
         logger.info(f"⚙️ 큐에서 파인튜닝 작업 시작: {task_id}")
+        
+        # GPU 메모리 확인
+        available_memory = await get_available_gpu_memory_mb()
+        if available_memory != -1 and available_memory < MIN_GPU_MEMORY_MB:
+            logger.warning(f"⚠️ GPU 메모리 부족 ({available_memory}MB). 최소 {MIN_GPU_MEMORY_MB}MB 필요. 작업 {task_id}를 다시 큐에 넣습니다.")
+            await finetuning_queue.put(task_id) # 작업을 다시 큐에 넣음
+            finetuning_queue.task_done()
+            await asyncio.sleep(60) # 1분 대기 후 다시 시도
+            continue
+
         try:
             await execute_finetuning(task_id)
         except Exception as e:
