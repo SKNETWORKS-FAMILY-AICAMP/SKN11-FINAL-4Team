@@ -124,27 +124,15 @@ class SpeechGenerator:
             )
         else:
             # 비동기 API 호출
-            if hasattr(self.client.chat.completions, 'acreate'):
-                res = await self.client.chat.completions.acreate(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {"role": "system", "content": "아래 캐릭터 정보로 system prompt 전체를 구성해줘. 문장 표현은 매끄럽고 정리된 스타일로 해줘."},
-                        {"role": "user", "content": content}
-                    ],
-                    temperature=0.7,
-                    max_tokens=1000
-                )
-            else:
-                # 동기 폴백
-                res = self.client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {"role": "system", "content": "아래 캐릭터 정보로 system prompt 전체를 구성해줘. 문장 표현은 매끄럽고 정리된 스타일로 해줘."},
-                        {"role": "user", "content": content}
-                    ],
-                    temperature=0.7,
-                    max_tokens=1000
-                )
+            res = await self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "아래 캐릭터 정보로 system prompt 전체를 구성해줘. 문장 표현은 매끄럽고 정리된 스타일로 해줘."},
+                    {"role": "user", "content": content}
+                ],
+                temperature=0.7,
+                max_tokens=1000
+            )
             return res.choices[0].message.content.strip()
 
     async def generate_system_prompt_from_scripts(self, character: CharacterProfile, scripts: List[str]) -> str:
@@ -184,26 +172,16 @@ class SpeechGenerator:
                 max_tokens=1200
             )
         else:
-            if hasattr(self.client.chat.completions, 'acreate'):
-                response = await self.client.chat.completions.acreate(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    temperature=0.7,
-                    max_tokens=1200
-                )
-            else:
-                response = self.client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    temperature=0.7,
-                    max_tokens=1200
-                )
+            # 비동기 API 호출
+            response = await self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.7,
+                max_tokens=1200
+            )
             return response.choices[0].message.content
 
     async def generate_question_for_character(self, character: CharacterProfile) -> str:
@@ -242,26 +220,16 @@ class SpeechGenerator:
                 model="gpt-4o-mini"
             )
         else:
-            if hasattr(self.client.chat.completions, 'acreate'):
-                response = await self.client.chat.completions.acreate(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {"role": "system", "content": "당신은 캐리터 기반 대화 시나리오 생성 도우미입니다."},
-                        {"role": "user", "content": prompt}
-                    ],
-                    max_tokens=100,
-                    temperature=0.6
-                )
-            else:
-                response = self.client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {"role": "system", "content": "당신은 캐리터 기반 대화 시나리오 생성 도우미입니다."},
-                        {"role": "user", "content": prompt}
-                    ],
-                    max_tokens=100,
-                    temperature=0.6
-                )
+            # 비동기 API 호출
+            response = await self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "당신은 캐리터 기반 대화 시나리오 생성 도우미입니다."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=100,
+                temperature=0.6
+            )
             return response.choices[0].message.content.strip()
 
 
@@ -310,26 +278,16 @@ class SpeechGenerator:
                 model="gpt-4o-mini"
             )
         else:
-            if hasattr(self.client.chat.completions, 'acreate'):
-                response = await self.client.chat.completions.acreate(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {"role": "system", "content": system_instruction},
-                        {"role": "user", "content": f"말투 지시사항:\n{system_prompt}"}
-                    ],
-                    max_tokens=200,
-                    temperature=0.7
-                )
-            else:
-                response = self.client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {"role": "system", "content": system_instruction},
-                        {"role": "user", "content": f"말투 지시사항:\n{system_prompt}"}
-                    ],
-                    max_tokens=200,
-                    temperature=0.7
-                )
+            # 비동기 API 호출
+            response = await self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": system_instruction},
+                    {"role": "user", "content": f"말투 지시사항:\n{system_prompt}"}
+                ],
+                max_tokens=200,
+                temperature=0.7
+            )
             
             try:
                 return json.loads(response.choices[0].message.content)
@@ -375,17 +333,7 @@ class SpeechGenerator:
                     )
                 else:
                     if hasattr(self.client.chat.completions, 'acreate'):
-                        response = await self.client.chat.completions.acreate(
-                            model="gpt-4o-mini",
-                            messages=[
-                                {"role": "system", "content": system_prompt},
-                                {"role": "user", "content": question}
-                            ],
-                            max_tokens=150,
-                            temperature=0.8
-                        )
-                    else:
-                        response = self.client.chat.completions.create(
+                        response = await self.client.chat.completions.create(
                             model="gpt-4o-mini",
                             messages=[
                                 {"role": "system", "content": system_prompt},
@@ -454,17 +402,6 @@ class SpeechGenerator:
                         temperature=0.8,
                         max_tokens=150
                     )
-                else:
-                    response = self.client.chat.completions.create(
-                        model="gpt-4o-mini",
-                        messages=[
-                            {"role": "system", "content": current_system_prompt},
-                            {"role": "user", "content": question}
-                        ],
-                        max_tokens=150,
-                        temperature=0.8
-                    )
-                    answer = response.choices[0].message.content.strip()
                 
                 qa_pairs.append({"question": question, "answer": answer})
                 
@@ -734,16 +671,6 @@ class SpeechGenerator:
                         max_tokens=100,
                         temperature=0.9
                     )
-                else:
-                    response = self.client.chat.completions.create(
-                        model="gpt-4o-mini",
-                        messages=[
-                            {"role": "system", "content": "아래 프롬프트에 따라 말투 스타일 설명을 한 문장으로, 반드시 한국어로만 답변하세요."},
-                            {"role": "user", "content": prompt}
-                        ],
-                        max_tokens=100,
-                        temperature=0.9
-                    )
                 desc = response.choices[0].message.content.strip()
             
             descriptions[tone_names[i]] = desc
@@ -904,17 +831,7 @@ class SpeechGenerator:
                     )
                 else:
                     if hasattr(self.client.chat.completions, 'acreate'):
-                        chat_completion = await self.client.chat.completions.acreate(
-                            model="gpt-4o-mini",
-                            messages=[
-                                {"role": "system", "content": prompt},
-                                {"role": "user", "content": selected_message}
-                            ],
-                            max_tokens=1000,
-                            temperature=0.9
-                        )
-                    else:
-                        chat_completion = self.client.chat.completions.create(
+                        chat_completion = await self.client.chat.completions.create(
                             model="gpt-4o-mini",
                             messages=[
                                 {"role": "system", "content": prompt},
