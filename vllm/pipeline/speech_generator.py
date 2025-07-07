@@ -332,16 +332,15 @@ class SpeechGenerator:
                         max_tokens=150
                     )
                 else:
-                    if hasattr(self.client.chat.completions, 'acreate'):
-                        response = await self.client.chat.completions.create(
-                            model="gpt-4o-mini",
-                            messages=[
-                                {"role": "system", "content": system_prompt},
-                                {"role": "user", "content": question}
-                            ],
-                            max_tokens=150,
-                            temperature=0.8
-                        )
+                    response = await self.client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": question}
+                        ],
+                        max_tokens=150,
+                        temperature=0.8
+                    )
                     generated_text = response.choices[0].message.content.strip()
                 
                 # 말투 요약 생성
@@ -661,16 +660,15 @@ class SpeechGenerator:
                     max_tokens=100
                 )
             else:
-                if hasattr(self.client.chat.completions, 'acreate'):
-                    response = await self.client.chat.completions.acreate(
-                        model="gpt-4o-mini",
-                        messages=[
-                            {"role": "system", "content": "아래 프롬프트에 따라 말투 스타일 설명을 한 문장으로, 반드시 한국어로만 답변하세요."},
-                            {"role": "user", "content": prompt}
-                        ],
-                        max_tokens=100,
-                        temperature=0.9
-                    )
+                response = await self.client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": "아래 프롬프트에 따라 말투 스타일 설명을 한 문장으로, 반드시 한국어로만 답변하세요."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    max_tokens=100,
+                    temperature=0.9
+                )
                 desc = response.choices[0].message.content.strip()
             
             descriptions[tone_names[i]] = desc
@@ -830,16 +828,15 @@ class SpeechGenerator:
                         max_tokens=1000
                     )
                 else:
-                    if hasattr(self.client.chat.completions, 'acreate'):
-                        chat_completion = await self.client.chat.completions.create(
-                            model="gpt-4o-mini",
-                            messages=[
-                                {"role": "system", "content": prompt},
-                                {"role": "user", "content": selected_message}
-                            ],
-                            max_tokens=1000,
-                            temperature=0.9
-                        )
+                    chat_completion = await self.client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=[
+                            {"role": "system", "content": prompt},
+                            {"role": "user", "content": selected_message}
+                        ],
+                        max_tokens=1000,
+                        temperature=0.9
+                    )
                     content = chat_completion.choices[0].message.content
                 
                 summary = await self.summarize_speech_style_with_gpt(prompt)
