@@ -161,16 +161,20 @@ class ToneGenerationService:
             )
             
             async with VLLMClient(vllm_config) as client:
-                # 새로운 어투 생성 엔드포인트 호출
+                # 🚀 LangChain 기반 고속 어투 생성 엔드포인트 호출
                 response = await client.client.post(
-                    "/speech/generate_qa",  # 기존 호환성 유지용 엔드포인트
+                    "/speech/generate_qa_fast",  # 새로운 고속 병렬 처리 엔드포인트
                     json=character_data,
-                    timeout=60
+                    timeout=30  # LangChain이 빠르므로 타임아웃 단축
                 )
                 response.raise_for_status()
                 
                 result = response.json()
-                logger.info(f"✅ vLLM 어투 생성 성공: {character_data.get('name', 'Unknown')}")
+                # LangChain 성능 정보 로깅
+                generation_time = result.get('generation_time_seconds', 0)
+                method = result.get('method', 'unknown')
+                logger.info(f"✅ vLLM 고속 어투 생성 성공: {character_data.get('name', 'Unknown')} "
+                          f"(소요시간: {generation_time:.2f}초, 방식: {method})")
                 return result
                 
         except Exception as e:
