@@ -15,6 +15,9 @@ from pipeline.speech_generator import SpeechGenerator
 from app.utils.adapter_utils import get_base_model_from_adapter
 from app.utils.finetuning_utils import create_system_message, convert_qa_data_for_finetuning
 from pipeline import fine_custom
+import dotenv
+
+dotenv.load_dotenv()
 
 logger = logging.getLogger(__name__)
 
