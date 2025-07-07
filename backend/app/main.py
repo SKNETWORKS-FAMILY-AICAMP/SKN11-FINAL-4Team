@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.middleware.base import BaseHTTPMiddleware
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -15,6 +16,7 @@ from app.database import init_database, test_database_connection
 from app.api.v1.api import api_router
 from app.services.startup_service import run_startup_tasks
 from app.services.batch_monitor import start_batch_monitoring, stop_batch_monitoring
+from app.services.scheduler_service import scheduler_service
 
 # 로깅 설정
 if settings.DEBUG:
@@ -26,8 +28,8 @@ if settings.DEBUG:
             logging.StreamHandler(),  # 콘솔 출력
         ]
     )
-    # 개발 환경에서는 SQLAlchemy 로그도 표시
-    logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
+    # SQLAlchemy 로그 비활성화 (디버깅 시 불편함)
+    logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
     logging.getLogger('app').setLevel(logging.DEBUG)
 else:
     # 프로덕션 환경에서는 기존 설정 유지
@@ -45,6 +47,8 @@ logger = logging.getLogger(__name__)
 # 공통으로 비활성화할 로그들
 logging.getLogger('httpx').setLevel(logging.WARNING)
 logging.getLogger('httpcore').setLevel(logging.WARNING)
+logging.getLogger('sqlalchemy.pool').setLevel(logging.WARNING)
+logging.getLogger('sqlalchemy.dialects').setLevel(logging.WARNING)
 
 
 @asynccontextmanager
@@ -71,6 +75,13 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"⚠️ Batch monitoring failed to start, but continuing: {e}")
 
+    # 스케줄러 서비스 시작
+    try:
+        await scheduler_service.start()
+        logger.info("📅 스케줄러 서비스 시작 완료")
+    except Exception as e:
+        logger.warning(f"⚠️ Scheduler service failed to start, but continuing: {e}")
+
     logger.info("✅ AIMEX API Server ready")
 
     yield
@@ -84,6 +95,13 @@ async def lifespan(app: FastAPI):
         logger.info("✅ 배치 모니터링이 정상적으로 중지되었습니다")
     except Exception as e:
         logger.error(f"❌ 배치 모니터링 중지 중 오류: {e}")
+
+    # 스케줄러 서비스 중지
+    try:
+        await scheduler_service.stop()
+        logger.info("✅ 스케줄러 서비스가 정상적으로 중지되었습니다")
+    except Exception as e:
+        logger.error(f"❌ 스케줄러 서비스 중지 중 오류: {e}")
 
 
 # FastAPI 애플리케이션 생성
@@ -101,7 +119,7 @@ app = FastAPI(
 # CORS 미들웨어 설정
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.BACKEND_CORS_ORIGINS + ["*"],  # 개발 환경에서 모든 origin 허용
+    allow_origins=settings.BACKEND_CORS_ORIGINS if not settings.DEBUG else ["*"],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
@@ -113,6 +131,27 @@ app.add_middleware(
     TrustedHostMiddleware,
     allowed_hosts=["*"]
 )
+
+
+# 파일 업로드 크기 제한 미들웨어
+class FileSizeMiddleware(BaseHTTPMiddleware):
+    def __init__(self, app, max_size: int = 50 * 1024 * 1024):  # 50MB
+        super().__init__(app)
+        self.max_size = max_size
+
+    async def dispatch(self, request: Request, call_next):
+        if request.method == "POST" and "multipart/form-data" in request.headers.get("content-type", ""):
+            content_length = request.headers.get("content-length")
+            if content_length and int(content_length) > self.max_size:
+                return JSONResponse(
+                    status_code=413,
+                    content={"detail": f"File too large. Maximum size is {self.max_size} bytes"}
+                )
+        
+        response = await call_next(request)
+        return response
+
+# app.add_middleware(FileSizeMiddleware)  # 임시 비활성화
 
 
 # 요청 로깅 미들웨어

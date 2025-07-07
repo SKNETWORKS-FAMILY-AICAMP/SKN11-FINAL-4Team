@@ -60,9 +60,27 @@ class Settings(BaseSettings):
     # RunPod 설정
     RUNPOD_API_KEY: str = os.getenv("RUNPOD_API_KEY", "")
     RUNPOD_TEMPLATE_ID: str = os.getenv("RUNPOD_TEMPLATE_ID", "")  # ComfyUI 템플릿 ID
+    RUNPOD_CUSTOM_TEMPLATE_ID: str = os.getenv("RUNPOD_CUSTOM_TEMPLATE_ID", "")  # 커스텀 노드 템플릿 ID
     RUNPOD_GPU_TYPE: str = os.getenv("RUNPOD_GPU_TYPE", "NVIDIA RTX 5090")
     RUNPOD_MAX_WORKERS: int = int(os.getenv("RUNPOD_MAX_WORKERS", "1"))
     RUNPOD_IDLE_TIMEOUT: int = int(os.getenv("RUNPOD_IDLE_TIMEOUT", "300"))  # 5분
+    
+    # 기존 실행 중인 RunPod 인스턴스 정보
+    RUNPOD_EXISTING_ENDPOINT: str = os.getenv("RUNPOD_EXISTING_ENDPOINT", "")
+    RUNPOD_EXISTING_POD_ID: str = os.getenv("RUNPOD_EXISTING_POD_ID", "")
+    
+    # 커스텀 노드 설정
+    RUNPOD_CUSTOM_NODES: List[str] = []
+    CUSTOM_NODES_INSTALL_TIMEOUT: int = int(os.getenv("CUSTOM_NODES_INSTALL_TIMEOUT", "600"))  # 10분
+    RUNPOD_VOLUME_ID: str = os.getenv("RUNPOD_VOLUME_ID", "")
+    RUNPOD_VOLUME_MOUNT_PATH: str = os.getenv("RUNPOD_VOLUME_MOUNT_PATH", "/runpod-volume")
+    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # 환경변수에서 커스텀 노드 목록 파싱
+        custom_nodes_str = os.getenv("RUNPOD_CUSTOM_NODES", "")
+        if custom_nodes_str:
+            self.RUNPOD_CUSTOM_NODES = [node.strip() for node in custom_nodes_str.split(",") if node.strip()]
 
     # 로깅 설정
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
