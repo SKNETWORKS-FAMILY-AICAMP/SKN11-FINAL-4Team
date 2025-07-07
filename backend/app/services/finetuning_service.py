@@ -208,8 +208,12 @@ class InfluencerFineTuningService:
                                 logger.warning(f"S3 QA 데이터: OpenAI 형식에서 Q:A: 파싱 실패: {message_content}")
                         else:
                             # Q: 또는 A: 키워드가 없는 경우, 원본 요청에서 질문을 추출하고 응답을 답변으로 사용
+                            logger.info(f"S3 QA 데이터: 키워드 없는 형식 처리 시작 - 데이터 구조: {list(data.keys())}")
+                            
                             if 'custom_id' in data and 'request' in data and 'body' in data['request']:
                                 request_body = data['request']['body']
+                                logger.info(f"S3 QA 데이터: request body 구조: {list(request_body.keys()) if isinstance(request_body, dict) else 'not dict'}")
+                                
                                 if 'messages' in request_body and isinstance(request_body['messages'], list):
                                     # 사용자 메시지에서 질문 추출
                                     user_message = None
@@ -221,7 +225,7 @@ class InfluencerFineTuningService:
                                     if user_message:
                                         # 질문을 추출하고 답변으로 message_content 사용
                                         qa_pairs.append({"question": user_message, "answer": message_content})
-                                        logger.info(f"S3 QA 데이터: 키워드 없는 형식에서 QA 쌍 추출 성공")
+                                        logger.info(f"S3 QA 데이터: 키워드 없는 형식에서 QA 쌍 추출 성공 - Q: {user_message[:50]}...")
                                     else:
                                         logger.warning(f"S3 QA 데이터: 요청에서 사용자 메시지를 찾을 수 없음")
                                 else:
