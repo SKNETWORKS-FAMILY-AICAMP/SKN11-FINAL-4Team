@@ -231,7 +231,7 @@ function PostListContent() {
         return
       }
 
-      const response = await fetch('https://localhost:8000/api/v1/boards', {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/api/v1/boards`, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`,

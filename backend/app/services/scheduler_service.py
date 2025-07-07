@@ -141,7 +141,7 @@ class SchedulerService:
                 
                 # 게시글 상태를 발행됨(3)으로 변경
                 post.board_status = 3
-                post.pulished_at = datetime.now()
+                post.published_at = datetime.now()
                 
                 db.commit()
                 

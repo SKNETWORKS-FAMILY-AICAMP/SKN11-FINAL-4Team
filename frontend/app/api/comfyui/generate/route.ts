@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 
+// SSL 검증 비활성화 (개발 환경용)
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
+
 // ComfyUI 워크플로우 템플릿
 const createWorkflow = (params: any) => {
   const { prompt, negative_prompt, model, width, height, steps, cfg_scale, seed } = params
@@ -90,7 +93,19 @@ const createWorkflow = (params: any) => {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { prompt, negative_prompt, model, style, width, height, steps, cfg_scale, seed } = body
+    const { 
+      prompt, 
+      negative_prompt, 
+      model, 
+      style, 
+      width, 
+      height, 
+      steps, 
+      cfg_scale, 
+      seed,
+      workflow_id,
+      custom_parameters 
+    } = body
 
     if (!prompt) {
       return NextResponse.json(
@@ -99,7 +114,8 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const comfyUIUrl = process.env.COMFYUI_URL || 'http://localhost:8188'
+    // 백엔드 API를 통해 커스텀 워크플로우로 이미지 생성
+    const backendUrl = process.env.BACKEND_URL || 'http://localhost:8000'
     
     // 스타일에 따른 프롬프트 수정
     let enhancedPrompt = prompt
@@ -132,40 +148,61 @@ export async function POST(request: NextRequest) {
         break
     }
 
-    // ComfyUI 워크플로우 생성
-    const workflow = createWorkflow({
-      prompt: enhancedPrompt,
-      negative_prompt: enhancedNegativePrompt,
-      model,
-      width,
-      height,
-      steps,
-      cfg_scale,
-      seed
-    })
-
-    // ComfyUI로 워크플로우 전송
-    const response = await fetch(`${comfyUIUrl}/prompt`, {
+    // 백엔드로 이미지 생성 요청 (RunPod 사용)
+    const response = await fetch(`${backendUrl}/api/v1/comfyui/generate`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        prompt: workflow,
-        client_id: 'nextjs-frontend'
+        prompt: enhancedPrompt,
+        negative_prompt: enhancedNegativePrompt,
+        width: width || 1024,
+        height: height || 1024,
+        steps: steps || 20,
+        cfg_scale: cfg_scale || 7.0,
+        seed: seed,
+        style: style,
+        workflow_id: workflow_id || 'basic_txt2img',
+        custom_parameters: custom_parameters || {},
+        use_runpod: true  // RunPod 사용 활성화
       })
     })
 
     if (!response.ok) {
-      throw new Error('Failed to submit workflow to ComfyUI')
+      const errorText = await response.text()
+      console.error('Backend error:', response.status, errorText)
+      throw new Error(`Backend error: ${response.status} - ${errorText}`)
     }
 
     const data = await response.json()
+    console.log('Backend response:', data)
+    
+    // 백엔드 응답에서 job_id 또는 prompt_id 찾기
+    const jobId = data.job_id || data.prompt_id || data.id
+    
+    // 백엔드에서 즉시 완료된 이미지를 반환하는 경우 처리
+    if (data.status === 'completed' && data.images && data.images.length > 0) {
+      return NextResponse.json({
+        success: true,
+        job_id: jobId,
+        status: 'completed',
+        image_url: data.images[0], // base64 이미지 URL
+        message: 'Image generation completed immediately',
+        backend_response: data
+      })
+    }
+    
+    if (!jobId) {
+      console.error('No job ID in backend response:', data)
+      throw new Error('No job ID received from backend')
+    }
     
     return NextResponse.json({
       success: true,
-      job_id: data.prompt_id,
-      message: 'Image generation started'
+      job_id: jobId,
+      message: 'Image generation started',
+      backend_response: data
     })
   } catch (error) {
     console.error('Error generating image:', error)

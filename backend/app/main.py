@@ -28,8 +28,8 @@ if settings.DEBUG:
             logging.StreamHandler(),  # 콘솔 출력
         ]
     )
-    # 개발 환경에서는 SQLAlchemy 로그도 표시
-    logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
+    # SQLAlchemy 로그 비활성화 (디버깅 시 불편함)
+    logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
     logging.getLogger('app').setLevel(logging.DEBUG)
 else:
     # 프로덕션 환경에서는 기존 설정 유지
@@ -47,6 +47,8 @@ logger = logging.getLogger(__name__)
 # 공통으로 비활성화할 로그들
 logging.getLogger('httpx').setLevel(logging.WARNING)
 logging.getLogger('httpcore').setLevel(logging.WARNING)
+logging.getLogger('sqlalchemy.pool').setLevel(logging.WARNING)
+logging.getLogger('sqlalchemy.dialects').setLevel(logging.WARNING)
 
 
 @asynccontextmanager

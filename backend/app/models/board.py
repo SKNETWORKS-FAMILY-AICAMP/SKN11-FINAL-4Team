@@ -60,13 +60,22 @@ class Board(Base, TimestampMixin):
         Integer,
         nullable=False,
         default=1,
-        comment="1:임시저장, 2:발행됨",
+        comment="1:임시저장, 2:예약상태, 3:발행됨",
     )
     image_url = Column(
         Text, nullable=False, comment="게시글 썸네일 또는 대표 이미지 URL 경로"
     )
+    reservation_at = Column(
+        TIMESTAMP,
+        nullable=True,
+        comment="예약 발행 시간"
+    )
+    published_at = Column(
+        TIMESTAMP,
+        nullable=True,
+        comment="실제 발행 시간"
+    )
     # created_at과 updated_at은 TimestampMixin에서 제공됨
-    # published_at 필드는 DB에 존재하지 않으므로 완전히 제거됨
 
     # 복합 외래키 제약조건 (USER_GROUP 테이블 참조)
     __table_args__ = (

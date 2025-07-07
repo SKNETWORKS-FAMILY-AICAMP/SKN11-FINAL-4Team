@@ -5,9 +5,13 @@
 
 import json
 import logging
+import time
 from typing import Dict, Any, Optional
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 from app.core.config import settings
+from app.database import get_db
+from app.models.prompt_optimization import PromptOptimization, PromptOptimizationUsage
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +35,8 @@ class PromptOptimizationRequest(BaseModel):
     quality_level: str = "high"  # low, medium, high, ultra
     aspect_ratio: str = "1:1"  # 1:1, 16:9, 9:16, 4:3, 3:2
     additional_tags: Optional[str] = None  # 추가 태그
+    user_id: Optional[str] = None  # 사용자 ID
+    session_id: Optional[str] = None  # 세션 ID
 
 
 class PromptOptimizationResponse(BaseModel):
@@ -55,11 +61,28 @@ class PromptOptimizationService:
     
     async def optimize_prompt(self, request: PromptOptimizationRequest) -> PromptOptimizationResponse:
         """프롬프트 최적화"""
+        start_time = time.time()
         
-        if not self.use_mock and openai_client:
-            return await self._optimize_with_openai(request)
-        else:
-            return await self._optimize_with_mock(request)
+        try:
+            if not self.use_mock and openai_client:
+                result = await self._optimize_with_openai(request)
+            else:
+                result = await self._optimize_with_mock(request)
+            
+            # 최적화 시간 계산
+            optimization_time = time.time() - start_time
+            
+            # DB에 저장
+            await self._save_optimization_result(request, result, optimization_time)
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Prompt optimization failed: {e}")
+            # 실패해도 DB에 기록
+            optimization_time = time.time() - start_time
+            await self._save_optimization_error(request, str(e), optimization_time)
+            raise
     
     async def _optimize_with_openai(self, request: PromptOptimizationRequest) -> PromptOptimizationResponse:
         """OpenAI를 사용한 실제 프롬프트 최적화"""
@@ -267,6 +290,79 @@ class PromptOptimizationService:
             "artistic": "low quality, blurry, distorted, deformed, ugly, bad anatomy, worst quality, low resolution",
             "photograph": "low quality, blurry, distorted, deformed, ugly, bad anatomy, worst quality, low resolution, cartoon, anime, painting, artistic"
         }
+    
+    async def _save_optimization_result(self, request: PromptOptimizationRequest, result: PromptOptimizationResponse, optimization_time: float):
+        """최적화 결과를 DB에 저장"""
+        try:
+            db_session = next(get_db())
+            
+            # 프롬프트 최적화 기록 저장
+            optimization_record = PromptOptimization(
+                original_prompt=request.original_prompt,
+                optimized_prompt=result.optimized_prompt,
+                negative_prompt=result.negative_prompt,
+                style=request.style,
+                quality_level=request.quality_level,
+                aspect_ratio=request.aspect_ratio,
+                additional_tags=request.additional_tags,
+                style_tags=result.style_tags,
+                quality_tags=result.quality_tags,
+                optimization_metadata=result.metadata,
+                optimization_method=result.metadata.get("method", "unknown"),
+                model_used=result.metadata.get("model", ""),
+                tokens_used=result.metadata.get("tokens_used", 0),
+                user_id=request.user_id,
+                session_id=request.session_id,
+                optimization_time=optimization_time
+            )
+            
+            db_session.add(optimization_record)
+            db_session.commit()
+            
+            logger.info(f"Optimization result saved to DB: {optimization_record.id}")
+            
+        except Exception as e:
+            logger.error(f"Failed to save optimization result to DB: {e}")
+            if db_session:
+                db_session.rollback()
+        finally:
+            if db_session:
+                db_session.close()
+    
+    async def _save_optimization_error(self, request: PromptOptimizationRequest, error_message: str, optimization_time: float):
+        """최적화 오류를 DB에 저장"""
+        try:
+            db_session = next(get_db())
+            
+            optimization_record = PromptOptimization(
+                original_prompt=request.original_prompt,
+                optimized_prompt="",
+                negative_prompt="",
+                style=request.style,
+                quality_level=request.quality_level,
+                aspect_ratio=request.aspect_ratio,
+                additional_tags=request.additional_tags,
+                style_tags=[],
+                quality_tags=[],
+                optimization_metadata={"error": error_message, "method": "error"},
+                optimization_method="error",
+                user_id=request.user_id,
+                session_id=request.session_id,
+                optimization_time=optimization_time
+            )
+            
+            db_session.add(optimization_record)
+            db_session.commit()
+            
+            logger.info(f"Optimization error saved to DB: {optimization_record.id}")
+            
+        except Exception as e:
+            logger.error(f"Failed to save optimization error to DB: {e}")
+            if db_session:
+                db_session.rollback()
+        finally:
+            if db_session:
+                db_session.close()
 
 
 # 싱글톤 패턴

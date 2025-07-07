@@ -3,43 +3,50 @@ import { NextRequest, NextResponse } from 'next/server'
 // ComfyUI 모델 목록을 가져오는 API
 export async function GET(request: NextRequest) {
   try {
-    // Backend API를 통해 ComfyUI 모델 정보 가져오기
-    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
-    
-    // Backend의 ComfyUI 모델 목록 엔드포인트 호출
-    const response = await fetch(`${backendUrl}/api/v1/boards/comfyui/models`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
+    // 현재는 ComfyUI 서버가 연결되지 않았으므로 기본 모델 목록 반환
+    const defaultModels = [
+      { 
+        id: 'sd_xl_base_1.0.safetensors', 
+        name: 'Stable Diffusion XL Base 1.0', 
+        type: 'checkpoint', 
+        description: 'High-quality SDXL base model for general image generation',
+        category: 'Base Model'
       },
-      // SSL 인증서 검증 무시 (개발 환경용)
-      ...(process.env.NODE_ENV === 'development' && { 
-        // @ts-ignore
-        agent: new (require('https').Agent)({ rejectUnauthorized: false })
-      })
-    })
-
-    if (!response.ok) {
-      throw new Error('Failed to fetch models from backend')
-    }
-
-    const data = await response.json()
+      { 
+        id: 'sd_v1-5-pruned-emaonly.safetensors', 
+        name: 'Stable Diffusion v1.5', 
+        type: 'checkpoint', 
+        description: 'Classic SD 1.5 model, reliable for various styles',
+        category: 'Base Model'
+      },
+      { 
+        id: 'dreamshaper_8.safetensors', 
+        name: 'DreamShaper v8', 
+        type: 'checkpoint', 
+        description: 'Popular fine-tuned model for artistic and fantasy images',
+        category: 'Fine-tuned'
+      },
+      { 
+        id: 'realvisxl_v4.0.safetensors', 
+        name: 'RealVisXL v4.0', 
+        type: 'checkpoint', 
+        description: 'Specialized for photorealistic image generation',
+        category: 'Realistic'
+      }
+    ]
     
     return NextResponse.json({
-      success: data.success,
-      models: data.models
+      success: true,
+      models: defaultModels,
+      message: 'Default models loaded successfully'
     })
   } catch (error) {
     console.error('Error fetching ComfyUI models:', error)
     return NextResponse.json(
       { 
         success: false, 
-        error: 'Failed to fetch models from ComfyUI',
-        models: [
-          // 기본 모델들 (ComfyUI가 연결되지 않은 경우)
-          { id: 'sd_xl_base_1.0', name: 'Stable Diffusion XL Base', type: 'checkpoint', description: 'Base SDXL model' },
-          { id: 'sd_v1-5', name: 'Stable Diffusion v1.5', type: 'checkpoint', description: 'SD 1.5 model' }
-        ]
+        error: 'Failed to fetch models',
+        models: []
       },
       { status: 500 }
     )
