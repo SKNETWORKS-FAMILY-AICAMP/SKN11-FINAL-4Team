@@ -96,6 +96,9 @@ async def run_finetuning_pipeline(qa_data: List[Dict], system_message: str,
     """파인튜닝 파이프라인 실행"""
     try:
         logger.info(f"🔄 파인튜닝 파이프라인 실행: {hf_repo_id}")
+        logger.info(f"🔍 파이프라인 QA 데이터: 개수={len(qa_data)}")
+        if qa_data:
+            logger.info(f"🔍 파이프라인 첫 번째 데이터: {qa_data[0]}")
         
         # fine_custom.py의 main 함수를 별도의 스레드에서 실행
         hf_model_url = await asyncio.to_thread(
@@ -144,18 +147,27 @@ async def execute_finetuning(task_id: str):
         qa_data = task["qa_data"]
         is_converted = task.get("is_converted", False)
         
+        logger.info(f"🔍 QA 데이터 디버깅: 개수={len(qa_data) if qa_data else 0}, is_converted={is_converted}")
+        if qa_data:
+            logger.info(f"🔍 첫 번째 QA 데이터 샘플: {qa_data[0]}")
+        
         # 이미 변환된 데이터인지 확인
         if is_converted or (qa_data and isinstance(qa_data[0], dict) and "messages" in qa_data[0]):
             logger.info("이미 변환된 파인튜닝 데이터 사용")
             finetuning_data = qa_data
         else:
             logger.info("QA 데이터를 파인튜닝용 형식으로 변환")
-            finetuning_data = convert_qa_data_for_finetuning(
-                qa_data, 
-                task["influencer_name"],
-                task["personality"],
-                task["style_info"]
-            )
+            try:
+                finetuning_data = convert_qa_data_for_finetuning(
+                    qa_data, 
+                    task["influencer_name"],
+                    task["personality"],
+                    task["style_info"]
+                )
+            except Exception as e:
+                logger.error(f"❌ QA 데이터 변환 중 오류: {e}")
+                logger.error(f"❌ QA 데이터 샘플: {qa_data[:3] if qa_data else 'None'}")
+                raise
         
         # 2. 파인튜닝 실행
         task["status"] = FineTuningStatus.TRAINING.value

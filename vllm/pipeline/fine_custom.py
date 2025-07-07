@@ -335,7 +335,7 @@ def main(qa_data: list[dict], system_message: str, hf_token: str, hf_repo_id: st
         return
     
     # 7. 데이터셋 준비
-    train_dataset = prepare_dataset(tokenizer, qa_data, system_message)
+    train_dataset = qa_data
     print(f"훈련 데이터셋 크기: {len(train_dataset)}")
     
     # 데이터셋을 train/eval로 분할 (조기 종료를 위한 validation 데이터 필요)
