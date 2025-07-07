@@ -186,36 +186,39 @@ async def initialize_vllm_engine():
     logger.info("🚀 vLLM LoRA 엔진 초기화 중...")
     
     try:
-        # vLLM 엔진을 FastAPI 내부에서만 사용 (별도 서버 없이)
-        engine_args = AsyncEngineArgs(
-            model="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct",
-            max_model_len=2048,
-            tensor_parallel_size=1,
-            trust_remote_code=True,
-            gpu_memory_utilization=0.8,
-            enable_lora=True,
-            max_loras=8,
-            max_lora_rank=64,
-            lora_extra_vocab_size=256,
-            max_cpu_loras=16,
-            max_num_seqs=256,
-            max_num_batched_tokens=8192,
-            # FastAPI와 포트 충돌 방지를 위해 별도 서버 비활성화
-            disable_log_requests=True,
-        )
-        
-        # AsyncLLMEngine을 직접 생성 (서버 모드 아님)
-        engine = AsyncLLMEngine.from_engine_args(engine_args)
-        logger.info("✅ vLLM LoRA 엔진 초기화 완료 (FastAPI 내부 엔진 모드)!")
-
+        # Speech Generator 먼저 초기화 (vLLM 엔진과 독립적)
         if OPENAI_API_KEY:
             speech_generator = SpeechGenerator(api_key=OPENAI_API_KEY)
             logger.info("✅ Speech Generator 초기화 완료")
         else:
             logger.warning("⚠️ OPENAI_API_KEY가 설정되지 않아 Speech Generator 기능이 비활성화됩니다")
         
+        # vLLM 엔진 초기화 (GPU 필요하므로 실패할 수 있음)
+        try:
+            engine_args = AsyncEngineArgs(
+                model="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct",
+                max_model_len=2048,
+                tensor_parallel_size=1,
+                trust_remote_code=True,
+                gpu_memory_utilization=0.8,
+                enable_lora=True,
+                max_loras=8,
+                max_lora_rank=64,
+                lora_extra_vocab_size=256,
+                max_cpu_loras=16,
+                max_num_seqs=256,
+                max_num_batched_tokens=8192,
+                disable_log_requests=True,
+            )
+            
+            engine = AsyncLLMEngine.from_engine_args(engine_args)
+            logger.info("✅ vLLM LoRA 엔진 초기화 완료 (FastAPI 내부 엔진 모드)!")
+        except Exception as vllm_error:
+            logger.warning(f"⚠️ vLLM 엔진 초기화 실패 (GPU 없음?): {vllm_error}")
+            logger.info("📝 vLLM 엔진 없이 파인튜닝과 Speech Generator만 사용 가능합니다")
+        
     except Exception as e:
-        logger.error(f"❌ vLLM 엔진 초기화 실패: {e}")
+        logger.error(f"❌ 초기화 실패: {e}")
         raise e
 
 async def startup_event():

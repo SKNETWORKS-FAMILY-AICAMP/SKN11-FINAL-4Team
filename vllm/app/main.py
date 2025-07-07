@@ -8,6 +8,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core import startup_event
 from app.routers import lora, generation, finetuning, speech
 
+# 로깅 설정
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
 
 # 환경 변수 로드
@@ -31,7 +36,13 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def on_startup():
-    await startup_event()
+    logger.info("🚀 FastAPI 서버 시작 중...")
+    try:
+        await startup_event()
+        logger.info("✅ FastAPI 서버 초기화 완료")
+    except Exception as e:
+        logger.error(f"❌ FastAPI 서버 초기화 실패: {e}")
+        # 서버는 계속 실행하되 초기화 실패를 로그에 남김
 
 @app.get("/")
 async def root():
