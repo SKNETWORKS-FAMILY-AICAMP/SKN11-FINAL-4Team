@@ -221,8 +221,15 @@ async def initialize_vllm_engine():
 async def startup_event():
     """서버 시작 시 비동기 엔진 초기화 및 파인튜닝 워커 시작"""
     global finetuning_queue
-    await initialize_vllm_engine()
+    
+    try:
+        await initialize_vllm_engine()
+        logger.info("✅ vLLM 엔진 초기화 완료")
+    except Exception as e:
+        logger.error(f"❌ vLLM 엔진 초기화 실패: {e}")
+        logger.warning("⚠️ vLLM 엔진 없이 파인튜닝 큐만 초기화합니다")
 
+    # vLLM 엔진 초기화 실패와 관계없이 파인튜닝 큐는 초기화
     finetuning_queue = asyncio.Queue()
     asyncio.create_task(finetuning_worker())
     logger.info("✅ 파인튜닝 워커 시작됨")
