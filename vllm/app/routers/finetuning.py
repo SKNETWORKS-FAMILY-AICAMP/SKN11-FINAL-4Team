@@ -4,7 +4,7 @@ import time
 from fastapi import APIRouter, HTTPException
 
 from app.models import FineTuningRequest, FineTuningResponse, FineTuningStatus, FineTuningStatusResponse
-from app.core import finetuning_tasks, finetuning_queue, execute_finetuning
+import app.core as core
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,7 @@ async def start_finetuning_endpoint(request: FineTuningRequest):
         task_id = f"ft_{request.influencer_id}_{int(time.time())}"
         
         # 작업 정보 저장
-        finetuning_tasks[task_id] = {
+        core.finetuning_tasks[task_id] = {
             "task_id": task_id,
             "influencer_id": request.influencer_id,
             "influencer_name": request.influencer_name,
@@ -33,15 +33,19 @@ async def start_finetuning_endpoint(request: FineTuningRequest):
             "updated_at": time.time()
         }
         
-        # 큐 초기화 확인
-        if finetuning_queue is None:
+        # 큐 초기화 확인 및 디버깅
+        logger.info(f"🔍 디버깅: core.finetuning_queue 상태 = {core.finetuning_queue}")
+        logger.info(f"🔍 디버깅: core.finetuning_tasks 개수 = {len(core.finetuning_tasks)}")
+        
+        if core.finetuning_queue is None:
+            logger.error("❌ core.finetuning_queue가 None입니다!")
             raise HTTPException(
                 status_code=503,
                 detail="서버가 아직 완전히 초기화되지 않았습니다. 잠시 후 다시 시도해주세요."
             )
         
         logger.info(f"🎯 파인튜닝 작업 큐에 추가: {task_id}")
-        await finetuning_queue.put(task_id) # 큐에 작업 추가
+        await core.finetuning_queue.put(task_id) # 큐에 작업 추가
         
         return FineTuningResponse(
             task_id=task_id,
@@ -57,10 +61,10 @@ async def start_finetuning_endpoint(request: FineTuningRequest):
 @router.get("/finetuning/status/{task_id}", response_model=FineTuningStatusResponse)
 async def get_finetuning_status(task_id: str):
     """파인튜닝 상태 조회"""
-    if task_id not in finetuning_tasks:
+    if task_id not in core.finetuning_tasks:
         raise HTTPException(status_code=404, detail=f"파인튜닝 작업 {task_id}를 찾을 수 없습니다.")
     
-    task = finetuning_tasks[task_id]
+    task = core.finetuning_tasks[task_id]
     
     return FineTuningStatusResponse(
         task_id=task_id,
@@ -74,6 +78,6 @@ async def get_finetuning_status(task_id: str):
 async def list_finetuning_tasks():
     """파인튜닝 작업 목록"""
     return {
-        "tasks": finetuning_tasks,
-        "total_count": len(finetuning_tasks)
+        "tasks": core.finetuning_tasks,
+        "total_count": len(core.finetuning_tasks)
     }

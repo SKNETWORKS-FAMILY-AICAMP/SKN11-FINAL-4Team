@@ -233,9 +233,15 @@ async def startup_event():
         logger.warning("⚠️ vLLM 엔진 없이 파인튜닝 큐만 초기화합니다")
 
     # vLLM 엔진 초기화 실패와 관계없이 파인튜닝 큐는 초기화
+    logger.info("🔄 파인튜닝 큐 초기화 중...")
     finetuning_queue = asyncio.Queue()
+    logger.info(f"✅ 파인튜닝 큐 초기화 완료: {finetuning_queue}")
+    
+    logger.info("🔄 파인튜닝 워커 시작 중...")
     asyncio.create_task(finetuning_worker())
     logger.info("✅ 파인튜닝 워커 시작됨")
+    
+    logger.info(f"🔍 최종 확인 - finetuning_queue: {finetuning_queue}")
 
 async def load_lora_adapter(request: LoRALoadRequest):
     """LoRA 어댑터 로드"""
