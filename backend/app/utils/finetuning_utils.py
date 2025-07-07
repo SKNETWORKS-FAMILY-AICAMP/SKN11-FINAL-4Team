@@ -57,7 +57,7 @@ def convert_qa_data_for_finetuning(qa_data: List[Dict], influencer_name: str,
     
     # 시스템 메시지 생성
     system_message = create_system_message(influencer_name, personality, style_info)
-    
+    print(qa_data)
     for qa_pair in qa_data:
         question = qa_pair.get('question', '').strip()
         answer = qa_pair.get('answer', '').strip()
