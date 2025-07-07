@@ -196,6 +196,7 @@ class VLLMClient:
     async def generate_qa_for_character(self, character_data: Dict[str, Any]) -> Dict[str, Any]:
         """캐릭터에 대한 QA 생성 (vLLM 서버의 /speech/generate_qa 엔드포인트 사용)"""
         try:
+            # VLLMCharacterProfile 형식으로 변환
             payload = {
                 "name": character_data.get("name", ""),
                 "description": character_data.get("description", ""),
@@ -205,6 +206,7 @@ class VLLMClient:
                 "mbti": character_data.get("mbti")
             }
             
+            logger.info(f"vLLM 서버로 QA 생성 요청: {payload}")
             response = await self.client.post("/speech/generate_qa", json=payload)
             response.raise_for_status()
             
@@ -214,6 +216,9 @@ class VLLMClient:
             
         except Exception as e:
             logger.error(f"❌ QA 생성 실패: {e}")
+            if hasattr(e, 'response') and e.response is not None:
+                logger.error(f"응답 상태: {e.response.status_code}")
+                logger.error(f"응답 내용: {e.response.text}")
             raise VLLMClientError(f"QA 생성 실패: {e}")
 
 

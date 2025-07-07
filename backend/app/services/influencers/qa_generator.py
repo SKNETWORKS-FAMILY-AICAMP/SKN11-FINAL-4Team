@@ -22,7 +22,19 @@ from app.database import get_db
 from app.services.influencers.crud import get_influencer_by_id
 from app.models.influencer import BatchKey
 from app.core.config import settings
-from vllm.pipeline.speech_generator import CharacterProfile, Gender, SpeechGenerator
+# Backend 내부 모델 사용
+from app.models.vllm_models import Gender, VLLMCharacterProfile
+
+# 하위 호환성을 위한 별칭
+CharacterProfile = VLLMCharacterProfile
+
+class SpeechGenerator:
+    """vLLM 서버 대신 HTTP API 클라이언트 사용"""
+    def __init__(self, *args, **kwargs):
+        pass
+    
+    def generate_character_random_tones_sync(self, *args, **kwargs):
+        raise RuntimeError("이 메서드는 더 이상 사용되지 않습니다. vLLM 서버 API를 사용하세요.")
 
 
 class QAGenerationStatus(Enum):

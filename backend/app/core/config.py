@@ -111,7 +111,7 @@ class Settings(BaseSettings):
             if self.VLLM_SERVER_URL:
                 self.VLLM_BASE_URL = self.VLLM_SERVER_URL
             else:
-                self.VLLM_BASE_URL = f"http://{self.VLLM_HOST}:{self.VLLM_PORT}/v1"
+                self.VLLM_BASE_URL = f"http://{self.VLLM_HOST}:{self.VLLM_PORT}"
         else:
             self.VLLM_BASE_URL = None
 
