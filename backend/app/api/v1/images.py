@@ -24,7 +24,7 @@ from pydantic import BaseModel, Field
 import logging
 
 from app.database import get_db
-from auth.jwt_handler import get_current_user
+from app.core.security import get_current_user
 from app.services.integrated_image_service import (
     get_integrated_image_generation_service,
     IntegratedImageGenerationRequest,
