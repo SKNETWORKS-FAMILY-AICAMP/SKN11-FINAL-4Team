@@ -320,7 +320,7 @@ def main(qa_data: list[dict], system_message: str, hf_token: str, hf_repo_id: st
     print(f"총 파라미터: {all_params:,}")
     print(f"훈련 가능한 파라미터: {trainable_params:,}")
     print(f"훈련 가능 비율: {100 * trainable_params / all_params:.4f}%")
-    
+    print('--------------------------------')
     if trainable_params == 0:
         print("ERROR: 훈련 가능한 파라미터가 없습니다!")
         return
