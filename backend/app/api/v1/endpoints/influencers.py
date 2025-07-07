@@ -332,7 +332,16 @@ async def get_qa_generation_status(
             "s3_urls": s3_urls,
             "created_at": batch_key_entry.created_at,
             "updated_at": batch_key_entry.updated_at,
-            "is_running": batch_key_entry.status in [QAGenerationStatus.PENDING.value, QAGenerationStatus.PROCESSING.value, QAGenerationStatus.BATCH_SUBMITTED.value, QAGenerationStatus.BATCH_PROCESSING.value], # DB 상태 기반으로 실행 여부 판단
+            "is_running": batch_key_entry.status in [
+                QAGenerationStatus.PENDING.value, 
+                QAGenerationStatus.TONE_GENERATION.value,
+                QAGenerationStatus.DOMAIN_PREPARATION.value,
+                QAGenerationStatus.PROCESSING.value, 
+                QAGenerationStatus.BATCH_SUBMITTED.value, 
+                QAGenerationStatus.BATCH_PROCESSING.value,
+                QAGenerationStatus.BATCH_UPLOAD.value,
+                QAGenerationStatus.PROCESSING_RESULTS.value
+            ], # DB 상태 기반으로 실행 여부 판단
             "openai_batch_status": openai_batch_status,  # 실제 OpenAI 상태 추가
         }
     else:
@@ -353,7 +362,16 @@ async def get_qa_generation_status(
                 } if task.s3_qa_file_url or task.s3_processed_file_url else None,
                 "created_at": task.created_at,
                 "updated_at": task.updated_at,
-                "is_running": task.status in [QAGenerationStatus.PENDING.value, QAGenerationStatus.PROCESSING.value, QAGenerationStatus.BATCH_SUBMITTED.value, QAGenerationStatus.BATCH_PROCESSING.value],
+                "is_running": task.status in [
+                    QAGenerationStatus.PENDING.value, 
+                    QAGenerationStatus.TONE_GENERATION.value,
+                    QAGenerationStatus.DOMAIN_PREPARATION.value,
+                    QAGenerationStatus.PROCESSING.value, 
+                    QAGenerationStatus.BATCH_SUBMITTED.value, 
+                    QAGenerationStatus.BATCH_PROCESSING.value,
+                    QAGenerationStatus.BATCH_UPLOAD.value,
+                    QAGenerationStatus.PROCESSING_RESULTS.value
+                ],
             }
             for task in all_tasks_from_db
         ]
@@ -432,7 +450,16 @@ async def get_all_qa_tasks_status(
             } if task.s3_qa_file_url or task.s3_processed_file_url else None,
             "created_at": task.created_at,
             "updated_at": task.updated_at,
-            "is_running": task.status in [QAGenerationStatus.PENDING.value, QAGenerationStatus.PROCESSING.value, QAGenerationStatus.BATCH_SUBMITTED.value, QAGenerationStatus.BATCH_PROCESSING.value],
+            "is_running": task.status in [
+            QAGenerationStatus.PENDING.value, 
+            QAGenerationStatus.TONE_GENERATION.value,
+            QAGenerationStatus.DOMAIN_PREPARATION.value,
+            QAGenerationStatus.PROCESSING.value, 
+            QAGenerationStatus.BATCH_SUBMITTED.value, 
+            QAGenerationStatus.BATCH_PROCESSING.value,
+            QAGenerationStatus.BATCH_UPLOAD.value,
+            QAGenerationStatus.PROCESSING_RESULTS.value
+        ],
         }
         for task in all_tasks_from_db
     ]

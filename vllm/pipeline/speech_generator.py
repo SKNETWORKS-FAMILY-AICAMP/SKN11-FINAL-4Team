@@ -360,6 +360,64 @@ class SpeechGenerator:
         
         return responses
 
+    async def generate_qa_pairs_for_character(self, character: CharacterProfile, num_qa_pairs: int, system_prompt: Optional[str] = None) -> List[Dict]:
+        """
+        주어진 캐릭터에 대해 QA 쌍을 생성합니다.
+        Args:
+            character: 캐릭터 프로필
+            num_qa_pairs: 생성할 QA 쌍의 개수
+            system_prompt: 시스템 프롬프트 (선택 사항)
+        Returns:
+            생성된 QA 쌍 리스트 (각 QA 쌍은 {'question': '...', 'answer': '...'} 형태)
+        """
+        qa_pairs = []
+        
+        for _ in range(num_qa_pairs):
+            # 1. 질문 생성
+            question = self.generate_question_for_character(character)
+            
+            # 2. 질문에 대한 응답 생성
+            # 시스템 프롬프트가 제공되면 그것을 사용하고, 아니면 캐릭터 정보 기반으로 생성
+            if system_prompt:
+                current_system_prompt = system_prompt
+            else:
+                # 기본 말투 (말투1)에 대한 시스템 프롬프트 생성
+                current_system_prompt = self.create_character_prompt_for_random_tone(character, 1) 
+            
+            try:
+                # 응답 생성 (OpenAI 래퍼 사용)
+                if hasattr(self.client, 'chat_completion'):
+                    messages = [
+                        {"role": "system", "content": current_system_prompt},
+                        {"role": "user", "content": question}
+                    ]
+                    answer = await self.client.chat_completion(
+                        messages=messages,
+                        model="gpt-4o-mini",
+                        temperature=0.8,
+                        max_tokens=150
+                    )
+                else:
+                    response = self.client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=[
+                            {"role": "system", "content": current_system_prompt},
+                            {"role": "user", "content": question}
+                        ],
+                        max_tokens=150,
+                        temperature=0.8
+                    )
+                    answer = response.choices[0].message.content.strip()
+                
+                qa_pairs.append({"question": question, "answer": answer})
+                
+            except Exception as e:
+                print(f"QA 쌍 생성 실패: {e}")
+                qa_pairs.append({"question": question, "answer": f"죄송합니다. 응답 생성에 실패했습니다. ({e})"})
+            
+            await asyncio.sleep(0.1) # API 호출 간격 조절
+            
+        return qa_pairs
 
     def create_batch_requests_for_character_tones(self, user_messages: List[str], character: CharacterProfile) -> List[Dict[str, Any]]:
         """

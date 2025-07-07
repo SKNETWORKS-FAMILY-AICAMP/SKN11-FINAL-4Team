@@ -1,10 +1,11 @@
 """
 말투 생성 서비스
 
-이 모듈은 말투 생성 관련 공통 비즈니스 로직을 제공합니다.
-- vLLM 서버 연동
+이 모듈은 어투 생성 관련 공통 비즈니스 로직을 제공합니다.
+- vLLM 서버 연동 (어투 생성 전용)
 - 캐릭터 데이터 구성
-- 응답 변환
+- 어투 응답 변환
+- 시스템 프롬프트 생성
 """
 
 import logging
@@ -14,7 +15,9 @@ from fastapi import HTTPException
 
 from app.schemas.influencer import ToneGenerationRequest
 from app.utils.data_mapping import create_character_data
-from app.services.vllm_client import vllm_health_check, vllm_generate_qa_for_character
+from app.services.vllm_client import vllm_health_check, VLLMClient, VLLMServerConfig
+from app.core.config import settings
+from fastapi import HTTPException
 
 logger = logging.getLogger(__name__)
 
@@ -61,8 +64,8 @@ class ToneGenerationService:
             log_message = "vLLM 서버로 캐릭터 QA 재생성 요청" if is_regeneration else "vLLM 서버로 캐릭터 QA 생성 요청"
             logger.info(f"{log_message}: {character_data}")
             
-            # vLLM 서버에서 QA 생성
-            vllm_result = await vllm_generate_qa_for_character(character_data)
+            # vLLM 서버에서 어투 생성 (새로운 전용 엔드포인트 사용)
+            vllm_result = await ToneGenerationService._generate_tones_from_vllm(character_data)
             
             if is_regeneration:
                 logger.info(f"vLLM 재생성 응답 완료: {vllm_result}")
@@ -129,18 +132,55 @@ class ToneGenerationService:
         
         except Exception as e:
             logger.error(f"vLLM 응답 변환 중 오류: {e}")
-            # 기본 응답 제공
-            conversation_examples = [
-                {
-                    "title": "기본 말투",
-                    "example": "안녕하세요! 만나서 반가워요.",
-                    "tone": "기본 말투", 
-                    "hashtags": "#기본 #말투",
-                    "system_prompt": "당신은 친근하고 자연스러운 말투로 대화하는 AI입니다."
-                }
-            ]
+            # 기본 어투 생성 금지 - 예외 발생
+            raise HTTPException(
+                status_code=500,
+                detail=f"vLLM 응답 변환 중 오류가 발생했습니다: {str(e)}"
+            )
         
         return conversation_examples
+    
+    @staticmethod
+    async def _generate_tones_from_vllm(character_data: dict) -> dict:
+        """vLLM 서버에서 어투 생성 (재시도 로직 없음)
+        
+        Args:
+            character_data: 캐릭터 데이터
+            
+        Returns:
+            dict: vLLM 서버 응답
+            
+        Raises:
+            HTTPException: vLLM 서버 오류 시 예외 발생
+        """
+        try:
+            # vLLM 서버 설정
+            vllm_config = VLLMServerConfig(
+                base_url=settings.VLLM_BASE_URL,
+                timeout=getattr(settings, 'VLLM_TIMEOUT', 300)
+            )
+            
+            async with VLLMClient(vllm_config) as client:
+                # 새로운 어투 생성 엔드포인트 호출
+                response = await client.client.post(
+                    "/speech/generate_qa",  # 기존 호환성 유지용 엔드포인트
+                    json=character_data,
+                    timeout=60
+                )
+                response.raise_for_status()
+                
+                result = response.json()
+                logger.info(f"✅ vLLM 어투 생성 성공: {character_data.get('name', 'Unknown')}")
+                return result
+                
+        except Exception as e:
+            logger.error(f"❌ vLLM 어투 생성 실패: {e}")
+            raise HTTPException(
+                status_code=503, 
+                detail=f"vLLM 서버에서 어투 생성에 실패했습니다: {str(e)}"
+            )
+    
+    # 기본 어투 생성 메서드는 제거됨 - vLLM 서버 실패 시 예외 발생
 
 
 # 하위 호환성을 위한 개별 함수
