@@ -14,6 +14,7 @@ import logging
 from datetime import datetime
 
 from pipeline.speech_generator import CharacterProfile, Gender
+# LangChain QA 생성은 제거 - 배치 처리 우선
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -53,6 +54,8 @@ class QABatchRequest(BaseModel):
     num_qa_per_character: int = 1
     domains: Optional[List[str]] = None
     system_prompt: Optional[str] = None
+
+# LangChain 기반 고속 QA 생성은 제거 - 배치 처리가 비용 효율적
 
 @router.post("/generate_qa_batch")
 async def generate_qa_batch(
@@ -172,6 +175,8 @@ async def get_qa_generation_results(task_id: str):
         "total_requests": len(task["batch_requests"]),
         "domains": task.get("domains", [])
     }
+
+# LangChain QA 생성 엔드포인트 제거 - 배치 처리가 비용 효율적
 
 async def _run_qa_batch_generation(
     task_id: str,
@@ -333,6 +338,8 @@ async def _run_influencer_qa_generation(
         task_entry["error"] = str(e)
         task_entry["end_time"] = datetime.now().isoformat()
         logger.error(f"인플루언서 QA 생성 실패: {task_id}, 오류: {e}", exc_info=True)
+
+# LangChain QA 생성 함수 제거 - 배치 처리가 비용 효율적
 
 def _generate_domain_question(domain: str, character: CharacterProfile) -> str:
     """도메인별 질문 생성"""

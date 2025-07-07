@@ -1,0 +1,7 @@
+# LangChain 기반 고속 어투 생성을 위한 추가 의존성
+
+# LangChain 핵심 패키지 (어투 생성용)
+langchain-core>=0.1.0
+langchain-openai>=0.1.0
+
+# 기존 요구사항과 충돌하지 않는 선에서 최소한만 추가
