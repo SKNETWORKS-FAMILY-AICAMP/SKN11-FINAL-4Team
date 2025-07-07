@@ -21,6 +21,7 @@ from app.schemas.instagram import (
 )
 from app.core.instagram_service import InstagramService
 from app.core.security import get_current_user
+from app.services.vllm_client import vllm_generate_response, vllm_health_check, vllm_load_adapter_if_needed
 
 router = APIRouter()
 instagram_service = InstagramService()
@@ -440,7 +441,7 @@ async def handle_instagram_dm_event(messaging_event: Dict, db: Session):
         logger.error(f"   - 에러 트레이스: {traceback.format_exc()}")
 
 async def generate_ai_response(message_text: str, influencer: AIInfluencer, sender_id: str, db: Session) -> str:
-    """AI 인플루언서 응답 생성"""
+    """AI 인플루언서 응답 생성 - vLLM 서버 활용"""
     try:
         # 인플루언서 개성 정보 활용
         personality = influencer.influencer_personality or "친근하고 도움이 되는 AI 인플루언서"
@@ -459,191 +460,67 @@ async def generate_ai_response(message_text: str, influencer: AIInfluencer, send
 4. {influencer.influencer_name}의 개성을 살려서 응답하세요
 5. 도움이 되는 정보를 제공하되 너무 길지 않게 해주세요"""
         
-        # AI 모델 기반 응답 생성
+        # vLLM 서버를 통한 AI 응답 생성
         try:
-            # 허깅페이스 모델 레포가 설정되어 있는 경우 해당 모델 사용
+            # vLLM 서버 상태 확인
+            if not await vllm_health_check():
+                logger.warning("⚠️ vLLM 서버에 접근할 수 없습니다. 기본 응답을 사용합니다.")
+                return f"안녕하세요! {influencer.influencer_name}입니다! 😊 메시지 감사해요! 더 자세히 말씀해주시면 도움드릴게요!"
+            
+            # 파인튜닝된 모델이 있는 경우 해당 모델 사용
+            model_id = None
             if influencer.influencer_model_repo:
                 logger.info(f"🤖 인플루언서 전용 모델 사용: {influencer.influencer_model_repo}")
+                model_id = influencer.influencer_model_repo
                 
-                # 인플루언서의 그룹에서 허깅페이스 토큰 가져오기
+                # 필요시 어댑터 로드
                 hf_token = await get_hf_token_from_influencer_group(influencer, db)
                 
-                response = await generate_response_with_huggingface_model(
-                    influencer.influencer_model_repo, 
-                    system_message, 
-                    message_text,
-                    influencer.influencer_name,
-                    hf_token
+                adapter_loaded = await vllm_load_adapter_if_needed(
+                    model_id=model_id,
+                    hf_repo_name=model_id,
+                    hf_token=hf_token
                 )
-                return response
+                
+                if not adapter_loaded:
+                    logger.warning(f"⚠️ 어댑터 로드 실패: {model_id}. 기본 모델을 사용합니다.")
+                    model_id = None
             else:
                 logger.info(f"🤖 기본 AI 모델로 응답 생성")
-                # 기본 모델 사용 (추후 구현)
-                response = await generate_response_with_default_model(
-                    system_message, 
-                    message_text,
-                    influencer.influencer_name
-                )
-                return response
+            
+            # vLLM 서버로 응답 생성 요청
+            response = await vllm_generate_response(
+                user_message=message_text,
+                system_message=system_message,
+                influencer_name=influencer.influencer_name,
+                model_id=model_id,
+                max_new_tokens=150,
+                temperature=0.7
+            )
+            
+            # 응답 후처리
+            response = response.strip()
+            
+            # 너무 길면 자르기 (DM은 간결해야 함)
+            if len(response) > 300:
+                response = response[:300] + "..."
+            
+            # 빈 응답인 경우 기본 응답 제공
+            if not response:
+                response = f"안녕하세요! {influencer.influencer_name}입니다! 😊 메시지 감사해요!"
+            
+            logger.info(f"✅ vLLM 서버를 통한 AI 응답 생성 완료")
+            return response
                 
         except Exception as model_error:
-            logger.error(f"❌ AI 모델 응답 생성 실패: {str(model_error)}")
-            # 모델 실패 시 기본 응답
+            logger.error(f"❌ vLLM 서버 응답 생성 실패: {str(model_error)}")
+            # vLLM 서버 실패 시 기본 응답
             return f"안녕하세요! {influencer.influencer_name}입니다! 😊 메시지 감사해요! 더 자세히 말씀해주시면 도움드릴게요!"
             
     except Exception as e:
         logger.error(f"❌ AI 응답 생성 오류: {str(e)}")
         return f"안녕하세요! {influencer.influencer_name}입니다! 😅 죄송해요, 지금 응답을 생성하는 중에 문제가 생겼어요. 다시 한 번 말씀해주시겠어요?"
 
-async def generate_response_with_huggingface_model(model_repo: str, system_message: str, user_message: str, influencer_name: str, hf_token: str = None) -> str:
-    """허깅페이스 모델 레포를 사용한 응답 생성 (베이스 모델 + LoRA 어댑터)"""
-    try:
-        from transformers import AutoModelForCausalLM, AutoTokenizer
-        from peft import PeftModel
-        import torch
-        import json
-        
-        logger.info(f"🔄 허깅페이스 LoRA 어댑터 로딩: {model_repo}")
-        logger.info(f"🔑 허깅페이스 토큰 사용: {bool(hf_token)}")
-        
-        # 1. 어댑터 레포에서 config 정보 가져와서 베이스 모델 확인
-        try:
-            from huggingface_hub import hf_hub_download
-            
-            # adapter_config.json에서 베이스 모델 정보 확인
-            config_file = hf_hub_download(
-                repo_id=model_repo,
-                filename="adapter_config.json",
-                token=hf_token
-            )
-            
-            with open(config_file, 'r') as f:
-                adapter_config = json.load(f)
-            
-            base_model_name = adapter_config.get("base_model_name_or_path")
-            logger.info(f"📋 베이스 모델 확인: {base_model_name}")
-            
-        except Exception as e:
-            logger.warning(f"⚠️ adapter_config.json 읽기 실패: {e}")
-            # 기본값으로 EXAONE 모델 사용
-            base_model_name = "LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct"
-            logger.info(f"📋 기본 베이스 모델 사용: {base_model_name}")
-        
-        # 2. 베이스 모델 로드
-        logger.info(f"🔄 베이스 모델 로딩: {base_model_name}")
-        tokenizer = AutoTokenizer.from_pretrained(
-            base_model_name, 
-            trust_remote_code=True
-        )
-        base_model = AutoModelForCausalLM.from_pretrained(
-            base_model_name, 
-            trust_remote_code=True,
-            torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
-            device_map="auto" if torch.cuda.is_available() else None
-        )
-        
-        # 3. LoRA 어댑터 로드 및 적용
-        logger.info(f"🔧 LoRA 어댑터 적용: {model_repo}")
-        model = PeftModel.from_pretrained(
-            base_model, 
-            model_repo,
-            token=hf_token
-        )
-        
-        # 패딩 토큰 설정
-        if tokenizer.pad_token is None:
-            tokenizer.pad_token = tokenizer.eos_token
-        
-        # Chat template을 활용한 메시지 구성
-        messages = [
-            {"role": "system", "content": system_message},
-            {"role": "user", "content": user_message}
-        ]
-        
-        # Chat template 적용하여 프롬프트 생성
-        try:
-            if hasattr(tokenizer, 'apply_chat_template') and tokenizer.chat_template is not None:
-                logger.info("🗨️ Chat template 사용")
-                prompt = tokenizer.apply_chat_template(
-                    messages, 
-                    tokenize=False, 
-                    add_generation_prompt=True
-                )
-            else:
-                logger.info("📝 기본 프롬프트 형식 사용")
-                prompt = f"{system_message}\n\n사용자: {user_message}\n\n{influencer_name}:"
-        except Exception as e:
-            logger.warning(f"⚠️ Chat template 적용 실패, 기본 형식 사용: {e}")
-            prompt = f"{system_message}\n\n사용자: {user_message}\n\n{influencer_name}:"
-        
-        logger.info(f"🔍 생성된 프롬프트 (처음 200자): {prompt[:200]}...")
-        
-        # 토큰화 및 생성
-        inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512)
-        
-        # GPU 사용 가능하면 inputs를 GPU로 이동
-        if torch.cuda.is_available():
-            inputs = {k: v.to(model.device) for k, v in inputs.items()}
-        
-        with torch.no_grad():
-            outputs = model.generate(
-                **inputs,
-                max_new_tokens=150,
-                temperature=0.7,
-                do_sample=True,
-                pad_token_id=tokenizer.eos_token_id,
-                eos_token_id=tokenizer.eos_token_id
-            )
-        
-        # 응답 디코딩
-        generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
-        
-        # Chat template 사용 시 입력 프롬프트 제거하여 응답만 추출
-        if hasattr(tokenizer, 'apply_chat_template') and tokenizer.chat_template is not None:
-            # 입력 프롬프트 길이만큼 제거
-            input_length = len(tokenizer.decode(inputs['input_ids'][0], skip_special_tokens=True))
-            if len(generated_text) > input_length:
-                response = generated_text[input_length:].strip()
-            else:
-                response = generated_text.strip()
-        else:
-            # 기본 형식일 때는 기존 방식 사용
-            response = generated_text.split(f"{influencer_name}:")[-1].strip()
-        
-        # 응답 후처리
-        response = response.strip()
-        
-        # 특수 토큰이나 불필요한 문자 제거
-        response = response.replace("<|im_end|>", "").replace("<|endoftext|>", "")
-        response = response.replace("[/INST]", "").replace("</s>", "")
-        
-        # 너무 길면 자르기
-        if len(response) > 300:
-            response = response[:300] + "..."
-        
-        # 빈 응답인 경우 기본 응답 제공
-        if not response.strip():
-            response = f"안녕하세요! {influencer_name}입니다! 😊 메시지 감사해요!"
-        
-        logger.info(f"✅ 허깅페이스 모델 응답 생성 완료")
-        return response
-        
-    except Exception as e:
-        logger.error(f"❌ 허깅페이스 모델 응답 생성 실패: {str(e)}")
-        raise e
-
-async def generate_response_with_default_model(system_message: str, user_message: str, influencer_name: str) -> str:
-    """기본 모델을 사용한 응답 생성 (추후 구현)"""
-    try:
-        # TODO: 기본 AI 모델 (EXAONE 등) 연동
-        logger.info("🤖 기본 모델 응답 생성 (미구현)")
-        
-        # 임시로 간단한 응답 반환
-        return f"안녕하세요! {influencer_name}입니다! 😊 메시지 감사해요! 더 자세히 말씀해주시면 도움드릴게요!"
-        
-    except Exception as e:
-        logger.error(f"❌ 기본 모델 응답 생성 실패: {str(e)}")
-        raise e
 
 async def get_hf_token_from_influencer_group(influencer: AIInfluencer, db: Session) -> str:
     """인플루언서의 그룹에서 허깅페이스 토큰 가져오기"""

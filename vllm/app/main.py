@@ -51,11 +51,12 @@ async def root():
 @app.get("/health")
 async def health_check():
     """서버 상태 확인 엔드포인트"""
-    from app.core import engine, finetuning_queue, speech_generator
+    from app.core import engine, finetuning_queue, speech_generator, tokenizer
     
     status = "ok"
     components = {
         "engine": engine is not None,
+        "tokenizer": tokenizer is not None,
         "finetuning_queue": finetuning_queue is not None,
         "speech_generator": speech_generator is not None
     }

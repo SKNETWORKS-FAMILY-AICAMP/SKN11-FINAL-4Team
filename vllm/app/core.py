@@ -51,6 +51,7 @@ async def get_available_gpu_memory_mb() -> int:
 
 # 전역 변수
 engine: AsyncLLMEngine = None
+tokenizer = None  # 토크나이저 전역 변수 추가
 loaded_adapters: Dict[str, Dict[str, Any]] = {}
 finetuning_tasks: Dict[str, Dict[str, Any]] = {}  # 파인튜닝 작업 저장
 finetuning_queue: asyncio.Queue = None # 파인튜닝 작업을 위한 큐
@@ -243,7 +244,7 @@ async def finetuning_worker():
             finetuning_queue.task_done()
 
 async def initialize_vllm_engine():
-    global engine, speech_generator
+    global engine, speech_generator, tokenizer
     logger.info("🚀 vLLM LoRA 엔진 초기화 중...")
     
     try:
@@ -253,6 +254,17 @@ async def initialize_vllm_engine():
             logger.info("✅ Speech Generator 초기화 완료")
         else:
             logger.warning("⚠️ OPENAI_API_KEY가 설정되지 않아 Speech Generator 기능이 비활성화됩니다")
+        
+        # 토크나이저 초기화 (chat template 사용을 위해)
+        try:
+            from transformers import AutoTokenizer
+            tokenizer = AutoTokenizer.from_pretrained(
+                "LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct",
+                trust_remote_code=True
+            )
+            logger.info("✅ 토크나이저 초기화 완료")
+        except Exception as tokenizer_error:
+            logger.warning(f"⚠️ 토크나이저 초기화 실패: {tokenizer_error}")
         
         # vLLM 엔진 초기화 (GPU 필요하므로 실패할 수 있음)
         try:

@@ -20,15 +20,12 @@ async def generate_response_endpoint(request: GenerateRequest):
         raise HTTPException(status_code=500, detail="엔진이 초기화되지 않았습니다.")
     
     try:
-        # 프롬프트 생성
-        if request.use_chat_template:
-            formatted_prompt = create_chat_prompt(
-                request.user_message, 
-                request.system_message, 
-                request.influencer_name
-            )
-        else:
-            formatted_prompt = f"{request.system_message}\n\n사용자: {request.user_message}\n\n{request.influencer_name}:"
+        # 프롬프트 생성 (무조건 chat template 사용)
+        formatted_prompt = create_chat_prompt(
+            request.user_message, 
+            request.system_message, 
+            request.influencer_name
+        )
         
         logger.info(f"🔍 생성된 프롬프트 (처음 200자): {formatted_prompt[:200]}...")
         
