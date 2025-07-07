@@ -332,6 +332,8 @@ async def load_lora_adapter(request: LoRALoadRequest):
         raise Exception("엔진이 초기화되지 않았습니다.")
     
     try:
+        logger.info(f"🔄 LoRA 어댑터 로딩 요청 받음: model_id={request.model_id}, repo={request.hf_repo_name}")
+        
         if request.model_id in loaded_adapters:
             logger.info(f"♻️ 어댑터 {request.model_id}는 이미 로드되어 있습니다.")
             return {
@@ -343,15 +345,25 @@ async def load_lora_adapter(request: LoRALoadRequest):
         
         if request.hf_token:
             try:
+                logger.info("🔑 허깅페이스 토큰 로그인 시도 중...")
                 login(token=request.hf_token)
                 logger.info("🔑 허깅페이스 토큰 로그인 성공")
             except Exception as e:
                 logger.warning(f"⚠️ 허깅페이스 로그인 실패: {e}")
+                # 토큰 로그인 실패해도 계속 진행
+        else:
+            logger.info("ℹ️ HuggingFace 토큰이 제공되지 않았습니다.")
         
-        base_model_name = (
-            request.base_model_override or 
-            get_base_model_from_adapter(request.hf_repo_name, request.hf_token)
-        )
+        logger.info("📋 베이스 모델 정보 확인 중...")
+        try:
+            base_model_name = (
+                request.base_model_override or 
+                get_base_model_from_adapter(request.hf_repo_name, request.hf_token)
+            )
+            logger.info(f"📋 베이스 모델 확인 완료: {base_model_name}")
+        except Exception as e:
+            logger.error(f"❌ 베이스 모델 정보 확인 실패: {e}")
+            raise Exception(f"베이스 모델 정보 확인 실패: {str(e)}")
         
         adapter_info = {
             "model_id": request.model_id,
