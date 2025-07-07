@@ -90,7 +90,7 @@ class AIInfluencerCreate(BaseSchema):
     influencer_data_url: Optional[str] = None
     learning_status: int = 0
     influencer_model_repo: str = ""
-    chatbot_option: bool = True
+    chatbot_option: bool = False
     
     # 프리셋 자동 생성을 위한 추가 필드들
     personality: Optional[str] = None  # 성격

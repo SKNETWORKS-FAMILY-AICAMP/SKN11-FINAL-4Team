@@ -109,6 +109,7 @@ class VLLMClient:
             if model_id:
                 payload["model_id"] = model_id
             
+            logger.debug(f"🔄 vLLM 서버 요청: {payload}")
             response = await self.client.post("/generate", json=payload)
             response.raise_for_status()
             
@@ -116,6 +117,15 @@ class VLLMClient:
             logger.debug(f"✅ 응답 생성 성공: {influencer_name}")
             return result
             
+        except httpx.HTTPStatusError as e:
+            error_detail = ""
+            try:
+                error_detail = e.response.text if e.response else "No response"
+            except:
+                error_detail = "Cannot read response"
+            
+            logger.error(f"❌ vLLM 서버 HTTP 오류: {e.response.status_code} - {error_detail}")
+            raise VLLMClientError(f"응답 생성 실패: {e.response.status_code} - {error_detail}")
         except Exception as e:
             logger.error(f"❌ 응답 생성 실패: {e}")
             raise VLLMClientError(f"응답 생성 실패: {e}")
@@ -126,6 +136,13 @@ class VLLMClient:
             response = await self.client.get("/adapters")
             response.raise_for_status()
             return response.json()
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                logger.warning(f"⚠️ 어댑터 엔드포인트가 지원되지 않습니다: {e}")
+                return {"adapters": []}  # 빈 어댑터 목록 반환
+            else:
+                logger.error(f"어댑터 목록 조회 실패: {e}")
+                raise VLLMClientError(f"어댑터 목록 조회 실패: {e}")
         except Exception as e:
             logger.error(f"어댑터 목록 조회 실패: {e}")
             raise VLLMClientError(f"어댑터 목록 조회 실패: {e}")

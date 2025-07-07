@@ -393,18 +393,6 @@ async def handle_instagram_dm_event(messaging_event: Dict, db: Session):
                 .first()
             )
             
-            # 페이지 ID로도 찾아보기 (비즈니스 계정의 경우)
-            if not influencer:
-                logger.info(f"🔍 페이지 ID로 AI 인플루언서 재검색 중 (recipient_id: {recipient_id})")
-                influencer = (
-                    db.query(AIInfluencer)
-                    .filter(
-                        AIInfluencer.instagram_page_id == recipient_id,
-                        AIInfluencer.instagram_is_active == True,
-                        AIInfluencer.chatbot_option == True
-                    )
-                    .first()
-                )
             
             if not influencer:
                 logger.warning(f"❌ 수신자 ID {recipient_id}에 해당하는 활성 AI 인플루언서를 찾을 수 없습니다.")
