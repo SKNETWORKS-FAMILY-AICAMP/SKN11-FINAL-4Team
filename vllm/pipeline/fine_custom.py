@@ -349,15 +349,7 @@ def main(qa_data: List[Dict], system_message: str, hf_token: str, hf_repo_id: st
     print("\nGradient 설정 확인:")
     trainable_params = 0
     all_params = 0
-    
-    for name, param in model.named_parameters():
-        all_params += param.numel()
-        if param.requires_grad:
-            trainable_params += param.numel()
-            print(f"  ✓ {name}: {param.shape} (requires_grad=True)")
-        else:
-            print(f"  ✗ {name}: {param.shape} (requires_grad=False)")
-    
+
     print(f"총 파라미터: {all_params:,}")
     print(f"훈련 가능한 파라미터: {trainable_params:,}")
     print(f"훈련 가능 비율: {100 * trainable_params / all_params:.4f}%")
