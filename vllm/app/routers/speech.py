@@ -61,7 +61,7 @@ async def generate_character_qa(request: VLLMCharacterProfile):
         speech_generator = SpeechGenerator(api_key=api_key)
         
         # 캐릭터에 맞는 질문 생성
-        question = speech_generator.generate_question_for_character(character_profile)
+        question = await speech_generator.generate_question_for_character(character_profile)
         
         # 3가지 다른 어투로 답변 생성
         responses = {}
@@ -69,14 +69,14 @@ async def generate_character_qa(request: VLLMCharacterProfile):
             tone_name = f"tone_{i+1}"
             
             # 시스템 프롬프트 생성
-            system_prompt = speech_generator.generate_system_prompt_with_gpt(
+            system_prompt = await speech_generator.generate_system_prompt_with_gpt(
                 character_profile, 
                 tone_instruction_seed=f"variation_{i+1}"
             )
             
             # SpeechGenerator를 통한 어투 생성
             try:
-                tones_result = speech_generator.generate_character_tones_for_question(character_profile, question, 1)
+                tones_result = await speech_generator.generate_character_tones_for_question(character_profile, question, 1)
                 
                 if tones_result and len(tones_result) > 0:
                     # 첫 번째 어투 사용
@@ -144,25 +144,28 @@ async def generate_tone_variations(request: ToneGenerationRequest):
         )
         
         speech_generator = SpeechGenerator(api_key=api_key)
-        question = speech_generator.generate_question_for_character(character_profile)
+        question = await speech_generator.generate_question_for_character(character_profile)
         
         # 지정된 개수만큼 어투 생성
+        tones_result = await speech_generator.generate_character_tones_for_question(character_profile, question, request.num_tones)
+        
+        if not tones_result or len(tones_result) == 0:
+            raise Exception("어투 생성에 실패했습니다.")
+        
+        # 결과 변환
         responses = {}
-        for i in range(request.num_tones):
+        for i, (tone_key, tone_list) in enumerate(tones_result.items()):
             tone_name = f"tone_{i+1}"
-            system_prompt = speech_generator.generate_system_prompt_with_gpt(
-                character_profile, 
-                tone_instruction_seed=f"variation_{i+1}"
-            )
-            
-            responses[tone_name] = [{
-                "text": f"{request.character.name}의 {i+1}번째 어투입니다.",
-                "tone_info": {
-                    "description": f"어투 변형 {i+1}",
-                    "hashtags": f"#어투{i+1} #변형"
-                },
-                "system_prompt": system_prompt
-            }]
+            if tone_list and len(tone_list) > 0:
+                tone_data = tone_list[0]
+                responses[tone_name] = [{
+                    "text": tone_data["text"],
+                    "tone_info": {
+                        "description": tone_data.get("description", f"어투 변형 {i+1}"),
+                        "hashtags": tone_data.get("hashtags", f"#어투{i+1} #변형")
+                    },
+                    "system_prompt": await speech_generator.generate_system_prompt_with_gpt(character_profile, f"variation_{i+1}")
+                }]
         
         result = {
             "question": question,

@@ -13,7 +13,7 @@ import json
 import logging
 from datetime import datetime
 
-from vllm.pipeline.speech_generator import CharacterProfile, Gender
+from pipeline.speech_generator import CharacterProfile, Gender
 
 router = APIRouter()
 logger = logging.getLogger(__name__)

@@ -10,9 +10,9 @@ OpenAI API 클라이언트 래퍼
 
 import os
 import logging
+import asyncio
 from typing import List, Dict, Any, Optional, Union
-from openai import OpenAI
-import time
+from openai import AsyncOpenAI
 import random
 
 logger = logging.getLogger(__name__)
@@ -37,10 +37,10 @@ class OpenAIClientWrapper:
         if not self.api_key:
             raise ValueError("OpenAI API 키가 설정되지 않았습니다. 환경변수 OPENAI_API_KEY를 확인하세요.")
         
-        self.client = OpenAI(api_key=self.api_key, timeout=timeout)
+        self.client = AsyncOpenAI(api_key=self.api_key, timeout=timeout)
         logger.info("✅ OpenAI 클라이언트 초기화 완료")
     
-    def chat_completion(
+    async def chat_completion(
         self,
         messages: List[Dict[str, str]],
         model: str = "gpt-4o-mini",
@@ -68,7 +68,7 @@ class OpenAIClientWrapper:
             try:
                 logger.debug(f"OpenAI API 호출 시도 {attempt + 1}/{self.max_retries + 1}")
                 
-                response = self.client.chat.completions.create(
+                response = await self.client.chat.completions.create(
                     model=model,
                     messages=messages,
                     temperature=temperature,
@@ -84,15 +84,15 @@ class OpenAIClientWrapper:
                 logger.warning(f"❌ OpenAI API 호출 실패 (시도 {attempt + 1}): {e}")
                 
                 if attempt < self.max_retries:
-                    # 지수 백오프로 재시도
+                    # 지수 백오프로 비동기 재시도
                     delay = (2 ** attempt) + random.uniform(0, 1)
                     logger.info(f"⏳ {delay:.1f}초 후 재시도...")
-                    time.sleep(delay)
+                    await asyncio.sleep(delay)
                 else:
                     logger.error(f"🚫 OpenAI API 호출 최종 실패: {e}")
                     raise
     
-    def generate_question(
+    async def generate_question(
         self,
         character_info: str,
         temperature: float = 0.6,
@@ -126,14 +126,14 @@ class OpenAIClientWrapper:
             {"role": "user", "content": prompt}
         ]
         
-        return self.chat_completion(
+        return await self.chat_completion(
             messages=messages,
             model=model,
             temperature=temperature,
             max_tokens=100
         )
     
-    def summarize_speech_style(
+    async def summarize_speech_style(
         self,
         system_prompt: str,
         model: str = "gpt-4o-mini"
@@ -169,7 +169,7 @@ class OpenAIClientWrapper:
         ]
         
         try:
-            response = self.chat_completion(
+            response = await self.chat_completion(
                 messages=messages,
                 model=model,
                 temperature=0.7,
@@ -186,7 +186,7 @@ class OpenAIClientWrapper:
                 "description": "말투 요약 실패한 말투"
             }
     
-    def generate_system_prompt_for_tone(
+    async def generate_system_prompt_for_tone(
         self,
         character_info: str,
         tone_variation: int,
@@ -237,7 +237,7 @@ class OpenAIClientWrapper:
             {"role": "user", "content": prompt}
         ]
         
-        return self.chat_completion(
+        return await self.chat_completion(
             messages=messages,
             model=model,
             temperature=0.7,
@@ -267,20 +267,20 @@ def get_openai_client(**kwargs) -> OpenAIClientWrapper:
     return _global_openai_client
 
 
-# 편의 함수들
-def chat_completion(messages: List[Dict[str, str]], **kwargs) -> str:
-    """편의 함수: 채팅 완성 API 호출"""
+# 비동기 편의 함수들
+async def chat_completion(messages: List[Dict[str, str]], **kwargs) -> str:
+    """비동기 편의 함수: 채팅 완성 API 호출"""
     client = get_openai_client()
-    return client.chat_completion(messages, **kwargs)
+    return await client.chat_completion(messages, **kwargs)
 
 
-def generate_question(character_info: str, **kwargs) -> str:
-    """편의 함수: 질문 생성"""
+async def generate_question(character_info: str, **kwargs) -> str:
+    """비동기 편의 함수: 질문 생성"""
     client = get_openai_client()
-    return client.generate_question(character_info, **kwargs)
+    return await client.generate_question(character_info, **kwargs)
 
 
-def summarize_speech_style(system_prompt: str, **kwargs) -> Dict[str, str]:
-    """편의 함수: 말투 요약"""
+async def summarize_speech_style(system_prompt: str, **kwargs) -> Dict[str, str]:
+    """비동기 편의 함수: 말투 요약"""
     client = get_openai_client()
-    return client.summarize_speech_style(system_prompt, **kwargs)
+    return await client.summarize_speech_style(system_prompt, **kwargs)
