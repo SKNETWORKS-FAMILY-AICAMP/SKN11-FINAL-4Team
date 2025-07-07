@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 from typing import List, Optional, Dict, Any
 from enum import Enum
 from pipeline.speech_generator import Gender # Gender Enum은 speech_generator에서 가져옴
@@ -68,6 +68,18 @@ class VLLMCharacterProfile(BaseModel):
     gender: Gender
     personality: str
     mbti: Optional[str] = None
+
+    @validator('gender', pre=True)
+    def convert_gender_to_korean_enum(cls, v):
+        if isinstance(v, str):
+            v_lower = v.lower()
+            if v_lower == 'male':
+                return Gender.MALE
+            elif v_lower == 'female':
+                return Gender.FEMALE
+            elif v_lower in ['non_binary', 'none']:
+                return Gender.NON_BINARY
+        return v
 
     class Config:
         use_enum_values = True
