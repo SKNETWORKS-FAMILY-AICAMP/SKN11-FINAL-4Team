@@ -40,7 +40,23 @@ async def root():
 @app.get("/health")
 async def health_check():
     """서버 상태 확인 엔드포인트"""
-    return {"status": "ok", "message": "vLLM LoRA Influencer API 서버가 정상적으로 실행 중입니다."}
+    from app.core import engine, finetuning_queue, speech_generator
+    
+    status = "ok"
+    components = {
+        "engine": engine is not None,
+        "finetuning_queue": finetuning_queue is not None,
+        "speech_generator": speech_generator is not None
+    }
+    
+    if not all(components.values()):
+        status = "initializing"
+    
+    return {
+        "status": status,
+        "message": "vLLM LoRA Influencer API 서버가 정상적으로 실행 중입니다.",
+        "components": components
+    }
 
 # 라우터 등록
 app.include_router(lora.router, prefix="/lora", tags=["LoRA Adapters"])

@@ -33,6 +33,13 @@ async def start_finetuning_endpoint(request: FineTuningRequest):
             "updated_at": time.time()
         }
         
+        # 큐 초기화 확인
+        if finetuning_queue is None:
+            raise HTTPException(
+                status_code=503,
+                detail="서버가 아직 완전히 초기화되지 않았습니다. 잠시 후 다시 시도해주세요."
+            )
+        
         logger.info(f"🎯 파인튜닝 작업 큐에 추가: {task_id}")
         await finetuning_queue.put(task_id) # 큐에 작업 추가
         
