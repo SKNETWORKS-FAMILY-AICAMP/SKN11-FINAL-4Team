@@ -37,7 +37,7 @@ class APIClient {
     } = options
 
     const url = `${this.baseURL}${endpoint}`
-    
+
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       ...(customHeaders as Record<string, string>)
@@ -67,7 +67,7 @@ class APIClient {
 
       let data
       const contentType = response.headers.get('content-type')
-      
+
       if (contentType?.includes('application/json')) {
         data = await response.json()
       } else {
@@ -85,15 +85,15 @@ class APIClient {
       return data
     } catch (error) {
       clearTimeout(timeoutId)
-      
+
       if (error instanceof APIError) {
         throw error
       }
-      
+
       if (error instanceof DOMException && error.name === 'AbortError') {
         throw new APIError('Request timeout', 408)
       }
-      
+
       throw new APIError(
         error instanceof Error ? error.message : 'Network error',
         0
@@ -153,13 +153,13 @@ class APIClient {
     options?: Omit<RequestOptions, 'headers'>
   ): Promise<T> {
     const formData = new FormData()
-    
+
     // 파일 배열을 FormData에 추가
     const fileArray = Array.from(files)
     fileArray.forEach((file, index) => {
       formData.append('files', file)
     })
-    
+
     if (additionalData) {
       Object.entries(additionalData).forEach(([key, value]) => {
         formData.append(key, value)
@@ -167,9 +167,9 @@ class APIClient {
     }
 
     const { requireAuth = true, ...fetchOptions } = options || {}
-    
+
     const headers: HeadersInit = {}
-    
+
     if (requireAuth) {
       const token = tokenUtils.getToken()
       if (!token) {
@@ -187,7 +187,7 @@ class APIClient {
 
     let data
     const contentType = response.headers.get('content-type')
-    
+
     if (contentType?.includes('application/json')) {
       data = await response.json()
     } else {
@@ -207,4 +207,16 @@ class APIClient {
 }
 
 export const apiClient = new APIClient(API_BASE_URL)
+
+// 인플루언서 말투 변환 API 함수
+export const influencerToneAPI = {
+  async transformWithInfluencerTone(influencerId: string, content: string, platform: string = "instagram") {
+    return apiClient.post('/api/v1/content-enhancement/influencer-tone', {
+      influencer_id: influencerId,
+      content: content,
+      platform: platform
+    }, { timeout: 300000 })
+  }
+}
+
 export default apiClient

@@ -14,7 +14,6 @@ import { AlertDialog, AlertDialogTrigger, AlertDialogContent, AlertDialogDescrip
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { useToast } from "@/hooks/use-toast"
-import { Toaster } from "@/components/ui/toaster"
 import { AdminService, type AdminTeam, type AdminUser, type AdminHFToken, type AdminCreateHFTokenRequest } from "@/lib/services/admin.service"
 
 export default function AdministratorPage() {
@@ -1656,7 +1655,6 @@ export default function AdministratorPage() {
           )}
         </div>
       </div>
-      <Toaster />
     </RequireAdmin>
   )
 }

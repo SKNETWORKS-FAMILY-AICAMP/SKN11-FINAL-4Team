@@ -12,15 +12,16 @@ import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
-import { apiClient } from "@/lib/api"
-import { 
-  ArrowLeft, 
-  Save, 
-  Image as ImageIcon, 
-  Hash, 
+import { apiClient, influencerToneAPI } from "@/lib/api"
+import {
+  ArrowLeft,
+  Save,
+  Image as ImageIcon,
+  Hash,
   Sparkles,
   AlertCircle,
-  Loader2
+  Loader2,
+  User
 } from "lucide-react"
 import { usePermission } from "@/hooks/use-auth"
 import { ModelService, type AIInfluencer } from "@/lib/services/model.service"
@@ -51,7 +52,7 @@ const PLATFORM_OPTIONS: PlatformOption[] = [
 
 // 기본 해시태그 목록
 const DEFAULT_HASHTAGS = [
-  "라이프스타일", "일상", "맛집", "여행", "패션", "뷰티", "건강", "운동", 
+  "라이프스타일", "일상", "맛집", "여행", "패션", "뷰티", "건강", "운동",
   "음식", "카페", "독서", "영화", "음악", "취미", "반려동물", "요리",
   "사진", "미술", "자연", "힐링", "동기부여", "성장", "학습", "기술"
 ]
@@ -59,7 +60,7 @@ const DEFAULT_HASHTAGS = [
 export default function CreatePostPage() {
   const router = useRouter()
   const { hasPermission, user } = usePermission()
-  
+
   // 상태 관리
   const [formData, setFormData] = useState<CreatePostFormData>({
     influencer_id: "",
@@ -69,7 +70,7 @@ export default function CreatePostPage() {
     board_hashtag: [],
     uploaded_image: null
   })
-  
+
   const [influencers, setInfluencers] = useState<AIInfluencer[]>([])
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
@@ -78,14 +79,9 @@ export default function CreatePostPage() {
   const [imagePreview, setImagePreview] = useState<string | null>(null)
   const [isDragOver, setIsDragOver] = useState(false)
   const [showPreview, setShowPreview] = useState(false)
-  const [enhancedContent, setEnhancedContent] = useState<{
-    enhancement_id: string
-    original_content: string
-    enhanced_content: string
-    status: string
-  } | null>(null)
+  const [generated, setGenerated] = useState<{ content: string, hashtags: string[] } | null>(null)
   const [isEnhancing, setIsEnhancing] = useState(false)
-  
+
   // 발행 설정 상태
   const [publishType, setPublishType] = useState<'immediate' | 'scheduled'>('immediate')
   const [scheduledDate, setScheduledDate] = useState('')
@@ -100,7 +96,7 @@ export default function CreatePostPage() {
         // 사용 가능한 인플루언서만 필터링
         const availableInfluencers = data.filter(inf => inf.learning_status === 1)
         setInfluencers(availableInfluencers)
-        
+
         // 첫 번째 인플루언서를 기본 선택
         if (availableInfluencers.length > 0) {
           setFormData(prev => ({
@@ -167,12 +163,12 @@ export default function CreatePostPage() {
       formData.board_hashtag.length > 0 &&
       hasImage
     )
-    
+
     // 예약 발행이 선택된 경우 날짜/시간 검증
     if (publishType === 'scheduled') {
       return basicFieldsValid && scheduledDate !== '' && scheduledTime !== ''
     }
-    
+
     return basicFieldsValid
   }
 
@@ -183,7 +179,7 @@ export default function CreatePostPage() {
       setError('이미지 파일만 업로드할 수 있습니다.')
       return
     }
-    
+
     // 파일 크기 제한 (5MB)
     if (file.size > 5 * 1024 * 1024) {
       setError('이미지 파일 크기는 5MB 이하여야 합니다.')
@@ -192,7 +188,7 @@ export default function CreatePostPage() {
 
     setError(null) // 에러 초기화
     handleInputChange('uploaded_image', file)
-    
+
     // 이미지 미리보기 생성
     const reader = new FileReader()
     reader.onload = (e) => {
@@ -223,7 +219,7 @@ export default function CreatePostPage() {
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault()
     setIsDragOver(false)
-    
+
     const files = e.dataTransfer.files
     if (files && files[0]) {
       processImageFile(files[0])
@@ -237,62 +233,54 @@ export default function CreatePostPage() {
   }
 
   // 게시글 설명 향상
-  const enhanceContent = async () => {
-    if (!formData.board_description.trim()) {
-      setError("향상할 게시글 설명을 입력해주세요.")
-      return
+  const isGenerateEnabled = !!formData.influencer_id && !!formData.board_topic && !!formData.board_description.trim();
+
+  const generateContent = async () => {
+    if (!formData.influencer_id) {
+      setError('AI 인플루언서를 선택하세요.');
+      return;
     }
-
-    setIsEnhancing(true)
-    setError(null)
-
+    if (!formData.board_topic) {
+      setError('게시글 주제를 입력하세요.');
+      return;
+    }
+    if (!formData.board_description || !formData.board_description.trim()) {
+      setError('게시글 설명을 입력하세요.');
+      return;
+    }
+    setIsEnhancing(true);
+    setError(null);
     try {
-      const data = await apiClient.post('/api/v1/content-enhancement/enhance', {
-        original_content: formData.board_description,
+      // /full-enhance 엔드포인트로 요청
+      const res: any = await apiClient.post('/api/v1/boards/full-enhance', {
+        topic: formData.board_topic,
+        platform: PLATFORM_OPTIONS[formData.board_platform].label.toLowerCase(),
+        include_content: formData.board_description,
         influencer_id: formData.influencer_id,
-        enhancement_style: "creative",
-        hashtags: formData.board_hashtag,
-        board_topic: formData.board_topic,
-        board_platform: formData.board_platform
-      })
-      setEnhancedContent(data as any)
+      });
+      setGenerated({
+        content: res.social_media_content,
+        hashtags: res.hashtags,
+      });
     } catch (err) {
-      console.error('Content enhancement failed:', err)
-      setError(err instanceof Error ? err.message : '설명 향상에 실패했습니다.')
+      setError(err instanceof Error ? err.message : 'AI 생성에 실패했습니다.');
     } finally {
-      setIsEnhancing(false)
+      setIsEnhancing(false);
     }
-  }
+  };
 
-  // 향상된 내용 승인
-  const approveEnhancement = async (approved: boolean) => {
-    if (!enhancedContent) return
-
-    try {
-      await apiClient.post('/api/v1/content-enhancement/approve', {
-        enhancement_id: enhancedContent.enhancement_id,
-        approved: approved
-      })
-
-      if (approved) {
-        // 승인된 내용으로 폼 데이터 업데이트
-        handleInputChange('board_description', enhancedContent.enhanced_content)
-        setEnhancedContent(null)
-      } else {
-        // 거부 시 향상 내용 초기화
-        setEnhancedContent(null)
-      }
-    } catch (err) {
-      console.error('Approval failed:', err)
-      setError(err instanceof Error ? err.message : '승인 처리에 실패했습니다.')
-    }
-  }
-
+  // 승인 함수
+  const approveGenerated = () => {
+    if (!generated) return;
+    handleInputChange('board_description', generated.content);
+    handleInputChange('board_hashtag', generated.hashtags.map((tag: string) => tag.replace(/^#+/, '')));
+    setGenerated(null);
+  };
 
   // 폼 제출 (게시글 저장)
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    
+
     // 필수 필드 검증
     if (!formData.influencer_id || !formData.board_topic || !formData.board_description) {
       setError("인플루언서, 주제, 설명을 모두 입력해주세요.")
@@ -311,10 +299,10 @@ export default function CreatePostPage() {
         setError("예약 발행을 선택했다면 날짜와 시간을 모두 선택해주세요.")
         return
       }
-      
+
       const scheduledDateTime = new Date(`${scheduledDate}T${scheduledTime}`)
       const now = new Date()
-      
+
       if (scheduledDateTime <= now) {
         setError("예약 시간은 현재 시간보다 이후여야 합니다.")
         return
@@ -328,14 +316,14 @@ export default function CreatePostPage() {
       // 백엔드 URL 가져오기
       const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://localhost:8000';
       console.log('Backend URL:', backendUrl);
-      
+
       // 먼저 GET 테스트
       console.log('Testing GET connection...');
       const getTestResponse = await fetch(`${backendUrl}/api/v1/boards/upload-test-get`, {
         method: 'GET'
       });
       console.log('GET test result:', await getTestResponse.json());
-      
+
       // POST 테스트
       console.log('Testing POST connection...');
       const testResponse = await fetch(`${backendUrl}/api/v1/boards/upload-test`, {
@@ -346,19 +334,19 @@ export default function CreatePostPage() {
         body: JSON.stringify({})
       });
       console.log('POST test result:', await testResponse.json());
-      
+
       // 인증 토큰 확인
       const token = localStorage.getItem('access_token');
       console.log('Token exists:', !!token);
       console.log('Token preview:', token ? token.substring(0, 20) + '...' : 'null');
-      
+
       // 이미지 업로드
       const imageFormData = new FormData()
       imageFormData.append('file', formData.uploaded_image)  // 단일 파일로 변경
-      
+
       console.log('Uploading image...', formData.uploaded_image);
       console.log('FormData entries:', Array.from(imageFormData.entries()));
-      
+
       const imageResponse = await fetch(`${backendUrl}/api/v1/boards/upload-image-simple`, {
         method: 'POST',
         headers: {
@@ -369,7 +357,7 @@ export default function CreatePostPage() {
       })
 
       console.log('Image upload response status:', imageResponse.status);
-      
+
       if (!imageResponse.ok) {
         const errorText = await imageResponse.text();
         console.error('Image upload error:', errorText);
@@ -404,7 +392,7 @@ export default function CreatePostPage() {
           scheduled_at: `${scheduledDate}T${scheduledTime}:00`
         })
       };
-      
+
       console.log('Sending board data:', boardData);
 
       // 게시글 생성
@@ -420,7 +408,7 @@ export default function CreatePostPage() {
       if (!response.ok) {
         throw new Error('게시글 생성에 실패했습니다.')
       }
-      
+
       router.push('/post_list')
     } catch (err) {
       console.error('Failed to create post:', err)
@@ -506,8 +494,8 @@ export default function CreatePostPage() {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
                       <Label htmlFor="influencer_id">AI 인플루언서 선택</Label>
-                      <Select 
-                        value={formData.influencer_id} 
+                      <Select
+                        value={formData.influencer_id}
                         onValueChange={(value) => handleInputChange('influencer_id', value)}
                       >
                         <SelectTrigger>
@@ -530,8 +518,8 @@ export default function CreatePostPage() {
 
                     <div>
                       <Label htmlFor="board_platform">플랫폼 선택</Label>
-                      <Select 
-                        value={formData.board_platform.toString()} 
+                      <Select
+                        value={formData.board_platform.toString()}
                         onValueChange={(value) => handleInputChange('board_platform', parseInt(value))}
                       >
                         <SelectTrigger>
@@ -568,27 +556,29 @@ export default function CreatePostPage() {
                   <div>
                     <div className="flex items-center justify-between">
                       <Label htmlFor="board_description">게시글 설명 (선택사항)</Label>
-                      {formData.board_description.trim() && !enhancedContent && (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={enhanceContent}
-                          disabled={isEnhancing}
-                        >
-                          {isEnhancing ? (
-                            <>
-                              <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                              향상 중...
-                            </>
-                          ) : (
-                            <>
-                              <Sparkles className="h-3 w-3 mr-1" />
-                              AI 생성
-                            </>
-                          )}
-                        </Button>
-                      )}
+                      <div className="flex space-x-2">
+                        {isGenerateEnabled && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={generateContent}
+                            disabled={isEnhancing}
+                          >
+                            {isEnhancing ? (
+                              <>
+                                <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                                향상 중...
+                              </>
+                            ) : (
+                              <>
+                                <Sparkles className="h-3 w-3 mr-1" />
+                                AI 생성
+                              </>
+                            )}
+                          </Button>
+                        )}
+                      </div>
                     </div>
                     <Textarea
                       id="board_description"
@@ -598,46 +588,23 @@ export default function CreatePostPage() {
                       rows={3}
                       className="mt-2"
                     />
-                    
+
                     {/* 향상된 내용 표시 */}
-                    {enhancedContent && (
+                    {generated && (
                       <div className="mt-4 space-y-4">
-                        <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                          <h4 className="font-medium text-blue-900 mb-2 flex items-center">
-                            <Sparkles className="h-4 w-4 mr-2" />
-                            원본 내용
-                          </h4>
-                          <div className="text-sm text-blue-800 whitespace-pre-wrap bg-white p-3 rounded border">
-                            {enhancedContent.original_content}
-                          </div>
-                        </div>
-                        
                         <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
-                          <h4 className="font-medium text-green-900 mb-2 flex items-center">
-                            <Sparkles className="h-4 w-4 mr-2" />
-                            AI가 생성한 내용
-                          </h4>
-                          <div className="text-sm text-green-800 whitespace-pre-wrap bg-white p-3 rounded border mb-4">
-                            {enhancedContent.enhanced_content}
+                          <h4 className="font-medium text-green-900 mb-2 flex items-center">AI가 생성한 본문</h4>
+                          <div className="text-sm text-green-800 whitespace-pre-wrap bg-white p-3 rounded border mb-4">{generated.content}</div>
+                          <h5 className="font-medium text-green-800 mb-2 flex items-center">자동 생성 해시태그</h5>
+                          <div className="flex flex-wrap gap-2">
+                            {generated.hashtags.map((tag: string, index: number) => (
+                              <Badge key={index} variant="secondary" className="bg-green-100 text-green-800 border-green-300">{tag}</Badge>
+                            ))}
                           </div>
-                          
-                          <div className="flex space-x-2">
-                            <Button
-                              type="button"
-                              onClick={() => approveEnhancement(true)}
-                              className="flex items-center space-x-2"
-                            >
+                          <div className="flex space-x-2 mt-4">
+                            <Button type="button" onClick={approveGenerated} className="flex items-center space-x-2">
                               <span>✓</span>
-                              <span>승인하기</span>
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              onClick={() => approveEnhancement(false)}
-                              className="flex items-center space-x-2"
-                            >
-                              <span>✕</span>
-                              <span>거부하기</span>
+                              <span>승인</span>
                             </Button>
                           </div>
                         </div>
@@ -670,9 +637,9 @@ export default function CreatePostPage() {
                       <Label className="text-sm font-medium">추천 해시태그</Label>
                       <div className="flex flex-wrap gap-2 mt-2">
                         {DEFAULT_HASHTAGS.map((hashtag) => (
-                          <Badge 
-                            key={hashtag} 
-                            variant="outline" 
+                          <Badge
+                            key={hashtag}
+                            variant="outline"
                             className="cursor-pointer hover:bg-blue-50 hover:border-blue-300"
                             onClick={() => addDefaultHashtag(hashtag)}
                           >
@@ -681,7 +648,7 @@ export default function CreatePostPage() {
                         ))}
                       </div>
                     </div>
-                    
+
                     {formData.board_hashtag.length > 0 && (
                       <div>
                         <Label className="text-sm font-medium">선택된 해시태그</Label>
@@ -718,15 +685,15 @@ export default function CreatePostPage() {
                   {/* 이미지 업로드 영역 */}
                   <div>
                     <Label htmlFor="image_upload">이미지 파일 업로드</Label>
-                    
+
                     {/* 업로드된 이미지가 있을 때 */}
                     {formData.uploaded_image && imagePreview ? (
                       <div className="mt-2 border-2 border-gray-200 rounded-lg p-4 bg-gray-50">
                         <div className="flex items-center justify-between mb-2">
                           <h4 className="font-medium text-gray-900">업로드된 이미지</h4>
-                          <Button 
-                            type="button" 
-                            variant="outline" 
+                          <Button
+                            type="button"
+                            variant="outline"
                             size="sm"
                             onClick={removeImage}
                             className="text-red-600 hover:text-red-700"
@@ -735,21 +702,20 @@ export default function CreatePostPage() {
                           </Button>
                         </div>
                         <div className="flex justify-center">
-                          <img 
-                            src={imagePreview} 
-                            alt="Uploaded" 
+                          <img
+                            src={imagePreview}
+                            alt="Uploaded"
                             className="max-w-full max-h-64 object-contain rounded-lg border"
                           />
                         </div>
                       </div>
                     ) : (
                       /* 업로드 영역 */
-                      <div 
-                        className={`mt-2 border-2 border-dashed rounded-lg p-6 transition-colors ${
-                          isDragOver 
-                            ? 'border-blue-500 bg-blue-50' 
-                            : 'border-gray-300 hover:border-gray-400'
-                        }`}
+                      <div
+                        className={`mt-2 border-2 border-dashed rounded-lg p-6 transition-colors ${isDragOver
+                          ? 'border-blue-500 bg-blue-50'
+                          : 'border-gray-300 hover:border-gray-400'
+                          }`}
                         onDragOver={handleDragOver}
                         onDragLeave={handleDragLeave}
                         onDrop={handleDrop}
@@ -769,9 +735,9 @@ export default function CreatePostPage() {
                           <p className="text-xs text-gray-400 mb-4">
                             JPG, PNG, GIF 파일 (최대 5MB)
                           </p>
-                          <Button 
-                            type="button" 
-                            variant="outline" 
+                          <Button
+                            type="button"
+                            variant="outline"
                             onClick={() => document.getElementById('image_upload')?.click()}
                           >
                             <ImageIcon className="h-4 w-4 mr-2" />
@@ -801,12 +767,11 @@ export default function CreatePostPage() {
                   {/* 발행 옵션 */}
                   <div className="grid grid-cols-2 gap-4">
                     {/* 즉시 발행 */}
-                    <div 
-                      className={`border-2 rounded-lg p-4 cursor-pointer transition-all ${
-                        publishType === 'immediate' 
-                          ? 'border-blue-500 bg-blue-50' 
-                          : 'border-gray-200 hover:border-gray-300'
-                      }`}
+                    <div
+                      className={`border-2 rounded-lg p-4 cursor-pointer transition-all ${publishType === 'immediate'
+                        ? 'border-blue-500 bg-blue-50'
+                        : 'border-gray-200 hover:border-gray-300'
+                        }`}
                       onClick={() => {
                         setPublishType('immediate')
                         setScheduledDate('')
@@ -820,12 +785,11 @@ export default function CreatePostPage() {
                     </div>
 
                     {/* 스케줄 발행 */}
-                    <div 
-                      className={`border-2 rounded-lg p-4 cursor-pointer transition-all ${
-                        publishType === 'scheduled' 
-                          ? 'border-blue-500 bg-blue-50' 
-                          : 'border-gray-200 hover:border-gray-300'
-                      }`}
+                    <div
+                      className={`border-2 rounded-lg p-4 cursor-pointer transition-all ${publishType === 'scheduled'
+                        ? 'border-blue-500 bg-blue-50'
+                        : 'border-gray-200 hover:border-gray-300'
+                        }`}
                       onClick={() => setPublishType('scheduled')}
                     >
                       <div className="text-center space-y-2">
@@ -893,8 +857,8 @@ export default function CreatePostPage() {
                     취소
                   </Button>
                 </Link>
-                <Button 
-                  type="submit" 
+                <Button
+                  type="submit"
                   disabled={submitting || !isFormValid()}
                 >
                   {submitting ? (
@@ -929,7 +893,7 @@ export default function CreatePostPage() {
                     ×
                   </Button>
                 </div>
-                
+
                 <div className="space-y-4">
                   {/* 플랫폼 정보 */}
                   <div className="flex items-center space-x-2">
@@ -938,7 +902,7 @@ export default function CreatePostPage() {
                       {PLATFORM_OPTIONS.find(p => p.value === formData.board_platform)?.label}
                     </Badge>
                   </div>
-                  
+
                   {/* 인플루언서 정보 */}
                   <div className="flex items-center space-x-2">
                     <span className="text-sm text-gray-600">인플루언서:</span>
@@ -946,26 +910,26 @@ export default function CreatePostPage() {
                       {influencers.find(i => i.influencer_id === formData.influencer_id)?.influencer_name}
                     </Badge>
                   </div>
-                  
+
                   {/* 게시글 주제 */}
                   <div>
                     <h3 className="font-semibold text-lg mb-2">{formData.board_topic}</h3>
                     <p className="text-gray-700 mb-4">{formData.board_description}</p>
                   </div>
-                  
+
                   {/* 업로드된 이미지 */}
                   {imagePreview && (
                     <div className="my-4">
                       <div className="flex justify-center">
-                        <img 
-                          src={imagePreview} 
-                          alt="Preview" 
+                        <img
+                          src={imagePreview}
+                          alt="Preview"
                           className="max-w-full max-h-64 object-contain rounded-lg border"
                         />
                       </div>
                     </div>
                   )}
-                  
+
                   {/* 해시태그 */}
                   <div>
                     <div className="flex flex-wrap gap-2">
@@ -977,7 +941,7 @@ export default function CreatePostPage() {
                     </div>
                   </div>
                 </div>
-                
+
                 <div className="mt-6 flex justify-end">
                   <Button onClick={() => setShowPreview(false)}>
                     확인
