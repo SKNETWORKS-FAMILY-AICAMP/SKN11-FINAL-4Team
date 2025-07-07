@@ -71,7 +71,8 @@ class VLLMClient:
             raise VLLMClientError(f"서버 통계 조회 실패: {e}")
     
     async def load_adapter(self, model_id: str, hf_repo_name: str, 
-                          hf_token: Optional[str] = None) -> Dict[str, Any]:
+                          hf_token: Optional[str] = None, 
+                          base_model_override: Optional[str] = None) -> Dict[str, Any]:
         """LoRA 어댑터 로드"""
         try:
             payload = {
@@ -80,6 +81,8 @@ class VLLMClient:
             }
             if hf_token:
                 payload["hf_token"] = hf_token
+            if base_model_override:
+                payload["base_model_override"] = base_model_override
             
             response = await self.client.post("/lora/load_adapter", json=payload)
             response.raise_for_status()
@@ -338,7 +341,8 @@ async def vllm_generate_response(user_message: str, system_message: str = None,
 
 
 async def vllm_load_adapter_if_needed(model_id: str, hf_repo_name: str,
-                                     hf_token: str = None) -> bool:
+                                     hf_token: str = None, 
+                                     base_model_override: str = None) -> bool:
     """필요시 어댑터 로드"""
     async with VLLMClient(_vllm_config) as client:
         try:
@@ -351,7 +355,7 @@ async def vllm_load_adapter_if_needed(model_id: str, hf_repo_name: str,
                 return True
             
             # 어댑터 로드
-            await client.load_adapter(model_id, hf_repo_name, hf_token)
+            await client.load_adapter(model_id, hf_repo_name, hf_token, base_model_override)
             return True
             
         except Exception as e:

@@ -313,8 +313,10 @@ class StartupService:
                         # vLLM 어댑터 로드
                         logger.info(f"🔄 어댑터 로드 중: {influencer.influencer_model_repo}")
                         success = await vllm_load_adapter_if_needed(
-                            influencer.influencer_model_repo,
-                            decrypted_token
+                            model_id=influencer.influencer_model_repo,
+                            hf_repo_name=influencer.influencer_model_repo,
+                            hf_token=decrypted_token,
+                            base_model_override="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct"  # 기본 베이스 모델 지정
                         )
                         
                         if success:
