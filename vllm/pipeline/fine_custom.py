@@ -306,27 +306,11 @@ def main(qa_data: list[dict], system_message: str, hf_token: str, hf_repo_id: st
     lora_config = setup_lora_config(model)
     model = get_peft_model(model, lora_config)
     
-    # 4. LoRA 적용 후 gradient checkpointing 다시 활성화
-    if hasattr(model, 'enable_input_require_grads'):
-        model.enable_input_require_grads()
-    
-    
-    # 6. gradient 체크 - 더 자세한 확인
-    print("\nGradient 설정 확인:")
-    trainable_params = 0
-    all_params = 0
-    
-    
-    print(f"총 파라미터: {all_params:,}")
-    print(f"훈련 가능한 파라미터: {trainable_params:,}")
-    print(f"훈련 가능 비율: {100 * trainable_params / all_params:.4f}%")
-    print('--------------------------------')
-    if trainable_params == 0:
-        print("ERROR: 훈련 가능한 파라미터가 없습니다!")
-        return
+    # 4. 훈련 가능한 파라미터 출력
+    model.print_trainable_parameters()
     
     # 7. 데이터셋 준비
-    train_dataset = qa_data
+    train_dataset = prepare_dataset(tokenizer, qa_data, system_message)
     print(f"훈련 데이터셋 크기: {len(train_dataset)}")
     
     # 데이터셋을 train/eval로 분할 (조기 종료를 위한 validation 데이터 필요)
@@ -396,41 +380,7 @@ def main(qa_data: list[dict], system_message: str, hf_token: str, hf_repo_id: st
         callbacks=[early_stopping_callback],
     )
     
-    # 12. 훈련 전 gradient 테스트
-    print("\n=== 훈련 전 Gradient 테스트 ===")
-    model.train()
-    sample_batch = next(iter(trainer.get_train_dataloader()))
-    sample_batch = {k: v.to(model.device) for k, v in sample_batch.items()}
-    
-    # Forward pass
-    outputs = model(**sample_batch)
-    loss = outputs.loss
-    print(f"Forward pass 성공, loss: {loss.item()}")
-    
-    # Backward pass 테스트
-    try:
-        loss.backward()
-        print("Backward pass 성공!")
-        
-        # Gradient 확인
-        grad_found = False
-        for name, param in model.named_parameters():
-            if param.requires_grad and param.grad is not None:
-                print(f"  Gradient found: {name}")
-                grad_found = True
-                break
-        
-        if not grad_found:
-            print("WARNING: Gradient가 계산되지 않았습니다!")
-        
-        # Gradient 초기화
-        model.zero_grad()
-        
-    except Exception as e:
-        print(f"Backward pass 실패: {e}")
-        return
-    
-    # 13. 훈련 시작
+    # 12. 훈련 시작
     print("훈련 시작...")
     try:
         trainer.train()
@@ -460,9 +410,3 @@ def main(qa_data: list[dict], system_message: str, hf_token: str, hf_repo_id: st
     print(f"✅ 파인튜닝 완료! 모델 URL: {hf_model_url}")
     return hf_model_url
 
-if __name__ == "__main__":
-    # 훈련 실행
-    # 이 스크립트는 직접 실행되지 않고, vllm/app/core.py에서 호출됩니다.
-    # 따라서 main 함수에 인자를 직접 전달하지 않습니다.
-    pass
-    
