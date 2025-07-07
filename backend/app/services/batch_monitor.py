@@ -90,7 +90,7 @@ class BatchMonitor:
 
             # 상태에 따른 처리
             if current_status == 'completed':
-                await self._handle_completed_batch(batch_key, batch_status, db)
+                await self._handle_completed_batch(batch_key, db, batch_status)
             elif current_status == 'failed':
                 await self._handle_failed_batch(batch_key, batch_status, db)
             elif current_status in ['validating', 'in_progress']:
@@ -108,9 +108,9 @@ class BatchMonitor:
         
         db: Session = next(get_db())
         try:
-            # 진행 중인 배치 작업 조회
+            # 진행 중인 배치 작업 조회 (모든 미완료 상태 포함)
             pending_batches = db.query(BatchKey).filter(
-                BatchKey.status.in_(['pending', 'processing', 'batch_submitted', 'batch_processing'])
+                BatchKey.status.in_(['pending', 'processing', 'batch_submitted', 'batch_processing', 'in_progress'])
             ).all()
             
             if not pending_batches:

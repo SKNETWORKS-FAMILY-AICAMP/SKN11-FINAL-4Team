@@ -12,6 +12,8 @@ import os
 import json
 import logging
 from datetime import datetime
+from openai import OpenAI
+import httpx
 
 from pipeline.speech_generator import CharacterProfile, Gender
 # LangChain QA 생성은 제거 - 배치 처리 우선
@@ -54,6 +56,10 @@ class QABatchRequest(BaseModel):
     num_qa_per_character: int = 1
     domains: Optional[List[str]] = None
     system_prompt: Optional[str] = None
+
+class BatchStatusRequest(BaseModel):
+    """OpenAI 배치 상태 조회 요청"""
+    batch_id: str
 
 # LangChain 기반 고속 QA 생성은 제거 - 배치 처리가 비용 효율적
 
@@ -175,6 +181,76 @@ async def get_qa_generation_results(task_id: str):
         "total_requests": len(task["batch_requests"]),
         "domains": task.get("domains", [])
     }
+
+@router.post("/openai_batch_status")
+async def get_openai_batch_status(request: BatchStatusRequest):
+    """OpenAI 배치 작업 상태 조회"""
+    try:
+        # OpenAI 클라이언트 초기화
+        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        
+        # 배치 상태 조회
+        batch = client.batches.retrieve(request.batch_id)
+        
+        return {
+            "batch_id": batch.id,
+            "status": batch.status,
+            "object": batch.object,
+            "created_at": batch.created_at,
+            "in_progress_at": batch.in_progress_at,
+            "expires_at": batch.expires_at,
+            "finalizing_at": batch.finalizing_at,
+            "completed_at": batch.completed_at,
+            "failed_at": batch.failed_at,
+            "expired_at": batch.expired_at,
+            "cancelling_at": batch.cancelling_at,
+            "cancelled_at": batch.cancelled_at,
+            "request_counts": batch.request_counts,
+            "metadata": batch.metadata,
+            "completion_window": batch.completion_window,
+            "endpoint": batch.endpoint,
+            "input_file_id": batch.input_file_id,
+            "output_file_id": batch.output_file_id,
+            "error_file_id": batch.error_file_id
+        }
+    except Exception as e:
+        logger.error(f"OpenAI 배치 상태 조회 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"배치 상태 조회 중 오류 발생: {str(e)}")
+
+@router.get("/openai_batch_status/{batch_id}")
+async def get_openai_batch_status_by_id(batch_id: str):
+    """OpenAI 배치 작업 상태 조회 (GET 방식)"""
+    try:
+        # OpenAI 클라이언트 초기화
+        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        
+        # 배치 상태 조회
+        batch = client.batches.retrieve(batch_id)
+        
+        return {
+            "batch_id": batch.id,
+            "status": batch.status,
+            "object": batch.object,
+            "created_at": batch.created_at,
+            "in_progress_at": batch.in_progress_at,
+            "expires_at": batch.expires_at,
+            "finalizing_at": batch.finalizing_at,
+            "completed_at": batch.completed_at,
+            "failed_at": batch.failed_at,
+            "expired_at": batch.expired_at,
+            "cancelling_at": batch.cancelling_at,
+            "cancelled_at": batch.cancelled_at,
+            "request_counts": batch.request_counts,
+            "metadata": batch.metadata,
+            "completion_window": batch.completion_window,
+            "endpoint": batch.endpoint,
+            "input_file_id": batch.input_file_id,
+            "output_file_id": batch.output_file_id,
+            "error_file_id": batch.error_file_id
+        }
+    except Exception as e:
+        logger.error(f"OpenAI 배치 상태 조회 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"배치 상태 조회 중 오류 발생: {str(e)}")
 
 # LangChain QA 생성 엔드포인트 제거 - 배치 처리가 비용 효율적
 

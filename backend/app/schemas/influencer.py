@@ -211,7 +211,6 @@ class FinetuningWebhookRequest(BaseModel):
 
 # 말투 생성 요청 스키마
 class ToneGenerationRequest(BaseModel):
-    influencer_id: str # Add influencer_id
     personality: str
     name: Optional[str] = None
     description: Optional[str] = None
