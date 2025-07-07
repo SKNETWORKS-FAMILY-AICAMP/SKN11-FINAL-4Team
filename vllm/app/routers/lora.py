@@ -2,7 +2,8 @@ from fastapi import APIRouter, HTTPException
 from typing import Dict, Any
 
 from app.models import LoRALoadRequest
-from app.core import engine, loaded_adapters, load_lora_adapter
+from app import core
+from app.core import load_lora_adapter
 
 router = APIRouter()
 
@@ -15,11 +16,12 @@ async def load_lora_adapter_endpoint(request: LoRALoadRequest):
     logger.info(f"🔄 LoRA 어댑터 로드 엔드포인트 호출됨")
     logger.info(f"📋 요청 데이터: {request.dict()}")
     
-    if engine is None:
+    logger.info(f"🔍 현재 엔진 상태 확인: {core.engine}")
+    if core.engine is None:
         logger.error("❌ 엔진이 초기화되지 않았습니다.")
         raise HTTPException(status_code=500, detail="엔진이 초기화되지 않았습니다.")
     
-    logger.info(f"✅ 엔진 상태 확인 완료")
+    logger.info(f"✅ 엔진 상태 확인 완료: {type(core.engine)}")
     
     try:
         logger.info(f"🔄 load_lora_adapter 함수 호출 중...")
@@ -38,18 +40,18 @@ async def load_lora_adapter_endpoint(request: LoRALoadRequest):
 async def list_adapters() -> Dict[str, Any]:
     """로드된 어댑터 목록 조회"""
     return {
-        "loaded_adapters": loaded_adapters,
-        "total_count": len(loaded_adapters)
+        "loaded_adapters": core.loaded_adapters,
+        "total_count": len(core.loaded_adapters)
     }
 
 @router.delete("/adapter/{model_id}")
 async def unload_adapter(model_id: str):
     """어댑터 언로드"""
-    if model_id not in loaded_adapters:
+    if model_id not in core.loaded_adapters:
         raise HTTPException(status_code=404, detail=f"어댑터 {model_id}를 찾을 수 없습니다.")
     
     try:
-        del loaded_adapters[model_id]
+        del core.loaded_adapters[model_id]
         # logger.info(f"🗑️ LoRA 어댑터 언로드 완료: {model_id}") # logger는 core에서 관리
         
         return {"message": f"어댑터 {model_id} 언로드 완료"}
