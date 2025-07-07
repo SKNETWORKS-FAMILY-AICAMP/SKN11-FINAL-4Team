@@ -2,6 +2,7 @@
 """
 애플리케이션 시작시 실행되는 서비스
 QA 데이터가 있지만 파인튜닝이 시작되지 않은 작업들을 자동으로 처리
+챗봇 옵션이 활성화된 인플루언서들의 vLLM 어댑터 자동 로드
 """
 
 import asyncio
@@ -14,8 +15,10 @@ from datetime import datetime
 from app.database import get_db
 # batch_job_service 제거됨 - BatchKey 모델 직접 사용
 from app.services.finetuning_service import get_finetuning_service
-from app.models.influencer import BatchKey as BatchJob
+from app.models.influencer import BatchKey as BatchJob, AIInfluencer
 from app.services.influencers.qa_generator import QAGenerationStatus
+from app.services.vllm_client import vllm_load_adapter_if_needed
+from app.services.hf_token_service import get_hf_token_service
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
@@ -245,8 +248,72 @@ class StartupService:
             
             logger.info(f"✅ 시작시 작업 완료 - 재시작: {restarted_count}개, 정리: {cleaned_count}개")
             
+            # 3. 챗봇 옵션 활성화된 인플루언서들의 vLLM 어댑터 로드
+            await self.load_adapters_for_chat_enabled_influencers()
+            
         except Exception as e:
             logger.error(f"❌ 시작시 작업 실행 중 오류: {str(e)}", exc_info=True)
+    
+    async def load_adapters_for_chat_enabled_influencers(self):
+        """챗봇 옵션이 활성화된 인플루언서들의 vLLM 어댑터 로드"""
+        logger.info("💬 챗봇 활성화된 인플루언서들의 vLLM 어댑터 로드 시작...")
+        
+        try:
+            db = next(get_db())
+            try:
+                # 챗봇 옵션이 활성화되고 파인튜닝된 모델을 가진 인플루언서 조회
+                chat_enabled_influencers = (
+                    db.query(AIInfluencer)
+                    .filter(
+                        AIInfluencer.chatbot_option == True,
+                        AIInfluencer.influencer_model_repo.isnot(None),
+                        AIInfluencer.influencer_model_repo != ""
+                    )
+                    .all()
+                )
+                
+                if not chat_enabled_influencers:
+                    logger.info("💬 챗봇 활성화된 인플루언서가 없습니다.")
+                    return
+                
+                logger.info(f"💬 챗봇 활성화된 인플루언서 {len(chat_enabled_influencers)}개 발견")
+                
+                # HF 토큰 서비스 초기화
+                hf_token_service = get_hf_token_service()
+                
+                loaded_count = 0
+                for influencer in chat_enabled_influencers:
+                    try:
+                        # 그룹 ID로 HF 토큰 조회
+                        hf_token = hf_token_service.get_hf_token(influencer.group_id, db)
+                        if not hf_token:
+                            logger.warning(f"⚠️ 인플루언서 {influencer.influencer_id}의 HF 토큰을 찾을 수 없습니다.")
+                            continue
+                        
+                        # vLLM 어댑터 로드
+                        logger.info(f"🔄 어댑터 로드 중: {influencer.influencer_model_repo}")
+                        success = await vllm_load_adapter_if_needed(
+                            influencer.influencer_model_repo,
+                            hf_token
+                        )
+                        
+                        if success:
+                            loaded_count += 1
+                            logger.info(f"✅ 어댑터 로드 성공: {influencer.influencer_model_repo}")
+                        else:
+                            logger.warning(f"⚠️ 어댑터 로드 실패: {influencer.influencer_model_repo}")
+                            
+                    except Exception as e:
+                        logger.error(f"❌ 인플루언서 {influencer.influencer_id} 어댑터 로드 중 오류: {str(e)}")
+                        continue
+                
+                logger.info(f"💬 챗봇 인플루언서 어댑터 로드 완료: {loaded_count}/{len(chat_enabled_influencers)}개 성공")
+                
+            finally:
+                db.close()
+                
+        except Exception as e:
+            logger.error(f"❌ 챗봇 인플루언서 어댑터 로드 중 오류: {str(e)}", exc_info=True)
 
 
 # 글로벌 시작시 서비스 인스턴스
@@ -262,3 +329,9 @@ async def run_startup_tasks():
     """애플리케이션 시작시 실행할 작업들"""
     service = get_startup_service()
     await service.run_startup_tasks()
+
+
+async def load_adapters_for_chat_enabled_influencers(db: Session):
+    """챗봇 옵션이 활성화된 인플루언서들의 vLLM 어댑터 로드 (main.py에서 사용)"""
+    service = get_startup_service()
+    await service.load_adapters_for_chat_enabled_influencers()

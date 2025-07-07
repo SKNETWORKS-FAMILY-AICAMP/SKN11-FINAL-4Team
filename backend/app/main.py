@@ -295,12 +295,12 @@ if settings.DEBUG:
         logger.info(f"🔍 ReDoc: {settings.BACKEND_CORS_ORIGINS[0]}/redoc")
         logger.info(f"💚 Health Check: {settings.BACKEND_CORS_ORIGINS[0]}/health")
         
-        # Instagram 연동된 인플루언서들의 vLLM 어댑터 자동 로드
+        # 챗봇 옵션이 활성화된 인플루언서들의 vLLM 어댑터 자동 로드
         try:
             from app.database import get_db
-            from app.services.influencers.instagram import load_adapters_for_active_instagram_influencers
+            from app.services.startup_service import load_adapters_for_chat_enabled_influencers
             
             db = next(get_db())
-            await load_adapters_for_active_instagram_influencers(db)
+            await load_adapters_for_chat_enabled_influencers(db)
         except Exception as e:
-            logger.warning(f"⚠️ 시작 시 Instagram 인플루언서 어댑터 로드 실패: {str(e)}")
+            logger.warning(f"⚠️ 시작 시 챗봇 인플루언서 어댑터 로드 실패: {str(e)}")
