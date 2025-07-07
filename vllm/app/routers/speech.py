@@ -8,7 +8,7 @@ import json
 import tempfile
 import logging
 
-from vllm.pipeline.speech_generator import SpeechGenerator, CharacterProfile, Gender
+from pipeline.speech_generator import SpeechGenerator, CharacterProfile, Gender
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -74,31 +74,30 @@ async def generate_character_qa(request: VLLMCharacterProfile):
                 tone_instruction_seed=f"variation_{i+1}"
             )
             
-            # 답변 생성 (실제 구현에서는 speech_generator의 메서드 사용)
+            # SpeechGenerator를 통한 어투 생성
             try:
-                # 임시: 기본 답변 생성
-                answer = f"{request.name}의 {i+1}번째 어투로 답변합니다: {question}"
+                tones_result = speech_generator.generate_character_tones_for_question(character_profile, question, 1)
                 
-                # 어투 정보 생성
-                tone_info = {
-                    "description": f"어투 {i+1}",
-                    "hashtags": f"#어투{i+1} #캐릭터"
-                }
-                
-                responses[tone_name] = [{
-                    "text": answer,
-                    "tone_info": tone_info,
-                    "system_prompt": system_prompt
-                }]
+                if tones_result and len(tones_result) > 0:
+                    # 첫 번째 어투 사용
+                    first_tone_key = list(tones_result.keys())[0]
+                    tone_data = tones_result[first_tone_key][0]
+                    
+                    responses[tone_name] = [{
+                        "text": tone_data["text"],
+                        "tone_info": {
+                            "description": tone_data.get("description", f"어투 {i+1}"),
+                            "hashtags": tone_data.get("hashtags", f"#어투{i+1} #캐릭터")
+                        },
+                        "system_prompt": system_prompt
+                    }]
+                else:
+                    raise Exception("SpeechGenerator에서 어투 생성 실패")
                 
             except Exception as e:
                 logger.error(f"어투 {i+1} 생성 실패: {e}")
-                # 기본 응답 제공
-                responses[tone_name] = [{
-                    "text": f"안녕하세요! 저는 {request.name}입니다.",
-                    "tone_info": {"description": f"기본 어투 {i+1}", "hashtags": f"#기본{i+1}"},
-                    "system_prompt": f"당신은 {request.name}라는 캐릭터입니다."
-                }]
+                # 기본 어투 생성 금지 - 예외 발생
+                raise HTTPException(status_code=500, detail=f"어투 {i+1} 생성에 실패했습니다: {str(e)}")
         
         return ToneGenerationResponse(
             question=question,
