@@ -101,6 +101,11 @@ class AIInfluencerCreate(BaseSchema):
     age: Optional[str] = None          # 나이
     hair_style: Optional[str] = None   # 헤어스타일
     mood: Optional[str] = None         # 분위기/스타일
+    system_prompt: Optional[str] = None # 시스템 프롬프트
+    
+    # 말투 정보 필드들
+    tone_type: Optional[str] = None    # "system" 또는 "custom"
+    tone_data: Optional[str] = None    # 선택된 시스템 프롬프트 또는 사용자 입력 데이터
 
 
 class AIInfluencerUpdate(BaseModel):
@@ -232,3 +237,9 @@ class GeneratedToneCreate(GeneratedToneBase):
 
 class GeneratedTone(GeneratedToneBase, TimestampSchema):
     tone_id: str
+
+
+# 시스템 프롬프트 저장 요청 스키마
+class SystemPromptSaveRequest(BaseModel):
+    type: str  # "system" 또는 "custom"
+    data: str  # system_prompt 또는 custom 입력 데이터

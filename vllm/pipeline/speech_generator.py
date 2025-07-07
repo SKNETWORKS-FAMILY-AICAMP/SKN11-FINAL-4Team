@@ -150,7 +150,7 @@ class SpeechGenerator:
     - 성격: {character.personality}
     - MBTI: {character.mbti or '없음'}
     - 연령대: {character.age_range or '없음'}
-    - 성별: {character.gender.value if character.gender else '없음'}
+    - 성별: {character.gender if character.gender else '없음'}
 
     조건:
     - 질문은 반드시 하나만 작성해주세요.

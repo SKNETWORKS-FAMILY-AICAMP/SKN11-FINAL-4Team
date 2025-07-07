@@ -34,6 +34,7 @@ interface FormDataType {
   mood: string;
   selectedPresetId: string;
   huggingFaceToken: string;
+  systemPrompt: string;
 }
 
 export default function CreateModelPage() {
@@ -262,6 +263,7 @@ export default function CreateModelPage() {
         createInfluencerData.style_preset_id = undefined; // 백엔드에서 자동 생성 로직을 타도록 undefined로 보냄
         createInfluencerData.personality = formData.personality;
         createInfluencerData.tone = formData.tone || formData.customTones[0] || "";
+        createInfluencerData.system_prompt = formData.systemPrompt; // Use the stored systemPrompt
         createInfluencerData.model_type = formData.modelType;
         createInfluencerData.mbti = formData.mbti !== "none" ? formData.mbti : undefined;
         createInfluencerData.gender = formData.gender !== "none" ? formData.gender : undefined;
@@ -273,7 +275,7 @@ export default function CreateModelPage() {
           createInfluencerData.mood = formData.mood;
         }
       }
-
+      console.log(JSON.stringify(createInfluencerData))
       // 실제 인플루언서 생성 API 호출
       const response = await ModelService.createInfluencer(createInfluencerData)
       
@@ -773,6 +775,7 @@ export default function CreateModelPage() {
                               onClick={() => {
                                 handleInputChange("tone", example.tone)
                                 handleInputChange("customTones", [] as string[])
+                                handleInputChange("systemPrompt", example.system_prompt || "")
                               }}
                             >
                               <CardHeader className="pb-3">

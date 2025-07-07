@@ -57,6 +57,21 @@ export interface CreateInfluencerRequest {
   learning_status: number
   influencer_model_repo: string
   chatbot_option: boolean
+  
+  // 프리셋 자동 생성을 위한 추가 필드들
+  personality?: string  // 성격
+  tone?: string         // 말투
+  model_type?: string   // 모델 타입
+  mbti?: string         // MBTI
+  gender?: string       // 성별
+  age?: string          // 나이
+  hair_style?: string   // 헤어스타일
+  mood?: string         // 분위기/스타일
+  system_prompt?: string // 시스템 프롬프트
+  
+  // 말투 정보 필드들
+  tone_type?: string    // "system" 또는 "custom"
+  tone_data?: string    // 선택된 시스템 프롬프트 또는 사용자 입력 데이터
 }
 
 export interface UpdateInfluencerRequest {

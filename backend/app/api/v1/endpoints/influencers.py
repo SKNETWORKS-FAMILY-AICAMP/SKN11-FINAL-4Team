@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 import os
 import logging
-
+import json
 from app.database import get_db
 from app.schemas.influencer import (
     AIInfluencer as AIInfluencerSchema,
@@ -15,6 +15,7 @@ from app.schemas.influencer import (
     ModelMBTI as ModelMBTISchema,
     FinetuningWebhookRequest,
     ToneGenerationRequest,
+    SystemPromptSaveRequest,
 )
 from app.core.security import get_current_user
 from app.services.influencers.crud import (
@@ -95,7 +96,7 @@ async def createnew_influencer(
     logger.info(
         f"🚀 API: 인플루언서 생성 요청 - user_id: {user_id}, name: {influencer_data.influencer_name}"
     )
-
+    print(influencer_data)
     # 인플루언서 생성
     influencer = create_influencer(db, user_id, influencer_data)
 
@@ -724,7 +725,6 @@ async def generate_conversation_tones(
         raise HTTPException(status_code=400, detail="성격 정보를 입력해주세요")
     
     try:
-        # vLLM 서버 상태 확인
         from app.services.vllm_client import vllm_health_check, vllm_generate_qa_for_character
         
         if not await vllm_health_check():
@@ -755,34 +755,11 @@ async def generate_conversation_tones(
         print(f'vLLM 서버로 캐릭터 QA 생성 요청: {character_data}')
         # vLLM 서버에서 QA 생성
         vllm_result = await vllm_generate_qa_for_character(character_data)
-        print(f'vLLM 응답 완료: {vllm_result}')
         
         # vLLM 응답을 기존 형식으로 변환
         conversation_examples = _convert_vllm_response_to_conversation_examples(vllm_result)
 
-        # 유효한 인플루언서 ID 확인 및 DB 저장
-        user_id = current_user.get("sub")
-        influencer = get_influencer_by_id(db, user_id, request.influencer_id)
-        if not influencer:
-            raise HTTPException(status_code=404, detail="인플루언서를 찾을 수 없습니다")
         
-        # 생성된 어투를 DB에 저장
-        from app.models.influencer import GeneratedTone
-        from app.schemas.influencer import GeneratedToneCreate
-
-        for example in conversation_examples:
-            generated_tone_data = GeneratedToneCreate(
-                influencer_id=request.influencer_id,
-                title=example.get("title", "말투"),
-                example=example.get("example", ""),
-                tone_description=example.get("tone", ""),
-                hashtags=example.get("hashtags", ""),
-                system_prompt=example.get("system_prompt", "")
-            )
-            db_generated_tone = GeneratedTone(**generated_tone_data.dict())
-            db.add(db_generated_tone)
-        db.commit()
-        logger.info(f"말투 생성 완료 및 DB 저장: influencer_id={request.influencer_id}")
         
         return {
             "personality": request.personality,
@@ -793,7 +770,7 @@ async def generate_conversation_tones(
         }
         
     except Exception as e:
-        logger.error(f"말투 생성 중 오류: {str(e)}")
+        logger.error(f"말투 생성 중 오류: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"말투 생성 중 오류가 발생했습니다: {str(e)}")
 
 
@@ -845,30 +822,6 @@ async def regenerate_conversation_tones(
         # vLLM 응답을 기존 형식으로 변환
         conversation_examples = _convert_vllm_response_to_conversation_examples(vllm_result)
 
-        # 유효한 인플루언서 ID 확인 및 DB 저장
-        user_id = current_user.get("sub")
-        influencer = get_influencer_by_id(db, user_id, request.influencer_id)
-        if not influencer:
-            raise HTTPException(status_code=404, detail="인플루언서를 찾을 수 없습니다")
-        
-        # 생성된 어투를 DB에 저장
-        from app.models.influencer import GeneratedTone
-        from app.schemas.influencer import GeneratedToneCreate
-
-        for example in conversation_examples:
-            generated_tone_data = GeneratedToneCreate(
-                influencer_id=request.influencer_id,
-                title=example.get("title", "말투"),
-                example=example.get("example", ""),
-                tone_description=example.get("tone", ""),
-                hashtags=example.get("hashtags", ""),
-                system_prompt=example.get("system_prompt", "")
-            )
-            db_generated_tone = GeneratedTone(**generated_tone_data.dict())
-            db.add(db_generated_tone)
-        db.commit()
-        logger.info(f"말투 재생성 완료 및 DB 저장: influencer_id={request.influencer_id}")
-        
         return {
             "personality": request.personality,
             "character_info": character_data,
@@ -879,7 +832,7 @@ async def regenerate_conversation_tones(
         }
         
     except Exception as e:
-        logger.error(f"말투 재생성 중 오류: {str(e)}")
+        logger.error(f"말투 재생성 중 오류: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"말투 재생성 중 오류가 발생했습니다: {str(e)}")
 
 
@@ -992,28 +945,28 @@ async def _generate_system_prompt_for_tone(client: OpenAI, character_info: str, 
 
 
 def _convert_vllm_response_to_conversation_examples(vllm_result: Dict[str, Any]) -> List[Dict[str, str]]:
-    """vLLM 서버 응답을 기존 conversation_examples 형식으로 변환"""
     conversation_examples = []
-    
     try:
-        responses = vllm_result.get("responses", {})
-        
+        responses = vllm_result['responses']
         for tone_name, tone_responses in responses.items():
             if tone_responses and len(tone_responses) > 0:
                 tone_response = tone_responses[0]  # 첫 번째 응답 사용
                 
-                # 기본 시스템 프롬프트 생성 (vLLM에서는 제공하지 않으므로)
-                system_prompt = f"당신은 {tone_name} 말투로 대화하는 AI입니다."
+                tone_info = tone_response.get("tone_info", {})
+                tone_description = tone_info.get("description", tone_name)
+                hashtags = tone_info.get("hashtags", f"#{tone_name} #말투")
+                system_prompt = tone_response.get("system_prompt", f"당신은 {tone_name} 말투로 대화하는 AI입니다.")
                 
                 conversation_examples.append({
-                    "title": tone_name,
+                    "title": tone_description,
                     "example": tone_response.get("text", ""),
-                    "tone": tone_name,
-                    "hashtags": f"#{tone_name} #말투",
+                    "tone": tone_description,
+                    "hashtags": hashtags,
                     "system_prompt": system_prompt
                 })
     
     except Exception as e:
+        print("예외 발생:", e)
         logger.error(f"vLLM 응답 변환 중 오류: {e}")
         # 기본 응답 제공
         conversation_examples = [
@@ -1069,7 +1022,7 @@ async def _summarize_speech_style(client: OpenAI, system_prompt: str) -> Dict[st
 @router.post("/{influencer_id}/system-prompt")
 async def save_system_prompt(
     influencer_id: str,
-    request: dict,
+    request: SystemPromptSaveRequest,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
@@ -1077,9 +1030,11 @@ async def save_system_prompt(
     user_id = current_user.get("sub")
     
     # 요청 데이터 검증
-    system_prompt = request.get("system_prompt")
-    if not system_prompt or not system_prompt.strip():
-        raise HTTPException(status_code=400, detail="시스템 프롬프트를 입력해주세요")
+    if not request.data or not request.data.strip():
+        raise HTTPException(status_code=400, detail="시스템 프롬프트 데이터를 입력해주세요")
+    
+    if request.type not in ["system", "custom"]:
+        raise HTTPException(status_code=400, detail="type은 'system' 또는 'custom'이어야 합니다")
     
     try:
         # 인플루언서 조회
@@ -1093,16 +1048,17 @@ async def save_system_prompt(
             AIInfluencer.influencer_id == influencer_id,
             AIInfluencer.user_id == user_id
         ).update({
-            "system_prompt": system_prompt.strip()
+            "system_prompt": request.data.strip()
         })
         
         db.commit()
         
-        logger.info(f"✅ 시스템 프롬프트 저장 완료: influencer_id={influencer_id}")
+        logger.info(f"✅ 시스템 프롬프트 저장 완료: influencer_id={influencer_id}, type={request.type}")
         
         return {
             "message": "시스템 프롬프트가 성공적으로 저장되었습니다",
             "influencer_id": influencer_id,
+            "type": request.type,
             "system_prompt_saved": True
         }
         

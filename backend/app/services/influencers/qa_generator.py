@@ -151,12 +151,91 @@ class InfluencerQAGenerator:
             "name": character.name,
             "description": character.description,
             "age_range": character.age_range,
-            "gender": character.gender.value if character.gender else "없음",
+            "gender": character.gender.value if hasattr(character.gender, 'value') else character.gender if character.gender else "없음",
             "personality": character.personality,
             "mbti": character.mbti
         }
         
-        # 1단계: VLLM 서버에서 질문 생성
+        # VLLM 서버에서 질문 생성 후 시스템 프롬프트로 답변 생성
+        try:
+            # 시스템 프롬프트가 있을 때만 새로운 방식 사용
+            if system_prompt:
+                # 1단계: 캐릭터 정보로 질문 생성
+                response = requests.post(
+                    f"{vllm_server_url}/speech/generate_questions_for_character",
+                    json={
+                        "character_info": character_data,
+                        "num_questions": num_requests
+                    },
+                    timeout=120
+                )
+                
+                if response.status_code == 200:
+                    questions_data = response.json()
+                    questions = questions_data.get('questions', [])
+                    
+                    print(f"VLLM 서버 캐릭터 질문 생성 성공: {len(questions)}개")
+                    
+                    # 2단계: 각 질문에 대해 시스템 프롬프트(캐릭터 정의)로 답변하는 배치 요청 생성
+                    for i, question in enumerate(questions):
+                        request = {
+                            "custom_id": f"influencer_qa_{character.name}_{i+1}",
+                            "method": "POST", 
+                            "url": "/v1/chat/completions",
+                            "body": {
+                                "model": "gpt-4o-mini",
+                                "messages": [
+                                    {
+                                        "role": "system",
+                                        "content": system_prompt  # 캐릭터 정의
+                                    },
+                                    {
+                                        "role": "user",
+                                        "content": question
+                                    }
+                                ],
+                                "max_tokens": 500,
+                                "temperature": 0.7
+                            }
+                        }
+                        
+                        batch_requests.append(request)
+                        
+                else:
+                    print(f"VLLM 서버 질문 생성 실패: {response.status_code} - {response.text}")
+                    # 폴백: 기존 방식 사용
+                    return self._fallback_qa_generation(character, system_prompt, num_requests)
+                    
+            else:
+                print("시스템 프롬프트가 없어 기존 방식으로 QA 생성")
+                return self._fallback_qa_generation(character, system_prompt, num_requests)
+                
+        except Exception as e:
+            print(f"VLLM 서버 QA 생성 오류: {e}")
+            # 폴백: 기존 방식 사용
+            return self._fallback_qa_generation(character, system_prompt, num_requests)
+            
+        return batch_requests
+    
+    def _fallback_qa_generation(self, character, system_prompt=None, num_requests=None):
+        """기존 방식의 QA 생성 (폴백용)"""
+        if num_requests is None:
+            num_requests = settings.QA_GENERATION_COUNT
+            
+        vllm_server_url = getattr(settings, 'VLLM_SERVER_URL', 'http://localhost:8001')
+        batch_requests = []
+        
+        # 캐릭터 데이터 준비
+        character_data = {
+            "name": character.name,
+            "description": character.description,
+            "age_range": character.age_range,
+            "gender": character.gender.value if hasattr(character.gender, 'value') else character.gender if character.gender else "없음",
+            "personality": character.personality,
+            "mbti": character.mbti
+        }
+        
+        # 1단계: 질문 생성
         questions = []
         try:
             response = requests.post(
@@ -174,22 +253,16 @@ class InfluencerQAGenerator:
                 
                 for result in results:
                     questions.extend(result.get('questions', []))
-                
-                print(f"VLLM 서버 질문 생성 성공: {len(questions)}개")
-            else:
-                print(f"VLLM 서버 질문 생성 실패: {response.status_code} - {response.text}")
-                
+                    
         except Exception as e:
-            print(f"VLLM 서버 질문 생성 오류: {e}")
-        
-        # 2단계: 생성된 질문들에 대해 말투 생성
+            print(f"폴백 질문 생성 오류: {e}")
+            
+        # 2단계: 말투 생성  
         if questions:
             try:
                 tone_requests = []
-                # 질문들을 배치로 나누어서 요청
-                batch_size = min(10, len(questions))  # 한 번에 최대 10개씩
-                for i in range(0, len(questions), batch_size):
-                    batch_questions = questions[i:i+batch_size]
+                for i in range(0, len(questions), 10):
+                    batch_questions = questions[i:i+10]
                     tone_requests.append({
                         "character": character_data,
                         "questions": batch_questions,
@@ -206,10 +279,7 @@ class InfluencerQAGenerator:
                     tone_data = response.json()
                     results = tone_data.get('results', [])
                     
-                    print(f"VLLM 서버 말투 생성 성공: {len(results)}개 결과")
-                    
-                    # 각 결과를 배치 요청으로 변환
-                    for i, tone_result in enumerate(results):
+                    for tone_result in results:
                         responses = tone_result.get('responses', {})
                         
                         for question, tone_responses in responses.items():
@@ -217,7 +287,6 @@ class InfluencerQAGenerator:
                                 if tone_response_list and len(tone_response_list) > 0:
                                     tone_response = tone_response_list[0]
                                     
-                                    # 시스템 프롬프트 사용 (있는 경우)
                                     system_content = system_prompt if system_prompt else "QA 쌍을 생성하는 역할입니다."
                                     
                                     request = {
@@ -233,7 +302,7 @@ class InfluencerQAGenerator:
                                                 },
                                                 {
                                                     "role": "user",
-                                                    "content": f"Q: {question} A: {tone_response.get('text', '')}"
+                                                    "content": f"Q: {question}\nA: {tone_response.get('text', '')}"
                                                 }
                                             ],
                                             "max_tokens": 300,
@@ -265,7 +334,7 @@ class InfluencerQAGenerator:
             fallback_system_content = system_prompt if system_prompt else f"당신은 {character.name}라는 캐릭터입니다. 성격: {character.personality}"
             
             request = {
-                "custom_id": f"influencer_qa_{character.name}_{i+1}_fallback",
+                "custom_id": f"influencer_qa_{character.name}_{len(batch_requests)+1}_fallback",
                 "method": "POST",
                 "url": "/v1/chat/completions",
                 "body": {
@@ -277,7 +346,7 @@ class InfluencerQAGenerator:
                         },
                         {
                             "role": "user",
-                            "content": "일상적인 질문 하나와 그에 대한 답변을 생성해주세요. 형식: Q: [질문] A: [답변]"
+                            "content": f"안녕하세요! 당신에 대해 알고 싶어요. 자신을 소개해 주세요."
                         }
                     ],
                     "max_tokens": 300,

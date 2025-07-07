@@ -134,6 +134,12 @@ def create_influencer(db: Session, user_id: str, influencer_data: AIInfluencerCr
             logger.warning(f"⚠️ 지정된 허깅페이스 토큰을 찾을 수 없음: {hf_manage_id}")
             hf_manage_id = None
 
+    # 말투 정보 처리
+    final_system_prompt = influencer_data.system_prompt
+    if influencer_data.tone_type and influencer_data.tone_data:
+        logger.info(f"📝 말투 정보 처리: type={influencer_data.tone_type}")
+        final_system_prompt = influencer_data.tone_data
+    
     # 인플루언서 생성 데이터 준비
     influencer_create_data = {
         "influencer_id": str(uuid.uuid4()),
@@ -153,6 +159,7 @@ def create_influencer(db: Session, user_id: str, influencer_data: AIInfluencerCr
         "influencer_personality": influencer_data.personality,
         "influencer_tone": influencer_data.tone,
         "influencer_age_group": None, # 초기화 후 아래에서 매핑
+        "system_prompt": final_system_prompt,
     }
 
     # 스키마의 age를 모델의 influencer_age_group으로 매핑
