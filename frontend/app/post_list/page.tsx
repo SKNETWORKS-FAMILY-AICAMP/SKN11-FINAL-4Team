@@ -134,12 +134,12 @@ function PostListContent() {
   const [searchTerm, setSearchTerm] = useState("")
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [modelFilter, setModelFilter] = useState<string>("all")
-  const [platformFilter, setPlatformFilter] = useState<string>("all")
+  const [platformFilter, setPlatformFilter] = useState<string[]>([])
   
   // 임시 필터 상태 (모달에서 사용)
   const [tempStatusFilter, setTempStatusFilter] = useState<string>("all")
   const [tempModelFilter, setTempModelFilter] = useState<string>("all")
-  const [tempPlatformFilter, setTempPlatformFilter] = useState<string>("all")
+  const [tempPlatformFilter, setTempPlatformFilter] = useState<string[]>([])
   const [isFilterModalOpen, setIsFilterModalOpen] = useState(false)
   
   // 게시글 상세 보기 모달 상태
@@ -200,7 +200,7 @@ function PostListContent() {
     
     const matchesStatus = statusFilter === "all" || post.status === statusFilter
     const matchesModel = modelFilter === "all" || post.modelName === modelFilter
-    const matchesPlatform = platformFilter === "all" || post.platform === platformFilter
+    const matchesPlatform = platformFilter.length === 0 || platformFilter.includes(post.platform)
     
     return matchesSearch && matchesStatus && matchesModel && matchesPlatform
   })
@@ -369,9 +369,9 @@ function PostListContent() {
                 <Button variant="outline" className="flex items-center gap-2" onClick={handleOpenFilterModal}>
                   <Filter className="h-4 w-4" />
                   필터
-                  {(modelFilter !== "all" || platformFilter !== "all") && (
+                  {(modelFilter !== "all" || platformFilter.length > 0) && (
                     <Badge variant="secondary" className="ml-1">
-                      {[modelFilter, platformFilter].filter(f => f !== "all").length}
+                      {[modelFilter, ...platformFilter].filter(f => f !== "all").length}
                     </Badge>
                   )}
                 </Button>
@@ -416,28 +416,37 @@ function PostListContent() {
                     <h3 className="font-medium text-sm text-gray-900 mb-3">플랫폼</h3>
                     <div className="grid grid-cols-2 gap-2">
                       <button
-                        onClick={() => setTempPlatformFilter("all")}
+                        onClick={() => setTempPlatformFilter([])}
                         className={`text-left px-3 py-2 rounded-md text-sm transition-colors ${
-                          tempPlatformFilter === "all"
+                          tempPlatformFilter.length === 0
                             ? "bg-blue-100 text-blue-700 border border-blue-200"
                             : "bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-200"
                         }`}
                       >
                         전체 플랫폼
                       </button>
-                      {uniquePlatforms.map((platform) => (
-                        <button
-                          key={platform}
-                          onClick={() => setTempPlatformFilter(platform)}
-                          className={`text-left px-3 py-2 rounded-md text-sm transition-colors ${
-                            tempPlatformFilter === platform
-                              ? "bg-purple-100 text-purple-700 border border-purple-200"
-                              : "bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-200"
-                          }`}
-                        >
-                          {platform}
-                        </button>
-                      ))}
+                      {uniquePlatforms.map((platform) => {
+                        const selected = tempPlatformFilter.includes(platform);
+                        return (
+                          <button
+                            key={platform}
+                            onClick={() => {
+                              if (selected) {
+                                setTempPlatformFilter(tempPlatformFilter.filter(p => p !== platform));
+                              } else {
+                                setTempPlatformFilter([...tempPlatformFilter, platform]);
+                              }
+                            }}
+                            className={`text-left px-3 py-2 rounded-md text-sm transition-colors ${
+                              selected
+                                ? "bg-purple-100 text-purple-700 border border-purple-200"
+                                : "bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-200"
+                            }`}
+                          >
+                            {platform}
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
                 </div>
@@ -468,6 +477,46 @@ function PostListContent() {
             </div>
           </div>
 
+          {(modelFilter !== "all" || platformFilter.length > 0) && (
+            <div className="flex items-center gap-2 mb-4 flex-wrap">
+              <span className="text-sm text-gray-500">활성 필터:</span>
+              {modelFilter !== "all" && (
+                <Badge variant="outline" className="text-xs flex items-center gap-1">
+                  모델: {modelFilter}
+                  <button
+                    onClick={() => setModelFilter("all")}
+                    className="ml-1 hover:text-red-600 transition-colors"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </Badge>
+              )}
+              {platformFilter.map((platform) => (
+                <Badge key={platform} variant="outline" className="text-xs flex items-center gap-1">
+                  플랫폼: {platform}
+                  <button
+                    onClick={() => setPlatformFilter(platformFilter.filter(p => p !== platform))}
+                    className="ml-1 hover:text-red-600 transition-colors"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </Badge>
+              ))}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setStatusFilter("all");
+                  setModelFilter("all");
+                  setPlatformFilter([]);
+                }}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                모든 필터 초기화
+              </Button>
+            </div>
+          )}
+          
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
             <Card
               className={`cursor-pointer transition-shadow ${statusFilter === "all" ? "ring-2 ring-blue-400" : "hover:shadow-lg"}`}

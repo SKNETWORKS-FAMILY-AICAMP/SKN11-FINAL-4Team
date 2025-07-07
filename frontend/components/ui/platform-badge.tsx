@@ -1,5 +1,5 @@
 import { Badge } from "@/components/ui/badge"
-import { Globe, Camera } from "lucide-react"
+import { Instagram, Globe } from "lucide-react"
 
 interface PlatformBadgeProps {
   platform: 'instagram'
@@ -13,7 +13,7 @@ export function PlatformBadge({ platform, isConnected, username, className = "" 
     switch (platform) {
       case 'instagram':
         return {
-          icon: Camera,
+          icon: Instagram,
           label: 'Instagram',
           color: isConnected ? 'bg-gradient-to-r from-purple-500 to-pink-500' : 'bg-gray-100',
           textColor: isConnected ? 'text-white' : 'text-gray-600'
