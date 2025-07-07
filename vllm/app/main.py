@@ -1,9 +1,11 @@
 import logging
 import os
 import dotenv
+import traceback
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.core import startup_event
 from app.routers import lora, generation, finetuning, speech, qa_generation, backend_utils
@@ -69,6 +71,23 @@ async def health_check():
         "message": "vLLM LoRA Influencer API 서버가 정상적으로 실행 중입니다.",
         "components": components
     }
+
+# 전역 예외 핸들러
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.error(f"❌ 글로벌 예외 발생 - URL: {request.url}")
+    logger.error(f"❌ 예외 타입: {type(exc).__name__}")
+    logger.error(f"❌ 예외 메시지: {str(exc)}")
+    logger.error(f"❌ 전체 스택 트레이스: {traceback.format_exc()}")
+    
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": f"서버 내부 오류: {str(exc)}",
+            "type": type(exc).__name__,
+            "url": str(request.url)
+        }
+    )
 
 # 라우터 등록
 app.include_router(lora.router, prefix="/lora", tags=["LoRA Adapters"])

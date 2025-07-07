@@ -365,6 +365,7 @@ async def load_lora_adapter(request: LoRALoadRequest):
             logger.error(f"❌ 베이스 모델 정보 확인 실패: {e}")
             raise Exception(f"베이스 모델 정보 확인 실패: {str(e)}")
         
+        logger.info("📦 어댑터 정보 객체 생성 중...")
         adapter_info = {
             "model_id": request.model_id,
             "hf_repo_name": request.hf_repo_name,
@@ -372,15 +373,21 @@ async def load_lora_adapter(request: LoRALoadRequest):
             "status": "loaded",
             "lora_int_id": hash(request.model_id) % 1000000
         }
+        logger.info(f"📦 생성된 어댑터 정보: {adapter_info}")
         
+        logger.info("💾 로드된 어댑터 목록에 추가 중...")
         loaded_adapters[request.model_id] = adapter_info
+        logger.info(f"💾 현재 로드된 어댑터 목록: {list(loaded_adapters.keys())}")
         
         logger.info(f"✅ LoRA 어댑터 로드 완료: {request.model_id}")
         
-        return {
+        result = {
             "message": f"LoRA 어댑터 {request.model_id} 로드 완료",
             "adapter_info": adapter_info
         }
+        logger.info(f"📤 반환할 결과: {result}")
+        
+        return result
         
     except Exception as e:
         logger.error(f"❌ LoRA 어댑터 로드 실패: {e}")

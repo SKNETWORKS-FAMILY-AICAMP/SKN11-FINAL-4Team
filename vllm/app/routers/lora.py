@@ -9,14 +9,29 @@ router = APIRouter()
 @router.post("/load_adapter")
 async def load_lora_adapter_endpoint(request: LoRALoadRequest):
     """LoRA 어댑터 로드"""
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    logger.info(f"🔄 LoRA 어댑터 로드 엔드포인트 호출됨")
+    logger.info(f"📋 요청 데이터: {request.dict()}")
+    
     if engine is None:
+        logger.error("❌ 엔진이 초기화되지 않았습니다.")
         raise HTTPException(status_code=500, detail="엔진이 초기화되지 않았습니다.")
     
+    logger.info(f"✅ 엔진 상태 확인 완료")
+    
     try:
+        logger.info(f"🔄 load_lora_adapter 함수 호출 중...")
         result = await load_lora_adapter(request)
+        logger.info(f"✅ load_lora_adapter 함수 실행 완료: {result}")
         return result
         
     except Exception as e:
+        logger.error(f"❌ 어댑터 로드 엔드포인트에서 예외 발생: {str(e)}")
+        logger.error(f"❌ 예외 타입: {type(e).__name__}")
+        import traceback
+        logger.error(f"❌ 전체 스택 트레이스: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"어댑터 로드 실패: {str(e)}")
 
 @router.get("/adapters")
