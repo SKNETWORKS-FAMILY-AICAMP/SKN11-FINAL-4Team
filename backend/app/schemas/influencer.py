@@ -202,3 +202,32 @@ class FinetuningWebhookRequest(BaseModel):
     status: str  # FineTuningStatus의 문자열 값
     hf_model_url: Optional[str] = None
     error_message: Optional[str] = None
+
+
+# 말투 생성 요청 스키마
+class ToneGenerationRequest(BaseModel):
+    influencer_id: str # Add influencer_id
+    personality: str
+    name: Optional[str] = None
+    description: Optional[str] = None
+    mbti: Optional[str] = None
+    gender: Optional[str] = None
+    age: Optional[str] = None
+
+
+# 생성된 어투 스키마
+class GeneratedToneBase(BaseModel):
+    influencer_id: str
+    title: str
+    example: str
+    tone_description: str
+    hashtags: Optional[str] = None
+    system_prompt: str
+
+
+class GeneratedToneCreate(GeneratedToneBase):
+    pass
+
+
+class GeneratedTone(GeneratedToneBase, TimestampSchema):
+    tone_id: str

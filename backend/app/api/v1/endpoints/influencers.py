@@ -14,6 +14,7 @@ from app.schemas.influencer import (
     StylePresetCreate,
     ModelMBTI as ModelMBTISchema,
     FinetuningWebhookRequest,
+    ToneGenerationRequest,
 )
 from app.core.security import get_current_user
 from app.services.influencers.crud import (
@@ -745,6 +746,27 @@ async def generate_conversation_tones(
         
         # 3가지 말투 생성
         conversation_examples = await _generate_three_tones(client, character_info, question)
+
+        # 생성된 어투를 DB에 저장 (임시 ID가 아닌 경우에만)
+        if request.influencer_id != "temp_influencer_id":
+            from app.models.influencer import GeneratedTone
+            from app.schemas.influencer import GeneratedToneCreate
+
+            for example in conversation_examples:
+                generated_tone_data = GeneratedToneCreate(
+                    influencer_id=request.influencer_id,
+                    title=example.get("title", "말투"),
+                    example=example.get("example", ""),
+                    tone_description=example.get("tone", ""),
+                    hashtags=example.get("hashtags", ""),
+                    system_prompt=example.get("system_prompt", "")
+                )
+                db_generated_tone = GeneratedTone(**generated_tone_data.dict())
+                db.add(db_generated_tone)
+            db.commit()
+            logger.info(f"말투 생성 완료 및 DB 저장: influencer_id={request.influencer_id}")
+        else:
+            logger.info("임시 influencer_id로 말투 생성, DB 저장 건너뜀")
         
         return {
             "personality": request.personality,
@@ -793,6 +815,27 @@ async def regenerate_conversation_tones(
         
         # 3가지 말투 재생성 (더 높은 temperature로 다양성 확보)
         conversation_examples = await _generate_three_tones(client, character_info, question, temperature=1.0)
+
+        # 생성된 어투를 DB에 저장 (임시 ID가 아닌 경우에만)
+        if request.influencer_id != "temp_influencer_id":
+            from app.models.influencer import GeneratedTone
+            from app.schemas.influencer import GeneratedToneCreate
+
+            for example in conversation_examples:
+                generated_tone_data = GeneratedToneCreate(
+                    influencer_id=request.influencer_id,
+                    title=example.get("title", "말투"),
+                    example=example.get("example", ""),
+                    tone_description=example.get("tone", ""),
+                    hashtags=example.get("hashtags", ""),
+                    system_prompt=example.get("system_prompt", "")
+                )
+                db_generated_tone = GeneratedTone(**generated_tone_data.dict())
+                db.add(db_generated_tone)
+            db.commit()
+            logger.info(f"말투 재생성 완료 및 DB 저장: influencer_id={request.influencer_id}")
+        else:
+            logger.info("임시 influencer_id로 말투 재생성, DB 저장 건너뜀")
         
         return {
             "personality": request.personality,

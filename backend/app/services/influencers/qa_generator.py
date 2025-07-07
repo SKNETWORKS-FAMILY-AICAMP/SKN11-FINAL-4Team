@@ -105,7 +105,7 @@ class InfluencerQAGenerator:
             if mbti_traits:
                 personality += f" ({mbti_traits})"
         else:
-            mbti_type = "알 수 없음"
+            mbti_type = None
             
         return CharacterProfile(
             name=name,
@@ -144,103 +144,82 @@ class InfluencerQAGenerator:
             "mbti": character.mbti
         }
         
-        for i in range(num_requests):
-            # VLLM 서버의 /generate_qa 엔드포인트 호출
-            try:
-                response = requests.post(
-                    f"{vllm_server_url}/generate_qa",
-                    json=character_data,
-                    timeout=30
-                )
+        # VLLM 서버의 /generate_qa 엔드포인트 호출 (한번만 시도)
+        try:
+            response = requests.post(
+                f"{vllm_server_url}/generate_qa",
+                json=character_data,
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                qa_data = response.json()
+                question = qa_data.get('question', '')
+                responses = qa_data.get('responses', {})
                 
-                if response.status_code == 200:
-                    qa_data = response.json()
-                    question = qa_data.get('question', '')
-                    responses = qa_data.get('responses', {})
-                    
-                    # 각 말투별 응답을 배치 요청으로 변환
-                    for tone_name, tone_responses in responses.items():
-                        if tone_responses and len(tone_responses) > 0:
-                            tone_response = tone_responses[0]  # 첫 번째 응답 사용
-                            
-                            request = {
-                                "custom_id": f"influencer_qa_{character.name}_{i+1}_{tone_name}",
-                                "method": "POST",
-                                "url": "/v1/chat/completions",
-                                "body": {
-                                    "model": "gpt-4o-mini",
-                                    "messages": [
-                                        {
-                                            "role": "system",
-                                            "content": "QA 쌍을 생성하는 역할입니다."
-                                        },
-                                        {
-                                            "role": "user",
-                                            "content": f"Q: {question} A: {tone_response.get('text', '')}"
-                                        }
-                                    ],
-                                    "max_tokens": 300,
-                                    "temperature": 0.8
-                                }
-                            }
-                            batch_requests.append(request)
-                            
-                            # 한 번에 너무 많은 요청을 보내지 않도록 제한
-                            if len(batch_requests) >= num_requests:
-                                break
-                    
-                    if len(batch_requests) >= num_requests:
-                        break
+                # 각 말투별 응답을 배치 요청으로 변환
+                for tone_name, tone_responses in responses.items():
+                    if tone_responses and len(tone_responses) > 0:
+                        tone_response = tone_responses[0]  # 첫 번째 응답 사용
                         
-                else:
-                    print(f"VLLM 서버 요청 실패: {response.status_code} - {response.text}")
-                    # 실패 시 기본 QA 생성
-                    request = {
-                        "custom_id": f"influencer_qa_{character.name}_{i+1}_fallback",
-                        "method": "POST",
-                        "url": "/v1/chat/completions",
-                        "body": {
-                            "model": "gpt-4o-mini",
-                            "messages": [
-                                {
-                                    "role": "system",
-                                    "content": f"당신은 {character.name}라는 캐릭터입니다. 성격: {character.personality}"
-                                },
-                                {
-                                    "role": "user",
-                                    "content": "일상적인 질문 하나와 그에 대한 답변을 생성해주세요. 형식: Q: [질문] A: [답변]"
-                                }
-                            ],
-                            "max_tokens": 300,
-                            "temperature": 0.8
-                        }
-                    }
-                    requests.append(request)
-                    
-            except Exception as e:
-                print(f"VLLM 서버 연결 오류: {e}")
-                # 연결 오류 시 기본 QA 생성
-                request = {
-                    "custom_id": f"influencer_qa_{character.name}_{i+1}_error",
-                    "method": "POST",
-                    "url": "/v1/chat/completions",
-                    "body": {
-                        "model": "gpt-4o-mini",
-                        "messages": [
-                            {
-                                "role": "system",
-                                "content": f"당신은 {character.name}라는 캐릭터입니다. 성격: {character.personality}"
-                            },
-                            {
-                                "role": "user",
-                                "content": "일상적인 질문 하나와 그에 대한 답변을 생성해주세요. 형식: Q: [질문] A: [답변]"
+                        request = {
+                            "custom_id": f"influencer_qa_{character.name}_{tone_name}",
+                            "method": "POST",
+                            "url": "/v1/chat/completions",
+                            "body": {
+                                "model": "gpt-4o-mini",
+                                "messages": [
+                                    {
+                                        "role": "system",
+                                        "content": "QA 쌍을 생성하는 역할입니다."
+                                    },
+                                    {
+                                        "role": "user",
+                                        "content": f"Q: {question} A: {tone_response.get('text', '')}"
+                                    }
+                                ],
+                                "max_tokens": 300,
+                                "temperature": 0.8
                             }
-                        ],
-                        "max_tokens": 300,
-                        "temperature": 0.8
-                    }
+                        }
+                        batch_requests.append(request)
+                        
+                        # 한 번에 너무 많은 요청을 보내지 않도록 제한
+                        if len(batch_requests) >= num_requests:
+                            break
+                
+                print(f"VLLM 서버 요청 성공: {len(batch_requests)}개의 QA 쌍 생성")
+                        
+            else:
+                print(f"VLLM 서버 요청 실패: {response.status_code} - {response.text}")
+                
+        except Exception as e:
+            print(f"VLLM 서버 연결 오류: {e}")
+        
+        # VLLM 서버에서 생성된 QA가 부족하면 기본 QA로 채움
+        remaining_requests = num_requests - len(batch_requests)
+        for i in range(remaining_requests):
+            request = {
+                "custom_id": f"influencer_qa_{character.name}_{i+1}_fallback",
+                "method": "POST",
+                "url": "/v1/chat/completions",
+                "body": {
+                    "model": "gpt-4o-mini",
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": f"당신은 {character.name}라는 캐릭터입니다. 성격: {character.personality}"
+                        },
+                        {
+                            "role": "user",
+                            "content": "일상적인 질문 하나와 그에 대한 답변을 생성해주세요. 형식: Q: [질문] A: [답변]"
+                        }
+                    ],
+                    "max_tokens": 300,
+                    "temperature": 0.8
                 }
-                requests.append(request)
+            }
+            batch_requests.append(request)
         
         return batch_requests[:num_requests]  # 요청한 개수만큼만 반환
     
@@ -398,6 +377,7 @@ class InfluencerQAGenerator:
         import uuid
         batch_key_entry = BatchKey(
             batch_key_id=str(uuid.uuid4()),
+            batch_key=task_id,  # batch_key 필드에 task_id 값 설정
             task_id=task_id,
             influencer_id=influencer_id,
             status=QAGenerationStatus.PENDING.value,

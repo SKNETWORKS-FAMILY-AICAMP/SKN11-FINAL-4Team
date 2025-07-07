@@ -111,6 +111,15 @@ export interface ToneGenerationResponse {
   regenerated?: boolean
 }
 
+export interface HuggingFaceToken {
+  hf_manage_id: string
+  hf_token_nickname: string
+  hf_user_name: string
+  group_id?: number
+  created_at?: string
+  updated_at?: string
+}
+
 
 export class ModelService {
   /**
@@ -126,7 +135,7 @@ export class ModelService {
     if (params?.limit) searchParams.set('limit', params.limit.toString())
 
     const query = searchParams.toString()
-    const endpoint = `/api/v1/influencers/${query ? `?${query}` : ''}`
+    const endpoint = `/api/v1/influencers${query ? `?${query}` : ''}`
     
     return await apiClient.get<AIInfluencer[]>(endpoint)
   }
@@ -160,7 +169,7 @@ export class ModelService {
   }
 
   /**
-   * 스타일 프리셋 목록 조회
+   * 스타일 프리셋 목록 조회 (공개 API)
    */
   static async getStylePresets(params?: {
     skip?: number
@@ -172,9 +181,17 @@ export class ModelService {
     if (params?.limit) searchParams.set('limit', params.limit.toString())
 
     const query = searchParams.toString()
-    const endpoint = `/api/v1/influencers/style-presets${query ? `?${query}` : ''}`
+    const endpoint = `/api/v1/public/style-presets${query ? `?${query}` : ''}`
     
     return await apiClient.get<StylePreset[]>(endpoint)
+  }
+
+  /**
+   * 허깅페이스 토큰 목록 조회 (그룹별)
+   */
+  static async getHuggingFaceTokens(groupId: number): Promise<HuggingFaceToken[]> {
+    const response = await apiClient.get<{tokens: HuggingFaceToken[]}>(`/api/v1/hf-tokens/group/${groupId}`)
+    return response.tokens || []
   }
 
   /**

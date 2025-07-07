@@ -385,7 +385,7 @@ class HFTokenService:
             권한 여부
         """
         try:
-            user_id = current_user.get('user_id')
+            user_id = current_user.get('sub')
             if not user_id:
                 return False
             

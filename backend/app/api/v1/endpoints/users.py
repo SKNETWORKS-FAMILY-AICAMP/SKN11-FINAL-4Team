@@ -19,6 +19,27 @@ router = APIRouter()
 
 
 
+from fastapi import APIRouter, Depends, HTTPException, status, Query
+from sqlalchemy.orm import Session
+from typing import List, Optional
+import uuid
+
+from app.database import get_db
+from app.models.user import User, Team
+from app.schemas.user import (
+    UserCreate,
+    UserUpdate,
+    User as UserSchema,
+    UserWithTeams,
+)
+from app.core.security import get_current_user
+from app.core.permissions import check_admin_permission
+
+router = APIRouter()
+
+
+
+
 @router.post("", response_model=UserSchema)
 async def create_user(
     user_data: UserCreate,
