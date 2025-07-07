@@ -18,11 +18,12 @@ class BackgroundTaskManager:
     def __init__(self):
         self.qa_generator = InfluencerQAGenerator()
 
-    async def start_qa_generation_task(self, influencer_id: str):
+    async def start_qa_generation_task(self, influencer_id: str, user_id: str = None):
         """
         인플루언서 QA 생성 백그라운드 작업 시작
         Args:
             influencer_id: 인플루언서 ID
+            user_id: 사용자 ID (권한 확인용)
         """
         try:
             logger.info(f"🎯 백그라운드: QA 생성 작업 시작 - influencer_id={influencer_id}")
@@ -33,7 +34,7 @@ class BackgroundTaskManager:
             
             try:
                 # QA 생성 작업 시작
-                task_id = self.qa_generator.start_qa_generation(influencer_id, db)
+                task_id = self.qa_generator.start_qa_generation(influencer_id, db, user_id)
                 logger.info(f"✅ 백그라운드: QA 생성 작업 시작 완료 - task_id={task_id}")
                 
             finally:
@@ -52,8 +53,8 @@ def get_background_task_manager() -> BackgroundTaskManager:
     return background_task_manager
 
 
-async def generate_influencer_qa_background(influencer_id: str):
+async def generate_influencer_qa_background(influencer_id: str, user_id: str = None):
     """인플루언서 QA 생성 백그라운드 작업 시작 함수"""
     logger.info(f"🚀 백그라운드 함수 호출 - influencer_id={influencer_id}")
     manager = get_background_task_manager()
-    await manager.start_qa_generation_task(influencer_id)
+    await manager.start_qa_generation_task(influencer_id, user_id)

@@ -244,7 +244,7 @@ export class ModelService {
    */
   static async generateTones(request: ToneGenerationRequest): Promise<ToneGenerationResponse> {
     return await apiClient.post<ToneGenerationResponse>('/api/v1/influencers/generate-tones', request, {
-      timeout: 60000 // 1분 타임아웃
+      timeout: 90000 // 1분 타임아웃
     })
   }
 
@@ -253,7 +253,7 @@ export class ModelService {
    */
   static async regenerateTones(request: ToneGenerationRequest): Promise<ToneGenerationResponse> {
     return await apiClient.post<ToneGenerationResponse>('/api/v1/influencers/regenerate-tones', request, {
-      timeout: 60000 // 1분 타임아웃
+      timeout: 90000 // 1분 타임아웃
     })
   }
 

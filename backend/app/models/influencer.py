@@ -165,6 +165,7 @@ class AIInfluencer(Base, TimestampMixin):
     influencer_age_group = Column(Integer, comment="AI 인플루언서 연령대")
     voice_option = Column(Boolean, default=False, comment="음성 생성 옵션")
     image_option = Column(Boolean, default=False, comment="이미지 생성 옵션")
+    system_prompt = Column(Text, comment="AI 인플루언서 시스템 프롬프트")
 
     # 기본키 설정
     __table_args__ = (

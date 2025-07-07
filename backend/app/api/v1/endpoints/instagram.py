@@ -447,8 +447,13 @@ async def generate_ai_response(message_text: str, influencer: AIInfluencer, send
         personality = influencer.influencer_personality or "친근하고 도움이 되는 AI 인플루언서"
         tone = influencer.influencer_tone or "친근하고 자연스러운 말투"
         
-        # 시스템 메시지 생성
-        system_message = f"""당신은 {influencer.influencer_name}라는 AI 인플루언서입니다.
+        # 저장된 시스템 프롬프트 사용 (있는 경우)
+        if influencer.system_prompt:
+            system_message = influencer.system_prompt
+            logger.info(f"✅ 저장된 시스템 프롬프트 사용: {system_message[:100]}...")
+        else:
+            # 기본 시스템 메시지 생성 (저장된 프롬프트가 없는 경우)
+            system_message = f"""당신은 {influencer.influencer_name}라는 AI 인플루언서입니다.
         
 성격: {personality}
 말투: {tone}
@@ -459,6 +464,7 @@ async def generate_ai_response(message_text: str, influencer: AIInfluencer, send
 3. 인스타그램 DM이므로 이모지를 적절히 사용하세요
 4. {influencer.influencer_name}의 개성을 살려서 응답하세요
 5. 도움이 되는 정보를 제공하되 너무 길지 않게 해주세요"""
+            logger.info("⚠️ 저장된 시스템 프롬프트가 없어 기본 시스템 메시지 사용")
         
         # vLLM 서버를 통한 AI 응답 생성
         try:

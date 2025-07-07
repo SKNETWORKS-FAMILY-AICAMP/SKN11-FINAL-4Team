@@ -116,7 +116,7 @@ class InfluencerQAGenerator:
             mbti=mbti_type
         )
     
-    def create_qa_batch_requests(self, character: CharacterProfile, num_requests: int = None) -> List[Dict]:
+    def create_qa_batch_requests(self, character: CharacterProfile, num_requests: int = None, system_prompt: str = None) -> List[Dict]:
         """
         인플루언서 캐릭터를 위한 QA 생성 배치 요청 생성
         VLLM 서버의 /generate_qa 엔드포인트를 사용하여 QA 생성
@@ -205,6 +205,9 @@ class InfluencerQAGenerator:
                                 if tone_response_list and len(tone_response_list) > 0:
                                     tone_response = tone_response_list[0]
                                     
+                                    # 시스템 프롬프트 사용 (있는 경우)
+                                    system_content = system_prompt if system_prompt else "QA 쌍을 생성하는 역할입니다."
+                                    
                                     request = {
                                         "custom_id": f"influencer_qa_{character.name}_{len(batch_requests)+1}_{tone_name}",
                                         "method": "POST",
@@ -214,7 +217,7 @@ class InfluencerQAGenerator:
                                             "messages": [
                                                 {
                                                     "role": "system",
-                                                    "content": "QA 쌍을 생성하는 역할입니다."
+                                                    "content": system_content
                                                 },
                                                 {
                                                     "role": "user",
@@ -246,6 +249,9 @@ class InfluencerQAGenerator:
         # VLLM 서버에서 생성된 QA가 부족하면 기본 QA로 채움
         remaining_requests = num_requests - len(batch_requests)
         for i in range(remaining_requests):
+            # 시스템 프롬프트 사용 (있는 경우)
+            fallback_system_content = system_prompt if system_prompt else f"당신은 {character.name}라는 캐릭터입니다. 성격: {character.personality}"
+            
             request = {
                 "custom_id": f"influencer_qa_{character.name}_{i+1}_fallback",
                 "method": "POST",
@@ -255,7 +261,7 @@ class InfluencerQAGenerator:
                     "messages": [
                         {
                             "role": "system",
-                            "content": f"당신은 {character.name}라는 캐릭터입니다. 성격: {character.personality}"
+                            "content": fallback_system_content
                         },
                         {
                             "role": "user",
@@ -407,12 +413,13 @@ class InfluencerQAGenerator:
         
         print(f"QA 쌍 {len(qa_pairs)}개가 {filepath}에 저장되었습니다.")
     
-    def start_qa_generation(self, influencer_id: str, db: Session) -> str:
+    def start_qa_generation(self, influencer_id: str, db: Session, user_id: str = None) -> str:
         """
         인플루언서를 위한 QA 생성 시작
         Args:
             influencer_id: 인플루언서 ID
             db: 데이터베이스 세션
+            user_id: 사용자 ID (권한 확인용)
         Returns:
             작업 ID
         """
@@ -436,9 +443,14 @@ class InfluencerQAGenerator:
             db.commit()
             db.refresh(batch_key_entry)
 
-            # 인플루언서 데이터 가져오기
-            user_id = "system"  # 시스템 작업으로 처리
-            influencer_data = get_influencer_by_id(db, user_id, influencer_id)
+            # 인플루언서 데이터 가져오기 (사용자 권한 확인)
+            if user_id:
+                # 사용자 권한으로 인플루언서 조회
+                influencer_data = get_influencer_by_id(db, user_id, influencer_id)
+            else:
+                # 백그라운드 작업의 경우 직접 조회 (권한 우회)
+                from app.models.influencer import AIInfluencer
+                influencer_data = db.query(AIInfluencer).filter(AIInfluencer.influencer_id == influencer_id).first()
             
             if not influencer_data:
                 raise Exception(f"인플루언서를 찾을 수 없습니다: {influencer_id}")
@@ -454,8 +466,15 @@ class InfluencerQAGenerator:
                 influencer_data.mbti.__dict__ if influencer_data.mbti else None
             )
             
-            # 배치 요청 생성
-            batch_requests = self.create_qa_batch_requests(character)
+            # 저장된 시스템 프롬프트 가져오기
+            system_prompt = getattr(influencer_data, 'system_prompt', None)
+            if system_prompt:
+                print(f"✅ 저장된 시스템 프롬프트 사용: {system_prompt[:100]}...")
+            else:
+                print("⚠️ 저장된 시스템 프롬프트가 없어 기본 프롬프트 사용")
+            
+            # 배치 요청 생성 (시스템 프롬프트 포함)
+            batch_requests = self.create_qa_batch_requests(character, system_prompt=system_prompt)
             
             # 배치 파일 저장
             batch_file_path = self.save_batch_file(batch_requests, task_id)

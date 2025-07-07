@@ -134,16 +134,22 @@ async def multi_chat(request: MultiChatRequest, db: Session = Depends(get_db), c
                 continue
             decrypted_token = decrypt_sensitive_data(encrypted_token_value)
 
-            # 1. 인플루언서별 시스템 프롬프트 생성
-            system_prompt = f"""
+            # 1. 인플루언서별 시스템 프롬프트 생성 (저장된 프롬프트 우선 사용)
+            if ai_influencer.system_prompt:
+                system_prompt = ai_influencer.system_prompt
+                logger.info(f"✅ 저장된 시스템 프롬프트 사용: {ai_influencer.influencer_name}")
+            else:
+                # 기본 시스템 프롬프트 생성 (저장된 프롬프트가 없는 경우)
+                system_prompt = f"""
 너는 {ai_influencer.influencer_name}라는 AI 인플루언서야.\n"""
-            desc = getattr(ai_influencer, "influencer_description", None)
-            if desc is not None and str(desc).strip() != "":
-                system_prompt += f"설명: {desc}\n"
-            personality = getattr(ai_influencer, "influencer_personality", None)
-            if personality is not None and str(personality).strip() != "":
-                system_prompt += f"성격: {personality}\n"
-            system_prompt += "한국어로만 대답해.\n"
+                desc = getattr(ai_influencer, "influencer_description", None)
+                if desc is not None and str(desc).strip() != "":
+                    system_prompt += f"설명: {desc}\n"
+                personality = getattr(ai_influencer, "influencer_personality", None)
+                if personality is not None and str(personality).strip() != "":
+                    system_prompt += f"성격: {personality}\n"
+                system_prompt += "한국어로만 대답해.\n"
+                logger.info(f"⚠️ 저장된 시스템 프롬프트가 없어 기본 프롬프트 사용: {ai_influencer.influencer_name}")
 
             # 2. 채팅 템플릿 형식으로 메시지 구성
             messages = [
@@ -206,11 +212,16 @@ async def multi_chat(request: MultiChatRequest, db: Session = Depends(get_db), c
             elif adapter_repo.startswith("https://huggingface.co/"):
                 adapter_repo = adapter_repo.replace("https://huggingface.co/", "")
             
-            # 임시로 테스트용 레포지토리 사용 (실제 레포지토리가 없을 경우)
-            if adapter_repo in ["sample1", "sample2", "sample3"] or "sample" in adapter_repo:
-                logger.warning(f"Using test repository for {influencer_info.influencer_id}")
-                # 실제 유효한 Hugging Face 레포지토리로 대체 (테스트용)
-                adapter_repo = "microsoft/DialoGPT-medium"  # 임시 테스트용
+            # 어댑터 레포지토리 유효성 검사
+            if adapter_repo in ["sample1", "sample2", "sample3"] or "sample" in adapter_repo or not adapter_repo.strip():
+                logger.error(f"Invalid adapter repository for {influencer_info.influencer_id}: {adapter_repo}")
+                results.append(
+                    {
+                        "influencer_id": influencer_info.influencer_id,
+                        "response": "유효하지 않은 어댑터 레포지토리입니다. 실제 허깅페이스 모델 레포지토리를 설정해주세요.",
+                    }
+                )
+                continue
             
             logger.info(f"Processed adapter repo: {adapter_repo}")
             

@@ -192,6 +192,29 @@ class VLLMClient:
         except Exception as e:
             logger.error(f"파인튜닝 작업 목록 조회 실패: {e}")
             raise VLLMClientError(f"파인튜닝 작업 목록 조회 실패: {e}")
+    
+    async def generate_qa_for_character(self, character_data: Dict[str, Any]) -> Dict[str, Any]:
+        """캐릭터에 대한 QA 생성 (vLLM 서버의 /speech/generate_qa 엔드포인트 사용)"""
+        try:
+            payload = {
+                "name": character_data.get("name", ""),
+                "description": character_data.get("description", ""),
+                "age_range": character_data.get("age_range", ""),
+                "gender": character_data.get("gender", "NON_BINARY"),
+                "personality": character_data.get("personality", ""),
+                "mbti": character_data.get("mbti")
+            }
+            
+            response = await self.client.post("/speech/generate_qa", json=payload)
+            response.raise_for_status()
+            
+            result = response.json()
+            logger.debug(f"✅ QA 생성 성공: {character_data.get('name', 'Unknown')}")
+            return result
+            
+        except Exception as e:
+            logger.error(f"❌ QA 생성 실패: {e}")
+            raise VLLMClientError(f"QA 생성 실패: {e}")
 
 
 class VLLMWebSocketClient:
@@ -312,3 +335,9 @@ async def vllm_load_adapter_if_needed(model_id: str, hf_repo_name: str,
         except Exception as e:
             logger.error(f"❌ 어댑터 로드 실패: {model_id}, {e}")
             return False
+
+
+async def vllm_generate_qa_for_character(character_data: Dict[str, Any]) -> Dict[str, Any]:
+    """vLLM에서 캐릭터 QA 생성 (편의 함수)"""
+    async with VLLMClient(_vllm_config) as client:
+        return await client.generate_qa_for_character(character_data)

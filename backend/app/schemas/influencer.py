@@ -213,6 +213,7 @@ class ToneGenerationRequest(BaseModel):
     mbti: Optional[str] = None
     gender: Optional[str] = None
     age: Optional[str] = None
+    tone_type: Optional[str] = None
 
 
 # 생성된 어투 스키마
