@@ -235,7 +235,7 @@ class InfluencerFineTuningService:
             logger.error(f"S3에서 QA 데이터 다운로드 실패: {e}", exc_info=True)
             return None
     
-    def prepare_finetuning_data(self, qa_data: List[Dict], influencer_data: AIInfluencer) -> tuple[List[Dict], str]:
+    async def prepare_finetuning_data(self, qa_data: List[Dict], influencer_data: AIInfluencer) -> tuple[List[Dict], str]:
         """
         파인튜닝용 데이터 준비
         Args:
@@ -250,11 +250,11 @@ class InfluencerFineTuningService:
             personality = getattr(influencer_data, 'influencer_personality', '친근하고 활발한 성격')
             style_info = getattr(influencer_data, 'influencer_description', '')
             
-            # 시스템 메시지 생성 (공통 유틸리티 사용)
-            system_message = create_system_message(influencer_name, personality, style_info)
+            # 시스템 메시지 생성 (vLLM 서버 사용)
+            system_message = await create_system_message(influencer_name, personality, style_info)
 
-            # QA 데이터 변환 (공통 유틸리티 사용)
-            finetuning_data = convert_qa_data_for_finetuning(
+            # QA 데이터 변환 (vLLM 서버 사용)
+            finetuning_data = await convert_qa_data_for_finetuning(
                 qa_data, influencer_name, personality, style_info
             )
             
@@ -359,45 +359,6 @@ class InfluencerFineTuningService:
                 logger.error(f"VLLM 파인튜닝 상태 확인 실패: {e}")
                 return None
     
-    async def _run_local_finetuning(self, qa_data: List[Dict], system_message: str, hf_repo_id: str, hf_token: str, epochs: int) -> Optional[str]:
-        """로컬 파인튜닝 실행 (기존 로직)"""
-        try:
-            # 현재 디렉토리를 pipeline 폴더로 변경
-            original_dir = os.getcwd()
-            pipeline_dir = os.path.join(os.path.dirname(__file__), '../../pipeline')
-            pipeline_dir = os.path.abspath(pipeline_dir)
-
-            try:
-                os.chdir(pipeline_dir)
-
-                # fine_custom.py 임포트 및 실행
-                import sys
-                if pipeline_dir not in sys.path:
-                    sys.path.insert(0, pipeline_dir)
-                
-                # fine_custom 모듈 실행
-                import fine_custom
-                hf_model_url = fine_custom.main(
-                    qa_data=qa_data,
-                    system_message=system_message,
-                    hf_token=hf_token,
-                    hf_repo_id=hf_repo_id,
-                    training_epochs=epochs
-                )
-
-                if hf_model_url:
-                    logger.info(f"로컬 파인튜닝 완료: {hf_model_url}")
-                    return hf_model_url
-                else:
-                    raise Exception("파인튜닝 실행 실패 또는 모델 URL 반환 실패")
-
-            finally:
-                # 원래 디렉토리로 복원
-                os.chdir(original_dir)
-
-        except Exception as e:
-            logger.error(f"로컬 파인튜닝 실행 실패: {e}")
-            return None
     
     def start_finetuning_task(self, influencer_id: str, qa_task_id: str, 
                             s3_qa_url: str, influencer_data: AIInfluencer, db=None) -> str:
@@ -489,7 +450,7 @@ class InfluencerFineTuningService:
                 raise Exception("S3에서 QA 데이터 다운로드 실패")
             
             # 파인튜닝용 데이터 준비
-            finetuning_qa_data, system_message = self.prepare_finetuning_data(qa_data, influencer_data)
+            finetuning_qa_data, system_message = await self.prepare_finetuning_data(qa_data, influencer_data)
             
             # 2. 파인튜닝 실행 단계
             task.status = FineTuningStatus.TRAINING

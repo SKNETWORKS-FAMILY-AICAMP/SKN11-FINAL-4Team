@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core import startup_event
-from app.routers import lora, generation, finetuning, speech
+from app.routers import lora, generation, finetuning, speech, backend_utils
 
 # 로깅 설정
 logging.basicConfig(
@@ -75,3 +75,4 @@ app.include_router(lora.router, prefix="/lora", tags=["LoRA Adapters"])
 app.include_router(generation.router, tags=["Generation"])
 app.include_router(finetuning.router, tags=["FineTuning"])
 app.include_router(speech.router, prefix="/speech", tags=["Speech Generator"])
+app.include_router(backend_utils.router, prefix="/api/v1", tags=["Backend Utils"])
