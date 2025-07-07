@@ -1,16 +1,33 @@
 import logging
+import os
 import dotenv
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.core import startup_event
 from app.routers import lora, generation, finetuning, speech
 
 logger = logging.getLogger(__name__)
 
-dotenv.load_dotenv() # .env 파일 로드
+# 환경 변수 로드
+dotenv.load_dotenv()
 
-app = FastAPI(title="vLLM LoRA Influencer API", version="1.0.0")
+# FastAPI 앱 생성
+app = FastAPI(
+    title="vLLM LoRA Influencer API", 
+    version="1.0.0",
+    description="vLLM 엔진을 사용한 LoRA 파인튜닝 및 추론 API"
+)
+
+# CORS 설정
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.on_event("startup")
 async def on_startup():

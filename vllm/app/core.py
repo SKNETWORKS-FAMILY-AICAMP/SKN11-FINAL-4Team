@@ -183,6 +183,7 @@ async def initialize_vllm_engine():
     logger.info("🚀 vLLM LoRA 엔진 초기화 중...")
     
     try:
+        # vLLM 엔진을 FastAPI 내부에서만 사용 (별도 서버 없이)
         engine_args = AsyncEngineArgs(
             model="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct",
             max_model_len=2048,
@@ -196,10 +197,13 @@ async def initialize_vllm_engine():
             max_cpu_loras=16,
             max_num_seqs=256,
             max_num_batched_tokens=8192,
+            # FastAPI와 포트 충돌 방지를 위해 별도 서버 비활성화
+            disable_log_requests=True,
         )
         
+        # AsyncLLMEngine을 직접 생성 (서버 모드 아님)
         engine = AsyncLLMEngine.from_engine_args(engine_args)
-        logger.info("✅ vLLM LoRA 엔진 초기화 완료!")
+        logger.info("✅ vLLM LoRA 엔진 초기화 완료 (FastAPI 내부 엔진 모드)!")
 
         if OPENAI_API_KEY:
             speech_generator = SpeechGenerator(api_key=OPENAI_API_KEY)
