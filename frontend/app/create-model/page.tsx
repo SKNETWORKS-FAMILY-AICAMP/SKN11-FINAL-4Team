@@ -263,7 +263,7 @@ export default function CreateModelPage() {
         influencer_data_url: undefined,
         learning_status: 0, // 초기 상태
         influencer_model_repo: "",
-        chatbot_option: true,
+        chatbot_option: false,
         hf_manage_id: formData.huggingFaceToken !== "none" ? formData.huggingFaceToken : undefined, // 허깅페이스 토큰 ID 추가
       }
 

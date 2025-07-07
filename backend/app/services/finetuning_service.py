@@ -207,7 +207,27 @@ class InfluencerFineTuningService:
                             else:
                                 logger.warning(f"S3 QA 데이터: OpenAI 형식에서 Q:A: 파싱 실패: {message_content}")
                         else:
-                            logger.warning(f"S3 QA 데이터: OpenAI 형식에서 Q: 또는 A: 키워드 없음: {message_content}")
+                            # Q: 또는 A: 키워드가 없는 경우, 원본 요청에서 질문을 추출하고 응답을 답변으로 사용
+                            if 'custom_id' in data and 'request' in data and 'body' in data['request']:
+                                request_body = data['request']['body']
+                                if 'messages' in request_body and isinstance(request_body['messages'], list):
+                                    # 사용자 메시지에서 질문 추출
+                                    user_message = None
+                                    for msg in request_body['messages']:
+                                        if msg.get('role') == 'user':
+                                            user_message = msg.get('content', '')
+                                            break
+                                    
+                                    if user_message:
+                                        # 질문을 추출하고 답변으로 message_content 사용
+                                        qa_pairs.append({"question": user_message, "answer": message_content})
+                                        logger.info(f"S3 QA 데이터: 키워드 없는 형식에서 QA 쌍 추출 성공")
+                                    else:
+                                        logger.warning(f"S3 QA 데이터: 요청에서 사용자 메시지를 찾을 수 없음")
+                                else:
+                                    logger.warning(f"S3 QA 데이터: 요청에 messages 필드가 없음")
+                            else:
+                                logger.warning(f"S3 QA 데이터: OpenAI 형식에서 Q: 또는 A: 키워드 없음: {message_content}")
                     
                     # Case 4: Top-level list of QA pairs (less common for JSONL, but possible)
                     elif isinstance(data, list):
