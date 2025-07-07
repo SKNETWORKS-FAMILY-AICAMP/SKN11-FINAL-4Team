@@ -720,58 +720,8 @@ async def generate_conversation_tones(
     current_user: dict = Depends(get_current_user),
 ):
     """성격 기반 말투 생성 API"""
-    
-    if not request.personality.strip():
-        raise HTTPException(status_code=400, detail="성격 정보를 입력해주세요")
-    
-    try:
-        from app.services.vllm_client import vllm_health_check, vllm_generate_qa_for_character
-        
-        if not await vllm_health_check():
-            raise HTTPException(status_code=503, detail="vLLM 서버에 접속할 수 없습니다")
-        
-        # 성별 매핑 (프론트엔드 값 -> vLLM Gender enum 값)
-        gender_mapping = {
-            "남성": "MALE",
-            "여성": "FEMALE", 
-            "기타": "NON_BINARY",
-            "남": "MALE",
-            "여": "FEMALE"
-        }
-        
-        # 나이 범위 매핑
-        age_range = f"{request.age}대" if request.age else "20대"
-        
-        # vLLM 서버용 캐릭터 데이터 구성
-        character_data = {
-            "name": request.name or "미지정",
-            "description": request.description or "미지정", 
-            "age_range": age_range,
-            "gender": gender_mapping.get(request.gender, "NON_BINARY"),
-            "personality": request.personality,
-            "mbti": request.mbti
-        }
-        
-        print(f'vLLM 서버로 캐릭터 QA 생성 요청: {character_data}')
-        # vLLM 서버에서 QA 생성
-        vllm_result = await vllm_generate_qa_for_character(character_data)
-        
-        # vLLM 응답을 기존 형식으로 변환
-        conversation_examples = _convert_vllm_response_to_conversation_examples(vllm_result)
-
-        
-        
-        return {
-            "personality": request.personality,
-            "character_info": character_data,
-            "question": vllm_result.get("question", ""),
-            "conversation_examples": conversation_examples,
-            "generated_at": datetime.now().isoformat()
-        }
-        
-    except Exception as e:
-        logger.error(f"말투 생성 중 오류: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"말투 생성 중 오류가 발생했습니다: {str(e)}")
+    from app.services.tone_service import ToneGenerationService
+    return await ToneGenerationService.generate_conversation_tones(request, False)
 
 
 @router.post("/regenerate-tones")
@@ -781,59 +731,8 @@ async def regenerate_conversation_tones(
     current_user: dict = Depends(get_current_user),
 ):
     """말투 재생성 API"""
-    
-    if not request.personality.strip():
-        raise HTTPException(status_code=400, detail="성격 정보를 입력해주세요")
-    
-    try:
-        # vLLM 서버 상태 확인
-        from app.services.vllm_client import vllm_health_check, vllm_generate_qa_for_character
-        
-        if not await vllm_health_check():
-            raise HTTPException(status_code=503, detail="vLLM 서버에 접속할 수 없습니다")
-        
-        # 성별 매핑 (프론트엔드 값 -> vLLM Gender enum 값)
-        gender_mapping = {
-            "남성": "MALE",
-            "여성": "FEMALE", 
-            "기타": "NON_BINARY",
-            "남": "MALE",
-            "여": "FEMALE"
-        }
-        
-        # 나이 범위 매핑
-        age_range = f"{request.age}대" if request.age else "20대"
-        
-        # vLLM 서버용 캐릭터 데이터 구성
-        character_data = {
-            "name": request.name or "미지정",
-            "description": request.description or "미지정", 
-            "age_range": age_range,
-            "gender": gender_mapping.get(request.gender, "NON_BINARY"),
-            "personality": request.personality,
-            "mbti": request.mbti
-        }
-        
-        print(f'vLLM 서버로 캐릭터 QA 재생성 요청: {character_data}')
-        # vLLM 서버에서 QA 재생성
-        vllm_result = await vllm_generate_qa_for_character(character_data)
-        print(f'vLLM 재생성 응답 완료: {vllm_result}')
-        
-        # vLLM 응답을 기존 형식으로 변환
-        conversation_examples = _convert_vllm_response_to_conversation_examples(vllm_result)
-
-        return {
-            "personality": request.personality,
-            "character_info": character_data,
-            "question": vllm_result.get("question", ""),
-            "conversation_examples": conversation_examples,
-            "generated_at": datetime.now().isoformat(),
-            "regenerated": True
-        }
-        
-    except Exception as e:
-        logger.error(f"말투 재생성 중 오류: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"말투 재생성 중 오류가 발생했습니다: {str(e)}")
+    from app.services.tone_service import ToneGenerationService
+    return await ToneGenerationService.generate_conversation_tones(request, True)
 
 
 async def _generate_question_for_character(client: OpenAI, character_info: str, temperature: float = 0.6) -> str:
@@ -944,42 +843,6 @@ async def _generate_system_prompt_for_tone(client: OpenAI, character_info: str, 
     return response.choices[0].message.content.strip()
 
 
-def _convert_vllm_response_to_conversation_examples(vllm_result: Dict[str, Any]) -> List[Dict[str, str]]:
-    conversation_examples = []
-    try:
-        responses = vllm_result['responses']
-        for tone_name, tone_responses in responses.items():
-            if tone_responses and len(tone_responses) > 0:
-                tone_response = tone_responses[0]  # 첫 번째 응답 사용
-                
-                tone_info = tone_response.get("tone_info", {})
-                tone_description = tone_info.get("description", tone_name)
-                hashtags = tone_info.get("hashtags", f"#{tone_name} #말투")
-                system_prompt = tone_response.get("system_prompt", f"당신은 {tone_name} 말투로 대화하는 AI입니다.")
-                
-                conversation_examples.append({
-                    "title": tone_description,
-                    "example": tone_response.get("text", ""),
-                    "tone": tone_description,
-                    "hashtags": hashtags,
-                    "system_prompt": system_prompt
-                })
-    
-    except Exception as e:
-        print("예외 발생:", e)
-        logger.error(f"vLLM 응답 변환 중 오류: {e}")
-        # 기본 응답 제공
-        conversation_examples = [
-            {
-                "title": "기본 말투",
-                "example": "안녕하세요! 만나서 반가워요.",
-                "tone": "기본 말투", 
-                "hashtags": "#기본 #말투",
-                "system_prompt": "당신은 친근하고 자연스러운 말투로 대화하는 AI입니다."
-            }
-        ]
-    
-    return conversation_examples
 
 
 async def _summarize_speech_style(client: OpenAI, system_prompt: str) -> Dict[str, str]:

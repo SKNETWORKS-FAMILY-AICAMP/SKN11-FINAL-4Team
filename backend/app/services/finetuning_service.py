@@ -27,13 +27,29 @@ from app.utils.finetuning_utils import (
 logger = logging.getLogger(__name__)
 
 
-class FineTuningStatus(Enum):
-    PENDING = "pending"
-    PREPARING_DATA = "preparing_data"
-    TRAINING = "training"
-    UPLOADING = "uploading"
-    COMPLETED = "completed"
-    FAILED = "failed"
+# vLLM 서버의 FineTuningStatus import
+try:
+    import sys
+    import os
+    
+    # vLLM 경로 추가
+    vllm_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), '..', 'vllm')
+    sys.path.insert(0, vllm_path)
+    
+    from app.models import FineTuningStatus
+    logger.info("✅ vLLM FineTuningStatus import 성공")
+
+except ImportError as e:
+    logger.warning(f"⚠️ vLLM FineTuningStatus import 실패, 로컬 버전 사용: {e}")
+    
+    # 폴백: 로컬 버전
+    class FineTuningStatus(Enum):
+        PENDING = "pending"
+        PREPARING_DATA = "preparing_data"
+        TRAINING = "training"
+        UPLOADING = "uploading"
+        COMPLETED = "completed"
+        FAILED = "failed"
 
 
 @dataclass

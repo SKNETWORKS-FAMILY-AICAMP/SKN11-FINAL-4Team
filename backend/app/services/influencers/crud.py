@@ -37,40 +37,16 @@ def create_influencer(db: Session, user_id: str, influencer_data: AIInfluencerCr
         if influencer_data.personality and influencer_data.tone:
             logger.info("📝 프리셋이 선택되지 않아 직접 입력된 정보로 자동 생성합니다")
             
-            # 모델 타입별 기본값 매핑
-            model_type_mapping = {
-                "character": 1,  # 캐릭터형
-                "human": 2,      # 사람형 
-                "objects": 3     # 사물형
-            }
+            from app.utils.data_mapping import DataMapper
             
-            gender_mapping = {
-                "male": 1,
-                "female": 2,
-                "other": 3
-            }
-            
-            # 나이 그룹 매핑 (기본값: 2)
-            age_group = 2  # 20-30대
-            if influencer_data.age:
-                try:
-                    age_num = int(influencer_data.age)
-                    if age_num < 20:
-                        age_group = 1
-                    elif age_num < 40:
-                        age_group = 2  
-                    elif age_num < 60:
-                        age_group = 3
-                    else:
-                        age_group = 4
-                except ValueError:
-                    age_group = 2
+            # 데이터 매핑 유틸리티 사용
+            age_group = DataMapper.map_age_to_group(influencer_data.age)
             
             # 프리셋 생성
             preset_data = StylePresetCreate(
                 style_preset_name=f"{influencer_data.influencer_name}_자동생성프리셋",
-                influencer_type=model_type_mapping.get(influencer_data.model_type, 2),
-                influencer_gender=gender_mapping.get(influencer_data.gender, 2),
+                influencer_type=DataMapper.map_model_type_to_db(influencer_data.model_type),
+                influencer_gender=DataMapper.map_gender_to_db(influencer_data.gender),
                 influencer_age_group=age_group,
                 influencer_hairstyle=influencer_data.hair_style or "기본 헤어스타일",
                 influencer_style=influencer_data.mood or "자연스럽고 편안한",
@@ -163,19 +139,7 @@ def create_influencer(db: Session, user_id: str, influencer_data: AIInfluencerCr
     }
 
     # 스키마의 age를 모델의 influencer_age_group으로 매핑
-    if influencer_data.age:
-        try:
-            age_num = int(influencer_data.age)
-            if age_num < 20:
-                influencer_create_data["influencer_age_group"] = 1
-            elif age_num < 40:
-                influencer_create_data["influencer_age_group"] = 2
-            elif age_num < 60:
-                influencer_create_data["influencer_age_group"] = 3
-            else:
-                influencer_create_data["influencer_age_group"] = 4
-        except ValueError:
-            influencer_create_data["influencer_age_group"] = None # 또는 원하는 기본값
+    influencer_create_data["influencer_age_group"] = DataMapper.map_age_to_group(influencer_data.age)
 
     try:
         influencer = AIInfluencer(**influencer_create_data)

@@ -1,0 +1,154 @@
+"""
+말투 생성 서비스
+
+이 모듈은 말투 생성 관련 공통 비즈니스 로직을 제공합니다.
+- vLLM 서버 연동
+- 캐릭터 데이터 구성
+- 응답 변환
+"""
+
+import logging
+from datetime import datetime
+from typing import Optional
+from fastapi import HTTPException
+
+from app.schemas.influencer import ToneGenerationRequest
+from app.utils.data_mapping import create_character_data
+from app.services.vllm_client import vllm_health_check, vllm_generate_qa_for_character
+
+logger = logging.getLogger(__name__)
+
+
+class ToneGenerationService:
+    """말투 생성 서비스 클래스"""
+    
+    @staticmethod
+    async def generate_conversation_tones(
+        request: ToneGenerationRequest, 
+        is_regeneration: bool = False
+    ) -> dict:
+        """말투 생성 공통 로직
+        
+        Args:
+            request: 말투 생성 요청 데이터
+            is_regeneration: 재생성 여부
+            
+        Returns:
+            dict: 생성된 말투 응답
+            
+        Raises:
+            HTTPException: 검증 실패, vLLM 서버 오류 등
+        """
+        # 입력 검증
+        if not request.personality.strip():
+            raise HTTPException(status_code=400, detail="성격 정보를 입력해주세요")
+        
+        try:
+            # vLLM 서버 상태 확인
+            if not await vllm_health_check():
+                raise HTTPException(status_code=503, detail="vLLM 서버에 접속할 수 없습니다")
+            
+            # 캐릭터 데이터 구성
+            character_data = create_character_data(
+                name=request.name,
+                description=request.description,
+                age=request.age,
+                gender=request.gender,
+                personality=request.personality,
+                mbti=request.mbti
+            )
+            
+            log_message = "vLLM 서버로 캐릭터 QA 재생성 요청" if is_regeneration else "vLLM 서버로 캐릭터 QA 생성 요청"
+            logger.info(f"{log_message}: {character_data}")
+            
+            # vLLM 서버에서 QA 생성
+            vllm_result = await vllm_generate_qa_for_character(character_data)
+            
+            if is_regeneration:
+                logger.info(f"vLLM 재생성 응답 완료: {vllm_result}")
+            
+            # vLLM 응답을 기존 형식으로 변환
+            conversation_examples = ToneGenerationService._convert_vllm_response_to_conversation_examples(vllm_result)
+            
+            # 응답 구성
+            result = {
+                "personality": request.personality,
+                "character_info": character_data,
+                "question": vllm_result.get("question", ""),
+                "conversation_examples": conversation_examples,
+                "generated_at": datetime.now().isoformat()
+            }
+            
+            # 재생성인 경우 플래그 추가
+            if is_regeneration:
+                result["regenerated"] = True
+            
+            return result
+            
+        except HTTPException:
+            # FastAPI HTTPException은 그대로 전파
+            raise
+        except Exception as e:
+            error_type = "재생성" if is_regeneration else "생성"
+            logger.error(f"말투 {error_type} 중 오류: {str(e)}", exc_info=True)
+            raise HTTPException(
+                status_code=500, 
+                detail=f"말투 {error_type} 중 오류가 발생했습니다: {str(e)}"
+            )
+    
+    @staticmethod
+    def _convert_vllm_response_to_conversation_examples(vllm_result: dict) -> list:
+        """vLLM 응답을 conversation_examples 형식으로 변환
+        
+        Args:
+            vllm_result: vLLM 서버 응답
+            
+        Returns:
+            list: 변환된 conversation_examples
+        """
+        conversation_examples = []
+        
+        try:
+            responses = vllm_result.get('responses', {})
+            for tone_name, tone_responses in responses.items():
+                if tone_responses and len(tone_responses) > 0:
+                    tone_response = tone_responses[0]  # 첫 번째 응답 사용
+                    
+                    tone_info = tone_response.get("tone_info", {})
+                    tone_description = tone_info.get("description", tone_name)
+                    hashtags = tone_info.get("hashtags", f"#{tone_name} #말투")
+                    system_prompt = tone_response.get("system_prompt", f"당신은 {tone_name} 말투로 대화하는 AI입니다.")
+                    
+                    conversation_examples.append({
+                        "title": tone_description,
+                        "example": tone_response.get("text", ""),
+                        "tone": tone_description,
+                        "hashtags": hashtags,
+                        "system_prompt": system_prompt
+                    })
+        
+        except Exception as e:
+            logger.error(f"vLLM 응답 변환 중 오류: {e}")
+            # 기본 응답 제공
+            conversation_examples = [
+                {
+                    "title": "기본 말투",
+                    "example": "안녕하세요! 만나서 반가워요.",
+                    "tone": "기본 말투", 
+                    "hashtags": "#기본 #말투",
+                    "system_prompt": "당신은 친근하고 자연스러운 말투로 대화하는 AI입니다."
+                }
+            ]
+        
+        return conversation_examples
+
+
+# 하위 호환성을 위한 개별 함수
+async def generate_conversation_tones(request: ToneGenerationRequest) -> dict:
+    """말투 생성 (하위 호환성)"""
+    return await ToneGenerationService.generate_conversation_tones(request, False)
+
+
+async def regenerate_conversation_tones(request: ToneGenerationRequest) -> dict:
+    """말투 재생성 (하위 호환성)"""
+    return await ToneGenerationService.generate_conversation_tones(request, True)

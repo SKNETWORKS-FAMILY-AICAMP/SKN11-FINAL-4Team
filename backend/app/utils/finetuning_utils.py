@@ -1,6 +1,6 @@
 """
 파인튜닝 관련 공통 유틸리티 함수들
-VLLM 서버와 로컬 파인튜닝에서 공통으로 사용되는 로직
+vLLM 서버의 고급 기능을 활용한 파인튜닝 유틸리티를 import
 """
 
 import logging
@@ -8,78 +8,72 @@ from typing import List, Dict, Any
 
 logger = logging.getLogger(__name__)
 
+# vLLM 서버의 고급 파인튜닝 유틸리티 import
+try:
+    import sys
+    import os
+    
+    # vLLM 경로 추가 (프로젝트 구조에 맞게 조정)
+    vllm_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), '..', 'vllm')
+    sys.path.insert(0, vllm_path)
+    
+    from app.utils.finetuning_utils import (
+        create_system_message,
+        convert_qa_data_for_finetuning
+    )
+    
+    logger.info("✅ vLLM 파인튜닝 유틸리티 import 성공 (MBTI 기능 포함)")
 
-def create_system_message(influencer_name: str, personality: str, style_info: str = "") -> str:
-    """
-    인플루언서용 시스템 메시지 생성
-    Args:
-        influencer_name: 인플루언서 이름
-        personality: 성격 정보
-        style_info: 스타일 정보
-    Returns:
-        시스템 메시지
-    """
-    system_msg = f"""당신은 {influencer_name}입니다.
+except ImportError as e:
+    logger.warning(f"⚠️ vLLM 파인튜닝 유틸리티 import 실패, 로컬 버전 사용: {e}")
+    
+    # 폴백: 기본 버전 제공
+    def create_system_message(influencer_name: str, personality: str, style_info: str = "") -> str:
+        """기본 시스템 메시지 생성 (폴백 버전)"""
+        system_msg = f"""당신은 {influencer_name}입니다.
 
 성격과 특징:
 {personality}
 
 """
-    
-    if style_info:
-        system_msg += f"""스타일 정보:
+        
+        if style_info:
+            system_msg += f"""스타일 정보:
 {style_info}
 
 """
-    
-    system_msg += f"""이 캐릭터의 성격과 말투를 완벽하게 재현하여 답변해주세요.
+        
+        system_msg += f"""이 캐릭터의 성격과 말투를 완벽하게 재현하여 답변해주세요.
 - 항상 캐릭터의 개성이 드러나도록 답변하세요
 - 일관된 말투와 어조를 유지하세요
 - 캐릭터의 특징적인 표현이나 어미를 사용하세요
 - 자연스럽고 매력적인 대화를 이끌어가세요"""
-    
-    return system_msg
-
-
-def convert_qa_data_for_finetuning(qa_data: List[Dict], influencer_name: str, 
-                                 personality: str, style_info: str = "") -> List[Dict]:
-    """
-    QA 데이터를 파인튜닝용 형식으로 변환
-    Args:
-        qa_data: QA 쌍 리스트
-        influencer_name: 인플루언서 이름
-        personality: 성격 정보
-        style_info: 스타일 정보
-    Returns:
-        파인튜닝용 데이터
-    """
-    finetuning_data = []
-    
-    # 시스템 메시지 생성
-    system_message = create_system_message(influencer_name, personality, style_info)
-    print(qa_data)
-    for qa_pair in qa_data:
-        question = qa_pair.get('question', '').strip()
-        answer = qa_pair.get('answer', '').strip()
         
-        if not question:
-            logger.error(f"QA 쌍에서 'question' 필드를 찾을 수 없거나 비어 있습니다: {qa_pair}")
-        if not answer:
-            logger.error(f"QA 쌍에서 'answer' 필드를 찾을 수 없거나 비어 있습니다: {qa_pair}")
+        return system_msg
 
-        if question and answer:
-            # EXAONE 모델용 채팅 형식으로 변환
-            formatted_data = {
-                "messages": [
-                    {"role": "system", "content": system_message},
-                    {"role": "user", "content": question},
-                    {"role": "assistant", "content": answer}
-                ]
-            }
-            finetuning_data.append(formatted_data)
-    
-    logger.info(f"QA 데이터 변환 완료: {len(qa_data)}개 → {len(finetuning_data)}개")
-    return finetuning_data
+    def convert_qa_data_for_finetuning(qa_data: List[Dict], influencer_name: str, 
+                                     personality: str, style_info: str = "") -> List[Dict]:
+        """기본 QA 변환 (폴백 버전)"""
+        finetuning_data = []
+        
+        system_message = create_system_message(influencer_name, personality, style_info)
+        
+        for qa_pair in qa_data:
+            question = qa_pair.get('question', '').strip()
+            answer = qa_pair.get('answer', '').strip()
+            
+            if question and answer:
+                formatted_data = {
+                    "messages": [
+                        {"role": "system", "content": system_message},
+                        {"role": "user", "content": question},
+                        {"role": "assistant", "content": answer}
+                    ]
+                }
+                finetuning_data.append(formatted_data)
+        
+        logger.info(f"QA 데이터 변환 완료: {len(qa_data)}개 → {len(finetuning_data)}개")
+        return finetuning_data
 
 
 def validate_qa_data(qa_data: List[Dict]) -> bool:
