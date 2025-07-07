@@ -7,7 +7,7 @@ from app.models import (
     VLLMToneRequest, VLLMToneResponse, VLLMBatchToneRequest, VLLMBatchToneResponse
 )
 from app.core import get_speech_generator
-from pipeline.speech_generator import SpeechGenerator, CharacterProfile
+from pipeline.speech_generator import SpeechGenerator, CharacterProfile, Gender
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ async def generate_qa_for_character_vllm_endpoint(
             name=character_profile.name,
             description=character_profile.description,
             age_range=character_profile.age_range,
-            gender=character_profile.gender,
+            gender=Gender(character_profile.gender), # Enum 변환 추가
             personality=character_profile.personality,
             mbti=character_profile.mbti
         )
@@ -83,7 +83,7 @@ async def generate_qa_batch_for_characters(
                     name=character_profile.name,
                     description=character_profile.description,
                     age_range=character_profile.age_range,
-                    gender=character_profile.gender,
+                    gender=Gender(character_profile.gender), # Enum 변환 추가
                     personality=character_profile.personality,
                     mbti=character_profile.mbti
                 )
@@ -133,7 +133,7 @@ async def generate_questions_only(
             name=request.character.name,
             description=request.character.description,
             age_range=request.character.age_range,
-            gender=request.character.gender,
+            gender=Gender(request.character.gender), # Enum 변환 추가
             personality=request.character.personality,
             mbti=request.character.mbti
         )
@@ -215,7 +215,7 @@ async def generate_tones_only(
             name=request.character.name,
             description=request.character.description,
             age_range=request.character.age_range,
-            gender=request.character.gender,
+            gender=Gender(request.character.gender), # Enum 변환 추가
             personality=request.character.personality,
             mbti=request.character.mbti
         )
