@@ -342,8 +342,6 @@ def main(qa_data: List[Dict], system_message: str, hf_token: str, hf_repo_id: st
     if hasattr(model, 'enable_input_require_grads'):
         model.enable_input_require_grads()
     
-    # 5. 훈련 가능한 파라미터 출력
-    model.print_trainable_parameters()
     
     # 6. gradient 체크 - 더 자세한 확인
     print("\nGradient 설정 확인:")
