@@ -227,6 +227,91 @@ class SpeechGenerator:
                 "hashtags": "#GPT #응답파싱 #실패",
                 "description": "말투 요약 실패한 말투"
             }
+    
+    def generate_question_for_character(self, character: CharacterProfile) -> str:
+        """
+        캐릭터 프로필에 맞는 질문을 생성합니다.
+        """
+        system_prompt = f"""
+        당신은 {character.name}라는 캐릭터에게 적절한 질문을 생성하는 역할입니다.
+        
+        캐릭터 정보:
+        - 이름: {character.name}
+        - 설명: {character.description}
+        - 성격: {character.personality}
+        - 나이대: {character.age_range or '알 수 없음'}
+        - MBTI: {character.mbti or '알 수 없음'}
+        
+        이 캐릭터가 답변하기 좋은 일상적이고 자연스러운 질문을 하나 생성해주세요.
+        질문은 캐릭터의 성격과 특성을 잘 드러낼 수 있는 내용이어야 합니다.
+        """
+        
+        response = self.client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": "캐릭터에 적합한 질문을 하나 생성해주세요."}
+            ],
+            max_tokens=100,
+            temperature=0.8
+        )
+        
+        return response.choices[0].message.content.strip()
+    
+    def generate_character_tones_for_question(self, character: CharacterProfile, question: str, num_variations: int = 3) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        주어진 질문에 대해 캐릭터의 다양한 말투로 응답을 생성합니다.
+        
+        Args:
+            character: 캐릭터 프로필
+            question: 응답할 질문
+            num_variations: 생성할 말투 변형 수
+            
+        Returns:
+            말투별 응답 딕셔너리 {tone_name: [responses]}
+        """
+        responses = {}
+        
+        for i in range(num_variations):
+            tone_name = f"말투{i+1}"
+            
+            # 말투별 시스템 프롬프트 생성
+            system_prompt = self.create_character_prompt_for_random_tone(character, i+1)
+            
+            try:
+                # 응답 생성
+                response = self.client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": question}
+                    ],
+                    max_tokens=150,
+                    temperature=0.8
+                )
+                
+                generated_text = response.choices[0].message.content.strip()
+                
+                # 말투 요약 생성
+                tone_summary = self.summarize_speech_style_with_gpt(system_prompt)
+                
+                response_data = {
+                    "text": generated_text,
+                    "hashtags": tone_summary.get("hashtags", f"#말투{i+1}"),
+                    "description": tone_summary.get("description", f"말투{i+1} 스타일")
+                }
+                
+                responses[tone_name] = [response_data]
+                
+            except Exception as e:
+                print(f"말투 {tone_name} 생성 실패: {e}")
+                responses[tone_name] = [{
+                    "text": f"죄송합니다. {tone_name} 응답 생성에 실패했습니다.",
+                    "hashtags": f"#에러 #말투{i+1}",
+                    "description": f"에러 발생한 말투{i+1}"
+                }]
+        
+        return responses
 
 
     def create_batch_requests_for_character_tones(self, user_messages: List[str], character: CharacterProfile) -> List[Dict[str, Any]]:

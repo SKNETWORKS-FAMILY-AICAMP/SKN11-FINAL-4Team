@@ -144,57 +144,104 @@ class InfluencerQAGenerator:
             "mbti": character.mbti
         }
         
-        # VLLM 서버의 /generate_qa 엔드포인트 호출 (한번만 시도)
+        # 1단계: VLLM 서버에서 질문 생성
+        questions = []
         try:
             response = requests.post(
-                f"{vllm_server_url}/generate_qa",
-                json=character_data,
-                timeout=30
+                f"{vllm_server_url}/speech/generate_questions_batch",
+                json={
+                    "characters": [character_data] * num_requests,
+                    "num_questions_per_character": 1
+                },
+                timeout=60
             )
             
             if response.status_code == 200:
-                qa_data = response.json()
-                question = qa_data.get('question', '')
-                responses = qa_data.get('responses', {})
+                question_data = response.json()
+                results = question_data.get('results', [])
                 
-                # 각 말투별 응답을 배치 요청으로 변환
-                for tone_name, tone_responses in responses.items():
-                    if tone_responses and len(tone_responses) > 0:
-                        tone_response = tone_responses[0]  # 첫 번째 응답 사용
+                for result in results:
+                    questions.extend(result.get('questions', []))
+                
+                print(f"VLLM 서버 질문 생성 성공: {len(questions)}개")
+            else:
+                print(f"VLLM 서버 질문 생성 실패: {response.status_code} - {response.text}")
+                
+        except Exception as e:
+            print(f"VLLM 서버 질문 생성 오류: {e}")
+        
+        # 2단계: 생성된 질문들에 대해 말투 생성
+        if questions:
+            try:
+                tone_requests = []
+                # 질문들을 배치로 나누어서 요청
+                batch_size = min(10, len(questions))  # 한 번에 최대 10개씩
+                for i in range(0, len(questions), batch_size):
+                    batch_questions = questions[i:i+batch_size]
+                    tone_requests.append({
+                        "character": character_data,
+                        "questions": batch_questions,
+                        "num_tone_variations": 3
+                    })
+                
+                response = requests.post(
+                    f"{vllm_server_url}/speech/generate_tones_batch",
+                    json={"requests": tone_requests},
+                    timeout=120
+                )
+                
+                if response.status_code == 200:
+                    tone_data = response.json()
+                    results = tone_data.get('results', [])
+                    
+                    print(f"VLLM 서버 말투 생성 성공: {len(results)}개 결과")
+                    
+                    # 각 결과를 배치 요청으로 변환
+                    for i, tone_result in enumerate(results):
+                        responses = tone_result.get('responses', {})
                         
-                        request = {
-                            "custom_id": f"influencer_qa_{character.name}_{tone_name}",
-                            "method": "POST",
-                            "url": "/v1/chat/completions",
-                            "body": {
-                                "model": "gpt-4o-mini",
-                                "messages": [
-                                    {
-                                        "role": "system",
-                                        "content": "QA 쌍을 생성하는 역할입니다."
-                                    },
-                                    {
-                                        "role": "user",
-                                        "content": f"Q: {question} A: {tone_response.get('text', '')}"
+                        for question, tone_responses in responses.items():
+                            for tone_name, tone_response_list in tone_responses.items():
+                                if tone_response_list and len(tone_response_list) > 0:
+                                    tone_response = tone_response_list[0]
+                                    
+                                    request = {
+                                        "custom_id": f"influencer_qa_{character.name}_{len(batch_requests)+1}_{tone_name}",
+                                        "method": "POST",
+                                        "url": "/v1/chat/completions",
+                                        "body": {
+                                            "model": "gpt-4o-mini",
+                                            "messages": [
+                                                {
+                                                    "role": "system",
+                                                    "content": "QA 쌍을 생성하는 역할입니다."
+                                                },
+                                                {
+                                                    "role": "user",
+                                                    "content": f"Q: {question} A: {tone_response.get('text', '')}"
+                                                }
+                                            ],
+                                            "max_tokens": 300,
+                                            "temperature": 0.8
+                                        }
                                     }
-                                ],
-                                "max_tokens": 300,
-                                "temperature": 0.8
-                            }
-                        }
-                        batch_requests.append(request)
+                                    batch_requests.append(request)
+                                    
+                                    # 요청수 제한
+                                    if len(batch_requests) >= num_requests:
+                                        break
+                            
+                            if len(batch_requests) >= num_requests:
+                                break
                         
-                        # 한 번에 너무 많은 요청을 보내지 않도록 제한
                         if len(batch_requests) >= num_requests:
                             break
                 
-                print(f"VLLM 서버 요청 성공: {len(batch_requests)}개의 QA 쌍 생성")
-                        
-            else:
-                print(f"VLLM 서버 요청 실패: {response.status_code} - {response.text}")
-                
-        except Exception as e:
-            print(f"VLLM 서버 연결 오류: {e}")
+                else:
+                    print(f"VLLM 서버 말투 생성 실패: {response.status_code} - {response.text}")
+                    
+            except Exception as e:
+                print(f"VLLM 서버 말투 생성 오류: {e}")
         
         # VLLM 서버에서 생성된 QA가 부족하면 기본 QA로 채움
         remaining_requests = num_requests - len(batch_requests)

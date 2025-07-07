@@ -16,6 +16,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { tokenUtils } from "@/lib/auth"
+import { ModelService } from "@/lib/services/model.service"
 import {
   ArrowLeft,
   Copy,
@@ -219,32 +220,22 @@ function ModelDetailContent() {
   const loadModelData = async () => {
     setIsModelLoading(true)
     try {
-      const response = await fetch(`/api/influencers/${params.id}`, {
-        headers: {
-          'Authorization': `Bearer ${tokenUtils.getToken()}`,
-        },
+      const data = await ModelService.getInfluencer(params.id)
+      setModel({
+        ...data,
+        id: data.influencer_id,
+        name: data.influencer_name,
+        description: data.influencer_description || '',
+        createdAt: data.created_at?.split('T')[0] || '',
+        apiKey: sampleModel.apiKey, // API 키는 별도 조회
+        trainingData: sampleModel.trainingData, // 훈련 데이터는 별도 조회
+        // Instagram 연동 정보 추가
+        instagram_id: data.instagram_id,
+        instagram_username: data.instagram_username,
+        instagram_account_type: data.instagram_account_type,
+        instagram_is_active: data.instagram_is_active,
+        instagram_connected_at: data.instagram_connected_at,
       })
-
-      if (response.ok) {
-        const data = await response.json()
-        setModel({
-          ...data,
-          id: data.influencer_id,
-          name: data.influencer_name,
-          description: data.influencer_description || '',
-          createdAt: data.created_at?.split('T')[0] || '',
-          apiKey: sampleModel.apiKey, // API 키는 별도 조회
-          trainingData: sampleModel.trainingData, // 훈련 데이터는 별도 조회
-          // Instagram 연동 정보 추가
-          instagram_id: data.instagram_id,
-          instagram_username: data.instagram_username,
-          instagram_account_type: data.instagram_account_type,
-          instagram_is_active: data.instagram_is_active,
-          instagram_connected_at: data.instagram_connected_at,
-        })
-      } else {
-        console.error('Failed to load model data:', response.status)
-      }
     } catch (error) {
       console.error('Error loading model data:', error)
     } finally {
@@ -334,32 +325,25 @@ function ModelDetailContent() {
           
           try {
             // 백엔드에 code 전송하여 토큰 교환 및 계정 연동
-            const response = await fetch(`/api/influencers/${params.id}/instagram/connect`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${tokenUtils.getToken()}`,
-              },
-              body: JSON.stringify({
-                code,
-                redirect_uri: redirectUri,
-              }),
+            const data = await ModelService.connectInstagram(params.id, {
+              instagram_access_token: code,
+              instagram_user_id: '',
+              instagram_username: '',
+              instagram_account_type: 'BUSINESS'
             })
 
-            const data = await response.json()
-
-            if (response.ok) {
-              setInstagramStatus({
-                is_connected: true,
-                connected_at: new Date().toISOString(),
-                token_expired: false,
-                instagram_info: data.instagram_info,
-              })
-              alert('Instagram 비즈니스 계정이 성공적으로 연동되었습니다!')
-            } else {
-              throw new Error(data.detail || 'Instagram 연동에 실패했습니다.')
-            }
-          } catch (error) {
+            setInstagramStatus({
+              is_connected: true,
+              connected_at: new Date().toISOString(),
+              token_expired: false,
+              instagram_info: {
+                id: data.instagram_id || '',
+                username: data.instagram_username || '',
+                account_type: data.instagram_account_type || '',
+              },
+            })
+            alert('Instagram 비즈니스 계정이 성공적으로 연동되었습니다!')
+          } catch (error: any) {
             console.error('Instagram 연동 오류:', error)
             alert('Instagram 연동에 실패했습니다. 다시 시도해주세요.')
           }
@@ -394,21 +378,12 @@ function ModelDetailContent() {
   const handleInstagramDisconnect = async () => {
     try {
       // API 호출하여 Instagram 연동 해제
-      const response = await fetch(`/api/influencers/${params.id}/instagram/disconnect`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${tokenUtils.getToken()}`,
-        },
+      await ModelService.disconnectInstagram(params.id)
+      
+      setInstagramStatus({
+        is_connected: false
       })
-
-      if (response.ok) {
-        setInstagramStatus({
-          is_connected: false
-        })
-        alert("Instagram 계정 연동이 해제되었습니다.")
-      } else {
-        throw new Error('Instagram 연동 해제에 실패했습니다')
-      }
+      alert("Instagram 계정 연동이 해제되었습니다.")
     } catch (error) {
       console.error("Instagram 연동 해제 오류:", error)
       alert("Instagram 연동 해제에 실패했습니다. 다시 시도해주세요.")
@@ -438,17 +413,18 @@ function ModelDetailContent() {
             })
           } else {
             // API로 추가 확인 (기존 방식 유지)
-            const response = await fetch(`/api/influencers/${params.id}/instagram/status`, {
-              headers: {
-                'Authorization': `Bearer ${tokenUtils.getToken()}`,
-              },
-            })
-
-            if (response.ok) {
-              const data = await response.json()
-                  setInstagramStatus(data)
-            } else {
-              console.error('Instagram status error:', response.status, response.statusText)
+            try {
+              const data = await ModelService.getInstagramStatus(params.id)
+              setInstagramStatus({
+                is_connected: data.connected,
+                instagram_info: data.instagram_username ? {
+                  id: '',
+                  username: data.instagram_username,
+                  account_type: data.instagram_account_type || '',
+                } : undefined
+              })
+            } catch (error) {
+              console.error('Instagram status error:', error)
               setInstagramStatus({ is_connected: false })
             }
           }

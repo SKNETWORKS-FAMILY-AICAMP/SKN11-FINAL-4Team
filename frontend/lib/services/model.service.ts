@@ -195,6 +195,37 @@ export class ModelService {
   }
 
   /**
+   * Instagram 계정 연결
+   */
+  static async connectInstagram(influencerId: string, data: {
+    instagram_access_token: string
+    instagram_user_id: string
+    instagram_username: string
+    instagram_account_type: string
+  }): Promise<AIInfluencer> {
+    return await apiClient.post<AIInfluencer>(`/api/v1/influencers/${influencerId}/instagram/connect`, data)
+  }
+
+  /**
+   * Instagram 계정 연결 해제
+   */
+  static async disconnectInstagram(influencerId: string): Promise<AIInfluencer> {
+    return await apiClient.post<AIInfluencer>(`/api/v1/influencers/${influencerId}/instagram/disconnect`)
+  }
+
+  /**
+   * Instagram 연결 상태 확인
+   */
+  static async getInstagramStatus(influencerId: string): Promise<{
+    connected: boolean
+    instagram_username?: string
+    instagram_account_type?: string
+    last_sync?: string
+  }> {
+    return await apiClient.get(`/api/v1/influencers/${influencerId}/instagram/status`)
+  }
+
+  /**
    * MBTI 목록 조회
    */
   static async getMBTIList(): Promise<ModelMBTI[]> {

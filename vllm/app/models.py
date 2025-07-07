@@ -74,3 +74,55 @@ class VLLMCharacterProfile(BaseModel):
 class VLLMQAGenerationResponse(BaseModel):
     question: str
     responses: Dict[str, List[Dict[str, Any]]]
+
+# 배치 처리 관련 모델
+class VLLMBatchQARequest(BaseModel):
+    characters: List[VLLMCharacterProfile]
+    num_qa_per_character: int = 1
+
+class VLLMBatchQAResponse(BaseModel):
+    results: List[VLLMQAGenerationResponse]
+    total_processed: int
+    success_count: int
+    error_count: int
+    errors: List[str] = []
+
+# 질문 생성 전용 모델
+class VLLMQuestionRequest(BaseModel):
+    character: VLLMCharacterProfile
+    num_questions: int = 1
+
+class VLLMQuestionResponse(BaseModel):
+    questions: List[str]
+    character_name: str
+
+class VLLMBatchQuestionRequest(BaseModel):
+    characters: List[VLLMCharacterProfile]
+    num_questions_per_character: int = 1
+
+class VLLMBatchQuestionResponse(BaseModel):
+    results: List[VLLMQuestionResponse]
+    total_processed: int
+    success_count: int
+    error_count: int
+    errors: List[str] = []
+
+# 말투 생성 전용 모델
+class VLLMToneRequest(BaseModel):
+    character: VLLMCharacterProfile
+    questions: List[str]
+    num_tone_variations: int = 3
+
+class VLLMToneResponse(BaseModel):
+    responses: Dict[str, Dict[str, List[Dict[str, Any]]]]  # {question: {tone_name: [responses]}}
+    character_name: str
+
+class VLLMBatchToneRequest(BaseModel):
+    requests: List[VLLMToneRequest]
+
+class VLLMBatchToneResponse(BaseModel):
+    results: List[VLLMToneResponse]
+    total_processed: int
+    success_count: int
+    error_count: int
+    errors: List[str] = []
