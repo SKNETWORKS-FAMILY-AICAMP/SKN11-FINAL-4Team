@@ -81,7 +81,7 @@ class VLLMClient:
             if hf_token:
                 payload["hf_token"] = hf_token
             
-            response = await self.client.post("/load_adapter", json=payload)
+            response = await self.client.post("/lora/load_adapter", json=payload)
             response.raise_for_status()
             
             result = response.json()
@@ -133,7 +133,7 @@ class VLLMClient:
     async def list_adapters(self) -> Dict[str, Any]:
         """로드된 어댑터 목록 조회"""
         try:
-            response = await self.client.get("/adapters")
+            response = await self.client.get("/lora/adapters")
             response.raise_for_status()
             return response.json()
         except httpx.HTTPStatusError as e:
@@ -150,7 +150,7 @@ class VLLMClient:
     async def unload_adapter(self, model_id: str) -> Dict[str, Any]:
         """어댑터 언로드"""
         try:
-            response = await self.client.delete(f"/adapter/{model_id}")
+            response = await self.client.delete(f"/lora/adapter/{model_id}")
             response.raise_for_status()
             
             result = response.json()
