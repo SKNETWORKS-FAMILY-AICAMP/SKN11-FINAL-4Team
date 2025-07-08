@@ -327,7 +327,7 @@ class InfluencerFineTuningService:
     
     async def run_finetuning(self, qa_data: List[Dict], system_message: str, hf_repo_id: str, hf_token: str, epochs: int = 5, batch_id: Optional[str] = None) -> Optional[str]:
         """
-        파인튜닝 실행 (VLLM 서버 우선, 로컬 폴백)
+        파인튜닝 실행 (VLLM 서버에 작업 제출 후 즉시 반환)
         Args:
             qa_data: 훈련 데이터 (QA 쌍 리스트)
             system_message: 시스템 메시지
@@ -336,7 +336,7 @@ class InfluencerFineTuningService:
             epochs: 훈련 에포크 수
             batch_id: 배치 작업 ID (선택적)
         Returns:
-            HF 모델 URL (성공 시), None (실패 시)
+            task_id (성공 시), None (실패 시)
         """
         try:
             logger.info(f"파인튜닝 시작: {hf_repo_id}")
@@ -372,8 +372,10 @@ class InfluencerFineTuningService:
                 
                 task_id = result.get("task_id")
                 if task_id:
-                    # 파인튜닝 완료까지 대기 (폴링)
-                    return await self._wait_for_vllm_finetuning(task_id, vllm_client)
+                    # 파인튜닝 작업이 시작되면 task_id만 반환 (폴링하지 않음)
+                    # VLLM 서버가 완료 시 웹훅을 통해 알려줌
+                    logger.info(f"✅ 파인튜닝 작업 제출 완료: task_id={task_id}")
+                    return task_id
                 else:
                     raise Exception("VLLM 파인튜닝 작업 시작 실패")
                     
@@ -385,41 +387,42 @@ class InfluencerFineTuningService:
             logger.error(f"파인튜닝 실행 실패: {e}")
             return None
     
-    async def _wait_for_vllm_finetuning(self, task_id: str, vllm_client, timeout: int = 3600) -> Optional[str]:
-        """VLLM 파인튜닝 완료 대기"""
-        import asyncio
-        
-        start_time = datetime.now()
-        
-        while True:
-            try:
-                status = await vllm_client.get_finetuning_status(task_id)
-                current_status = status.get("status")
-                
-                logger.info(f"VLLM 파인튜닝 상태: {current_status}")
-                
-                if current_status == "completed":
-                    hf_model_url = status.get("hf_model_url")
-                    logger.info(f"✅ VLLM 파인튜닝 완료: {hf_model_url}")
-                    return hf_model_url
-                    
-                elif current_status == "failed":
-                    error_msg = status.get("error_message", "알 수 없는 오류")
-                    logger.error(f"❌ VLLM 파인튜닝 실패: {error_msg}")
-                    return None
-                
-                # 타임아웃 확인
-                elapsed = (datetime.now() - start_time).total_seconds()
-                if elapsed > timeout:
-                    logger.error(f"⏰ VLLM 파인튜닝 타임아웃: {timeout}초")
-                    return None
-                
-                # 10초 대기
-                await asyncio.sleep(10)
-                
-            except Exception as e:
-                logger.error(f"VLLM 파인튜닝 상태 확인 실패: {e}")
-                return None
+    # 폴링 방식은 더 이상 사용하지 않음 (웹훅 기반으로 전환)
+    # async def _wait_for_vllm_finetuning(self, task_id: str, vllm_client, timeout: int = 3600) -> Optional[str]:
+    #     """VLLM 파인튜닝 완료 대기"""
+    #     import asyncio
+    #     
+    #     start_time = datetime.now()
+    #     
+    #     while True:
+    #         try:
+    #             status = await vllm_client.get_finetuning_status(task_id)
+    #             current_status = status.get("status")
+    #             
+    #             logger.info(f"VLLM 파인튜닝 상태: {current_status}")
+    #             
+    #             if current_status == "completed":
+    #                 hf_model_url = status.get("hf_model_url")
+    #                 logger.info(f"✅ VLLM 파인튜닝 완료: {hf_model_url}")
+    #                 return hf_model_url
+    #                 
+    #             elif current_status == "failed":
+    #                 error_msg = status.get("error_message", "알 수 없는 오류")
+    #                 logger.error(f"❌ VLLM 파인튜닝 실패: {error_msg}")
+    #                 return None
+    #             
+    #             # 타임아웃 확인
+    #             elapsed = (datetime.now() - start_time).total_seconds()
+    #             if elapsed > timeout:
+    #                 logger.error(f"⏰ VLLM 파인튜닝 타임아웃: {timeout}초")
+    #                 return None
+    #             
+    #             # 10초 대기
+    #             await asyncio.sleep(10)
+    #             
+    #         except Exception as e:
+    #             logger.error(f"VLLM 파인튜닝 상태 확인 실패: {e}")
+    #             return None
     
     
     def start_finetuning_task(self, influencer_id: str, qa_task_id: str, 
@@ -521,7 +524,7 @@ class InfluencerFineTuningService:
             task.status = FineTuningStatus.TRAINING
             task.updated_at = datetime.now()
             
-            hf_model_url = await self.run_finetuning(
+            vllm_task_id = await self.run_finetuning(
                 qa_data=finetuning_qa_data,
                 system_message=system_message,
                 hf_repo_id=task.hf_repo_id,
@@ -530,20 +533,31 @@ class InfluencerFineTuningService:
                 batch_id=task.batch_id
             )
             
-            if hf_model_url:
-                # 3. 업로드 완료
-                task.status = FineTuningStatus.UPLOADING
-                task.hf_model_url = hf_model_url
-                task.updated_at = datetime.now()
+            if vllm_task_id:
+                # VLLM 서버에 작업이 제출됨
+                # 웹훅을 통해 완료 통지를 받을 예정
+                logger.info(f"파인튜닝 작업 제출됨: {task_id} → VLLM task_id: {vllm_task_id}")
                 
-                # 4. 완료
-                task.status = FineTuningStatus.COMPLETED
-                task.updated_at = datetime.now()
+                # BatchKey 테이블에 task_id 업데이트 (웹훅 처리를 위해)
+                if task.batch_id:
+                    from app.database import get_db
+                    from app.models.influencer import BatchKey
+                    try:
+                        db_gen = get_db()
+                        db = next(db_gen)
+                        batch_key = db.query(BatchKey).filter(BatchKey.id == task.batch_id).first()
+                        if batch_key:
+                            batch_key.task_id = vllm_task_id
+                            db.commit()
+                            logger.info(f"BatchKey에 VLLM task_id 저장: {vllm_task_id}")
+                    except Exception as e:
+                        logger.error(f"BatchKey 업데이트 실패: {e}")
+                    finally:
+                        db_gen.close()
                 
-                logger.info(f"파인튜닝 작업 완료: {task_id} → {task.hf_model_url}")
                 return True
             else:
-                raise Exception(f"파인튜닝 실행 실패: 모델 URL을 반환하지 못했습니다.")
+                raise Exception(f"파인튜닝 실행 실패: VLLM 작업 제출 실패")
             
         except Exception as e:
             task.status = FineTuningStatus.FAILED

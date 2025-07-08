@@ -494,7 +494,7 @@ async def generate_ai_response(message_text: str, influencer: AIInfluencer, send
                 system_message=system_message,
                 influencer_name=influencer.influencer_name,
                 model_id=model_id,
-                max_new_tokens=150,
+                max_new_tokens=300,
                 temperature=0.7
             )
             
