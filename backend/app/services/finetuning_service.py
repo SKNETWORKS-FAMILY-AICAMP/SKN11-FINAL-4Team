@@ -171,6 +171,17 @@ class InfluencerFineTuningService:
             content = response['Body'].read().decode('utf-8')
             qa_pairs = []
             
+            # 먼저 전체 내용을 하나의 JSON으로 파싱 시도 (처리된 QA 형식)
+            try:
+                data = json.loads(content)
+                if isinstance(data, dict) and 'qa_pairs' in data:
+                    qa_pairs = data['qa_pairs']
+                    logger.info(f"S3에서 처리된 QA 데이터 로드 완료: {len(qa_pairs)}개 QA 쌍")
+                    return qa_pairs
+            except json.JSONDecodeError:
+                logger.info("전체 JSON 파싱 실패, JSONL 형식으로 재시도")
+            
+            # JSONL 형식으로 파싱 (각 줄이 별도의 JSON)
             for line in content.splitlines():
                 if not line.strip(): # 빈 줄 건너뛰기
                     continue
@@ -178,16 +189,8 @@ class InfluencerFineTuningService:
                 try:
                     data = json.loads(line)
                     
-                    # Case 1: Top-level object contains 'qa_pairs' list
-                    if isinstance(data, dict) and 'qa_pairs' in data and isinstance(data['qa_pairs'], list):
-                        for item in data['qa_pairs']:
-                            if isinstance(item, dict) and 'question' in item and 'answer' in item:
-                                qa_pairs.append({"question": item['question'], "answer": item['answer']})
-                            else:
-                                logger.warning(f"S3 QA 데이터: 'qa_pairs' 내부에 유효하지 않은 QA 쌍 발견: {item}")
-                    
-                    # Case 2: Single QA pair as a top-level object
-                    elif isinstance(data, dict) and 'question' in data and 'answer' in data:
+                    # Single QA pair as a top-level object
+                    if isinstance(data, dict) and 'question' in data and 'answer' in data:
                         qa_pairs.append({"question": data['question'], "answer": data['answer']})
                     
                     # Case 3: OpenAI batch result format
