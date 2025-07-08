@@ -406,7 +406,7 @@ async def handle_instagram_dm_event(messaging_event: Dict, db: Session):
                 return
             
             if not influencer:
-                logger.warning(f"❌ 수신자 ID {sender_id}에 해당하는 활성 AI 인플루언서를 찾을 수 없습니다.")
+                logger.warning(f"❌ 수신자 ID {recipient_id}에 해당하는 활성 AI 인플루언서를 찾을 수 없습니다.")
                 # 모든 AI 인플루언서 목록 로그
                 all_influencers = db.query(AIInfluencer).all()
                 logger.info(f"🔍 전체 AI 인플루언서 목록 ({len(all_influencers)}개):")
@@ -422,7 +422,7 @@ async def handle_instagram_dm_event(messaging_event: Dict, db: Session):
             
             # AI 응답 생성
             logger.info("🧠 AI 응답 생성 시작...")
-            ai_response = await generate_ai_response(message_text, influencer, recipient_id, db)
+            ai_response = await generate_ai_response(message_text, influencer, sender_id, db)
             logger.info(f"🧠 AI 응답 생성 완료: {ai_response[:100]}...")
             
             # 인스타그램으로 DM 응답 전송
