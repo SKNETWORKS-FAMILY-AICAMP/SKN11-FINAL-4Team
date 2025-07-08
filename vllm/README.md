@@ -58,6 +58,7 @@ MAX_LORA_RANK=64
 
 ### 3. 서버 실행
 
+**통합 vLLM 서버 실행:**
 ```bash
 cd vllm
 python main.py
@@ -68,6 +69,13 @@ python main.py
 ```bash
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
+
+**주요 기능:**
+- vLLM 기반 GPU 추론
+- LoRA 어댑터 관리
+- 파인튜닝 파이프라인
+- WebSocket 실시간 채팅
+- Speech Generator API (OpenAI 기반 톤 변형 생성)
 
 ## 🌐 API 엔드포인트
 
@@ -88,6 +96,9 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 - `POST /finetuning/start` - 파인튜닝 시작
 - `GET /finetuning/status/{task_id}` - 파인튜닝 상태 조회
 - `GET /finetuning/tasks` - 파인튜닝 작업 목록
+
+### Speech Generator (OpenAI 기반)
+- `POST /generate_qa` - 캐릭터 프로필 기반 Q&A 및 톤 변형 생성
 
 ## 🔧 FastAPI 백엔드 통합
 

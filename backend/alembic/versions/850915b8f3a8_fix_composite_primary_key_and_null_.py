@@ -85,7 +85,7 @@ def upgrade() -> None:
         "AI_INFLUENCER",
         "hf_manage_id",
         existing_type=sa.String(255),
-        nullable=False,
+        nullable=True,
         comment="허깅페이스 토큰 관리 고유 식별자",
     )
 

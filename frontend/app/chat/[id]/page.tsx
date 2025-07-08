@@ -55,23 +55,9 @@ export default function ChatPage() {
         description: data.influencer_description || '',
         learning_status: data.learning_status,
         chatbot_option: data.chatbot_option,
+        influencer_model_repo: data.influencer_model_repo || '',
+        group_id: String(data.group_id || '')
       })
-
-
-      if (response.ok) {
-        const data = await response.json()
-        setModel({
-          id: data.influencer_id,
-          name: data.influencer_name,
-          description: data.influencer_description || '',
-          learning_status: data.learning_status,
-          chatbot_option: data.chatbot_option,
-          influencer_model_repo: data.influencer_model_repo,
-          group_id: data.group_id,
-        })
-      } else {
-        console.error('Failed to load model data:', response.status)
-      }
     } catch (error) {
       console.error("Error loading model data:", error)
     } finally {

@@ -17,22 +17,13 @@ logger = logging.getLogger(__name__)
 class BackgroundTaskManager:
     def __init__(self):
         self.qa_generator = InfluencerQAGenerator()
-        self.running_tasks: Dict[str, asyncio.Task] = {}
 
-    def is_task_running(self, task_id: str) -> bool:
-        """특정 작업이 현재 실행 중인지 확인"""
-        return task_id in self.running_tasks and not self.running_tasks[task_id].done()
-
-    def get_running_tasks_count(self) -> int:
-        """현재 실행 중인 작업의 개수를 반환"""
-        # 완료된 작업은 running_tasks에서 제거될 수 있으므로, 실제 실행 중인 작업만 카운트
-        return sum(1 for task in self.running_tasks.values() if not task.done())
-        
-    async def start_qa_generation_task(self, influencer_id: str):
+    async def start_qa_generation_task(self, influencer_id: str, user_id: str = None):
         """
         인플루언서 QA 생성 백그라운드 작업 시작
         Args:
             influencer_id: 인플루언서 ID
+            user_id: 사용자 ID (권한 확인용)
         """
         try:
             logger.info(f"🎯 백그라운드: QA 생성 작업 시작 - influencer_id={influencer_id}")
@@ -43,7 +34,7 @@ class BackgroundTaskManager:
             
             try:
                 # QA 생성 작업 시작
-                task_id = self.qa_generator.start_qa_generation(influencer_id, db)
+                task_id = self.qa_generator.start_qa_generation(influencer_id, db, user_id)
                 logger.info(f"✅ 백그라운드: QA 생성 작업 시작 완료 - task_id={task_id}")
                 
             finally:
@@ -62,8 +53,8 @@ def get_background_task_manager() -> BackgroundTaskManager:
     return background_task_manager
 
 
-async def generate_influencer_qa_background(influencer_id: str):
+async def generate_influencer_qa_background(influencer_id: str, user_id: str = None):
     """인플루언서 QA 생성 백그라운드 작업 시작 함수"""
     logger.info(f"🚀 백그라운드 함수 호출 - influencer_id={influencer_id}")
     manager = get_background_task_manager()
-    await manager.start_qa_generation_task(influencer_id)
+    await manager.start_qa_generation_task(influencer_id, user_id)

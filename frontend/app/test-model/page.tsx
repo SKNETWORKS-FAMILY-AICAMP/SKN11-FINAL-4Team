@@ -77,12 +77,10 @@ export default function TestModelPage() {
       }
       
       // 디버깅을 위한 로그 추가
-      console.log('Sending request:', JSON.stringify(request, null, 2))
       
       const data = await ModelService.multiChat(request)
       
       // 응답 로그 추가
-      console.log('Received response:', JSON.stringify(data, null, 2))
       const aiMessages: ChatMessage[] = data.results.map((result, index) => ({
         id: (Date.now() + index + 1).toString(),
         type: "ai" as const,

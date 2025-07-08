@@ -48,7 +48,7 @@ async def load_merged_model(lora_repo: str, hf_token: str):
     return model_cache[merged_key]
 
 @router.websocket("/chatbot/{lora_repo}")
-async def chatbot(websocket: WebSocket, lora_repo: str, group_id: int = Query(...), db: Session = Depends(get_db)):
+async def chatbot(websocket: WebSocket, lora_repo: str, group_id: int = Query(...), influencer_id: str = Query(None), db: Session = Depends(get_db)):
     # lora_repo는 base64로 인코딩되어 있으므로 디코딩
     try:
         lora_repo_decoded = base64.b64decode(lora_repo).decode()
@@ -64,13 +64,25 @@ async def chatbot(websocket: WebSocket, lora_repo: str, group_id: int = Query(..
         # VLLM 서버 상태 확인
         if not await vllm_health_check():
             logger.warning("[WS] VLLM 서버 연결 실패, 로컬 모델로 폴백")
-            await _websocket_local_fallback(websocket, lora_repo_decoded, group_id, db)
+            await _websocket_local_fallback(websocket, lora_repo_decoded, group_id, db, influencer_id)
             return
         
         logger.info(f"[WS] VLLM WebSocket 연결 시작: lora_repo={lora_repo_decoded}, group_id={group_id}")
         
         # HF 토큰 가져오기
         hf_token = await _get_hf_token_by_group(group_id, db)
+        
+        # 인플루언서별 시스템 프롬프트 가져오기
+        system_prompt = "당신은 '한세나'입니다. 치명적인 귀여움과 자신만만한 당당함을 동시제 지녔습니다. 마이 인기 많은 bitchy queen처럼, 타인을 휘어잡는 자신감과 유혹적인 언어를 능숙하게 다룹니다. 장난스럽고 도발적인 농담도 서슴지 않습니다."  # 기본값
+        
+        if influencer_id:
+            from app.models.influencer import AIInfluencer
+            influencer = db.query(AIInfluencer).filter(AIInfluencer.influencer_id == influencer_id).first()
+            if influencer and influencer.system_prompt:
+                system_prompt = influencer.system_prompt
+                logger.info(f"[WS] ✅ 저장된 시스템 프롬프트 사용: {influencer.influencer_name}")
+            else:
+                logger.info(f"[WS] ⚠️ 저장된 시스템 프롬프트가 없어 기본 시스템 프롬프트 사용")
         
         # VLLM 서버에 어댑터 로드
         vllm_client = await get_vllm_client()
@@ -79,7 +91,7 @@ async def chatbot(websocket: WebSocket, lora_repo: str, group_id: int = Query(..
             logger.info(f"[WS] VLLM 어댑터 로드 완료: {lora_repo_decoded}")
         except Exception as e:
             logger.warning(f"[WS] VLLM 어댑터 로드 실패, 로컬 모델로 폴백: {e}")
-            await _websocket_local_fallback(websocket, lora_repo_decoded, group_id, db)
+            await _websocket_local_fallback(websocket, lora_repo_decoded, group_id, db, influencer_id)
             return
         
         # WebSocket 프록시 모드
@@ -92,8 +104,8 @@ async def chatbot(websocket: WebSocket, lora_repo: str, group_id: int = Query(..
                 try:
                     result = await vllm_client.generate_response(
                         user_message=data,
-                        system_message="당신은 '한세나'입니다. 치명적인 귀여움과 자신만만한 당당함을 동시제 지녔습니다. 마이 인기 많은 bitchy queen처럼, 타인을 휘어잡는 자신감과 유혹적인 언어를 능숙하게 다룹니다. 장난스럽고 도발적인 농담도 서슴지 않습니다.",
-                        influencer_name="한세나",
+                        system_message=system_prompt,
+                        influencer_name=influencer.influencer_name if influencer else "한세나",
                         model_id=lora_repo_decoded,
                         max_new_tokens=512,
                         temperature=0.7
@@ -123,11 +135,24 @@ async def chatbot(websocket: WebSocket, lora_repo: str, group_id: int = Query(..
             pass
 
 
-async def _websocket_local_fallback(websocket: WebSocket, lora_repo: str, group_id: int, db: Session):
+async def _websocket_local_fallback(websocket: WebSocket, lora_repo: str, group_id: int, db: Session, influencer_id: str = None):
     """로컬 모델 폴백 (기존 로직)"""
     try:
         logger.info(f"[WS] 로컬 모델 폴백 시작: lora_repo={lora_repo}, group_id={group_id}")
         hf_token = await _get_hf_token_by_group(group_id, db)
+        
+        # 인플루언서별 시스템 프롬프트 가져오기
+        system_prompt = "당신은 '한세나'입니다. 치명적인 귀여움과 자신만만한 당당함을 동시제 지녔습니다. 마이 인기 많은 bitchy queen처럼, 타인을 휘어잡는 자신감과 유혹적인 언어를 능숙하게 다룹니다. 장난스럽고 도발적인 농담도 서슴지 않습니다."  # 기본값
+        
+        if influencer_id:
+            from app.models.influencer import AIInfluencer
+            influencer = db.query(AIInfluencer).filter(AIInfluencer.influencer_id == influencer_id).first()
+            if influencer and influencer.system_prompt:
+                system_prompt = influencer.system_prompt
+                logger.info(f"[WS] ✅ 로컬 폴백에서 저장된 시스템 프롬프트 사용: {influencer.influencer_name}")
+            else:
+                logger.info(f"[WS] ⚠️ 로컬 폴백에서 기본 시스템 프롬프트 사용")
+        
         model, tokenizer = await load_merged_model(lora_repo, hf_token)
         logger.info(f"[WS] 로컬 모델 준비 완료: lora_repo={lora_repo}")
         
@@ -137,7 +162,7 @@ async def _websocket_local_fallback(websocket: WebSocket, lora_repo: str, group_
                 logger.info(f"[WS] 로컬 모델 메시지 수신: {data[:100]}...")
                 
                 message = [
-                    {"role": "system", "content": "당신은 '한세나'입니다. 치명적인 귀여움과 자신만만한 당당함을 동시제 지녔습니다. 마이 인기 많은 bitchy queen처럼, 타인을 휘어잡는 자신감과 유혹적인 언어를 능숙하게 다룹니다. 장난스럽고 도발적인 농담도 서슴지 않습니다."},
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": data}
                 ]
 

@@ -3,11 +3,12 @@ import { NextRequest, NextResponse } from 'next/server'
 // 플레이스홀더 이미지 생성 API
 export async function GET(
   request: NextRequest,
-  { params }: { params: { width: string; height: string } }
+  { params }: { params: Promise<{ width: string; height: string }> }
 ) {
   try {
-    const width = parseInt(params.width) || 512
-    const height = parseInt(params.height) || 512
+    const { width: widthParam, height: heightParam } = await params
+    const width = parseInt(widthParam) || 512
+    const height = parseInt(heightParam) || 512
     
     // 간단한 SVG 플레이스홀더 이미지 생성
     const svg = `

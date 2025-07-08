@@ -176,7 +176,6 @@ export async function POST(request: NextRequest) {
     }
 
     const data = await response.json()
-    console.log('Backend response:', data)
     
     // 백엔드 응답에서 job_id 또는 prompt_id 찾기
     const jobId = data.job_id || data.prompt_id || data.id

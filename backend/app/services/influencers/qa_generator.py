@@ -10,6 +10,7 @@ import time
 import random
 import tempfile
 import logging
+import requests
 from typing import List, Dict, Optional
 from openai import OpenAI
 from datetime import datetime
@@ -21,38 +22,34 @@ from app.database import get_db
 from app.services.influencers.crud import get_influencer_by_id
 from app.models.influencer import BatchKey
 from app.core.config import settings
-from vllm.pipeline.speech_generator import CharacterProfile, Gender, SpeechGenerator
+# Backend 내부 모델 사용
+from app.models.vllm_models import Gender, VLLMCharacterProfile
+
+# 하위 호환성을 위한 별칭
+CharacterProfile = VLLMCharacterProfile
+
+class SpeechGenerator:
+    """vLLM 서버 대신 HTTP API 클라이언트 사용"""
+    def __init__(self, *args, **kwargs):
+        pass
+    
+    def generate_character_random_tones_sync(self, *args, **kwargs):
+        raise RuntimeError("이 메서드는 더 이상 사용되지 않습니다. vLLM 서버 API를 사용하세요.")
 
 
 class QAGenerationStatus(Enum):
     PENDING = "pending"
+    TONE_GENERATION = "tone_generation"      # 어투 생성 중
+    DOMAIN_PREPARATION = "domain_preparation" # 도메인별 질문 준비
     PROCESSING = "processing"  
     BATCH_SUBMITTED = "batch_submitted"
     BATCH_PROCESSING = "batch_processing"
     BATCH_COMPLETED = "batch_completed"
+    BATCH_UPLOAD = "batch_upload"            # S3 업로드 중
     PROCESSING_RESULTS = "processing_results"
     COMPLETED = "completed"
+    FINALIZED = "finalized"
     FAILED = "failed"
-
-
-@dataclass
-class QAGenerationTask:
-    task_id: str
-    influencer_id: str
-    status: QAGenerationStatus
-    batch_id: Optional[str] = None
-    total_qa_pairs: int = settings.QA_GENERATION_COUNT
-    generated_qa_pairs: int = 0
-    error_message: Optional[str] = None
-    s3_urls: Optional[Dict] = None
-    created_at: datetime = None
-    updated_at: datetime = None
-    
-    def __post_init__(self):
-        if self.created_at is None:
-            self.created_at = datetime.now()
-        if self.updated_at is None:
-            self.updated_at = datetime.now()
 
 
 class InfluencerQAGenerator:
@@ -64,9 +61,6 @@ class InfluencerQAGenerator:
         """
         self.client = OpenAI(api_key=api_key or os.getenv('OPENAI_API_KEY'))
         self.speech_generator = SpeechGenerator(api_key)
-# batch_service 제거됨 - BatchKey 모델 직접 사용
-        # 메모리 기반 tasks는 웹훅 모드에서만 사용 (하위 호환성)
-        self.tasks: Dict[str, QAGenerationTask] = {}
         
     def influencer_to_character_profile(self, influencer_data: dict, style_preset: dict = None, mbti: dict = None) -> CharacterProfile:
         """
@@ -100,8 +94,9 @@ class InfluencerQAGenerator:
         
         # 스타일 프리셋에서 정보 추출
         if style_preset:
-            gender = gender_map.get(style_preset.get('influencer_gender', 3), Gender.NON_BINARY)
-            age = age_group_map.get(style_preset.get('influencer_age_group', 2), 25)
+            gender = gender_map.get(style_preset.get('influencer_gender'), Gender.NON_BINARY)
+            age_group = style_preset.get('influencer_age_group')
+            age_range = f"{age_group_map.get(age_group, 25)}대" if age_group else "알 수 없음"
             personality = style_preset.get('influencer_personality', '친근하고 활발한 성격')
             
             # 설명에 스타일 정보 추가
@@ -112,89 +107,223 @@ class InfluencerQAGenerator:
                 description = f"헤어스타일: {hairstyle}, 스타일: {style}, 말투: {speech}"
         else:
             gender = Gender.NON_BINARY
-            age = 25
+            age_range = "알 수 없음"
             personality = '친근하고 활발한 성격'
             
         # MBTI 정보 추출
         if mbti:
-            mbti_type = mbti.get('mbti_name', 'ENFP')
+            mbti_type = mbti.get('mbti_name')
+            if not mbti_type:
+                mbti_type = "알 수 없음"
             # 성격에 MBTI 특성 추가
             mbti_traits = mbti.get('mbti_traits', '')
             if mbti_traits:
                 personality += f" ({mbti_traits})"
         else:
-            mbti_type = 'ENFP'  # 기본값
+            mbti_type = None
             
         return CharacterProfile(
             name=name,
             description=description,
-            age=age,
+            age_range=age_range,
             gender=gender,
             personality=personality,
             mbti=mbti_type
         )
     
-    def create_qa_batch_requests(self, character: CharacterProfile, num_requests: int = None) -> List[Dict]:
+    def create_qa_batch_requests(self, character: CharacterProfile, num_requests: int = None, system_prompt: str = None) -> List[Dict]:
         """
         인플루언서 캐릭터를 위한 QA 생성 배치 요청 생성
+        VLLM 서버에서 직접 OpenAI Batch API 형식의 JSONL을 생성
         Args:
             character: 캐릭터 프로필
             num_requests: 생성할 QA 개수 (None이면 환경변수 QA_GENERATION_COUNT 사용)
+            system_prompt: 시스템 프롬프트
         Returns:
-            배치 요청 리스트
+            배치 요청 리스트 (OpenAI Batch API 형식)
         """
         if num_requests is None:
             num_requests = settings.QA_GENERATION_COUNT
-        # 다양한 질문 주제들
-        question_topics = [
-            "일상생활과 취미",
-            "패션과 뷰티",
-            "여행과 맛집",
-            "연애와 관계",
-            "직업과 커리어", 
-            "건강과 운동",
-            "문화와 엔터테인먼트",
-            "소셜미디어와 트렌드",
-            "자기계발과 성장",
-            "가족과 친구들",
-            "쇼핑과 소비",
-            "음식과 요리",
-            "스트레스와 힐링",
-            "미래와 꿈",
-            "추억과 경험"
-        ]
         
-        requests = []
+        print(f"QA 생성 요청: {num_requests}개 (환경변수 QA_GENERATION_COUNT: {settings.QA_GENERATION_COUNT})")
         
-        # 캐릭터 프롬프트 생성
-        character_prompt = self.speech_generator.create_character_prompt(character)
+        # VLLM 서버 URL 설정
+        vllm_server_url = getattr(settings, 'VLLM_SERVER_URL', 'http://localhost:8001')
         
-        for i in range(num_requests):
-            topic = random.choice(question_topics)
+        # VLLM 서버에 요청할 캐릭터 프로필 데이터 준비
+        character_data = {
+            "name": character.name,
+            "description": character.description,
+            "age_range": character.age_range,
+            "gender": character.gender.value if hasattr(character.gender, 'value') else character.gender if character.gender else "없음",
+            "personality": character.personality,
+            "mbti": character.mbti
+        }
+        
+        # VLLM 서버에서 JSONL 생성 작업 시작 (새로운 QA 전용 엔드포인트 사용)
+        try:
+            print(f"VLLM 서버에 {num_requests}개 QA JSONL 생성 작업 시작 요청...")
             
-            request = {
-                "custom_id": f"influencer_qa_{character.name}_{i+1}",
-                "method": "POST",
-                "url": "/v1/chat/completions",
-                "body": {
-                    "model": "gpt-4o-mini",
-                    "messages": [
-                        {
-                            "role": "system",
-                            "content": character_prompt
-                        },
-                        {
-                            "role": "user",
-                            "content": f"'{topic}' 주제에 대한 자연스러운 질문을 하나 만들고, 당신의 캐릭터와 말투로 답변해주세요. 형식: Q: [질문] A: [답변]"
-                        }
-                    ],
-                    "max_tokens": 300,
-                    "temperature": 0.8
-                }
-            }
-            requests.append(request)
+            # 새로운 QA 생성 엔드포인트 사용
+            response = requests.post(
+                f"{vllm_server_url}/qa/generate_qa_for_influencer",
+                json={
+                    "character": character_data,
+                    "num_qa_pairs": num_requests,
+                    "domains": ["일상생활", "과학기술", "사회이슈", "인문학", "스포츠", "역사문화"],
+                    "system_prompt": system_prompt
+                },
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                task_data = response.json()
+                task_id = task_data.get('task_id')
+                
+                print(f"VLLM 서버 QA JSONL 생성 작업 시작 성공: task_id={task_id}")
+                
+                # 작업 완료까지 대기 (새로운 엔드포인트 사용)
+                batch_requests = self._wait_for_qa_completion(vllm_server_url, task_id)
+                
+                if batch_requests:
+                    print(f"QA JSONL 생성 완료: {len(batch_requests)}개 배치 요청")
+                    return batch_requests
+                else:
+                    print("QA JSONL 생성 작업이 실패했습니다.")
+                    raise Exception("vLLM 서버에서 QA JSONL 생성에 실패했습니다.")
+                        
+            else:
+                print(f"VLLM 서버 QA JSONL 생성 작업 시작 실패: {response.status_code} - {response.text}")
+                raise Exception(f"vLLM 서버 QA JSONL 생성 작업 시작 실패: {response.status_code} - {response.text}")
+                
+        except Exception as e:
+            print(f"VLLM 서버 QA JSONL 생성 오류: {e}")
+            raise Exception(f"vLLM 서버 QA JSONL 생성 오류: {e}")
+    
+    def _wait_for_qa_completion(self, vllm_server_url: str, task_id: str, max_wait_time: int = 1800) -> List[Dict]:
+        """
+        QA 생성 작업이 완료될 때까지 대기하고 결과를 반환 (새로운 엔드포인트 사용)
+        Args:
+            vllm_server_url: VLLM 서버 URL
+            task_id: 작업 ID
+            max_wait_time: 최대 대기 시간 (초, 기본 30분)
+        Returns:
+            OpenAI Batch API 형식의 배치 요청 리스트
+        """
+        import time
         
-        return requests
+        start_time = time.time()
+        check_interval = 5  # 5초마다 상태 확인
+        
+        print(f"QA 생성 작업 완료 대기 중: task_id={task_id}")
+        
+        while time.time() - start_time < max_wait_time:
+            try:
+                # 새로운 QA 상태 확인 엔드포인트 사용
+                status_response = requests.get(
+                    f"{vllm_server_url}/qa/qa_status/{task_id}",
+                    timeout=10
+                )
+                
+                if status_response.status_code == 200:
+                    status_data = status_response.json()
+                    status = status_data.get('status')
+                    progress = status_data.get('progress', 0)
+                    completed = status_data.get('completed', 0)
+                    total_qa_pairs = status_data.get('total_qa_pairs', 0)
+                    domains = status_data.get('domains', [])
+                    
+                    print(f"QA 생성 진행 상황: {progress:.1f}% ({completed}/{total_qa_pairs}), 도메인: {', '.join(domains)}")
+                    
+                    if status == "completed":
+                        # 새로운 QA 결과 엔드포인트 사용
+                        result_response = requests.get(
+                            f"{vllm_server_url}/qa/qa_results/{task_id}",
+                            timeout=30
+                        )
+                        
+                        if result_response.status_code == 200:
+                            result_data = result_response.json()
+                            batch_requests = result_data.get('batch_requests', [])
+                            total_requests = result_data.get('total_requests', 0)
+                            domains = result_data.get('domains', [])
+                            
+                            print(f"QA 생성 완료: {total_requests}개 배치 요청, 도메인: {', '.join(domains)}")
+                            return batch_requests
+                        else:
+                            print(f"QA 결과 가져오기 실패: {result_response.status_code}")
+                            return []
+                    
+                    elif status == "failed":
+                        error_msg = status_data.get('error', '알 수 없는 오류')
+                        print(f"QA 생성 작업이 실패했습니다: {error_msg}")
+                        return []
+                    
+                    # 아직 진행 중이면 대기
+                    time.sleep(check_interval)
+                    
+                else:
+                    print(f"QA 상태 확인 실패: {status_response.status_code}")
+                    time.sleep(check_interval)
+                    
+            except Exception as e:
+                print(f"QA 상태 확인 오류: {e}")
+                time.sleep(check_interval)
+        
+        print(f"QA 생성 작업 시간 초과: {max_wait_time}초")
+        return []
+
+    # 폴백 QA 요청 생성 메서드는 제거됨 - vLLM 서버 실패 시 예외 발생
+
+    def _create_qa_batch_requests_from_results(self, qa_results: List[Dict], character: CharacterProfile, system_prompt: str) -> List[Dict]:
+        """
+        VLLM 서버에서 생성된 QA 결과를 배치 요청으로 변환
+        Args:
+            qa_results: VLLM 서버에서 생성된 QA 결과 리스트
+            character: 캐릭터 프로필
+            system_prompt: 시스템 프롬프트
+        Returns:
+            배치 요청 리스트
+        """
+        batch_requests = []
+        
+        for i, qa_result in enumerate(qa_results):
+            question = qa_result.get('question', '')
+            responses = qa_result.get('responses', {})
+            
+            # 각 말투별 응답을 개별 배치 요청으로 생성
+            for tone_name, tone_responses in responses.items():
+                if tone_responses and len(tone_responses) > 0:
+                    tone_response = tone_responses[0]  # 첫 번째 응답 사용
+                    answer_text = tone_response.get('text', '')
+                    
+                    # 시스템 프롬프트와 캐릭터 정보를 결합
+                    enhanced_system_prompt = f"{system_prompt}\n\n캐릭터 정보:\n- 이름: {character.name}\n- 성격: {character.personality}\n- 말투: {tone_name}"
+                    
+                    request = {
+                        "custom_id": f"influencer_qa_{character.name}_{i + 1}_{tone_name}",
+                        "method": "POST",
+                        "url": "/v1/chat/completions",
+                        "body": {
+                            "model": "gpt-4o-mini",
+                            "messages": [
+                                {
+                                    "role": "system",
+                                    "content": enhanced_system_prompt
+                                },
+                                {
+                                    "role": "user",
+                                    "content": f"Q: {question}\nA: {answer_text}\n\n위 QA 쌍을 검토하고 개선해주세요."
+                                }
+                            ],
+                            "max_tokens": 500,
+                            "temperature": 0.7
+                        }
+                    }
+                    
+                    batch_requests.append(request)
+        
+        return batch_requests
     
     def save_batch_file(self, requests: List[Dict], task_id: str) -> str:
         """배치 요청을 JSONL 파일로 저장"""
@@ -333,37 +462,51 @@ class InfluencerQAGenerator:
         
         print(f"QA 쌍 {len(qa_pairs)}개가 {filepath}에 저장되었습니다.")
     
-    def start_qa_generation(self, influencer_id: str, db: Session) -> str:
+    def start_qa_generation(self, influencer_id: str, db: Session, user_id: str = None) -> str:
         """
         인플루언서를 위한 QA 생성 시작
         Args:
             influencer_id: 인플루언서 ID
             db: 데이터베이스 세션
+            user_id: 사용자 ID (권한 확인용)
         Returns:
             작업 ID
         """
         # 작업 ID 생성
         task_id = f"qa_{influencer_id}_{int(time.time())}"
         print(f"🎨 QA Generator: 작업 시작 - task_id={task_id}, influencer_id={influencer_id}")
-        
-        # 웹훅 모드에서는 메모리에도 저장 (하위 호환성)
-        use_webhook = settings.OPENAI_MONITORING_MODE == 'webhook'
-        if use_webhook:
-            task = QAGenerationTask(
-                task_id=task_id,
-                influencer_id=influencer_id,
-                status=QAGenerationStatus.PENDING
-            )
-            self.tasks[task_id] = task
-            print(f"웹훅 모드: 메모리에 작업 저장: task_id={task_id}")
+
+        # BatchKey 모델을 사용하여 DB에 작업 기록
+        import uuid
+        batch_key_entry = BatchKey(
+            batch_key_id=str(uuid.uuid4()),
+            batch_key=task_id,  # batch_key 필드에 task_id 값 설정
+            task_id=task_id,
+            influencer_id=influencer_id,
+            status=QAGenerationStatus.PENDING.value,
+            total_qa_pairs=settings.QA_GENERATION_COUNT
+        )
+        db.add(batch_key_entry)
         
         try:
-            # 인플루언서 데이터 가져오기
-            user_id = "system"  # 시스템 작업으로 처리
-            influencer_data = get_influencer_by_id(db, user_id, influencer_id)
+            db.commit()
+            db.refresh(batch_key_entry)
+
+            # 인플루언서 데이터 가져오기 (사용자 권한 확인)
+            if user_id:
+                # 사용자 권한으로 인플루언서 조회
+                influencer_data = get_influencer_by_id(db, user_id, influencer_id)
+            else:
+                # 백그라운드 작업의 경우 직접 조회 (권한 우회)
+                from app.models.influencer import AIInfluencer
+                influencer_data = db.query(AIInfluencer).filter(AIInfluencer.influencer_id == influencer_id).first()
             
             if not influencer_data:
                 raise Exception(f"인플루언서를 찾을 수 없습니다: {influencer_id}")
+
+            # 상태 업데이트: PROCESSING
+            batch_key_entry.status = QAGenerationStatus.PROCESSING.value
+            db.commit()
             
             # 인플루언서 → 캐릭터 프로필 변환
             character = self.influencer_to_character_profile(
@@ -372,42 +515,29 @@ class InfluencerQAGenerator:
                 influencer_data.mbti.__dict__ if influencer_data.mbti else None
             )
             
-            # 배치 요청 생성
-            if use_webhook:
-                task.status = QAGenerationStatus.PROCESSING
+            # 저장된 시스템 프롬프트 가져오기
+            system_prompt = getattr(influencer_data, 'system_prompt', None)
+            if system_prompt:
+                print(f"✅ 저장된 시스템 프롬프트 사용: {system_prompt[:100]}...")
+            else:
+                print("⚠️ 저장된 시스템 프롬프트가 없어 기본 프롬프트 사용")
             
-            requests = self.create_qa_batch_requests(character)
+            # 배치 요청 생성 (시스템 프롬프트 포함)
+            batch_requests = self.create_qa_batch_requests(character, system_prompt=system_prompt)
             
             # 배치 파일 저장
-            batch_file_path = self.save_batch_file(requests, task_id)
+            batch_file_path = self.save_batch_file(batch_requests, task_id)
             
             # 배치 작업 제출
             batch_id = self.submit_batch_job(batch_file_path, task_id)
             
-            # DB에 배치 작업 저장 (BatchKey 모델 직접 사용)
-            import uuid
-            batch_key = BatchKey(
-                batch_key_id=str(uuid.uuid4()),
-                batch_key=batch_id,  # OpenAI 배치 ID를 batch_key로 사용
-                task_id=task_id,
-                influencer_id=influencer_id,
-                openai_batch_id=batch_id,
-                input_file_id=batch_file_path,
-                status="pending",
-                total_qa_pairs=settings.QA_GENERATION_COUNT  # 환경변수에서 읽은 값으로 설정
-            )
-            
-            db.add(batch_key)
+            # DB에 배치 정보 업데이트
+            batch_key_entry.openai_batch_id = batch_id
+            batch_key_entry.input_file_id = batch_file_path
+            batch_key_entry.status = QAGenerationStatus.BATCH_SUBMITTED.value
             db.commit()
-            db.refresh(batch_key)
             
-            print(f"✅ 배치 작업 DB에 저장: task_id={task_id}, batch_id={batch_id}")
-            
-            # 웹훅 모드에서는 메모리 상태도 업데이트
-            if use_webhook:
-                task.batch_id = batch_id
-                task.status = QAGenerationStatus.BATCH_SUBMITTED
-                task.updated_at = datetime.now()
+            print(f"✅ 배치 작업 DB에 저장 및 상태 업데이트: task_id={task_id}, batch_id={batch_id}")
             
             print(f"🎉 QA Generator: 작업 완료 - Task ID: {task_id}, Batch ID: {batch_id}, QA 개수: {settings.QA_GENERATION_COUNT}")
             return task_id
@@ -418,52 +548,13 @@ class InfluencerQAGenerator:
             import traceback
             print(f"🔍 QA Generator: 상세 에러 정보 - {traceback.format_exc()}")
             
-            # 웹훅 모드에서는 메모리 상태도 업데이트
-            if use_webhook and task_id in self.tasks:
-                self.tasks[task_id].status = QAGenerationStatus.FAILED
-                self.tasks[task_id].error_message = error_msg
-                self.tasks[task_id].updated_at = datetime.now()
+            # DB에 오류 상태 업데이트
+            db.rollback() # 오류 발생 시 롤백
+            batch_key_entry.status = QAGenerationStatus.FAILED.value
+            batch_key_entry.error_message = error_msg
+            db.commit()
             
-            # QA 생성 작업에서는 예외를 re-raise하지 않음
             return task_id
-    
-    def get_task_status(self, task_id: str) -> Optional[QAGenerationTask]:
-        """작업 상태 조회"""
-        print(f"작업 상태 조회: task_id={task_id}")
-        print(f"현재 저장된 작업 수: {len(self.tasks)}")
-        print(f"저장된 작업 ID들: {list(self.tasks.keys())}")
-        
-        task = self.tasks.get(task_id)
-        if task:
-            print(f"작업 찾음: status={task.status.value}")
-        else:
-            print(f"작업을 찾을 수 없음")
-        
-        return task
-    
-    def update_task_status(self, task_id: str):
-        """작업 상태 업데이트 (배치 상태 확인)"""
-        task = self.tasks.get(task_id)
-        if not task or not task.batch_id:
-            return
-        
-        try:
-            batch_status = self.check_batch_status(task.batch_id)
-            
-            if batch_status['status'] == 'completed':
-                task.status = QAGenerationStatus.BATCH_COMPLETED
-            elif batch_status['status'] == 'failed':
-                task.status = QAGenerationStatus.FAILED
-                task.error_message = "배치 작업 실패"
-            elif batch_status['status'] in ['validating', 'in_progress']:
-                task.status = QAGenerationStatus.BATCH_PROCESSING
-            
-            task.updated_at = datetime.now()
-            
-        except Exception as e:
-            task.status = QAGenerationStatus.FAILED
-            task.error_message = f"상태 확인 오류: {str(e)}"
-            task.updated_at = datetime.now()
     
     def complete_qa_generation(self, task_id: str, db: Session) -> bool:
         """QA 생성 완료 처리 - 폴링/웹훅 모드 모두 지원"""
@@ -498,14 +589,12 @@ class InfluencerQAGenerator:
             self.save_qa_pairs_to_db(batch_key.influencer_id, qa_pairs, db)
             logger.info(f"💾 QA 쌍 DB 저장 완료")
             
-            # 웹훅 모드에서는 메모리 상태도 업데이트
-            if settings.OPENAI_MONITORING_MODE == 'webhook':
-                task = self.tasks.get(task_id)
-                if task:
-                    task.status = QAGenerationStatus.COMPLETED
-                    task.generated_qa_pairs = len(qa_pairs)
-                    task.updated_at = datetime.now()
-                    logger.info(f"🧠 메모리 상태 업데이트 완료 (웹훅 모드)")
+            # BatchKey 상태 업데이트
+            batch_key.status = QAGenerationStatus.COMPLETED.value
+            batch_key.generated_qa_pairs = len(qa_pairs)
+            batch_key.completed_at = datetime.now()
+            db.commit()
+            logger.info(f"🧠 BatchKey 상태 업데이트 완료 (DB)")
             
             logger.info(f"✅ QA 생성 완료 - Task ID: {task_id}, QA 쌍: {len(qa_pairs)}개")
             return True
@@ -513,12 +602,11 @@ class InfluencerQAGenerator:
         except Exception as e:
             logger.error(f"❌ QA 생성 완료 처리 실패: task_id={task_id}, error={e}", exc_info=True)
             
-            # 웹훅 모드에서는 메모리 상태도 업데이트
-            if settings.OPENAI_MONITORING_MODE == 'webhook':
-                task = self.tasks.get(task_id)
-                if task:
-                    task.status = QAGenerationStatus.FAILED
-                    task.error_message = f"결과 처리 오류: {str(e)}"
-                    task.updated_at = datetime.now()
+            # DB에 오류 상태 업데이트
+            if batch_key:
+                db.rollback() # 오류 발생 시 롤백
+                batch_key.status = QAGenerationStatus.FAILED.value
+                batch_key.error_message = f"결과 처리 오류: {str(e)}"
+                db.commit()
             
             return False

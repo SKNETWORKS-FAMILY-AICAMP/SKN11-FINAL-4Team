@@ -3,11 +3,11 @@ import { NextRequest, NextResponse } from 'next/server'
 // 특정 워크플로우 조회
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id: workflowId } = await params
+  
   try {
-    const workflowId = params.id
-
     const backendUrl = process.env.BACKEND_URL || 'http://localhost:8000'
     const response = await fetch(`${backendUrl}/api/v1/workflows/${workflowId}`, {
       method: 'GET',
@@ -37,7 +37,7 @@ export async function GET(
     
     // 폴백 데이터
     const mockWorkflow = {
-      id: params.id,
+      id: workflowId,
       name: '샘플 워크플로우',
       description: '샘플 워크플로우입니다',
       category: 'txt2img',
@@ -57,10 +57,11 @@ export async function GET(
 // 워크플로우 업데이트
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id: workflowId } = await params
+  
   try {
-    const workflowId = params.id
     const body = await request.json()
 
     const backendUrl = process.env.BACKEND_URL || 'http://localhost:8000'
@@ -97,10 +98,11 @@ export async function PUT(
 // 워크플로우 삭제
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id: workflowId } = await params
+  
   try {
-    const workflowId = params.id
 
     const backendUrl = process.env.BACKEND_URL || 'http://localhost:8000'
     const response = await fetch(`${backendUrl}/api/v1/workflows/${workflowId}`, {

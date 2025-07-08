@@ -272,7 +272,7 @@ export class PostService {
    * 이미지 업로드
    */
   static async uploadImage(file: File): Promise<{ url: string }> {
-    return await apiClient.uploadFile('/api/v1/posts/upload-image', file)
+    return await apiClient.uploadFiles('/api/v1/posts/upload-image', [file])
   }
 }
 

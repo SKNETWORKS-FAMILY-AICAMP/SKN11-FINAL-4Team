@@ -5,12 +5,12 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Shield, User, Users, Zap } from "lucide-react"
-import { useAuth, useTeamPermission } from "@/hooks/use-auth"
+import { useAuth, usePermission } from "@/hooks/use-auth"
 import PermissionGuard, { ModelCreationGuard, PostCreationGuard } from "@/components/auth/permission-guard"
 
 export default function PermissionDemoPage() {
   const { user, isDefaultTeam, requiresPermissionRequest } = useAuth()
-  const teamPermission = useTeamPermission()
+  const teamPermission = usePermission()
 
   return (
     <PermissionGuard>

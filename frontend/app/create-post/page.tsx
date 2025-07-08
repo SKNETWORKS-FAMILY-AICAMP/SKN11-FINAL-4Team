@@ -4,7 +4,6 @@ import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { Navigation } from "@/components/navigation"
-import { RequireAuth } from "@/components/auth/protected-route"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -327,37 +326,14 @@ export default function CreatePostPage() {
     try {
       // 백엔드 URL 가져오기
       const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://localhost:8000';
-      console.log('Backend URL:', backendUrl);
-      
-      // 먼저 GET 테스트
-      console.log('Testing GET connection...');
-      const getTestResponse = await fetch(`${backendUrl}/api/v1/boards/upload-test-get`, {
-        method: 'GET'
-      });
-      console.log('GET test result:', await getTestResponse.json());
-      
-      // POST 테스트
-      console.log('Testing POST connection...');
-      const testResponse = await fetch(`${backendUrl}/api/v1/boards/upload-test`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({})
-      });
-      console.log('POST test result:', await testResponse.json());
       
       // 인증 토큰 확인
       const token = localStorage.getItem('access_token');
-      console.log('Token exists:', !!token);
-      console.log('Token preview:', token ? token.substring(0, 20) + '...' : 'null');
       
       // 이미지 업로드
       const imageFormData = new FormData()
       imageFormData.append('file', formData.uploaded_image)  // 단일 파일로 변경
       
-      console.log('Uploading image...', formData.uploaded_image);
-      console.log('FormData entries:', Array.from(imageFormData.entries()));
       
       const imageResponse = await fetch(`${backendUrl}/api/v1/boards/upload-image-simple`, {
         method: 'POST',
@@ -368,7 +344,6 @@ export default function CreatePostPage() {
         body: imageFormData
       })
 
-      console.log('Image upload response status:', imageResponse.status);
       
       if (!imageResponse.ok) {
         const errorText = await imageResponse.text();
@@ -377,9 +352,7 @@ export default function CreatePostPage() {
       }
 
       const imageData = await imageResponse.json()
-      console.log('Image upload response:', imageData);
       const imageUrl = imageData.file_url // 백엔드에서 반환된 실제 파일 URL 사용
-      console.log('Image URL:', imageUrl);
 
       // 발행 상태 결정
       let boardStatus = 1; // 기본값: 임시저장
@@ -405,7 +378,6 @@ export default function CreatePostPage() {
         })
       };
       
-      console.log('Sending board data:', boardData);
 
       // 게시글 생성
       const response = await fetch(`${backendUrl}/api/v1/boards`, {
@@ -433,29 +405,26 @@ export default function CreatePostPage() {
   // 권한 확인
   if (!hasPermission('content', 'create')) {
     return (
-      <RequireAuth>
-        <div className="min-h-screen bg-gray-50">
-          <Navigation />
-          <div className="max-w-4xl mx-auto px-4 py-8">
-            <Card>
-              <CardContent className="p-6 text-center">
-                <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
-                <h2 className="text-xl font-semibold mb-2">접근 권한이 없습니다</h2>
-                <p className="text-gray-600 mb-4">게시글을 생성할 권한이 없습니다.</p>
-                <Link href="/dashboard">
-                  <Button>대시보드로 돌아가기</Button>
-                </Link>
-              </CardContent>
-            </Card>
-          </div>
+      <div className="min-h-screen bg-gray-50">
+        <Navigation />
+        <div className="max-w-4xl mx-auto px-4 py-8">
+          <Card>
+            <CardContent className="p-6 text-center">
+              <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
+              <h2 className="text-xl font-semibold mb-2">접근 권한이 없습니다</h2>
+              <p className="text-gray-600 mb-4">게시글을 생성할 권한이 없습니다.</p>
+              <Link href="/dashboard">
+                <Button>대시보드로 돌아가기</Button>
+              </Link>
+            </CardContent>
+          </Card>
         </div>
-      </RequireAuth>
+      </div>
     )
   }
 
   return (
-    <RequireAuth>
-      <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50">
         <Navigation />
 
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -988,6 +957,5 @@ export default function CreatePostPage() {
           </div>
         )}
       </div>
-    </RequireAuth>
   )
 }

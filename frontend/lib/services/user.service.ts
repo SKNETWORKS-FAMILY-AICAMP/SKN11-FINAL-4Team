@@ -47,9 +47,9 @@ export class UserService {
    * 프로필 이미지 업로드
    */
   static async uploadProfileImage(file: File): Promise<User> {
-    const response = await apiClient.uploadFile<UserResponse>(
+    const response = await apiClient.uploadFiles<UserResponse>(
       '/api/v1/users/me/profile-image',
-      file
+      [file]
     )
     return response.user
   }

@@ -3,7 +3,6 @@
 import { useState, useMemo, useEffect } from "react"
 import Link from "next/link"
 import { Navigation } from "@/components/navigation"
-import { RequireAuth } from "@/components/auth/protected-route"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -44,8 +43,17 @@ export default function DashboardPage() {
   const [tempPlatformFilter, setTempPlatformFilter] = useState<string>("all")
   const [isFilterModalOpen, setIsFilterModalOpen] = useState(false)
 
-  // API에서 인플루언서 데이터 가져오기
+  // 사용자가 그룹에 할당되어 있는지 확인
+  const hasValidGroup = user?.teams && user.teams.length > 0
+
+  // API에서 인플루언서 데이터 가져오기 (그룹이 할당된 사용자만)
   useEffect(() => {
+    // 그룹이 할당되지 않은 사용자는 데이터를 가져오지 않음
+    if (!hasValidGroup) {
+      setLoading(false)
+      return
+    }
+
     const fetchInfluencers = async () => {
       try {
         setLoading(true)
@@ -60,7 +68,7 @@ export default function DashboardPage() {
     }
 
     fetchInfluencers()
-  }, [])
+  }, [hasValidGroup])
 
   // 필터 적용된 인플루언서 목록
   const filteredInfluencers = influencers.filter(
@@ -120,12 +128,26 @@ export default function DashboardPage() {
     }
   }
 
-  return (
-    <RequireAuth blockGroup={2}>
+  // 그룹이 할당되지 않은 사용자는 빈 대시보드 표시
+  if (!hasValidGroup) {
+    return (
       <div className="min-h-screen bg-gray-50">
         <Navigation />
-
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <div className="text-center py-12">
+            <h1 className="text-3xl font-bold text-gray-900 mb-4">AI 인플루언서 대시보드</h1>
+            <p className="text-gray-600 text-lg">권한이 할당되면 인플루언서 정보를 확인할 수 있습니다.</p>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <Navigation />
+
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           {/* 대시보드 타이틀 및 설명 */}
           <div className="mb-8">
             <h1 className="text-3xl font-bold text-gray-900">AI 인플루언서 대시보드</h1>
@@ -401,7 +423,6 @@ export default function DashboardPage() {
             </div>
           )}
         </div>
-      </div>
-    </RequireAuth>
+    </div>
   )
 }
