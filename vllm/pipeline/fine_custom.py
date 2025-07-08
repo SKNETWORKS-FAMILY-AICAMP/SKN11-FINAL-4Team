@@ -81,6 +81,25 @@ def load_model_and_tokenizer(model_name="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct"):
     """모델과 토크나이저 로드"""
     print("모델과 토크나이저 로딩 중...")
     
+    # GPU 할당 확인
+    from pipeline.gpu_utils import find_available_gpu, log_gpu_status
+    
+    # 현재 GPU 상태 로깅
+    log_gpu_status()
+    
+    # 사용 가능한 GPU 찾기
+    available_gpu = find_available_gpu(min_memory_mb=10240)  # 10GB 이상 여유 메모리
+    
+    if available_gpu is not None:
+        # 특정 GPU만 사용하도록 설정
+        os.environ['CUDA_VISIBLE_DEVICES'] = str(available_gpu)
+        print(f"파인튜닝에 GPU {available_gpu} 사용")
+        device_map = "auto"  # 단일 GPU에서 auto는 전체 모델을 해당 GPU에 로드
+    else:
+        # 사용 가능한 GPU가 없으면 기본 동작
+        print("경고: 여유 있는 GPU를 찾을 수 없습니다. 기본 설정 사용")
+        device_map = "auto"
+    
     # 토크나이저 로드
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     
@@ -94,7 +113,7 @@ def load_model_and_tokenizer(model_name="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct"):
         model_name,
         torch_dtype=torch.bfloat16,
         trust_remote_code=True,
-        device_map="auto",
+        device_map=device_map,
         use_cache=False,  # 그래디언트 체크포인팅과 호환성을 위해
     )
     

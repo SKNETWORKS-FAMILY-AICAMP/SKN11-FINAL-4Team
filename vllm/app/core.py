@@ -278,10 +278,25 @@ async def initialize_vllm_engine():
         
         # vLLM 엔진 초기화 (GPU 필요하므로 실패할 수 있음)
         try:
+            # tensor_parallel_size 설정 (환경변수 또는 기본값)
+            tensor_parallel_size = int(os.getenv('VLLM_TENSOR_PARALLEL_SIZE', '1'))
+            
+            # vLLM이 사용할 GPU ID 설정
+            if tensor_parallel_size > 1:
+                # multi-GPU 사용 시 처음 N개 GPU 사용
+                vllm_gpu_ids = ','.join(str(i) for i in range(tensor_parallel_size))
+                os.environ['VLLM_GPU_IDS'] = vllm_gpu_ids
+                logger.info(f"vLLM multi-GPU 모드: GPU {vllm_gpu_ids} 사용")
+            else:
+                # 단일 GPU 사용
+                vllm_gpu_id = os.getenv('VLLM_GPU_ID', '0')
+                os.environ['VLLM_GPU_IDS'] = vllm_gpu_id
+                logger.info(f"vLLM 단일 GPU 모드: GPU {vllm_gpu_id} 사용")
+            
             engine_args = AsyncEngineArgs(
                 model="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct",
                 max_model_len=2048,
-                tensor_parallel_size=1,
+                tensor_parallel_size=tensor_parallel_size,
                 trust_remote_code=True,
                 gpu_memory_utilization=0.5,
                 enable_lora=True,

@@ -382,11 +382,11 @@ async def handle_instagram_dm_event(messaging_event: Dict, db: Session):
             logger.info(f"💬 메시지: {message_text}")
             
             # 수신자 ID로 연동된 AI 인플루언서 찾기 (Instagram ID로 확인)
-            logger.info(f"🔍 AI 인플루언서 검색 중 (recipient_id: {sender_id})")
+            logger.info(f"🔍 AI 인플루언서 검색 중 (recipient_id: {recipient_id})")
             influencer = (
                 db.query(AIInfluencer)
                 .filter(
-                    AIInfluencer.instagram_id == sender_id,
+                    AIInfluencer.instagram_id == recipient_id,
                     AIInfluencer.instagram_is_active == True,
                     AIInfluencer.chatbot_option == True  # 챗봇 옵션이 활성화된 인플루언서만
                 )
@@ -422,13 +422,13 @@ async def handle_instagram_dm_event(messaging_event: Dict, db: Session):
             
             # AI 응답 생성
             logger.info("🧠 AI 응답 생성 시작...")
-            ai_response = await generate_ai_response(message_text, influencer, sender_id, db)
+            ai_response = await generate_ai_response(message_text, influencer, recipient_id, db)
             logger.info(f"🧠 AI 응답 생성 완료: {ai_response[:100]}...")
             
             # 인스타그램으로 DM 응답 전송
             logger.info("📤 DM 응답 전송 시작...")
             success = await send_instagram_dm(
-                sender_id,
+                recipient_id,
                 ai_response,
                 influencer.instagram_access_token
             )
