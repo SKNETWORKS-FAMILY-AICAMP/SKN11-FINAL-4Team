@@ -659,7 +659,12 @@ async def handle_finetuning_webhook(
     logger.info(f"🎯 파인튜닝 웹훅 수신: task_id={webhook_data.task_id}, status={webhook_data.status}")
 
     try:
-        batch_key_entry = db.query(BatchKey).filter(BatchKey.task_id == webhook_data.task_id).first()
+        # VLLM task_id로 먼저 찾고, 없으면 일반 task_id로 찾기
+        batch_key_entry = db.query(BatchKey).filter(BatchKey.vllm_task_id == webhook_data.task_id).first()
+        
+        if not batch_key_entry:
+            # 하위 호환성을 위해 task_id로도 검색
+            batch_key_entry = db.query(BatchKey).filter(BatchKey.task_id == webhook_data.task_id).first()
 
         if not batch_key_entry:
             logger.warning(f"⚠️ 해당 task_id를 가진 BatchKey를 찾을 수 없음: {webhook_data.task_id}")
