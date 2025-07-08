@@ -168,7 +168,7 @@ class VLLMClient:
                              personality: str, qa_data: List[Dict], hf_repo_id: str,
                              hf_token: str, training_epochs: int = 5,
                              style_info: str = "", is_converted: bool = False,
-                             batch_id: Optional[str] = None) -> Dict[str, Any]:
+                             task_id: Optional[str] = None) -> Dict[str, Any]:
         """파인튜닝 시작"""
         try:
             payload = {
@@ -181,7 +181,7 @@ class VLLMClient:
                 "training_epochs": training_epochs,
                 "style_info": style_info,
                 "is_converted": is_converted,
-                "batch_id": batch_id
+                "task_id": task_id
             }
             
             response = await self.client.post("/finetuning/start", json=payload)

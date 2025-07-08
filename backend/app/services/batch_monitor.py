@@ -200,12 +200,12 @@ class BatchMonitor:
             
             logger.info(f"🚀 배치 {batch_key.batch_key_id}에 대한 파인튜닝 시작")
             
-            # 파인튜닝 서비스 호출 (batch_id 전달)
+            # 파인튜닝 서비스 호출 (task_id 전달)
             result = await self.finetuning_service.start_finetuning_for_influencer(
                 batch_key.influencer_id,
                 batch_key.s3_qa_file_url,
                 db,
-                batch_id=batch_key.batch_key_id
+                task_id=batch_key.task_id
             )
             
             if result:

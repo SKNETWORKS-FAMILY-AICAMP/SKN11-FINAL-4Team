@@ -589,14 +589,48 @@ class InfluencerQAGenerator:
             self.save_qa_pairs_to_db(batch_key.influencer_id, qa_pairs, db)
             logger.info(f"💾 QA 쌍 DB 저장 완료")
             
+            # S3에 업로드
+            logger.info(f"☁️ S3 업로드 시작: influencer_id={batch_key.influencer_id}, task_id={task_id}")
+            try:
+                from app.services.s3_service import get_s3_service
+                s3_service = get_s3_service()
+                
+                if s3_service.is_available():
+                    # S3에 QA 결과 업로드
+                    s3_urls = s3_service.upload_qa_results(
+                        influencer_id=batch_key.influencer_id,
+                        task_id=task_id,
+                        qa_pairs=qa_pairs,
+                        raw_result_path=result_file_path
+                    )
+                    
+                    # S3 URL 저장
+                    if s3_urls:
+                        batch_key.s3_qa_file_url = s3_urls.get('qa_pairs_url')
+                        batch_key.s3_processed_file_url = s3_urls.get('raw_result_url')
+                        batch_key.is_uploaded_to_s3 = True
+                        logger.info(f"✅ S3 업로드 성공: QA URL={batch_key.s3_qa_file_url}")
+                    else:
+                        logger.warning(f"⚠️ S3 업로드 실패: URL이 반환되지 않았습니다")
+                        batch_key.is_uploaded_to_s3 = False
+                else:
+                    logger.warning(f"⚠️ S3 서비스를 사용할 수 없습니다. 로컬 파일만 사용합니다.")
+                    batch_key.is_uploaded_to_s3 = False
+                    
+            except Exception as s3_error:
+                logger.error(f"❌ S3 업로드 중 오류 발생: {s3_error}", exc_info=True)
+                # S3 업로드 실패해도 전체 프로세스는 계속 진행
+                batch_key.is_uploaded_to_s3 = False
+            
             # BatchKey 상태 업데이트
             batch_key.status = QAGenerationStatus.COMPLETED.value
             batch_key.generated_qa_pairs = len(qa_pairs)
             batch_key.completed_at = datetime.now()
+            batch_key.is_processed = True
             db.commit()
             logger.info(f"🧠 BatchKey 상태 업데이트 완료 (DB)")
             
-            logger.info(f"✅ QA 생성 완료 - Task ID: {task_id}, QA 쌍: {len(qa_pairs)}개")
+            logger.info(f"✅ QA 생성 완료 - Task ID: {task_id}, QA 쌍: {len(qa_pairs)}개, S3 업로드: {batch_key.is_uploaded_to_s3}")
             return True
             
         except Exception as e:

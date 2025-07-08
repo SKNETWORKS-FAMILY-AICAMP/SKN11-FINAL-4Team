@@ -64,7 +64,7 @@ class FineTuningTask:
     hf_model_url: Optional[str] = None
     error_message: Optional[str] = None
     training_epochs: int = 5
-    batch_id: Optional[str] = None
+    qa_batch_task_id: Optional[str] = None
     created_at: datetime = None
     updated_at: datetime = None
     
@@ -325,7 +325,7 @@ class InfluencerFineTuningService:
             logger.error(f"파인튜닝 데이터 준비 실패: {e}")
             raise
     
-    async def run_finetuning(self, qa_data: List[Dict], system_message: str, hf_repo_id: str, hf_token: str, epochs: int = 5, batch_id: Optional[str] = None) -> Optional[str]:
+    async def run_finetuning(self, qa_data: List[Dict], system_message: str, hf_repo_id: str, hf_token: str, epochs: int = 5, task_id: Optional[str] = None) -> Optional[str]:
         """
         파인튜닝 실행 (VLLM 서버에 작업 제출 후 즉시 반환)
         Args:
@@ -334,7 +334,7 @@ class InfluencerFineTuningService:
             hf_repo_id: Hugging Face Repository ID
             hf_token: 허깅페이스 토큰
             epochs: 훈련 에포크 수
-            batch_id: 배치 작업 ID (선택적)
+            task_id: QA 생성 작업 ID (선택적)
         Returns:
             task_id (성공 시), None (실패 시)
         """
@@ -367,7 +367,7 @@ class InfluencerFineTuningService:
                     training_epochs=epochs,
                     style_info="",
                     is_converted=is_already_converted,
-                    batch_id=batch_id
+                    task_id=task_id
                 )
                 
                 task_id = result.get("task_id")
@@ -427,23 +427,23 @@ class InfluencerFineTuningService:
     
     def start_finetuning_task(self, influencer_id: str, qa_task_id: str, 
                             s3_qa_url: str, influencer_data: AIInfluencer, db=None,
-                            batch_id: Optional[str] = None) -> str:
+                            task_id: Optional[str] = None) -> str:
         """
         파인튜닝 작업 시작
         Args:
-            influencer_id: 인플루언서 ID
+            influencer_id: 인플루어서 ID
             qa_task_id: QA 생성 작업 ID
             s3_qa_url: S3 QA 데이터 URL
-            influencer_data: 인플루언서 정보 (딕셔너리 또는 모델 인스턴스)
+            influencer_data: 인플루어서 정보 (딕셔너리 또는 모델 인스턴스)
             db: 데이터베이스 세션
-            batch_id: 배치 작업 ID (선택적)
+            task_id: QA 생성 작업 ID (선택적)
         Returns:
             파인튜닝 작업 ID
         """
         import time
         
-        # 작업 ID 생성
-        task_id = f"ft_{influencer_id}_{int(time.time())}"
+        # 파인튜닝 작업 ID 생성
+        ft_task_id = f"ft_{influencer_id}_{int(time.time())}"
         
         # 인플루언서 이름 처리
         influencer_name = getattr(influencer_data, 'influencer_name', 'influencer')
@@ -477,20 +477,20 @@ class InfluencerFineTuningService:
         
         # 작업 생성
         task = FineTuningTask(
-            task_id=task_id,
+            task_id=ft_task_id,
             influencer_id=influencer_id,
             qa_task_id=qa_task_id,
             status=FineTuningStatus.PENDING,
             s3_qa_url=s3_qa_url,
             model_name=safe_name,
             hf_repo_id=hf_repo_id,
-            batch_id=batch_id
+            qa_batch_task_id=task_id
         )
         
-        self.tasks[task_id] = task
-        logger.info(f"파인튜닝 작업 생성: {task_id}")
+        self.tasks[ft_task_id] = task
+        logger.info(f"파인튜닝 작업 생성: {ft_task_id}")
         
-        return task_id
+        return ft_task_id
     
     async def execute_finetuning_task(self, task_id: str, influencer_data: AIInfluencer, hf_token: str, db=None) -> bool:
         """
@@ -530,7 +530,7 @@ class InfluencerFineTuningService:
                 hf_repo_id=task.hf_repo_id,
                 hf_token=hf_token,
                 epochs=task.training_epochs,
-                batch_id=task.batch_id
+                task_id=task.qa_batch_task_id
             )
             
             if vllm_task_id:
@@ -538,16 +538,16 @@ class InfluencerFineTuningService:
                 # 웹훅을 통해 완료 통지를 받을 예정
                 logger.info(f"파인튜닝 작업 제출됨: {task_id} → VLLM task_id: {vllm_task_id}")
                 
-                # BatchKey 테이블에 task_id 업데이트 (웹훅 처리를 위해)
-                if task.batch_id:
+                # BatchKey 테이블에 VLLM task_id 업데이트 (웹훅 처리를 위해)
+                if task.qa_batch_task_id:
                     from app.database import get_db
                     from app.models.influencer import BatchKey
                     try:
                         db_gen = get_db()
                         db = next(db_gen)
-                        batch_key = db.query(BatchKey).filter(BatchKey.id == task.batch_id).first()
+                        batch_key = db.query(BatchKey).filter(BatchKey.task_id == task.qa_batch_task_id).first()
                         if batch_key:
-                            batch_key.task_id = vllm_task_id
+                            batch_key.vllm_task_id = vllm_task_id
                             db.commit()
                             logger.info(f"BatchKey에 VLLM task_id 저장: {vllm_task_id}")
                     except Exception as e:
@@ -664,17 +664,17 @@ class InfluencerFineTuningService:
             hf_token, hf_username = self._get_hf_info_from_influencer(influencer_data, db)
 
             # 파인튜닝 작업 시작 (모델 인스턴스 직접 사용)
-            task_id = self.start_finetuning_task(
+            ft_task_id = self.start_finetuning_task(
                 influencer_id=influencer_id,
                 qa_task_id=f"startup_restart_{influencer_id}",
                 s3_qa_url=s3_qa_file_url,
                 influencer_data=influencer_data,  # 모델 인스턴스 직접 전달
                 db=db,
-                batch_id=batch_id
+                task_id=task_id
             )
             
             # 파인튜닝 실행
-            success = await self.execute_finetuning_task(task_id, influencer_data, hf_token, db)
+            success = await self.execute_finetuning_task(ft_task_id, influencer_data, hf_token, db)
             
             if success:
                 logger.info(f"✅ 인플루언서 파인튜닝 자동 시작 성공: {influencer_id}")
