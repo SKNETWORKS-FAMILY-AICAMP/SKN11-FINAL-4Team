@@ -300,7 +300,7 @@ async def _run_qa_batch_generation(
                                 },
                                 {
                                     "role": "user", 
-                                    "content": question
+                                    "content": f"Q: {question}\nA:"
                                 }
                             ],
                             "max_tokens": 500,
@@ -384,7 +384,7 @@ async def _run_influencer_qa_generation(
                             },
                             {
                                 "role": "user",
-                                "content": question
+                                "content": f"Q: {question}\nA:"
                             }
                         ],
                         "max_tokens": 500,

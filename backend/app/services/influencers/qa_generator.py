@@ -428,24 +428,29 @@ class InfluencerQAGenerator:
                 result = json.loads(line)
                 
                 if result.get('response', {}).get('status_code') == 200:
-                    content = result['response']['body']['choices'][0]['message']['content']
+                    # 응답에서 답변 추출
+                    answer = result['response']['body']['choices'][0]['message']['content'].strip()
                     
-                    # Q: A: 형식으로 파싱
-                    if 'Q:' in content and 'A:' in content:
-                        try:
-                            parts = content.split('A:', 1)
-                            if len(parts) == 2:
-                                question = parts[0].replace('Q:', '').strip()
-                                answer = parts[1].strip()
-                                
-                                qa_pairs.append({
-                                    "question": question,
-                                    "answer": answer,
-                                    "custom_id": result.get('custom_id')
-                                })
-                        except Exception as e:
-                            print(f"QA 파싱 오류: {e}")
-                            continue
+                    # 요청에서 원본 질문 추출
+                    question = None
+                    if 'request' in result and 'body' in result['request']:
+                        messages = result['request']['body'].get('messages', [])
+                        for msg in messages:
+                            if msg.get('role') == 'user':
+                                user_content = msg.get('content', '')
+                                # "Q: 질문\nA:" 형식에서 질문 추출
+                                if 'Q:' in user_content and '\nA:' in user_content:
+                                    question = user_content.split('\nA:')[0].replace('Q:', '').strip()
+                                break
+                    
+                    if question and answer:
+                        qa_pairs.append({
+                            "question": question,
+                            "answer": answer,
+                            "custom_id": result.get('custom_id')
+                        })
+                    else:
+                        print(f"QA 파싱 실패 - 질문: {question}, 답변: {answer[:50]}...")
         
         return qa_pairs
     
