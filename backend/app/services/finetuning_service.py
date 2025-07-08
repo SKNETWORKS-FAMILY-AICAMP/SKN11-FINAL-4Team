@@ -638,14 +638,14 @@ class InfluencerFineTuningService:
             logger.error(f"파인튜닝 상태 확인 중 오류: {e}")
             return False
     
-    async def start_finetuning_for_influencer(self, influencer_id: str, s3_qa_file_url: str, db, batch_id: Optional[str] = None) -> bool:
+    async def start_finetuning_for_influencer(self, influencer_id: str, s3_qa_file_url: str, db, task_id: Optional[str] = None) -> bool:
         """
         인플루언서를 위한 파인튜닝 시작 (startup service용)
         Args:
             influencer_id: 인플루언서 ID  
             s3_qa_file_url: S3 QA 파일 URL
             db: 데이터베이스 세션
-            batch_id: 배치 작업 ID (선택적)
+            task_id: QA 생성 작업 ID (선택적)
         Returns:
             성공 여부
         """

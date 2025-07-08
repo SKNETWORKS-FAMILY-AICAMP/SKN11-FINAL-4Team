@@ -18,7 +18,7 @@ from app.services.finetuning_service import get_finetuning_service
 from app.models.influencer import BatchKey as BatchJob, AIInfluencer
 from app.models.user import HFTokenManage
 from app.services.influencers.qa_generator import QAGenerationStatus
-from app.services.vllm_client import vllm_load_adapter_if_needed
+from app.services.vllm_client import vllm_load_adapter_if_needed, vllm_health_check
 from app.core.encryption import decrypt_sensitive_data
 
 # 로깅 설정
@@ -248,10 +248,13 @@ class StartupService:
             # 2. 오래된 배치 작업 정리
             cleaned_count = await self.cleanup_old_batch_jobs()
             
-            logger.info(f"✅ 시작시 작업 완료 - 재시작: {restarted_count}개, 정리: {cleaned_count}개")
+            # 3. 허깅페이스에 업로드된 모든 인플루언서 모델들의 vLLM 어댑터 로드
+            loaded_count = await self.load_all_huggingface_models()
             
-            # 3. 챗봇 옵션 활성화된 인플루언서들의 vLLM 어댑터 로드
-            await self.load_adapters_for_chat_enabled_influencers()
+            logger.info(f"✅ 시작시 작업 완료 - 재시작: {restarted_count}개, 정리: {cleaned_count}개, 어댑터 로드: {loaded_count}개")
+            
+            # 4. 챗봇 옵션 활성화된 인플루언서들의 vLLM 어댑터 로드 (하위 호환성)
+            # await self.load_adapters_for_chat_enabled_influencers()
             
         except Exception as e:
             logger.error(f"❌ 시작시 작업 실행 중 오류: {str(e)}", exc_info=True)
@@ -337,6 +340,86 @@ class StartupService:
                 
         except Exception as e:
             logger.error(f"❌ 챗봇 인플루언서 어댑터 로드 중 오류: {str(e)}", exc_info=True)
+    
+    async def load_all_huggingface_models(self) -> int:
+        """허깅페이스에 업로드된 모든 인플루언서 모델들의 vLLM 어댑터 로드"""
+        logger.info("🤗 허깅페이스에 업로드된 모든 인플루언서 모델 로드 시작...")
+        
+        try:
+            # VLLM 서버 상태 확인
+            if not await vllm_health_check():
+                logger.warning("⚠️ VLLM 서버가 비활성화되었거나 연결할 수 없습니다.")
+                return 0
+            
+            db = next(get_db())
+            try:
+                # 허깅페이스 모델 repo가 있는 모든 인플루언서 조회
+                influencers_with_models = (
+                    db.query(AIInfluencer)
+                    .filter(
+                        AIInfluencer.influencer_model_repo.isnot(None),
+                        AIInfluencer.influencer_model_repo != ""
+                    )
+                    .all()
+                )
+                
+                if not influencers_with_models:
+                    logger.info("🤗 허깅페이스에 업로드된 모델이 없습니다.")
+                    return 0
+                
+                logger.info(f"🤗 총 {len(influencers_with_models)}개의 허깅페이스 모델을 발견했습니다.")
+                loaded_count = 0
+                
+                # 각 인플루언서의 어댑터 로드
+                for influencer in influencers_with_models:
+                    try:
+                        # HF 토큰 정보 가져오기
+                        hf_token_record = db.query(HFTokenManage).filter(
+                            HFTokenManage.group_id == influencer.group_id
+                        ).first()
+                        
+                        if not hf_token_record:
+                            logger.warning(f"⚠️ 인플루언서 {influencer.influencer_name}의 HF 토큰을 찾을 수 없습니다.")
+                            continue
+                        
+                        # 토큰 복호화
+                        try:
+                            decrypted_token = decrypt_sensitive_data(hf_token_record.hf_token_value)
+                            if not decrypted_token:
+                                logger.warning(f"⚠️ 인플루언서 {influencer.influencer_name}의 HF 토큰 복호화에 실패했습니다.")
+                                continue
+                        except Exception as decrypt_error:
+                            logger.warning(f"⚠️ 인플루언서 {influencer.influencer_name}의 HF 토큰 복호화 중 오류: {decrypt_error}")
+                            continue
+                        
+                        # vLLM 어댑터 로드
+                        logger.info(f"🔄 어댑터 로드 중: {influencer.influencer_name} - {influencer.influencer_model_repo}")
+                        success = await vllm_load_adapter_if_needed(
+                            model_id=influencer.influencer_model_repo,
+                            hf_repo_name=influencer.influencer_model_repo,
+                            hf_token=decrypted_token,
+                            base_model_override="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct"  # 기본 베이스 모델 지정
+                        )
+                        
+                        if success:
+                            loaded_count += 1
+                            logger.info(f"✅ 어댑터 로드 성공: {influencer.influencer_name} ({influencer.influencer_model_repo})")
+                        else:
+                            logger.warning(f"⚠️ 어댑터 로드 실패: {influencer.influencer_name} ({influencer.influencer_model_repo})")
+                            
+                    except Exception as e:
+                        logger.error(f"❌ 인플루언서 {influencer.influencer_name} 어댑터 로드 중 오류: {str(e)}")
+                        continue
+                
+                logger.info(f"🤗 허깅페이스 모델 어댑터 로드 완료: {loaded_count}/{len(influencers_with_models)}개 성공")
+                return loaded_count
+                
+            finally:
+                db.close()
+                
+        except Exception as e:
+            logger.error(f"❌ 허깅페이스 모델 로드 중 오류: {str(e)}", exc_info=True)
+            return 0
 
 
 # 글로벌 시작시 서비스 인스턴스
