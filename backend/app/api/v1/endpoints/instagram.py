@@ -370,9 +370,9 @@ async def handle_instagram_dm_event(messaging_event: Dict, db: Session):
             logger.info(f"   - 메시지 키들: {list(message.keys())}")
             
             # Echo 메시지는 처리하지 않음 (AI가 보낸 메시지의 에코)
-            if is_echo:
-                logger.info("🔄 Echo 메시지는 무시합니다.")
-                return
+            # if is_echo:
+            #     logger.info("🔄 Echo 메시지는 무시합니다.")
+            #     return
             
             if not message_text:
                 logger.info("📭 텍스트가 없는 메시지는 무시합니다.")
