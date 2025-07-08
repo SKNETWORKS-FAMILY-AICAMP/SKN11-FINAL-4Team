@@ -32,19 +32,20 @@ export class InstagramService {
   static async connectAccount(
     data: InstagramConnectRequest
   ): Promise<InstagramConnectResponse> {
+    const { influencer_id, ...requestData } = data;
     return await apiClient.post<InstagramConnectResponse>(
-      '/api/v1/instagram/connect',
-      data
+      `/api/v1/influencers/${influencer_id}/instagram/connect`,
+      requestData
     );
   }
 
   static async disconnectAccount(influencerId: string): Promise<void> {
-    await apiClient.post(`/api/v1/instagram/disconnect`, { influencer_id: influencerId });
+    await apiClient.delete(`/api/v1/influencers/${influencerId}/instagram/disconnect`);
   }
 
   static async getStatus(influencerId: string): Promise<InstagramStatus> {
     return await apiClient.get<InstagramStatus>(
-      `/api/v1/instagram/status/${influencerId}`
+      `/api/v1/influencers/${influencerId}/instagram/status`
     );
   }
 

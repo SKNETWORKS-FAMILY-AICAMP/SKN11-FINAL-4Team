@@ -325,20 +325,18 @@ function ModelDetailContent() {
           try {
             // 백엔드에 code 전송하여 토큰 교환 및 계정 연동
             const data = await ModelService.connectInstagram(params.id as string, {
-              instagram_access_token: code,
-              instagram_user_id: '',
-              instagram_username: '',
-              instagram_account_type: 'BUSINESS'
+              code: code,
+              redirect_uri: redirectUri
             })
 
             setInstagramStatus({
               is_connected: true,
               connected_at: new Date().toISOString(),
               token_expired: false,
-              instagram_info: {
-                id: data.instagram_id || '',
-                username: data.instagram_username || '',
-                account_type: data.instagram_account_type || '',
+              instagram_info: data.instagram_info || {
+                id: '',
+                username: '',
+                account_type: '',
               },
             })
             alert('Instagram 비즈니스 계정이 성공적으로 연동되었습니다!')

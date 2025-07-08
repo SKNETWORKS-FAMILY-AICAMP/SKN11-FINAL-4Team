@@ -212,14 +212,25 @@ async def delete_existing_influencer(
 async def connect_instagram_business(
     influencer_id: str,
     request: InstagramConnectRequest,
+    req: Request,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
     """AI 인플루언서에 Instagram 비즈니스 계정 연동"""
+    # 원시 요청 데이터 확인
+    try:
+        body = await req.json()
+        print(f"🔍 DEBUG Raw request body: {body}")
+    except:
+        print("🔍 DEBUG Failed to parse request body")
+    
     user_id = current_user.get("sub")
     if not user_id:
         raise HTTPException(status_code=401, detail="User ID not found")
+    print(f"🔍 DEBUG influencer_id: {influencer_id}")
     print(f"🔍 DEBUG request: {request}")
+    print(f"🔍 DEBUG request.code: {request.code}")
+    print(f"🔍 DEBUG request.redirect_uri: {request.redirect_uri}")
     return await connect_instagram_account(db, user_id, influencer_id, request)
 
 

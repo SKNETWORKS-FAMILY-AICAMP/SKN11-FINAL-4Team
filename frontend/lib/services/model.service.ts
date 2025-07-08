@@ -213,19 +213,17 @@ export class ModelService {
    * Instagram 계정 연결
    */
   static async connectInstagram(influencerId: string, data: {
-    instagram_access_token: string
-    instagram_user_id: string
-    instagram_username: string
-    instagram_account_type: string
-  }): Promise<AIInfluencer> {
-    return await apiClient.post<AIInfluencer>(`/api/v1/influencers/${influencerId}/instagram/connect`, data)
+    code: string
+    redirect_uri: string
+  }): Promise<any> {
+    return await apiClient.post(`/api/v1/influencers/${influencerId}/instagram/connect`, data)
   }
 
   /**
    * Instagram 계정 연결 해제
    */
-  static async disconnectInstagram(influencerId: string): Promise<AIInfluencer> {
-    return await apiClient.post<AIInfluencer>(`/api/v1/influencers/${influencerId}/instagram/disconnect`)
+  static async disconnectInstagram(influencerId: string): Promise<any> {
+    return await apiClient.delete(`/api/v1/influencers/${influencerId}/instagram/disconnect`)
   }
 
   /**
