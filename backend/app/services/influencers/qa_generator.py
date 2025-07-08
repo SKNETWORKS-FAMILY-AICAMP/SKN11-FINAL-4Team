@@ -601,7 +601,7 @@ class InfluencerQAGenerator:
                         influencer_id=batch_key.influencer_id,
                         task_id=task_id,
                         qa_pairs=qa_pairs,
-                        raw_result_path=result_file_path
+                        raw_results_file=result_file_path
                     )
                     
                     # S3 URL 저장
