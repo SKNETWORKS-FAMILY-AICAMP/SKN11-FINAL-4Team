@@ -283,6 +283,17 @@ def upload_to_huggingface(output_dir, hf_token, hf_repo_id):
         )
         
         print(f"✅ 업로드 완료! 모델 URL: https://huggingface.co/{hf_repo_id}")
+        
+        # 3. 로컬 폴더 삭제
+        import shutil
+        try:
+            print(f"🗑️ 로컬 폴더 삭제 중: {output_dir}")
+            shutil.rmtree(output_dir)
+            print(f"✅ 로컬 폴더 삭제 완료: {output_dir}")
+        except Exception as cleanup_error:
+            print(f"⚠️ 로컬 폴더 삭제 실패: {cleanup_error}")
+            # 삭제 실패해도 업로드는 성공했으므로 계속 진행
+        
         return f"https://huggingface.co/{hf_repo_id}"
         
     except Exception as e:
