@@ -606,8 +606,8 @@ class InfluencerQAGenerator:
                     
                     # S3 URL 저장
                     if s3_urls:
-                        batch_key.s3_qa_file_url = s3_urls.get('qa_pairs_url')
-                        batch_key.s3_processed_file_url = s3_urls.get('raw_result_url')
+                        batch_key.s3_qa_file_url = s3_urls.get('processed_qa_url')
+                        batch_key.s3_processed_file_url = s3_urls.get('raw_results_url')
                         batch_key.is_uploaded_to_s3 = True
                         logger.info(f"✅ S3 업로드 성공: QA URL={batch_key.s3_qa_file_url}")
                     else:
