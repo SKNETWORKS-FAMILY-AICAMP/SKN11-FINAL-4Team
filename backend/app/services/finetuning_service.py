@@ -180,7 +180,15 @@ class InfluencerFineTuningService:
                 if isinstance(data, dict) and 'qa_pairs' in data:
                     qa_pairs = data['qa_pairs']
                     logger.info(f"S3에서 처리된 QA 데이터 로드 완료: {len(qa_pairs)}개 QA 쌍")
-                    return qa_pairs
+                    
+                    # 비어있는 qa_pairs 체크
+                    if not qa_pairs:
+                        logger.warning(f"QA 데이터가 비어있음. 전체 데이터 구조: {list(data.keys())}")
+                        logger.warning(f"S3 키: {s3_key}")
+                        # JSONL 형식으로 재시도
+                        logger.info("qa_pairs가 비어있어 JSONL 형식으로 재시도")
+                    else:
+                        return qa_pairs
             except json.JSONDecodeError:
                 logger.info("전체 JSON 파싱 실패, JSONL 형식으로 재시도")
             
@@ -214,66 +222,48 @@ class InfluencerFineTuningService:
                             else:
                                 logger.warning(f"S3 QA 데이터: OpenAI 형식에서 Q:A: 파싱 실패: {message_content}")
                         else:
-                            # Q: 또는 A: 키워드가 없는 경우, custom_id에서 질문을 추출하고 응답을 답변으로 사용
-                            logger.info(f"S3 QA 데이터: 키워드 없는 형식 처리 시작 - 데이터 구조: {list(data.keys())}")
+                            # Q: 또는 A: 키워드가 없는 경우, custom_id에서 도메인을 추출하고 기본 질문 생성
+                            logger.info(f"S3 QA 데이터: 키워드 없는 형식 처리 시줉 - 데이터 구조: {list(data.keys())}")
                             
                             if 'custom_id' in data:
                                 custom_id = data['custom_id']
                                 logger.info(f"S3 QA 데이터: custom_id 확인: {custom_id}")
                                 
-                                # custom_id가 질문을 포함하고 있는지 확인하고 파싱
-                                # 일반적으로 custom_id에 질문이나 질문 식별자가 포함되어 있을 수 있음
-                                
-                                # 1. request 필드가 있는 경우 우선 처리
-                                if 'request' in data and 'body' in data['request']:
-                                    request_body = data['request']['body']
-                                    logger.info(f"S3 QA 데이터: request body 구조: {list(request_body.keys()) if isinstance(request_body, dict) else 'not dict'}")
+                                # custom_id에서 도메인 추출 
+                                # 형식: "influencer_qa_[name]_[도메인]_[index]"
+                                parts = custom_id.split('_')
+                                if len(parts) >= 4:  # 최소한 influencer_qa_name_domain 형식
+                                    domain = parts[-2]  # 끝에서 두 번째 항목이 도메인
+                                    domain_questions = {
+                                        "일상생활": ["오늘 하루는 어떻게 보내셨나요?", "요즘 즐겨하는 취미가 있으신가요?"],
+                                        "과학기술": ["최근 관심있는 기술 트렌드가 있으신가요?", "AI나 인공지능에 대해 어떻게 생각하시나요?"],
+                                        "사회이슈": ["요즘 사회에서 가장 중요한 이슈는 무엇이라고 생각하시나요?", "젊은 세대가 직면한 가장 큰 도전은 무엇일까요?"],
+                                        "인문학": ["인생에서 가장 중요한 가치는 무엇이라고 생각하시나요?", "역사에서 배울 수 있는 교훈은 무엇일까요?"],
+                                        "스포츠": ["좋아하는 스포츠나 운동이 있으신가요?", "운동의 즐거움은 무엇이라고 생각하시나요?"],
+                                        "역사문화": ["우리나라의 전통문화 중 자랑스러운 것은 무엇인가요?", "문화의 다양성에 대해 어떻게 생각하시나요?"]
+                                    }
                                     
-                                    if 'messages' in request_body and isinstance(request_body['messages'], list):
-                                        # 사용자 메시지에서 질문 추출
-                                        user_message = None
-                                        for msg in request_body['messages']:
-                                            if msg.get('role') == 'user':
-                                                user_message = msg.get('content', '')
-                                                break
-                                        
-                                        if user_message:
-                                            # 질문을 추출하고 답변으로 message_content 사용
-                                            qa_pairs.append({"question": user_message, "answer": message_content})
-                                            logger.info(f"S3 QA 데이터: request에서 QA 쌍 추출 성공 - Q: {user_message[:50]}...")
-                                        else:
-                                            logger.warning(f"S3 QA 데이터: 요청에서 사용자 메시지를 찾을 수 없음")
+                                    # 도메인에 맞는 질문 사용
+                                    if domain in domain_questions:
+                                        question = domain_questions[domain][0]  # 첫 번째 질문 사용
+                                        qa_pairs.append({"question": question, "answer": message_content})
+                                        logger.info(f"S3 QA 데이터: 도메인 '{domain}'에서 QA 쌍 생성 성공")
                                     else:
-                                        logger.warning(f"S3 QA 데이터: 요청에 messages 필드가 없음")
-                                else:
-                                    # 2. request 필드가 없는 경우, custom_id를 질문으로 사용하거나 기본 질문 생성
-                                    # custom_id에서 의미 있는 질문을 추출하거나, 범용 질문을 생성
-                                    
-                                    # custom_id가 "qa_" 로 시작하는 경우 등 패턴 확인
-                                    if custom_id.startswith('qa_') and len(custom_id) > 3:
-                                        # custom_id에서 질문 부분 추출 시도
-                                        potential_question = custom_id[3:].replace('_', ' ')
-                                        if len(potential_question) > 5:  # 최소 길이 체크
-                                            qa_pairs.append({"question": potential_question, "answer": message_content})
-                                            logger.info(f"S3 QA 데이터: custom_id에서 QA 쌍 추출 성공 - Q: {potential_question[:50]}...")
-                                        else:
-                                            # 범용 질문 생성
-                                            default_question = "이에 대해 답변해 주세요."
-                                            qa_pairs.append({"question": default_question, "answer": message_content})
-                                            logger.info(f"S3 QA 데이터: 기본 질문으로 QA 쌍 생성 - A: {message_content[:50]}...")
-                                    else:
-                                        # 범용 질문 생성
+                                        # 도메인을 찾을 수 없으면 기본 질문
                                         default_question = "이에 대해 답변해 주세요."
                                         qa_pairs.append({"question": default_question, "answer": message_content})
-                                        logger.info(f"S3 QA 데이터: 기본 질문으로 QA 쌍 생성 - A: {message_content[:50]}...")
-                            else:
-                                # 키워드가 없는 경우에도 QA 쌍 생성 시도
-                                if len(message_content.strip()) > 0:
+                                        logger.info(f"S3 QA 데이터: 알 수 없는 도메인 '{domain}', 기본 질문 사용")
+                                else:
+                                    # custom_id 형식이 예상과 다름
                                     default_question = "이에 대해 답변해 주세요."
                                     qa_pairs.append({"question": default_question, "answer": message_content})
-                                    logger.info(f"S3 QA 데이터: 키워드 없는 응답으로 QA 쌍 생성 - A: {message_content[:50]}...")
-                                else:
-                                    logger.warning(f"S3 QA 데이터: OpenAI 형식에서 Q: 또는 A: 키워드 없음: {message_content}")
+                                    logger.info(f"S3 QA 데이터: custom_id 형식 불일치, 기본 질문 사용")
+                                
+                            else:
+                                # custom_id가 없는 경우
+                                default_question = "이에 대해 답변해 주세요."
+                                qa_pairs.append({"question": default_question, "answer": message_content})
+                                logger.info(f"S3 QA 데이터: custom_id 없음, 기본 질문 사용")
                     
                     # Case 4: Top-level list of QA pairs (less common for JSONL, but possible)
                     elif isinstance(data, list):
@@ -291,7 +281,12 @@ class InfluencerFineTuningService:
                     continue
             
             if not qa_pairs:
-                logger.error("S3에서 유효한 QA 데이터를 추출하지 못했습니다.")
+                logger.error(f"S3에서 유효한 QA 데이터를 추출하지 못했습니다. 총 라인 수: {len(content.splitlines())}")
+                logger.error(f"S3 URL: {s3_url}")
+                logger.error(f"S3 Key: {s3_key}")
+                
+                # 컨텐츠 샘플 출력 (처음 500자)
+                logger.error(f"컨텐츠 샘플 (500자): {content[:500]}...")
                 return None
             
             logger.info(f"S3에서 QA 데이터 다운로드 및 파싱 완료: {len(qa_pairs)}개")
