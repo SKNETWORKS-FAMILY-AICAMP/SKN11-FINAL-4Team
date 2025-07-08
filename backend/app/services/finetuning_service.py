@@ -213,6 +213,17 @@ class InfluencerFineTuningService:
                           'content' in data['response']['body']['choices'][0]['message']):
                         
                         message_content = data['response']['body']['choices'][0]['message']['content']
+                        
+                        # JSON 형식 파싱 시도
+                        try:
+                            qa_data = json.loads(message_content)
+                            if isinstance(qa_data, dict) and 'q' in qa_data and 'a' in qa_data:
+                                qa_pairs.append({"question": qa_data['q'], "answer": qa_data['a']})
+                                continue
+                        except json.JSONDecodeError:
+                            pass
+                        
+                        # 기존 Q:A: 형식 파싱
                         if 'Q:' in message_content and 'A:' in message_content:
                             parts = message_content.split('A:', 1)
                             if len(parts) == 2:

@@ -369,6 +369,18 @@ async def _run_influencer_qa_generation(
                 # 도메인별 질문 생성
                 question = _generate_domain_question(domain, character_profile)
                 
+                # 도메인별 특성 설명
+                domain_descriptions = {
+                    "일상생활": "일상의 소소한 일들, 취미, 습관, 음식, 주말 활동 등",
+                    "과학기술": "AI, 기술 트렌드, 스마트폰, 미래 기술, 과학의 발전",
+                    "사회이슈": "사회 문제, 환경, 불평등, 세대 간 차이, 미래 사회",
+                    "인문학": "인생의 가치, 책, 예술, 철학, 역사의 교훈",
+                    "스포츠": "운동, 건강관리, 스포츠 경기, 운동의 즐거움",
+                    "역사문화": "전통문화, 역사적 장소, 문화의 다양성, 역사 인물"
+                }
+                
+                domain_desc = domain_descriptions.get(domain, domain)
+                
                 # OpenAI Batch API 형식으로 변환
                 custom_id = f"influencer_qa_{character_data.name}_{domain}_{i}"
                 batch_request = {
@@ -380,15 +392,19 @@ async def _run_influencer_qa_generation(
                         "messages": [
                             {
                                 "role": "system",
-                                "content": system_prompt or f"당신은 {character_data.name}라는 인플루언서입니다. {character_data.personality} 성격을 가지고 있으며, {domain} 분야에 대해 자연스럽고 매력적으로 답변합니다."
+                                "content": system_prompt or f"당신은 {character_data.name}라는 인플루언서입니다. {character_data.personality} 성격을 가지고 있습니다."
                             },
                             {
                                 "role": "user",
-                                "content": f"Q: {question}\nA:"
+                                "content": f"""{domain}({domain_desc})에 관한 QA 쌍을 하나 만들어주세요.
+{character_data.name}의 성격과 특성에 맞는 자연스럽고 흥미로운 질문을 만들고, 그에 대해 캐릭터답게 답변해주세요.
+반드시 JSON 형식으로 답변해주세요:
+{{"q": "질문 내용", "a": "답변 내용"}}"""
                             }
                         ],
                         "max_tokens": 500,
-                        "temperature": 0.8
+                        "temperature": 0.8,
+                        "response_format": {"type": "json_object"}  # JSON 형식 강제
                     }
                 }
                 
