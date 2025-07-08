@@ -392,7 +392,18 @@ async def handle_instagram_dm_event(messaging_event: Dict, db: Session):
                 )
                 .first()
             )
-            
+            isAiInfluencer = (
+                db.query(AIInfluencer)
+                .filter(
+                    AIInfluencer.instagram_id == sender_id,
+                    AIInfluencer.instagram_is_active == True,
+                    AIInfluencer.chatbot_option == True  # 챗봇 옵션이 활성화된 인플루언서만
+                )
+                .first()
+            )
+            if isAiInfluencer:
+                logger.info(f"🤖 발신자 ID {sender_id}는 AI 인플루언서입니다.")
+                return
             
             if not influencer:
                 logger.warning(f"❌ 수신자 ID {sender_id}에 해당하는 활성 AI 인플루언서를 찾을 수 없습니다.")
