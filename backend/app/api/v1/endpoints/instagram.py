@@ -428,7 +428,7 @@ async def handle_instagram_dm_event(messaging_event: Dict, db: Session):
             # 인스타그램으로 DM 응답 전송
             logger.info("📤 DM 응답 전송 시작...")
             success = await send_instagram_dm(
-                recipient_id,
+                sender_id,
                 ai_response,
                 influencer.instagram_access_token
             )
