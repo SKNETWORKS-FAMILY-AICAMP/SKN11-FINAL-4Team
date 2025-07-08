@@ -161,10 +161,20 @@ class StartupService:
                         
                         logger.info(f"🚀 파인튜닝 자동 재시작: task_id={batch_job.task_id}, influencer_id={batch_job.influencer_id}")
                         
+                        # S3 URL 확인 및 수정
+                        s3_qa_url = batch_job.s3_qa_file_url
+                        
+                        # 잘못된 URL인 경우 수정 (임시 조치)
+                        if s3_qa_url and 'generated_qa_results.jsonl' in s3_qa_url:
+                            logger.warning(f"⚠️ 잘못된 S3 URL 감지, 처리된 QA URL로 변경 시도")
+                            # processed_qa 파일 URL로 변경
+                            s3_qa_url = s3_qa_url.replace('qa_results/', 'qa_pairs/').replace('generated_qa_results.jsonl', f'processed_qa_{batch_job.task_id.split("_")[-1]}.json')
+                            logger.info(f"📝 수정된 S3 URL: {s3_qa_url}")
+                        
                         # 파인튜닝 시작 (task_id 전달)
                         success = await self.finetuning_service.start_finetuning_for_influencer(
                             influencer_id=batch_job.influencer_id,
-                            s3_qa_file_url=batch_job.s3_qa_file_url,
+                            s3_qa_file_url=s3_qa_url,
                             db=db,
                             task_id=batch_job.task_id
                         )

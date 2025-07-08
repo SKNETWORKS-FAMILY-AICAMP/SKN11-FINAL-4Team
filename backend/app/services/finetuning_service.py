@@ -151,9 +151,12 @@ class InfluencerFineTuningService:
             QA 데이터 리스트
         """
         try:
+            logger.info(f"S3에서 QA 데이터 다운로드 시작: {s3_url}")
+            
             # S3 URL에서 키 추출
             if 'amazonaws.com/' in s3_url:
                 s3_key = s3_url.split('amazonaws.com/')[-1]
+                logger.info(f"S3 키: {s3_key}")
             else:
                 logger.error(f"잘못된 S3 URL 형식: {s3_url}")
                 return None
