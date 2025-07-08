@@ -48,7 +48,7 @@ from app.services.finetuning_service import (
     InfluencerFineTuningService,
 )
 from datetime import datetime
-from app.models.influencer import StylePreset, BatchKey
+from app.models.influencer import StylePreset, BatchKey, AIInfluencer
 from fastapi import HTTPException
 from typing import Dict, Any
 from openai import OpenAI
@@ -675,6 +675,17 @@ async def handle_finetuning_webhook(
             batch_key_entry.hf_model_url = webhook_data.hf_model_url
             batch_key_entry.completed_at = datetime.now()
             logger.info(f"✅ 파인튜닝 완료: task_id={webhook_data.task_id}, 모델 URL={webhook_data.hf_model_url}")
+            
+            # AIInfluencer 모델 상태를 사용 가능으로 업데이트
+            influencer = db.query(AIInfluencer).filter(
+                AIInfluencer.influencer_id == batch_key_entry.influencer_id
+            ).first()
+            
+            if influencer:
+                influencer.learning_status = 1  # 1: 사용가능
+                if webhook_data.hf_model_url:
+                    influencer.influencer_model_repo = webhook_data.hf_model_url
+                logger.info(f"✅ 인플루언서 모델 상태 업데이트 완료: influencer_id={batch_key_entry.influencer_id}, status=사용 가능")
         elif webhook_data.status == "failed":
             batch_key_entry.status = QAGenerationStatus.FAILED.value
             batch_key_entry.error_message = webhook_data.error_message

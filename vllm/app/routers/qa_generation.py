@@ -379,9 +379,6 @@ async def _run_influencer_qa_generation(
             logger.info(f"도메인 '{domain}' QA 생성 시작: {current_domain_qa}개")
             
             for i in range(current_domain_qa):
-                # 도메인별 질문 생성
-                question = _generate_domain_question(domain, character_profile)
-                
                 # 도메인별 특성 설명
                 domain_descriptions = {
                     "일상생활": "일상의 소소한 일들, 취미, 습관, 음식, 주말 활동 등",
