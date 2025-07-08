@@ -258,6 +258,19 @@ async def finetuning_worker():
         except Exception as e:
             logger.error(f"❌ 파인튜닝 워커 오류: {task_id}, {e}")
         finally:
+            # 작업 완료 후 GPU 메모리 정리
+            try:
+                import torch
+                import gc
+                
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    torch.cuda.synchronize()
+                    logger.info(f"♾️ 파인튜닝 작업 {task_id} 후 GPU 메모리 정리 완료")
+            except Exception as cleanup_error:
+                logger.warning(f"⚠️ GPU 메모리 정리 실패: {cleanup_error}")
+            
             finetuning_queue.task_done()
 
 async def initialize_vllm_engine():

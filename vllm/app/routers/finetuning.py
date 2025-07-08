@@ -85,3 +85,33 @@ async def list_finetuning_tasks():
         "tasks": core.finetuning_tasks,
         "total_count": len(core.finetuning_tasks)
     }
+
+@router.get("/finetuning/gpu-status")
+async def get_gpu_status():
+    """GPU 상태 조회"""
+    try:
+        from pipeline.gpu_utils import get_gpu_info, log_gpu_status
+        
+        # GPU 상태 로깅
+        log_gpu_status()
+        
+        # GPU 정보 가져오기
+        gpu_info = get_gpu_info()
+        
+        # 현재 진행 중인 파인튜닝 작업 수
+        active_tasks = sum(1 for task in core.finetuning_tasks.values() 
+                          if task["status"] in ["training", "preparing_data", "uploading"])
+        
+        # 대기 중인 작업 수
+        pending_tasks = sum(1 for task in core.finetuning_tasks.values() 
+                           if task["status"] == "pending")
+        
+        return {
+            "gpu_info": gpu_info,
+            "active_finetuning_tasks": active_tasks,
+            "pending_finetuning_tasks": pending_tasks,
+            "queue_size": core.finetuning_queue.qsize() if core.finetuning_queue else 0
+        }
+    except Exception as e:
+        logger.error(f"❌ GPU 상태 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail=f"GPU 상태 조회 실패: {str(e)}")

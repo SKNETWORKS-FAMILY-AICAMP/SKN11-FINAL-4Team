@@ -14,6 +14,9 @@ from peft import LoraConfig, get_peft_model, TaskType, prepare_model_for_kbit_tr
 from datasets import Dataset
 from huggingface_hub import HfApi
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 # GPU 설정 확인
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -319,11 +322,27 @@ def upload_to_huggingface(output_dir, hf_token, hf_repo_id):
         print(f"❌ 업로드 실패: {e}")
         return f"https://huggingface.co/{hf_repo_id}"  # 실패해도 URL은 반환
 
+def cleanup_gpu_memory():
+    """GPU 메모리 정리"""
+    import gc
+    
+    # Python 가비지 컬렉션 강제 실행
+    gc.collect()
+    
+    # PyTorch GPU 캐시 정리
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+        print("✅ GPU 메모리 캐시 정리 완료")
+
 def main(qa_data: list[dict], system_message: str, hf_token: str, hf_repo_id: str, training_epochs: int) -> str:
     """메인 훈련 함수"""
     
     # 환경 변수 설정
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
+    
+    # 시작 전 GPU 메모리 정리
+    cleanup_gpu_memory()
     
     # 1. 모델과 토크나이저 로드
     model, tokenizer = load_model_and_tokenizer()
@@ -436,7 +455,30 @@ def main(qa_data: list[dict], system_message: str, hf_token: str, hf_repo_id: st
     # 15. Hugging Face Hub에 업로드
     hf_model_url = upload_to_huggingface(training_args.output_dir, hf_token, hf_repo_id)
     
-    # 16. HuggingFace 모델 URL 반환
+    # 16. 모델과 트레이너 메모리 해제
+    print("🧹 메모리 정리 중...")
+    try:
+        # 모델을 CPU로 이동 후 삭제
+        if hasattr(model, 'cpu'):
+            model.cpu()
+        del model
+        del trainer
+        del tokenizer
+        if 'train_dataset' in locals():
+            del train_dataset
+        if 'train_dataset_split' in locals():
+            del train_dataset_split
+        if 'eval_dataset' in locals():
+            del eval_dataset
+        
+        # GPU 메모리 정리
+        cleanup_gpu_memory()
+        
+        print("✅ 메모리 정리 완료")
+    except Exception as e:
+        print(f"⚠️ 메모리 정리 중 오류 (무시됨): {e}")
+    
+    # 17. HuggingFace 모델 URL 반환
     print(f"✅ 파인튜닝 완료! 모델 URL: {hf_model_url}")
     return hf_model_url
 
