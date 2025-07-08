@@ -29,6 +29,7 @@ async def start_finetuning_endpoint(request: FineTuningRequest):
             "training_epochs": request.training_epochs,
             "style_info": request.style_info,
             "is_converted": getattr(request, 'is_converted', False),
+            "batch_id": request.batch_id,
             "status": FineTuningStatus.PENDING.value,
             "created_at": time.time(),
             "updated_at": time.time()
@@ -52,7 +53,8 @@ async def start_finetuning_endpoint(request: FineTuningRequest):
             task_id=task_id,
             status=FineTuningStatus.PENDING.value,
             message=f"파인튜닝 작업 {task_id} 시작 요청됨. 백그라운드에서 처리됩니다.",
-            hf_repo_id=request.hf_repo_id
+            hf_repo_id=request.hf_repo_id,
+            batch_id=request.batch_id
         )
         
     except Exception as e:
@@ -72,7 +74,8 @@ async def get_finetuning_status(task_id: str):
         status=task["status"],
         progress=task.get("progress"),
         error_message=task.get("error_message"),
-        hf_model_url=task.get("hf_model_url")
+        hf_model_url=task.get("hf_model_url"),
+        batch_id=task.get("batch_id")
     )
 
 @router.get("/finetuning/tasks")

@@ -161,11 +161,12 @@ class StartupService:
                         
                         logger.info(f"🚀 파인튜닝 자동 재시작: task_id={batch_job.task_id}, influencer_id={batch_job.influencer_id}")
                         
-                        # 파인튜닝 시작
+                        # 파인튜닝 시작 (batch_id 전달)
                         success = await self.finetuning_service.start_finetuning_for_influencer(
                             influencer_id=batch_job.influencer_id,
                             s3_qa_file_url=batch_job.s3_qa_file_url,
-                            db=db
+                            db=db,
+                            batch_id=batch_job.batch_key_id
                         )
                         
                         if success:

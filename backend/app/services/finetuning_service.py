@@ -64,6 +64,7 @@ class FineTuningTask:
     hf_model_url: Optional[str] = None
     error_message: Optional[str] = None
     training_epochs: int = 5
+    batch_id: Optional[str] = None
     created_at: datetime = None
     updated_at: datetime = None
     
@@ -324,7 +325,7 @@ class InfluencerFineTuningService:
             logger.error(f"파인튜닝 데이터 준비 실패: {e}")
             raise
     
-    async def run_finetuning(self, qa_data: List[Dict], system_message: str, hf_repo_id: str, hf_token: str, epochs: int = 5) -> Optional[str]:
+    async def run_finetuning(self, qa_data: List[Dict], system_message: str, hf_repo_id: str, hf_token: str, epochs: int = 5, batch_id: Optional[str] = None) -> Optional[str]:
         """
         파인튜닝 실행 (VLLM 서버 우선, 로컬 폴백)
         Args:
@@ -333,6 +334,7 @@ class InfluencerFineTuningService:
             hf_repo_id: Hugging Face Repository ID
             hf_token: 허깅페이스 토큰
             epochs: 훈련 에포크 수
+            batch_id: 배치 작업 ID (선택적)
         Returns:
             HF 모델 URL (성공 시), None (실패 시)
         """
@@ -364,7 +366,8 @@ class InfluencerFineTuningService:
                     hf_token=hf_token,
                     training_epochs=epochs,
                     style_info="",
-                    is_converted=is_already_converted
+                    is_converted=is_already_converted,
+                    batch_id=batch_id
                 )
                 
                 task_id = result.get("task_id")
@@ -420,7 +423,8 @@ class InfluencerFineTuningService:
     
     
     def start_finetuning_task(self, influencer_id: str, qa_task_id: str, 
-                            s3_qa_url: str, influencer_data: AIInfluencer, db=None) -> str:
+                            s3_qa_url: str, influencer_data: AIInfluencer, db=None,
+                            batch_id: Optional[str] = None) -> str:
         """
         파인튜닝 작업 시작
         Args:
@@ -429,6 +433,7 @@ class InfluencerFineTuningService:
             s3_qa_url: S3 QA 데이터 URL
             influencer_data: 인플루언서 정보 (딕셔너리 또는 모델 인스턴스)
             db: 데이터베이스 세션
+            batch_id: 배치 작업 ID (선택적)
         Returns:
             파인튜닝 작업 ID
         """
@@ -475,7 +480,8 @@ class InfluencerFineTuningService:
             status=FineTuningStatus.PENDING,
             s3_qa_url=s3_qa_url,
             model_name=safe_name,
-            hf_repo_id=hf_repo_id
+            hf_repo_id=hf_repo_id,
+            batch_id=batch_id
         )
         
         self.tasks[task_id] = task
@@ -520,7 +526,8 @@ class InfluencerFineTuningService:
                 system_message=system_message,
                 hf_repo_id=task.hf_repo_id,
                 hf_token=hf_token,
-                epochs=task.training_epochs
+                epochs=task.training_epochs,
+                batch_id=task.batch_id
             )
             
             if hf_model_url:
@@ -617,13 +624,14 @@ class InfluencerFineTuningService:
             logger.error(f"파인튜닝 상태 확인 중 오류: {e}")
             return False
     
-    async def start_finetuning_for_influencer(self, influencer_id: str, s3_qa_file_url: str, db) -> bool:
+    async def start_finetuning_for_influencer(self, influencer_id: str, s3_qa_file_url: str, db, batch_id: Optional[str] = None) -> bool:
         """
         인플루언서를 위한 파인튜닝 시작 (startup service용)
         Args:
             influencer_id: 인플루언서 ID  
             s3_qa_file_url: S3 QA 파일 URL
             db: 데이터베이스 세션
+            batch_id: 배치 작업 ID (선택적)
         Returns:
             성공 여부
         """
@@ -647,7 +655,8 @@ class InfluencerFineTuningService:
                 qa_task_id=f"startup_restart_{influencer_id}",
                 s3_qa_url=s3_qa_file_url,
                 influencer_data=influencer_data,  # 모델 인스턴스 직접 전달
-                db=db
+                db=db,
+                batch_id=batch_id
             )
             
             # 파인튜닝 실행
