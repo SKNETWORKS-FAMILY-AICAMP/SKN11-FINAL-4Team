@@ -299,6 +299,22 @@ class InfluencerFineTuningService:
                 
         except Exception as e:
             logger.error(f"S3에서 QA 데이터 다운로드 실패: {e}", exc_info=True)
+            
+            # 처리된 QA 파일이 없는 경우 원본 파일 시도
+            if 'NoSuchKey' in str(e) and 'processed_qa' in s3_url:
+                logger.warning("처리된 QA 파일이 없습니다. 원본 파일로 시도합니다.")
+                
+                # URL을 원본 파일로 변경
+                raw_url = s3_url.replace('qa_pairs/', 'qa_results/').replace(
+                    f'processed_qa_{s3_url.split("_")[-1].replace(".json", "")}.json', 
+                    'generated_qa_results.jsonl'
+                )
+                
+                logger.info(f"원본 파일 URL로 재시도: {raw_url}")
+                
+                # 재귀 호출로 원본 파일 다운로드 시도
+                return self.download_qa_data_from_s3(raw_url)
+            
             return None
     
     async def prepare_finetuning_data(self, qa_data: List[Dict], influencer_data: AIInfluencer) -> tuple[List[Dict], str]:
