@@ -258,6 +258,19 @@ async def finetuning_worker():
         except Exception as e:
             logger.error(f"❌ 파인튜닝 워커 오류: {task_id}, {e}")
         finally:
+            # 작업 완료 후 GPU 메모리 정리
+            try:
+                import torch
+                import gc
+                
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    torch.cuda.synchronize()
+                    logger.info(f"♾️ 파인튜닝 작업 {task_id} 후 GPU 메모리 정리 완료")
+            except Exception as cleanup_error:
+                logger.warning(f"⚠️ GPU 메모리 정리 실패: {cleanup_error}")
+            
             finetuning_queue.task_done()
 
 async def initialize_vllm_engine():
@@ -278,10 +291,25 @@ async def initialize_vllm_engine():
         
         # vLLM 엔진 초기화 (GPU 필요하므로 실패할 수 있음)
         try:
+            # tensor_parallel_size 설정 (환경변수 또는 기본값)
+            tensor_parallel_size = int(os.getenv('VLLM_TENSOR_PARALLEL_SIZE', '1'))
+            
+            # vLLM이 사용할 GPU ID 설정
+            if tensor_parallel_size > 1:
+                # multi-GPU 사용 시 처음 N개 GPU 사용
+                vllm_gpu_ids = ','.join(str(i) for i in range(tensor_parallel_size))
+                os.environ['VLLM_GPU_IDS'] = vllm_gpu_ids
+                logger.info(f"vLLM multi-GPU 모드: GPU {vllm_gpu_ids} 사용")
+            else:
+                # 단일 GPU 사용
+                vllm_gpu_id = os.getenv('VLLM_GPU_ID', '0')
+                os.environ['VLLM_GPU_IDS'] = vllm_gpu_id
+                logger.info(f"vLLM 단일 GPU 모드: GPU {vllm_gpu_id} 사용")
+            
             engine_args = AsyncEngineArgs(
                 model="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct",
                 max_model_len=2048,
-                tensor_parallel_size=1,
+                tensor_parallel_size=tensor_parallel_size,
                 trust_remote_code=True,
                 gpu_memory_utilization=0.5,
                 enable_lora=True,

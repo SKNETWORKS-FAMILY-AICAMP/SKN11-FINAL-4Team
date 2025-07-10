@@ -370,9 +370,9 @@ async def handle_instagram_dm_event(messaging_event: Dict, db: Session):
             logger.info(f"   - 메시지 키들: {list(message.keys())}")
             
             # Echo 메시지는 처리하지 않음 (AI가 보낸 메시지의 에코)
-            if is_echo:
-                logger.info("🔄 Echo 메시지는 무시합니다.")
-                return
+            # if is_echo:
+            #     logger.info("🔄 Echo 메시지는 무시합니다.")
+            #     return
             
             if not message_text:
                 logger.info("📭 텍스트가 없는 메시지는 무시합니다.")
@@ -392,7 +392,18 @@ async def handle_instagram_dm_event(messaging_event: Dict, db: Session):
                 )
                 .first()
             )
-            
+            isAiInfluencer = (
+                db.query(AIInfluencer)
+                .filter(
+                    AIInfluencer.instagram_id == sender_id,
+                    AIInfluencer.instagram_is_active == True,
+                    AIInfluencer.chatbot_option == True  # 챗봇 옵션이 활성화된 인플루언서만
+                )
+                .first()
+            )
+            if isAiInfluencer:
+                logger.info(f"🤖 발신자 ID {sender_id}는 AI 인플루언서입니다.")
+                return
             
             if not influencer:
                 logger.warning(f"❌ 수신자 ID {recipient_id}에 해당하는 활성 AI 인플루언서를 찾을 수 없습니다.")
@@ -494,7 +505,7 @@ async def generate_ai_response(message_text: str, influencer: AIInfluencer, send
                 system_message=system_message,
                 influencer_name=influencer.influencer_name,
                 model_id=model_id,
-                max_new_tokens=150,
+                max_new_tokens=300,
                 temperature=0.7
             )
             

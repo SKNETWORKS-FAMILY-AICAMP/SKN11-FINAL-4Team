@@ -22,14 +22,14 @@ from pydantic import BaseModel
 import logging
 
 from app.services.openai_service_simple import (
-    get_openai_service, 
-    ContentGenerationRequest, 
-    ContentGenerationResponse
+    get_openai_service,
+    ContentGenerationRequest,
+    ContentGenerationResponse,
 )
 from app.services.comfyui_service_simple import (
     get_comfyui_service,
     ImageGenerationRequest,
-    ImageGenerationResponse
+    ImageGenerationResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -38,23 +38,24 @@ logger = logging.getLogger(__name__)
 # 통합 요청/응답 모델 (Clean Architecture - Domain Layer)
 class FullContentGenerationRequest(BaseModel):
     """전체 콘텐츠 생성 요청 모델"""
+
     # 게시글 정보
     topic: str
     platform: str
     include_content: Optional[str] = None
     hashtags: Optional[str] = None
-    
+
     # 인플루언서 정보
     influencer_id: str
     influencer_personality: Optional[str] = None
     influencer_tone: Optional[str] = None
-    
+
     # 이미지 생성 옵션
     generate_image: bool = True
     image_style: str = "realistic"
     image_width: int = 1024
     image_height: int = 1024
-    
+
     # 사용자 정보 (DB 저장용)
     user_id: str
     team_id: int
@@ -62,20 +63,21 @@ class FullContentGenerationRequest(BaseModel):
 
 class FullContentGenerationResponse(BaseModel):
     """전체 콘텐츠 생성 응답 모델"""
+
     # 생성된 콘텐츠
     social_media_content: str
     hashtags: List[str]
-    
+
     # 생성된 이미지
     generated_images: List[str] = []
     comfyui_prompt: str
-    
+
     # 메타데이터
     generation_id: str
     created_at: datetime
     total_generation_time: float
     metadata: Dict[str, Any]
-    
+
     # 단계별 결과
     openai_response: Optional[ContentGenerationResponse] = None
     comfyui_response: Optional[ImageGenerationResponse] = None
@@ -84,40 +86,39 @@ class FullContentGenerationResponse(BaseModel):
 class ContentGenerationWorkflow:
     """
     전체 콘텐츠 생성 워크플로우 관리
-    
+
     Clean Architecture Application Layer:
     - 여러 도메인 서비스를 조율
     - 비즈니스 로직 순서 관리
     - 에러 처리 및 폴백 제공
     """
-    
+
     def __init__(self):
         self.openai_service = get_openai_service()
         self.comfyui_service = get_comfyui_service()
-        
+
     async def generate_full_content(
-        self, 
-        request: FullContentGenerationRequest
+        self, request: FullContentGenerationRequest
     ) -> FullContentGenerationResponse:
         """
         전체 콘텐츠 생성 워크플로우 실행
-        
+
         단계:
         1. 사용자 입력 검증
         2. OpenAI로 소셜 미디어 콘텐츠 + ComfyUI 프롬프트 생성
         3. ComfyUI로 이미지 생성
         4. 결과 통합 및 반환
         """
-        
+
         generation_id = str(uuid.uuid4())
         start_time = datetime.now()
-        
+
         logger.info(f"Starting content generation workflow: {generation_id}")
-        
+
         try:
             # 1단계: 입력 검증
             self._validate_request(request)
-            
+
             # 2단계: OpenAI 콘텐츠 생성
             logger.info(f"Step 1: Generating text content with OpenAI")
             openai_request = ContentGenerationRequest(
@@ -126,34 +127,49 @@ class ContentGenerationWorkflow:
                 include_content=request.include_content,
                 hashtags=request.hashtags,
                 influencer_personality=request.influencer_personality,
-                influencer_tone=request.influencer_tone
+                influencer_tone=request.influencer_tone,
             )
-            
-            openai_response = await self.openai_service.generate_social_content(openai_request)
-            
+
+            openai_response = await self.openai_service.generate_social_content(
+                openai_request
+            )
+
             # 3단계: ComfyUI 이미지 생성 (옵션)
             comfyui_response = None
             generated_images = []
-            
+
             if request.generate_image:
                 logger.info(f"Step 2: Generating images with ComfyUI")
-                
-                comfyui_request = ImageGenerationRequest(
-                    prompt=openai_response.english_prompt_for_comfyui,
-                    width=request.image_width,
-                    height=request.image_height,
-                    style=request.image_style
-                )
-                
-                comfyui_response = await self.comfyui_service.generate_image(comfyui_request)
-                generated_images = comfyui_response.images
-            
+
+                try:
+                    comfyui_request = ImageGenerationRequest(
+                        prompt=openai_response.english_prompt_for_comfyui,
+                        width=request.image_width,
+                        height=request.image_height,
+                        style=request.image_style,
+                    )
+
+                    comfyui_response = await self.comfyui_service.generate_image(
+                        comfyui_request
+                    )
+                    generated_images = comfyui_response.images
+
+                except Exception as comfyui_error:
+                    logger.warning(
+                        f"ComfyUI image generation failed, continuing without images: {comfyui_error}"
+                    )
+                    # ComfyUI 실패 시 이미지 없이 계속 진행
+                    generated_images = []
+                    comfyui_response = None
+
             # 4단계: 결과 통합
             end_time = datetime.now()
             total_time = (end_time - start_time).total_seconds()
-            
-            logger.info(f"Content generation completed: {generation_id} ({total_time:.2f}s)")
-            
+
+            logger.info(
+                f"Content generation completed: {generation_id} ({total_time:.2f}s)"
+            )
+
             return FullContentGenerationResponse(
                 social_media_content=openai_response.social_media_content,
                 hashtags=openai_response.hashtags,
@@ -165,53 +181,59 @@ class ContentGenerationWorkflow:
                 metadata={
                     "request": request.dict(),
                     "openai_metadata": openai_response.metadata,
-                    "comfyui_metadata": comfyui_response.metadata if comfyui_response else {},
-                    "workflow_version": "1.0"
+                    "comfyui_metadata": (
+                        comfyui_response.metadata if comfyui_response else {}
+                    ),
+                    "workflow_version": "1.0",
                 },
                 openai_response=openai_response,
-                comfyui_response=comfyui_response
+                comfyui_response=comfyui_response,
             )
-            
+
         except Exception as e:
             logger.error(f"Content generation failed: {generation_id} - {e}")
-            
+
             # 실패 시 기본 응답 반환
-            return await self._generate_fallback_response(request, generation_id, start_time, str(e))
-    
+            return await self._generate_fallback_response(
+                request, generation_id, start_time, str(e)
+            )
+
     def _validate_request(self, request: FullContentGenerationRequest):
         """요청 검증"""
         if not request.topic or len(request.topic.strip()) < 2:
             raise ValueError("Topic must be at least 2 characters long")
-        
+
         if request.platform not in ["instagram", "facebook", "twitter", "tiktok"]:
             raise ValueError(f"Unsupported platform: {request.platform}")
-        
+
         if not request.influencer_id or not request.user_id:
             raise ValueError("Influencer ID and User ID are required")
-    
+
     async def _generate_fallback_response(
-        self, 
+        self,
         request: FullContentGenerationRequest,
         generation_id: str,
         start_time: datetime,
-        error_message: str
+        error_message: str,
     ) -> FullContentGenerationResponse:
         """실패 시 폴백 응답 생성"""
-        
+
         # 기본 콘텐츠 생성
         fallback_content = f"죄송합니다. {request.topic}에 대한 콘텐츠를 자동 생성하는 중 문제가 발생했습니다. 😅\n\n"
-        
+
         if request.include_content:
             fallback_content += f"{request.include_content}\n\n"
-        
-        fallback_content += "곧 더 나은 콘텐츠로 찾아뵙겠습니다! 💪\n\n#콘텐츠생성 #AI #소통"
-        
+
+        fallback_content += (
+            "곧 더 나은 콘텐츠로 찾아뵙겠습니다! 💪\n\n#콘텐츠생성 #AI #소통"
+        )
+
         # 기본 ComfyUI 프롬프트
         fallback_prompt = "high quality, realistic, social media content, modern style, professional photography"
-        
+
         end_time = datetime.now()
         total_time = (end_time - start_time).total_seconds()
-        
+
         return FullContentGenerationResponse(
             social_media_content=fallback_content,
             hashtags=["#콘텐츠생성", "#AI", "#소통"],
@@ -223,13 +245,14 @@ class ContentGenerationWorkflow:
             metadata={
                 "error": error_message,
                 "fallback": True,
-                "request": request.dict()
-            }
+                "request": request.dict(),
+            },
         )
 
 
 # 싱글톤 패턴으로 워크플로우 인스턴스 관리
 _workflow_instance = None
+
 
 def get_content_generation_workflow() -> ContentGenerationWorkflow:
     """콘텐츠 생성 워크플로우 싱글톤 인스턴스 반환"""
@@ -248,12 +271,12 @@ async def generate_content_for_board(
     team_id: int,
     include_content: Optional[str] = None,
     hashtags: Optional[str] = None,
-    generate_image: bool = True
+    generate_image: bool = True,
 ) -> FullContentGenerationResponse:
     """게시글용 콘텐츠 생성 편의 함수"""
-    
+
     workflow = get_content_generation_workflow()
-    
+
     request = FullContentGenerationRequest(
         topic=topic,
         platform=platform,
@@ -262,18 +285,18 @@ async def generate_content_for_board(
         influencer_id=influencer_id,
         user_id=user_id,
         team_id=team_id,
-        generate_image=generate_image
+        generate_image=generate_image,
     )
-    
+
     return await workflow.generate_full_content(request)
 
 
 async def generate_content_with_custom_settings(
-    request_data: Dict[str, Any]
+    request_data: Dict[str, Any],
 ) -> FullContentGenerationResponse:
     """커스텀 설정으로 콘텐츠 생성"""
-    
+
     workflow = get_content_generation_workflow()
     request = FullContentGenerationRequest(**request_data)
-    
+
     return await workflow.generate_full_content(request)

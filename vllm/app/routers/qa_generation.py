@@ -252,8 +252,6 @@ async def get_openai_batch_status_by_id(batch_id: str):
         logger.error(f"OpenAI 배치 상태 조회 실패: {str(e)}")
         raise HTTPException(status_code=500, detail=f"배치 상태 조회 중 오류 발생: {str(e)}")
 
-# LangChain QA 생성 엔드포인트 제거 - 배치 처리가 비용 효율적
-
 async def _run_qa_batch_generation(
     task_id: str,
     characters_data: List[CharacterData],
@@ -279,11 +277,20 @@ async def _run_qa_batch_generation(
                 mbti=char_data.mbti
             )
             
+            # 도메인별 특성 설명 (위와 동일)
+            domain_descriptions = {
+                "일상생활": "일상의 소소한 일들, 취미, 습관, 음식, 주말 활동 등",
+                "과학기술": "AI, 기술 트렌드, 스마트폰, 미래 기술, 과학의 발전",
+                "사회이슈": "사회 문제, 환경, 불평등, 세대 간 차이, 미래 사회",
+                "인문학": "인생의 가치, 책, 예술, 철학, 역사의 교훈",
+                "스포츠": "운동, 건강관리, 스포츠 경기, 운동의 즐거움",
+                "역사문화": "전통문화, 역사적 장소, 문화의 다양성, 역사 인물"
+            }
+            
             # 도메인별로 QA 생성
             for domain in domains:
                 for j in range(num_qa_per_character):
-                    # 도메인별 질문 생성
-                    question = _generate_domain_question(domain, character_profile)
+                    domain_desc = domain_descriptions.get(domain, domain)
                     
                     # OpenAI Batch API 형식으로 변환
                     custom_id = f"qa_{char_data.name}_{domain}_{i}_{j}"
@@ -300,11 +307,15 @@ async def _run_qa_batch_generation(
                                 },
                                 {
                                     "role": "user", 
-                                    "content": question
+                                    "content": f"""{domain}({domain_desc})에 관한 QA 쌍을 하나 만들어주세요.
+{char_data.name}의 성격과 특성에 맞는 자연스럽고 흥미로운 질문을 만들고, 그에 대해 캐릭터답게 답변해주세요.
+반드시 JSON 형식으로 답변해주세요:
+{{"q": "질문 내용", "a": "답변 내용"}}"""
                                 }
                             ],
                             "max_tokens": 500,
-                            "temperature": 0.7
+                            "temperature": 0.7,
+                            "response_format": {"type": "json_object"}  # JSON 형식 강제
                         }
                     }
                     
@@ -366,8 +377,17 @@ async def _run_influencer_qa_generation(
             logger.info(f"도메인 '{domain}' QA 생성 시작: {current_domain_qa}개")
             
             for i in range(current_domain_qa):
-                # 도메인별 질문 생성
-                question = _generate_domain_question(domain, character_profile)
+                # 도메인별 특성 설명
+                domain_descriptions = {
+                    "일상생활": "일상의 소소한 일들, 취미, 습관, 음식, 주말 활동 등",
+                    "과학기술": "AI, 기술 트렌드, 스마트폰, 미래 기술, 과학의 발전",
+                    "사회이슈": "사회 문제, 환경, 불평등, 세대 간 차이, 미래 사회",
+                    "인문학": "인생의 가치, 책, 예술, 철학, 역사의 교훈",
+                    "스포츠": "운동, 건강관리, 스포츠 경기, 운동의 즐거움",
+                    "역사문화": "전통문화, 역사적 장소, 문화의 다양성, 역사 인물"
+                }
+                
+                domain_desc = domain_descriptions.get(domain, domain)
                 
                 # OpenAI Batch API 형식으로 변환
                 custom_id = f"influencer_qa_{character_data.name}_{domain}_{i}"
@@ -380,15 +400,19 @@ async def _run_influencer_qa_generation(
                         "messages": [
                             {
                                 "role": "system",
-                                "content": system_prompt or f"당신은 {character_data.name}라는 인플루언서입니다. {character_data.personality} 성격을 가지고 있으며, {domain} 분야에 대해 자연스럽고 매력적으로 답변합니다."
+                                "content": system_prompt or f"당신은 {character_data.name}라는 인플루언서입니다. {character_data.personality} 성격을 가지고 있습니다."
                             },
                             {
                                 "role": "user",
-                                "content": question
+                                "content": f"""{domain}({domain_desc})에 관한 QA 쌍을 하나 만들어주세요.
+{character_data.name}의 성격과 특성에 맞는 자연스럽고 흥미로운 질문을 만들고, 그에 대해 캐릭터답게 답변해주세요.
+반드시 JSON 형식으로 답변해주세요:
+{{"q": "질문 내용", "a": "답변 내용"}}"""
                             }
                         ],
                         "max_tokens": 500,
-                        "temperature": 0.8
+                        "temperature": 0.8,
+                        "response_format": {"type": "json_object"}  # JSON 형식 강제
                     }
                 }
                 
@@ -415,69 +439,4 @@ async def _run_influencer_qa_generation(
         task_entry["end_time"] = datetime.now().isoformat()
         logger.error(f"인플루언서 QA 생성 실패: {task_id}, 오류: {e}", exc_info=True)
 
-# LangChain QA 생성 함수 제거 - 배치 처리가 비용 효율적
-
-def _generate_domain_question(domain: str, character: CharacterProfile) -> str:
-    """도메인별 질문 생성"""
-    
-    # 도메인별 질문 템플릿
-    domain_questions = {
-        "일상생활": [
-            "오늘 하루는 어떻게 보내셨나요?",
-            "요즘 즐겨하는 취미가 있으신가요?",
-            "스트레스를 받을 때 어떻게 해소하시나요?",
-            "좋아하는 음식이나 레시피가 있다면 소개해주세요.",
-            "주말에는 주로 뭘 하며 시간을 보내시나요?"
-        ],
-        "과학기술": [
-            "최근 관심있는 기술 트렌드가 있으신가요?",
-            "AI나 인공지능에 대해 어떻게 생각하시나요?",
-            "스마트폰 없는 생활을 상상할 수 있나요?",
-            "미래에 어떤 기술이 우리 삶을 바꿀 것 같나요?",
-            "과학기술의 발전이 인간에게 미치는 영향은 무엇일까요?"
-        ],
-        "사회이슈": [
-            "요즘 사회에서 가장 중요한 이슈는 무엇이라고 생각하시나요?",
-            "환경 보호를 위해 개인이 할 수 있는 일은 무엇일까요?",
-            "사회의 불평등 문제에 대해 어떻게 생각하시나요?",
-            "젊은 세대가 직면한 가장 큰 도전은 무엇일까요?",
-            "미래 사회는 어떤 모습일 것 같나요?"
-        ],
-        "인문학": [
-            "인생에서 가장 중요한 가치는 무엇이라고 생각하시나요?",
-            "좋아하는 책이나 명언이 있다면 소개해주세요.",
-            "예술이 인간에게 미치는 영향은 무엇일까요?",
-            "역사에서 배울 수 있는 교훈은 무엇일까요?",
-            "철학적으로 생각해볼 만한 질문이 있다면 무엇인가요?"
-        ],
-        "스포츠": [
-            "좋아하는 스포츠나 운동이 있으신가요?",
-            "운동의 즐거움은 무엇이라고 생각하시나요?",
-            "건강관리를 위해 어떤 노력을 하고 계신가요?",
-            "스포츠 경기를 보면서 느끼는 감정은 어떤가요?",
-            "운동을 통해 얻은 인생의 교훈이 있다면 무엇인가요?"
-        ],
-        "역사문화": [
-            "우리나라의 전통문화 중 자랑스러운 것은 무엇인가요?",
-            "역사를 배우는 이유는 무엇이라고 생각하시나요?",
-            "가고 싶은 역사적 장소나 유적지가 있나요?",
-            "문화의 다양성에 대해 어떻게 생각하시나요?",
-            "역사 속 인물 중 존경하는 사람이 있다면 누구인가요?"
-        ]
-    }
-    
-    import random
-    
-    # 해당 도메인의 질문 중 랜덤 선택
-    if domain in domain_questions:
-        base_question = random.choice(domain_questions[domain])
-    else:
-        base_question = f"{domain}에 대해 어떻게 생각하시나요?"
-    
-    # 캐릭터 정보를 반영한 질문으로 개인화
-    if character.name and character.name != "인플루언서":
-        personalized_question = f"{character.name}님, {base_question}"
-    else:
-        personalized_question = base_question
-    
-    return personalized_question
+# 하드코딩된 질문 생성 함수 제거 - OpenAI가 직접 질문과 답변 생성
