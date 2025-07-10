@@ -13,9 +13,11 @@ class InstagramConnectRequest(BaseModel):
     redirect_uri: str
 
 
-def get_user_with_groups(db: Session, user_id: str):
-    """사용자 정보와 그룹 정보를 조회"""
-    user = db.query(User).filter(User.user_id == user_id).first()
+def get_user_with_teams(db: Session, user_id: str):
+    """사용자 정보와 팀 정보를 조회"""
+    from sqlalchemy.orm import joinedload
+    
+    user = db.query(User).options(joinedload(User.teams)).filter(User.user_id == user_id).first()
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -26,8 +28,8 @@ def get_user_with_groups(db: Session, user_id: str):
 
 def get_influencer_with_permission(db: Session, user_id: str, influencer_id: str):
     """권한 확인 후 인플루언서 조회"""
-    user = get_user_with_groups(db, user_id)
-    user_group_ids = [group.group_id for group in user.groups]
+    user = get_user_with_teams(db, user_id)
+    user_group_ids = [team.group_id for team in user.teams]
     
     query = db.query(AIInfluencer).filter(AIInfluencer.influencer_id == influencer_id)
     if user_group_ids:
@@ -111,6 +113,9 @@ async def connect_instagram_account(db: Session, user_id: str, influencer_id: st
     db.commit()
     db.refresh(influencer)
     
+    # Instagram 연동 완료 후 vLLM 어댑터 로드 요청
+    await _load_vllm_adapter_for_influencer(influencer, db)
+    
     # 실시간으로 Instagram 사용자 정보 조회
     try:
         user_info = await social_auth.get_instagram_user_info(
@@ -181,3 +186,77 @@ async def get_instagram_status(db: Session, user_id: str, influencer_id: str):
         "token_expired": token_expired,
         "instagram_info": instagram_info
     }
+
+
+async def _load_vllm_adapter_for_influencer(influencer, db: Session):
+    """Instagram 연동된 인플루언서의 vLLM 어댑터 로드"""
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    # 파인튜닝된 모델이 있는지 확인
+    if not influencer.influencer_model_repo:
+        logger.info(f"🤖 {influencer.influencer_name}: 파인튜닝된 모델이 없어 어댑터 로드를 건너뜁니다.")
+        return False
+    
+    try:
+        # vLLM 클라이언트 및 어댑터 로드 함수 import
+        from app.services.vllm_operations import vllm_load_adapter_if_needed, get_hf_token_from_influencer_group
+        
+        logger.info(f"📲 {influencer.influencer_name}: Instagram 연동 완료, vLLM 어댑터 로드 시작")
+        logger.info(f"   - 모델 리포지토리: {influencer.influencer_model_repo}")
+        
+        # 허깅페이스 토큰 조회
+        hf_token = await get_hf_token_from_influencer_group(influencer, db)
+        
+        # 어댑터 로드 요청
+        adapter_loaded = await vllm_load_adapter_if_needed(
+            model_id=influencer.influencer_model_repo,
+            hf_repo_name=influencer.influencer_model_repo,
+            hf_token=hf_token
+        )
+        
+        if adapter_loaded:
+            logger.info(f"✅ {influencer.influencer_name}: vLLM 어댑터 로드 성공")
+        else:
+            logger.warning(f"⚠️ {influencer.influencer_name}: vLLM 어댑터 로드 실패")
+        
+        return adapter_loaded
+        
+    except Exception as e:
+        logger.error(f"❌ {influencer.influencer_name}: vLLM 어댑터 로드 중 오류 발생: {str(e)}")
+        return False
+
+
+async def load_adapters_for_active_instagram_influencers(db: Session):
+    """활성화된 Instagram 연동 인플루언서들의 vLLM 어댑터 자동 로드"""
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    try:
+        # Instagram이 활성화되고 파인튜닝된 모델이 있는 인플루언서 조회
+        from app.models.influencer import AIInfluencer
+        
+        active_influencers = (
+            db.query(AIInfluencer)
+            .filter(
+                AIInfluencer.instagram_is_active == True,
+                AIInfluencer.influencer_model_repo.isnot(None),
+                AIInfluencer.influencer_model_repo != ""
+            )
+            .all()
+        )
+        
+        if not active_influencers:
+            logger.info("📱 Instagram 연동된 파인튜닝 인플루언서가 없습니다.")
+            return
+        
+        logger.info(f"📱 Instagram 활성화된 인플루언서 {len(active_influencers)}개의 vLLM 어댑터 로드 시작")
+        
+        # 각 인플루언서의 어댑터 로드
+        for influencer in active_influencers:
+            await _load_vllm_adapter_for_influencer(influencer, db)
+        
+        logger.info("✅ Instagram 연동 인플루언서들의 vLLM 어댑터 로드 완료")
+        
+    except Exception as e:
+        logger.error(f"❌ Instagram 연동 인플루언서 어댑터 로드 중 오류: {str(e)}")

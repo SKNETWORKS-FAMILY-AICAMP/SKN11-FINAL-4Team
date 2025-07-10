@@ -26,17 +26,13 @@ class VLLMClientError(Exception):
 @dataclass
 class VLLMServerConfig:
     """VLLM 서버 설정"""
-    host: str = "localhost"
-    port: int = 8000
+    base_url: str
     timeout: int = 300
     
     @property
-    def base_url(self) -> str:
-        return f"http://{self.host}:{self.port}"
-    
-    @property
     def ws_url(self) -> str:
-        return f"ws://{self.host}:{self.port}"
+        # HTTP -> WS 변환 (http:// -> ws://, https:// -> wss://)
+        return self.base_url.replace("http://", "ws://").replace("https://", "wss://")
 
 
 class VLLMClient:
@@ -75,7 +71,8 @@ class VLLMClient:
             raise VLLMClientError(f"서버 통계 조회 실패: {e}")
     
     async def load_adapter(self, model_id: str, hf_repo_name: str, 
-                          hf_token: Optional[str] = None) -> Dict[str, Any]:
+                          hf_token: Optional[str] = None, 
+                          base_model_override: Optional[str] = None) -> Dict[str, Any]:
         """LoRA 어댑터 로드"""
         try:
             payload = {
@@ -84,8 +81,10 @@ class VLLMClient:
             }
             if hf_token:
                 payload["hf_token"] = hf_token
+            if base_model_override:
+                payload["base_model_override"] = base_model_override
             
-            response = await self.client.post("/load_adapter", json=payload)
+            response = await self.client.post("/lora/load_adapter", json=payload)
             response.raise_for_status()
             
             result = response.json()
@@ -113,6 +112,7 @@ class VLLMClient:
             if model_id:
                 payload["model_id"] = model_id
             
+            logger.debug(f"🔄 vLLM 서버 요청: {payload}")
             response = await self.client.post("/generate", json=payload)
             response.raise_for_status()
             
@@ -120,6 +120,15 @@ class VLLMClient:
             logger.debug(f"✅ 응답 생성 성공: {influencer_name}")
             return result
             
+        except httpx.HTTPStatusError as e:
+            error_detail = ""
+            try:
+                error_detail = e.response.text if e.response else "No response"
+            except:
+                error_detail = "Cannot read response"
+            
+            logger.error(f"❌ vLLM 서버 HTTP 오류: {e.response.status_code} - {error_detail}")
+            raise VLLMClientError(f"응답 생성 실패: {e.response.status_code} - {error_detail}")
         except Exception as e:
             logger.error(f"❌ 응답 생성 실패: {e}")
             raise VLLMClientError(f"응답 생성 실패: {e}")
@@ -127,9 +136,16 @@ class VLLMClient:
     async def list_adapters(self) -> Dict[str, Any]:
         """로드된 어댑터 목록 조회"""
         try:
-            response = await self.client.get("/adapters")
+            response = await self.client.get("/lora/adapters")
             response.raise_for_status()
             return response.json()
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                logger.warning(f"⚠️ 어댑터 엔드포인트가 지원되지 않습니다: {e}")
+                return {"adapters": []}  # 빈 어댑터 목록 반환
+            else:
+                logger.error(f"어댑터 목록 조회 실패: {e}")
+                raise VLLMClientError(f"어댑터 목록 조회 실패: {e}")
         except Exception as e:
             logger.error(f"어댑터 목록 조회 실패: {e}")
             raise VLLMClientError(f"어댑터 목록 조회 실패: {e}")
@@ -137,7 +153,7 @@ class VLLMClient:
     async def unload_adapter(self, model_id: str) -> Dict[str, Any]:
         """어댑터 언로드"""
         try:
-            response = await self.client.delete(f"/adapter/{model_id}")
+            response = await self.client.delete(f"/lora/adapter/{model_id}")
             response.raise_for_status()
             
             result = response.json()
@@ -151,7 +167,8 @@ class VLLMClient:
     async def start_finetuning(self, influencer_id: str, influencer_name: str,
                              personality: str, qa_data: List[Dict], hf_repo_id: str,
                              hf_token: str, training_epochs: int = 5,
-                             style_info: str = "") -> Dict[str, Any]:
+                             style_info: str = "", is_converted: bool = False,
+                             task_id: Optional[str] = None) -> Dict[str, Any]:
         """파인튜닝 시작"""
         try:
             payload = {
@@ -162,7 +179,9 @@ class VLLMClient:
                 "hf_repo_id": hf_repo_id,
                 "hf_token": hf_token,
                 "training_epochs": training_epochs,
-                "style_info": style_info
+                "style_info": style_info,
+                "is_converted": is_converted,
+                "task_id": task_id
             }
             
             response = await self.client.post("/finetuning/start", json=payload)
@@ -195,6 +214,34 @@ class VLLMClient:
         except Exception as e:
             logger.error(f"파인튜닝 작업 목록 조회 실패: {e}")
             raise VLLMClientError(f"파인튜닝 작업 목록 조회 실패: {e}")
+    
+    async def generate_qa_for_character(self, character_data: Dict[str, Any]) -> Dict[str, Any]:
+        """캐릭터에 대한 QA 생성 (vLLM 서버의 /speech/generate_qa 엔드포인트 사용)"""
+        try:
+            # VLLMCharacterProfile 형식으로 변환
+            payload = {
+                "name": character_data.get("name", ""),
+                "description": character_data.get("description", ""),
+                "age_range": character_data.get("age_range", ""),
+                "gender": character_data.get("gender", "NON_BINARY"),
+                "personality": character_data.get("personality", ""),
+                "mbti": character_data.get("mbti")
+            }
+            
+            logger.info(f"vLLM 서버로 QA 생성 요청: {payload}")
+            response = await self.client.post("/speech/generate_qa", json=payload)
+            response.raise_for_status()
+            
+            result = response.json()
+            logger.debug(f"✅ QA 생성 성공: {character_data.get('name', 'Unknown')}")
+            return result
+            
+        except Exception as e:
+            logger.error(f"❌ QA 생성 실패: {e}")
+            if hasattr(e, 'response') and e.response is not None:
+                logger.error(f"응답 상태: {e.response.status_code}")
+                logger.error(f"응답 내용: {e.response.text}")
+            raise VLLMClientError(f"QA 생성 실패: {e}")
 
 
 class VLLMWebSocketClient:
@@ -262,32 +309,15 @@ class VLLMWebSocketClient:
             logger.info("🔌 VLLM WebSocket 연결 종료")
 
 
-# 싱글톤 클라이언트 인스턴스
-_vllm_client_instance = None
 _vllm_config = VLLMServerConfig(
-    host=getattr(settings, 'VLLM_HOST', 'localhost'),
-    port=getattr(settings, 'VLLM_PORT', 8000),
+    base_url=settings.VLLM_BASE_URL,
     timeout=getattr(settings, 'VLLM_TIMEOUT', 300)
 )
 
 
 async def get_vllm_client() -> VLLMClient:
     """VLLM 클라이언트 의존성 주입용 함수"""
-    global _vllm_client_instance
-    
-    if _vllm_client_instance is None:
-        _vllm_client_instance = VLLMClient(_vllm_config)
-    
-    return _vllm_client_instance
-
-
-async def close_vllm_client():
-    """VLLM 클라이언트 종료"""
-    global _vllm_client_instance
-    
-    if _vllm_client_instance:
-        await _vllm_client_instance.client.aclose()
-        _vllm_client_instance = None
+    return VLLMClient(_vllm_config)
 
 
 # 편의 함수들
@@ -313,7 +343,8 @@ async def vllm_generate_response(user_message: str, system_message: str = None,
 
 
 async def vllm_load_adapter_if_needed(model_id: str, hf_repo_name: str,
-                                     hf_token: str = None) -> bool:
+                                     hf_token: str = None, 
+                                     base_model_override: str = None) -> bool:
     """필요시 어댑터 로드"""
     async with VLLMClient(_vllm_config) as client:
         try:
@@ -326,9 +357,15 @@ async def vllm_load_adapter_if_needed(model_id: str, hf_repo_name: str,
                 return True
             
             # 어댑터 로드
-            await client.load_adapter(model_id, hf_repo_name, hf_token)
+            await client.load_adapter(model_id, hf_repo_name, hf_token, base_model_override)
             return True
             
         except Exception as e:
             logger.error(f"❌ 어댑터 로드 실패: {model_id}, {e}")
             return False
+
+
+async def vllm_generate_qa_for_character(character_data: Dict[str, Any]) -> Dict[str, Any]:
+    """vLLM에서 캐릭터 QA 생성 (편의 함수)"""
+    async with VLLMClient(_vllm_config) as client:
+        return await client.generate_qa_for_character(character_data)

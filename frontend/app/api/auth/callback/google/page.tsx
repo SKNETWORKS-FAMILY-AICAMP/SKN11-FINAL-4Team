@@ -14,13 +14,11 @@ function GoogleCallbackContent() {
 
   useEffect(() => {
     const processAuth = async () => {
-      console.log('Google 콜백 처리 시작')
       const code = searchParams.get('code')
       const error = searchParams.get('error')
       const state = searchParams.get('state')
       const returnUrl = localStorage.getItem('social_auth_return_url') || '/'
 
-      console.log('콜백 파라미터:', { code: !!code, error, state, returnUrl })
 
       if (error) {
         console.error('Google OAuth 에러:', error)
@@ -43,9 +41,7 @@ function GoogleCallbackContent() {
       }
 
       try {
-        console.log('백엔드 API 호출 시작')
         const redirectUri = process.env.NEXT_PUBLIC_GOOGLE_REDIRECT_URI || `${window.location.origin}/api/auth/callback/google`
-        console.log('사용할 redirect URI:', redirectUri)
         
         // 백엔드에 authorization code 전달
         const backendResponse = await BackendAuthService.exchangeCodeForToken(
@@ -54,7 +50,6 @@ function GoogleCallbackContent() {
           redirectUri
         )
 
-        console.log('백엔드 응답 성공:', backendResponse)
 
         // AuthContext의 login 함수를 사용하여 인증 상태 업데이트
         await login(backendResponse.access_token)

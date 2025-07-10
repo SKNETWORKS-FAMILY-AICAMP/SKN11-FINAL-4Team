@@ -9,11 +9,17 @@ export function useBackendSession() {
       throw new Error('No backend authentication token available')
     }
 
-    return BackendAuthService.makeAuthenticatedRequest(
-      endpoint,
-      options,
-      session.backendJWT
-    )
+    // 직접 fetch를 사용하여 인증된 요청 구현
+    const authHeaders = {
+      'Authorization': `Bearer ${session.backendJWT}`,
+      'Content-Type': 'application/json',
+      ...options.headers
+    }
+
+    return fetch(endpoint, {
+      ...options,
+      headers: authHeaders
+    })
   }
 
   const verifyBackendToken = async () => {
@@ -22,7 +28,7 @@ export function useBackendSession() {
     }
 
     try {
-      return await BackendAuthService.verifyToken(session.backendJWT)
+      return await BackendAuthService.verifyToken()
     } catch (error) {
       console.error('Backend token verification failed:', error)
       return null

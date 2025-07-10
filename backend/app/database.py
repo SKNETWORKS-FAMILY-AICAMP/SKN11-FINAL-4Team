@@ -48,6 +48,7 @@ def init_database():
         from app.models.board import Board
         from app.models.image_generation import ImageGenerationRequest
         from app.models.content_enhancement import ContentEnhancement
+        from app.models.prompt_optimization import PromptOptimization, PromptOptimizationUsage, PromptTemplate
 
         # 테이블 생성
         Base.metadata.create_all(bind=engine)

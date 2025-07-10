@@ -5,9 +5,13 @@
 
 import json
 import logging
+import time
 from typing import Dict, Any, Optional
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 from app.core.config import settings
+from app.database import get_db
+from app.models.prompt_optimization import PromptOptimization, PromptOptimizationUsage
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +20,7 @@ openai_client = None
 if settings.OPENAI_API_KEY:
     try:
         import openai
+
         openai_client = openai.OpenAI(api_key=settings.OPENAI_API_KEY)
         logger.info("OpenAI client initialized for prompt optimization")
     except ImportError:
@@ -26,15 +31,19 @@ if settings.OPENAI_API_KEY:
 
 class PromptOptimizationRequest(BaseModel):
     """프롬프트 최적화 요청"""
+
     original_prompt: str  # 사용자 입력 (한글/영문)
     style: str = "realistic"  # realistic, anime, artistic, photograph
     quality_level: str = "high"  # low, medium, high, ultra
     aspect_ratio: str = "1:1"  # 1:1, 16:9, 9:16, 4:3, 3:2
     additional_tags: Optional[str] = None  # 추가 태그
+    user_id: Optional[str] = None  # 사용자 ID
+    session_id: Optional[str] = None  # 세션 ID
 
 
 class PromptOptimizationResponse(BaseModel):
     """프롬프트 최적화 응답"""
+
     optimized_prompt: str  # 최적화된 영문 프롬프트
     negative_prompt: str  # 네거티브 프롬프트
     style_tags: list[str]  # 스타일 관련 태그
@@ -44,26 +53,47 @@ class PromptOptimizationResponse(BaseModel):
 
 class PromptOptimizationService:
     """프롬프트 최적화 서비스"""
-    
+
     def __init__(self):
-        self.use_mock = not bool(settings.OPENAI_API_KEY and openai_client)
+        if not settings.OPENAI_API_KEY or not openai_client:
+            raise ValueError(
+                "OpenAI API 키가 설정되지 않았습니다. .env 파일에 OPENAI_API_KEY를 설정해주세요."
+            )
         self.style_presets = self._load_style_presets()
         self.quality_presets = self._load_quality_presets()
         self.negative_presets = self._load_negative_presets()
-        
-        logger.info(f"Prompt Optimization Service initialized (Mock mode: {self.use_mock})")
-    
-    async def optimize_prompt(self, request: PromptOptimizationRequest) -> PromptOptimizationResponse:
+
+        logger.info("Prompt Optimization Service initialized (실제 API 모드)")
+
+    async def optimize_prompt(
+        self, request: PromptOptimizationRequest
+    ) -> PromptOptimizationResponse:
         """프롬프트 최적화"""
-        
-        if not self.use_mock and openai_client:
-            return await self._optimize_with_openai(request)
-        else:
-            return await self._optimize_with_mock(request)
-    
-    async def _optimize_with_openai(self, request: PromptOptimizationRequest) -> PromptOptimizationResponse:
+        start_time = time.time()
+
+        try:
+            result = await self._optimize_with_openai(request)
+
+            # 최적화 시간 계산
+            optimization_time = time.time() - start_time
+
+            # DB에 저장
+            await self._save_optimization_result(request, result, optimization_time)
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Prompt optimization failed: {e}")
+            # 실패해도 DB에 기록
+            optimization_time = time.time() - start_time
+            await self._save_optimization_error(request, str(e), optimization_time)
+            raise
+
+    async def _optimize_with_openai(
+        self, request: PromptOptimizationRequest
+    ) -> PromptOptimizationResponse:
         """OpenAI를 사용한 실제 프롬프트 최적화"""
-        
+
         try:
             # 시스템 프롬프트 구성
             system_prompt = f"""
@@ -86,7 +116,7 @@ class PromptOptimizationService:
                 "reasoning": "최적화 과정 설명"
             }}
             """
-            
+
             # 사용자 프롬프트 구성
             user_prompt = f"""
             원본 프롬프트: {request.original_prompt}
@@ -97,36 +127,40 @@ class PromptOptimizationService:
             
             위 정보를 바탕으로 ComfyUI에 최적화된 프롬프트를 생성해주세요.
             """
-            
+
             response = openai_client.chat.completions.create(
                 model=settings.OPENAI_MODEL,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
+                    {"role": "user", "content": user_prompt},
                 ],
                 max_tokens=settings.OPENAI_MAX_TOKENS,
-                temperature=0.7
+                temperature=0.7,
             )
-            
+
             content = response.choices[0].message.content
-            
+
             # JSON 파싱 시도
             try:
                 parsed_result = json.loads(content)
-                
+
                 return PromptOptimizationResponse(
                     optimized_prompt=parsed_result.get("optimized_prompt", ""),
-                    negative_prompt=parsed_result.get("negative_prompt", self.negative_presets["default"]),
+                    negative_prompt=parsed_result.get(
+                        "negative_prompt", self.negative_presets["default"]
+                    ),
                     style_tags=parsed_result.get("style_tags", []),
                     quality_tags=parsed_result.get("quality_tags", []),
                     metadata={
                         "method": "openai",
                         "model": settings.OPENAI_MODEL,
                         "reasoning": parsed_result.get("reasoning", ""),
-                        "tokens_used": response.usage.total_tokens if response.usage else 0
-                    }
+                        "tokens_used": (
+                            response.usage.total_tokens if response.usage else 0
+                        ),
+                    },
                 )
-                
+
             except json.JSONDecodeError:
                 # JSON 파싱 실패 시 텍스트 처리
                 return PromptOptimizationResponse(
@@ -136,128 +170,79 @@ class PromptOptimizationService:
                     quality_tags=self.quality_presets[request.quality_level]["tags"],
                     metadata={
                         "method": "openai_fallback",
-                        "note": "JSON 파싱 실패, 원본 응답 사용"
-                    }
+                        "note": "JSON 파싱 실패, 원본 응답 사용",
+                    },
                 )
-                
+
         except Exception as e:
             logger.error(f"OpenAI 프롬프트 최적화 실패: {e}")
-            # 실패 시 Mock 모드로 fallback
-            return await self._optimize_with_mock(request)
-    
-    async def _optimize_with_mock(self, request: PromptOptimizationRequest) -> PromptOptimizationResponse:
-        """Mock 프롬프트 최적화"""
-        
-        # 간단한 규칙 기반 최적화
-        original = request.original_prompt.strip()
-        
-        # 기본 영문 변환 (실제로는 번역 API 사용)
-        if self._is_korean(original):
-            # 간단한 한글 키워드 매핑
-            korean_mapping = {
-                "고양이": "cat",
-                "강아지": "dog", 
-                "꽃": "flower",
-                "산": "mountain",
-                "바다": "ocean",
-                "하늘": "sky",
-                "구름": "cloud",
-                "나무": "tree",
-                "집": "house",
-                "차": "car",
-                "사람": "person",
-                "여자": "woman",
-                "남자": "man",
-                "아이": "child",
-                "음식": "food",
-                "풍경": "landscape",
-                "도시": "city"
-            }
-            
-            translated = original
-            for kr, en in korean_mapping.items():
-                translated = translated.replace(kr, en)
-        else:
-            translated = original
-        
-        # 스타일 및 품질 태그 추가
-        style_tags = self.style_presets[request.style]["tags"]
-        quality_tags = self.quality_presets[request.quality_level]["tags"]
-        
-        # 최적화된 프롬프트 구성
-        optimized_parts = [translated]
-        optimized_parts.extend(style_tags)
-        optimized_parts.extend(quality_tags)
-        
-        if request.additional_tags:
-            optimized_parts.append(request.additional_tags)
-        
-        # 종횡비에 따른 태그 추가
-        if request.aspect_ratio == "16:9":
-            optimized_parts.append("wide shot, cinematic")
-        elif request.aspect_ratio == "9:16":
-            optimized_parts.append("portrait orientation, vertical")
-        
-        optimized_prompt = ", ".join(optimized_parts)
-        
-        return PromptOptimizationResponse(
-            optimized_prompt=optimized_prompt,
-            negative_prompt=self.negative_presets[request.style],
-            style_tags=style_tags,
-            quality_tags=quality_tags,
-            metadata={
-                "method": "mock",
-                "original_language": "korean" if self._is_korean(original) else "english",
-                "note": "Mock optimization - 실제 OpenAI API 키 설정 시 고품질 최적화됩니다"
-            }
-        )
-    
+            raise ValueError(f"프롬프트 최적화에 실패했습니다: {str(e)}")
+
     def _is_korean(self, text: str) -> bool:
         """한글 포함 여부 확인"""
-        return any('\uac00' <= char <= '\ud7af' for char in text)
-    
+        return any("\uac00" <= char <= "\ud7af" for char in text)
+
     def _load_style_presets(self) -> Dict[str, Dict]:
         """스타일 프리셋 로드"""
         return {
             "realistic": {
-                "tags": ["photorealistic", "detailed", "high resolution", "sharp focus"],
-                "description": "사실적인 사진 스타일"
+                "tags": [
+                    "photorealistic",
+                    "detailed",
+                    "high resolution",
+                    "sharp focus",
+                ],
+                "description": "사실적인 사진 스타일",
             },
             "anime": {
                 "tags": ["anime style", "manga", "cel shading", "vibrant colors"],
-                "description": "애니메이션 스타일"
+                "description": "애니메이션 스타일",
             },
             "artistic": {
                 "tags": ["artistic", "painterly", "expressive", "creative"],
-                "description": "예술적 스타일"
+                "description": "예술적 스타일",
             },
             "photograph": {
-                "tags": ["professional photography", "DSLR", "studio lighting", "commercial"],
-                "description": "전문 사진 스타일"
-            }
+                "tags": [
+                    "professional photography",
+                    "DSLR",
+                    "studio lighting",
+                    "commercial",
+                ],
+                "description": "전문 사진 스타일",
+            },
         }
-    
+
     def _load_quality_presets(self) -> Dict[str, Dict]:
         """품질 프리셋 로드"""
         return {
-            "low": {
-                "tags": ["simple", "basic"],
-                "description": "기본 품질"
-            },
+            "low": {"tags": ["simple", "basic"], "description": "기본 품질"},
             "medium": {
                 "tags": ["good quality", "detailed"],
-                "description": "중간 품질"
+                "description": "중간 품질",
             },
             "high": {
-                "tags": ["high quality", "masterpiece", "best quality", "ultra detailed"],
-                "description": "고품질"
+                "tags": [
+                    "high quality",
+                    "masterpiece",
+                    "best quality",
+                    "ultra detailed",
+                ],
+                "description": "고품질",
             },
             "ultra": {
-                "tags": ["masterpiece", "best quality", "ultra detailed", "8k", "perfect", "flawless"],
-                "description": "최고 품질"
-            }
+                "tags": [
+                    "masterpiece",
+                    "best quality",
+                    "ultra detailed",
+                    "8k",
+                    "perfect",
+                    "flawless",
+                ],
+                "description": "최고 품질",
+            },
         }
-    
+
     def _load_negative_presets(self) -> Dict[str, str]:
         """네거티브 프롬프트 프리셋 로드"""
         return {
@@ -265,12 +250,96 @@ class PromptOptimizationService:
             "realistic": "low quality, blurry, distorted, deformed, ugly, bad anatomy, worst quality, low resolution, cartoon, anime, painting",
             "anime": "low quality, blurry, distorted, deformed, ugly, bad anatomy, worst quality, low resolution, realistic, photograph",
             "artistic": "low quality, blurry, distorted, deformed, ugly, bad anatomy, worst quality, low resolution",
-            "photograph": "low quality, blurry, distorted, deformed, ugly, bad anatomy, worst quality, low resolution, cartoon, anime, painting, artistic"
+            "photograph": "low quality, blurry, distorted, deformed, ugly, bad anatomy, worst quality, low resolution, cartoon, anime, painting, artistic",
         }
+
+    async def _save_optimization_result(
+        self,
+        request: PromptOptimizationRequest,
+        result: PromptOptimizationResponse,
+        optimization_time: float,
+    ):
+        """최적화 결과를 DB에 저장"""
+        try:
+            db_session = next(get_db())
+
+            # 프롬프트 최적화 기록 저장
+            optimization_record = PromptOptimization(
+                original_prompt=request.original_prompt,
+                optimized_prompt=result.optimized_prompt,
+                negative_prompt=result.negative_prompt,
+                style=request.style,
+                quality_level=request.quality_level,
+                aspect_ratio=request.aspect_ratio,
+                additional_tags=request.additional_tags,
+                style_tags=result.style_tags,
+                quality_tags=result.quality_tags,
+                optimization_metadata=result.metadata,
+                optimization_method=result.metadata.get("method", "unknown"),
+                model_used=result.metadata.get("model", ""),
+                tokens_used=result.metadata.get("tokens_used", 0),
+                user_id=request.user_id,
+                session_id=request.session_id,
+                optimization_time=optimization_time,
+            )
+
+            db_session.add(optimization_record)
+            db_session.commit()
+
+            logger.info(f"Optimization result saved to DB: {optimization_record.id}")
+
+        except Exception as e:
+            logger.error(f"Failed to save optimization result to DB: {e}")
+            if db_session:
+                db_session.rollback()
+        finally:
+            if db_session:
+                db_session.close()
+
+    async def _save_optimization_error(
+        self,
+        request: PromptOptimizationRequest,
+        error_message: str,
+        optimization_time: float,
+    ):
+        """최적화 오류를 DB에 저장"""
+        try:
+            db_session = next(get_db())
+
+            optimization_record = PromptOptimization(
+                original_prompt=request.original_prompt,
+                optimized_prompt="",
+                negative_prompt="",
+                style=request.style,
+                quality_level=request.quality_level,
+                aspect_ratio=request.aspect_ratio,
+                additional_tags=request.additional_tags,
+                style_tags=[],
+                quality_tags=[],
+                optimization_metadata={"error": error_message, "method": "error"},
+                optimization_method="error",
+                user_id=request.user_id,
+                session_id=request.session_id,
+                optimization_time=optimization_time,
+            )
+
+            db_session.add(optimization_record)
+            db_session.commit()
+
+            logger.info(f"Optimization error saved to DB: {optimization_record.id}")
+
+        except Exception as e:
+            logger.error(f"Failed to save optimization error to DB: {e}")
+            if db_session:
+                db_session.rollback()
+        finally:
+            if db_session:
+                db_session.close()
 
 
 # 싱글톤 패턴
 _prompt_optimization_service_instance = None
+
 
 def get_prompt_optimization_service() -> PromptOptimizationService:
     """프롬프트 최적화 서비스 인스턴스 반환"""

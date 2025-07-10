@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, Suspense } from "react"
+import { useState, Suspense, useEffect } from "react"
 import { AlertCircle } from "lucide-react"
 import React from "react"
 import { useParams, useSearchParams } from "next/navigation"
@@ -16,6 +16,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { tokenUtils } from "@/lib/auth"
+import { ModelService } from "@/lib/services/model.service"
 import {
   ArrowLeft,
   Copy,
@@ -57,6 +58,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
+import { apiClient } from "@/lib/api"
 
 // 샘플 모델 데이터
 const sampleModel: AIModel = {
@@ -179,6 +181,27 @@ const samplePosts: ContentPost[] = [
   },
 ]
 
+// 게시글 상세 이미지 apiClient 방식 컴포넌트
+function PostImage({ url, alt, className }: { url: string; alt?: string; className?: string }) {
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!url) return;
+    if (!url.startsWith("/uploads/")) {
+      setImageUrl(url);
+      return;
+    }
+    apiClient.get(url, { responseType: "blob", requireAuth: false }).then((res) => {
+      const blobUrl = URL.createObjectURL(res.data);
+      setImageUrl(blobUrl);
+    });
+    return () => {
+      if (imageUrl) URL.revokeObjectURL(imageUrl);
+    };
+  }, [url]);
+  if (!imageUrl) return <div className="bg-gray-100 w-full h-80 flex items-center justify-center text-gray-400">이미지 불러오는 중...</div>;
+  return <img src={imageUrl} alt={alt} className={className} />;
+}
+
 function ModelDetailContent() {
   const params = useParams()
   const searchParams = useSearchParams()
@@ -219,32 +242,22 @@ function ModelDetailContent() {
   const loadModelData = async () => {
     setIsModelLoading(true)
     try {
-      const response = await fetch(`/api/influencers/${params.id}`, {
-        headers: {
-          'Authorization': `Bearer ${tokenUtils.getToken()}`,
-        },
+      const data = await ModelService.getInfluencer(params.id as string)
+      setModel({
+        ...data,
+        id: data.influencer_id,
+        name: data.influencer_name,
+        description: data.influencer_description || '',
+        createdAt: data.created_at?.split('T')[0] || '',
+        apiKey: sampleModel.apiKey, // API 키는 별도 조회
+        trainingData: sampleModel.trainingData, // 훈련 데이터는 별도 조회
+        // Instagram 연동 정보 추가
+        instagram_id: data.instagram_id,
+        instagram_username: data.instagram_username,
+        instagram_account_type: data.instagram_account_type,
+        instagram_is_active: data.instagram_is_active,
+        instagram_connected_at: data.instagram_connected_at,
       })
-
-      if (response.ok) {
-        const data = await response.json()
-        setModel({
-          ...data,
-          id: data.influencer_id,
-          name: data.influencer_name,
-          description: data.influencer_description || '',
-          createdAt: data.created_at?.split('T')[0] || '',
-          apiKey: sampleModel.apiKey, // API 키는 별도 조회
-          trainingData: sampleModel.trainingData, // 훈련 데이터는 별도 조회
-          // Instagram 연동 정보 추가
-          instagram_id: data.instagram_id,
-          instagram_username: data.instagram_username,
-          instagram_account_type: data.instagram_account_type,
-          instagram_is_active: data.instagram_is_active,
-          instagram_connected_at: data.instagram_connected_at,
-        })
-      } else {
-        console.error('Failed to load model data:', response.status)
-      }
     } catch (error) {
       console.error('Error loading model data:', error)
     } finally {
@@ -262,7 +275,6 @@ function ModelDetailContent() {
     try {
       const updatedData = await ModelService.updateInfluencer(params.id as string, {
         influencer_name: model.name,
-        influencer_description: model.description,
       })
       setModel((prev: any) => ({
         ...prev,
@@ -334,32 +346,23 @@ function ModelDetailContent() {
           
           try {
             // 백엔드에 code 전송하여 토큰 교환 및 계정 연동
-            const response = await fetch(`/api/influencers/${params.id}/instagram/connect`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${tokenUtils.getToken()}`,
-              },
-              body: JSON.stringify({
-                code,
-                redirect_uri: redirectUri,
-              }),
+            const data = await ModelService.connectInstagram(params.id as string, {
+              code: code,
+              redirect_uri: redirectUri
             })
 
-            const data = await response.json()
-
-            if (response.ok) {
-              setInstagramStatus({
-                is_connected: true,
-                connected_at: new Date().toISOString(),
-                token_expired: false,
-                instagram_info: data.instagram_info,
-              })
-              alert('Instagram 비즈니스 계정이 성공적으로 연동되었습니다!')
-            } else {
-              throw new Error(data.detail || 'Instagram 연동에 실패했습니다.')
-            }
-          } catch (error) {
+            setInstagramStatus({
+              is_connected: true,
+              connected_at: new Date().toISOString(),
+              token_expired: false,
+              instagram_info: data.instagram_info || {
+                id: '',
+                username: '',
+                account_type: '',
+              },
+            })
+            alert('Instagram 비즈니스 계정이 성공적으로 연동되었습니다!')
+          } catch (error: any) {
             console.error('Instagram 연동 오류:', error)
             alert('Instagram 연동에 실패했습니다. 다시 시도해주세요.')
           }
@@ -394,21 +397,12 @@ function ModelDetailContent() {
   const handleInstagramDisconnect = async () => {
     try {
       // API 호출하여 Instagram 연동 해제
-      const response = await fetch(`/api/influencers/${params.id}/instagram/disconnect`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${tokenUtils.getToken()}`,
-        },
+      await ModelService.disconnectInstagram(params.id as string)
+      
+      setInstagramStatus({
+        is_connected: false
       })
-
-      if (response.ok) {
-        setInstagramStatus({
-          is_connected: false
-        })
-        alert("Instagram 계정 연동이 해제되었습니다.")
-      } else {
-        throw new Error('Instagram 연동 해제에 실패했습니다')
-      }
+      alert("Instagram 계정 연동이 해제되었습니다.")
     } catch (error) {
       console.error("Instagram 연동 해제 오류:", error)
       alert("Instagram 연동 해제에 실패했습니다. 다시 시도해주세요.")
@@ -438,17 +432,18 @@ function ModelDetailContent() {
             })
           } else {
             // API로 추가 확인 (기존 방식 유지)
-            const response = await fetch(`/api/influencers/${params.id}/instagram/status`, {
-              headers: {
-                'Authorization': `Bearer ${tokenUtils.getToken()}`,
-              },
-            })
-
-            if (response.ok) {
-              const data = await response.json()
-                  setInstagramStatus(data)
-            } else {
-              console.error('Instagram status error:', response.status, response.statusText)
+            try {
+              const data = await ModelService.getInstagramStatus(params.id as string)
+              setInstagramStatus({
+                is_connected: data.connected,
+                instagram_info: data.instagram_username ? {
+                  id: '',
+                  username: data.instagram_username,
+                  account_type: data.instagram_account_type || '',
+                } : undefined
+              })
+            } catch (error) {
+              console.error('Instagram status error:', error)
               setInstagramStatus({ is_connected: false })
             }
           }
@@ -536,20 +531,11 @@ function ModelDetailContent() {
                 {post.media.type === "carousel" ? (
                   <div className="flex overflow-x-auto snap-x snap-mandatory">
                     {post.media.urls.map((url, index) => (
-                      <img
-                        key={index}
-                        src={url || "/placeholder.svg"}
-                        alt={`Slide ${index + 1}`}
-                        className="w-full h-80 object-cover flex-shrink-0 snap-start"
-                      />
+                      <PostImage key={index} url={url || "/placeholder.svg"} alt={`Slide ${index + 1}`} className="w-full h-80 object-cover flex-shrink-0 snap-start" />
                     ))}
                   </div>
                 ) : (
-                  <img
-                    src={post.media.urls[0] || "/placeholder.svg"}
-                    alt="Post image"
-                    className="w-full h-80 object-cover"
-                  />
+                  <PostImage url={post.media.urls[0] || "/placeholder.svg"} alt="Post image" className="w-full h-80 object-cover" />
                 )}
                 {post.media.type === "carousel" && (
                   <div className="absolute top-2 right-2 bg-black bg-opacity-50 text-white text-xs px-2 py-1 rounded">
@@ -617,7 +603,7 @@ function ModelDetailContent() {
             {/* Facebook 이미지 */}
             {post.media && (
               <div className="mb-3">
-                <img src={post.media.urls[0] || "/placeholder.svg"} alt="Post image" className="w-full rounded-lg" />
+                <PostImage url={post.media.urls[0] || "/placeholder.svg"} alt="Post image" className="w-full rounded-lg" />
               </div>
             )}
 
@@ -672,11 +658,7 @@ function ModelDetailContent() {
                 {/* Twitter 이미지 */}
                 {post.media && (
                   <div className="mt-3">
-                    <img
-                      src={post.media.urls[0] || "/placeholder.svg"}
-                      alt="Tweet image"
-                      className="w-full rounded-2xl border"
-                    />
+                    <PostImage url={post.media.urls[0] || "/placeholder.svg"} alt="Tweet image" className="w-full rounded-2xl border" />
                   </div>
                 )}
 
@@ -710,11 +692,7 @@ function ModelDetailContent() {
             <div className="relative">
               <div className="aspect-[9/16] bg-gray-900 flex items-center justify-center">
                 {post.media?.thumbnailUrl ? (
-                  <img
-                    src={post.media.thumbnailUrl || "/placeholder.svg"}
-                    alt="Video thumbnail"
-                    className="w-full h-full object-cover"
-                  />
+                  <PostImage url={post.media.thumbnailUrl || "/placeholder.svg"} alt="Video thumbnail" className="w-full h-full object-cover" />
                 ) : (
                   <div className="text-white text-center">
                     <Play className="h-16 w-16 mx-auto mb-2" />
@@ -766,11 +744,7 @@ function ModelDetailContent() {
           <div className="bg-white rounded-lg overflow-hidden max-w-lg mx-auto">
             {/* YouTube 썸네일 */}
             <div className="relative">
-              <img
-                src={post.media?.thumbnailUrl || "/placeholder.svg"}
-                alt="Video thumbnail"
-                className="w-full aspect-video object-cover"
-              />
+              <PostImage url={post.media?.thumbnailUrl || "/placeholder.svg"} alt="Video thumbnail" className="w-full aspect-video object-cover" />
               <div className="absolute inset-0 bg-black bg-opacity-20 flex items-center justify-center">
                 <div className="w-16 h-16 bg-red-600 rounded-full flex items-center justify-center">
                   <Play className="h-8 w-8 text-white ml-1" />
@@ -1258,11 +1232,7 @@ function ModelDetailContent() {
                       }`}>
                         <div className="w-12 h-12 bg-gradient-to-br from-pink-500 to-purple-600 rounded-full flex items-center justify-center shadow-sm">
                           {instagramStatus.instagram_info?.profile_picture_url ? (
-                            <img 
-                              src={instagramStatus.instagram_info.profile_picture_url} 
-                              alt="Profile"
-                              className="w-12 h-12 rounded-full object-cover"
-                            />
+                            <PostImage url={instagramStatus.instagram_info.profile_picture_url} alt="Profile" className="w-12 h-12 rounded-full object-cover" />
                           ) : (
                             <Instagram className="h-6 w-6 text-white" />
                           )}

@@ -27,13 +27,29 @@ from app.utils.finetuning_utils import (
 logger = logging.getLogger(__name__)
 
 
-class FineTuningStatus(Enum):
-    PENDING = "pending"
-    PREPARING_DATA = "preparing_data"
-    TRAINING = "training"
-    UPLOADING = "uploading"
-    COMPLETED = "completed"
-    FAILED = "failed"
+# vLLM 서버의 FineTuningStatus import
+try:
+    import sys
+    import os
+    
+    # vLLM 경로 추가
+    vllm_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), '..', 'vllm')
+    sys.path.insert(0, vllm_path)
+    
+    from app.models import FineTuningStatus
+    logger.info("✅ vLLM FineTuningStatus import 성공")
+
+except ImportError as e:
+    logger.warning(f"⚠️ vLLM FineTuningStatus import 실패, 로컬 버전 사용: {e}")
+    
+    # 폴백: 로컬 버전
+    class FineTuningStatus(Enum):
+        PENDING = "pending"
+        PREPARING_DATA = "preparing_data"
+        TRAINING = "training"
+        UPLOADING = "uploading"
+        COMPLETED = "completed"
+        FAILED = "failed"
 
 
 @dataclass
@@ -48,6 +64,7 @@ class FineTuningTask:
     hf_model_url: Optional[str] = None
     error_message: Optional[str] = None
     training_epochs: int = 5
+    qa_batch_task_id: Optional[str] = None
     created_at: datetime = None
     updated_at: datetime = None
     
@@ -134,9 +151,12 @@ class InfluencerFineTuningService:
             QA 데이터 리스트
         """
         try:
+            logger.info(f"S3에서 QA 데이터 다운로드 시작: {s3_url}")
+            
             # S3 URL에서 키 추출
             if 'amazonaws.com/' in s3_url:
                 s3_key = s3_url.split('amazonaws.com/')[-1]
+                logger.info(f"S3 키: {s3_key}")
             else:
                 logger.error(f"잘못된 S3 URL 형식: {s3_url}")
                 return None
@@ -154,6 +174,25 @@ class InfluencerFineTuningService:
             content = response['Body'].read().decode('utf-8')
             qa_pairs = []
             
+            # 먼저 전체 내용을 하나의 JSON으로 파싱 시도 (처리된 QA 형식)
+            try:
+                data = json.loads(content)
+                if isinstance(data, dict) and 'qa_pairs' in data:
+                    qa_pairs = data['qa_pairs']
+                    logger.info(f"S3에서 처리된 QA 데이터 로드 완료: {len(qa_pairs)}개 QA 쌍")
+                    
+                    # 비어있는 qa_pairs 체크
+                    if not qa_pairs:
+                        logger.warning(f"QA 데이터가 비어있음. 전체 데이터 구조: {list(data.keys())}")
+                        logger.warning(f"S3 키: {s3_key}")
+                        # JSONL 형식으로 재시도
+                        logger.info("qa_pairs가 비어있어 JSONL 형식으로 재시도")
+                    else:
+                        return qa_pairs
+            except json.JSONDecodeError:
+                logger.info("전체 JSON 파싱 실패, JSONL 형식으로 재시도")
+            
+            # JSONL 형식으로 파싱 (각 줄이 별도의 JSON)
             for line in content.splitlines():
                 if not line.strip(): # 빈 줄 건너뛰기
                     continue
@@ -161,16 +200,8 @@ class InfluencerFineTuningService:
                 try:
                     data = json.loads(line)
                     
-                    # Case 1: Top-level object contains 'qa_pairs' list
-                    if isinstance(data, dict) and 'qa_pairs' in data and isinstance(data['qa_pairs'], list):
-                        for item in data['qa_pairs']:
-                            if isinstance(item, dict) and 'question' in item and 'answer' in item:
-                                qa_pairs.append({"question": item['question'], "answer": item['answer']})
-                            else:
-                                logger.warning(f"S3 QA 데이터: 'qa_pairs' 내부에 유효하지 않은 QA 쌍 발견: {item}")
-                    
-                    # Case 2: Single QA pair as a top-level object
-                    elif isinstance(data, dict) and 'question' in data and 'answer' in data:
+                    # Single QA pair as a top-level object
+                    if isinstance(data, dict) and 'question' in data and 'answer' in data:
                         qa_pairs.append({"question": data['question'], "answer": data['answer']})
                     
                     # Case 3: OpenAI batch result format
@@ -182,6 +213,17 @@ class InfluencerFineTuningService:
                           'content' in data['response']['body']['choices'][0]['message']):
                         
                         message_content = data['response']['body']['choices'][0]['message']['content']
+                        
+                        # JSON 형식 파싱 시도
+                        try:
+                            qa_data = json.loads(message_content)
+                            if isinstance(qa_data, dict) and 'q' in qa_data and 'a' in qa_data:
+                                qa_pairs.append({"question": qa_data['q'], "answer": qa_data['a']})
+                                continue
+                        except json.JSONDecodeError:
+                            pass
+                        
+                        # 기존 Q:A: 형식 파싱
                         if 'Q:' in message_content and 'A:' in message_content:
                             parts = message_content.split('A:', 1)
                             if len(parts) == 2:
@@ -191,7 +233,48 @@ class InfluencerFineTuningService:
                             else:
                                 logger.warning(f"S3 QA 데이터: OpenAI 형식에서 Q:A: 파싱 실패: {message_content}")
                         else:
-                            logger.warning(f"S3 QA 데이터: OpenAI 형식에서 Q: 또는 A: 키워드 없음: {message_content}")
+                            # Q: 또는 A: 키워드가 없는 경우, custom_id에서 도메인을 추출하고 기본 질문 생성
+                            logger.info(f"S3 QA 데이터: 키워드 없는 형식 처리 시줉 - 데이터 구조: {list(data.keys())}")
+                            
+                            if 'custom_id' in data:
+                                custom_id = data['custom_id']
+                                logger.info(f"S3 QA 데이터: custom_id 확인: {custom_id}")
+                                
+                                # custom_id에서 도메인 추출 
+                                # 형식: "influencer_qa_[name]_[도메인]_[index]"
+                                parts = custom_id.split('_')
+                                if len(parts) >= 4:  # 최소한 influencer_qa_name_domain 형식
+                                    domain = parts[-2]  # 끝에서 두 번째 항목이 도메인
+                                    domain_questions = {
+                                        "일상생활": ["오늘 하루는 어떻게 보내셨나요?", "요즘 즐겨하는 취미가 있으신가요?"],
+                                        "과학기술": ["최근 관심있는 기술 트렌드가 있으신가요?", "AI나 인공지능에 대해 어떻게 생각하시나요?"],
+                                        "사회이슈": ["요즘 사회에서 가장 중요한 이슈는 무엇이라고 생각하시나요?", "젊은 세대가 직면한 가장 큰 도전은 무엇일까요?"],
+                                        "인문학": ["인생에서 가장 중요한 가치는 무엇이라고 생각하시나요?", "역사에서 배울 수 있는 교훈은 무엇일까요?"],
+                                        "스포츠": ["좋아하는 스포츠나 운동이 있으신가요?", "운동의 즐거움은 무엇이라고 생각하시나요?"],
+                                        "역사문화": ["우리나라의 전통문화 중 자랑스러운 것은 무엇인가요?", "문화의 다양성에 대해 어떻게 생각하시나요?"]
+                                    }
+                                    
+                                    # 도메인에 맞는 질문 사용
+                                    if domain in domain_questions:
+                                        question = domain_questions[domain][0]  # 첫 번째 질문 사용
+                                        qa_pairs.append({"question": question, "answer": message_content})
+                                        logger.info(f"S3 QA 데이터: 도메인 '{domain}'에서 QA 쌍 생성 성공")
+                                    else:
+                                        # 도메인을 찾을 수 없으면 기본 질문
+                                        default_question = "이에 대해 답변해 주세요."
+                                        qa_pairs.append({"question": default_question, "answer": message_content})
+                                        logger.info(f"S3 QA 데이터: 알 수 없는 도메인 '{domain}', 기본 질문 사용")
+                                else:
+                                    # custom_id 형식이 예상과 다름
+                                    default_question = "이에 대해 답변해 주세요."
+                                    qa_pairs.append({"question": default_question, "answer": message_content})
+                                    logger.info(f"S3 QA 데이터: custom_id 형식 불일치, 기본 질문 사용")
+                                
+                            else:
+                                # custom_id가 없는 경우
+                                default_question = "이에 대해 답변해 주세요."
+                                qa_pairs.append({"question": default_question, "answer": message_content})
+                                logger.info(f"S3 QA 데이터: custom_id 없음, 기본 질문 사용")
                     
                     # Case 4: Top-level list of QA pairs (less common for JSONL, but possible)
                     elif isinstance(data, list):
@@ -209,7 +292,12 @@ class InfluencerFineTuningService:
                     continue
             
             if not qa_pairs:
-                logger.error("S3에서 유효한 QA 데이터를 추출하지 못했습니다.")
+                logger.error(f"S3에서 유효한 QA 데이터를 추출하지 못했습니다. 총 라인 수: {len(content.splitlines())}")
+                logger.error(f"S3 URL: {s3_url}")
+                logger.error(f"S3 Key: {s3_key}")
+                
+                # 컨텐츠 샘플 출력 (처음 500자)
+                logger.error(f"컨텐츠 샘플 (500자): {content[:500]}...")
                 return None
             
             logger.info(f"S3에서 QA 데이터 다운로드 및 파싱 완료: {len(qa_pairs)}개")
@@ -217,9 +305,25 @@ class InfluencerFineTuningService:
                 
         except Exception as e:
             logger.error(f"S3에서 QA 데이터 다운로드 실패: {e}", exc_info=True)
+            
+            # 처리된 QA 파일이 없는 경우 원본 파일 시도
+            if 'NoSuchKey' in str(e) and 'processed_qa' in s3_url:
+                logger.warning("처리된 QA 파일이 없습니다. 원본 파일로 시도합니다.")
+                
+                # URL을 원본 파일로 변경
+                raw_url = s3_url.replace('qa_pairs/', 'qa_results/').replace(
+                    f'processed_qa_{s3_url.split("_")[-1].replace(".json", "")}.json', 
+                    'generated_qa_results.jsonl'
+                )
+                
+                logger.info(f"원본 파일 URL로 재시도: {raw_url}")
+                
+                # 재귀 호출로 원본 파일 다운로드 시도
+                return self.download_qa_data_from_s3(raw_url)
+            
             return None
     
-    def prepare_finetuning_data(self, qa_data: List[Dict], influencer_data: AIInfluencer) -> tuple[List[Dict], str]:
+    async def prepare_finetuning_data(self, qa_data: List[Dict], influencer_data: AIInfluencer) -> tuple[List[Dict], str]:
         """
         파인튜닝용 데이터 준비
         Args:
@@ -234,11 +338,11 @@ class InfluencerFineTuningService:
             personality = getattr(influencer_data, 'influencer_personality', '친근하고 활발한 성격')
             style_info = getattr(influencer_data, 'influencer_description', '')
             
-            # 시스템 메시지 생성 (공통 유틸리티 사용)
-            system_message = create_system_message(influencer_name, personality, style_info)
+            # 시스템 메시지 생성 (vLLM 서버 사용)
+            system_message = await create_system_message(influencer_name, personality, style_info)
 
-            # QA 데이터 변환 (공통 유틸리티 사용)
-            finetuning_data = convert_qa_data_for_finetuning(
+            # QA 데이터 변환 (vLLM 서버 사용)
+            finetuning_data = await convert_qa_data_for_finetuning(
                 qa_data, influencer_name, personality, style_info
             )
             
@@ -249,152 +353,125 @@ class InfluencerFineTuningService:
             logger.error(f"파인튜닝 데이터 준비 실패: {e}")
             raise
     
-    async def run_finetuning(self, qa_data: List[Dict], system_message: str, hf_repo_id: str, hf_token: str, epochs: int = 5) -> Optional[str]:
+    async def run_finetuning(self, qa_data: List[Dict], system_message: str, hf_repo_id: str, hf_token: str, epochs: int = 5, task_id: Optional[str] = None) -> Optional[str]:
         """
-        파인튜닝 실행 (VLLM 서버 우선, 로컬 폴백)
+        파인튜닝 실행 (VLLM 서버에 작업 제출 후 즉시 반환)
         Args:
             qa_data: 훈련 데이터 (QA 쌍 리스트)
             system_message: 시스템 메시지
             hf_repo_id: Hugging Face Repository ID
             hf_token: 허깅페이스 토큰
             epochs: 훈련 에포크 수
+            task_id: QA 생성 작업 ID (선택적)
         Returns:
-            HF 모델 URL (성공 시), None (실패 시)
+            task_id (성공 시), None (실패 시)
         """
         try:
             logger.info(f"파인튜닝 시작: {hf_repo_id}")
 
             # VLLM 서버 상태 확인
-            if await vllm_health_check():
-                try:
-                    logger.info(f"🚀 VLLM 서버에서 파인튜닝 실행: {hf_repo_id}")
+            if not await vllm_health_check():
+                logger.error("VLLM 서버가 비활성화되었거나 연결할 수 없습니다.")
+                return None
+
+            try:
+                logger.info(f"🚀 VLLM 서버에서 파인튜닝 실행: {hf_repo_id}")
+                
+                # 인플루언서 정보 추출 (QA 데이터에서)
+                influencer_name = hf_repo_id.split('/')[-1].replace('-finetuned', '')
+                personality = "친근하고 활발한 성격"  # 기본값
+                
+                # 이미 변환된 데이터인지 확인
+                is_already_converted = (qa_data and isinstance(qa_data[0], dict) and "messages" in qa_data[0])
+                
+                vllm_client = await get_vllm_client()
+                result = await vllm_client.start_finetuning(
+                    influencer_id=influencer_name,
+                    influencer_name=influencer_name,
+                    personality=personality,
+                    qa_data=qa_data,
+                    hf_repo_id=hf_repo_id,
+                    hf_token=hf_token,
+                    training_epochs=epochs,
+                    style_info="",
+                    is_converted=is_already_converted,
+                    task_id=task_id
+                )
+                
+                task_id = result.get("task_id")
+                if task_id:
+                    # 파인튜닝 작업이 시작되면 task_id만 반환 (폴링하지 않음)
+                    # VLLM 서버가 완료 시 웹훅을 통해 알려줌
+                    logger.info(f"✅ 파인튜닝 작업 제출 완료: task_id={task_id}")
+                    return task_id
+                else:
+                    raise Exception("VLLM 파인튜닝 작업 시작 실패")
                     
-                    # 인플루언서 정보 추출 (QA 데이터에서)
-                    influencer_name = hf_repo_id.split('/')[-1].replace('-finetuned', '')
-                    personality = "친근하고 활발한 성격"  # 기본값
-                    
-                    vllm_client = await get_vllm_client()
-                    result = await vllm_client.start_finetuning(
-                        influencer_id=influencer_name,
-                        influencer_name=influencer_name,
-                        personality=personality,
-                        qa_data=qa_data,
-                        hf_repo_id=hf_repo_id,
-                        hf_token=hf_token,
-                        training_epochs=epochs
-                    )
-                    
-                    task_id = result.get("task_id")
-                    if task_id:
-                        # 파인튜닝 완료까지 대기 (폴링)
-                        return await self._wait_for_vllm_finetuning(task_id, vllm_client)
-                    else:
-                        raise Exception("VLLM 파인튜닝 작업 시작 실패")
-                        
-                except Exception as e:
-                    logger.warning(f"VLLM 파인튜닝 실패, 로컬로 폴백: {e}")
-                    return await self._run_local_finetuning(qa_data, system_message, hf_repo_id, hf_token, epochs)
-            else:
-                logger.info(f"🔧 로컬에서 파인튜닝 실행: {hf_repo_id}")
-                return await self._run_local_finetuning(qa_data, system_message, hf_repo_id, hf_token, epochs)
+            except Exception as e:
+                logger.error(f"VLLM 파인튜닝 실행 중 오류: {e}")
+                return None
 
         except Exception as e:
             logger.error(f"파인튜닝 실행 실패: {e}")
             return None
     
-    async def _wait_for_vllm_finetuning(self, task_id: str, vllm_client, timeout: int = 3600) -> Optional[str]:
-        """VLLM 파인튜닝 완료 대기"""
-        import asyncio
-        
-        start_time = datetime.now()
-        
-        while True:
-            try:
-                status = await vllm_client.get_finetuning_status(task_id)
-                current_status = status.get("status")
-                
-                logger.info(f"VLLM 파인튜닝 상태: {current_status}")
-                
-                if current_status == "completed":
-                    hf_model_url = status.get("hf_model_url")
-                    logger.info(f"✅ VLLM 파인튜닝 완료: {hf_model_url}")
-                    return hf_model_url
-                    
-                elif current_status == "failed":
-                    error_msg = status.get("error_message", "알 수 없는 오류")
-                    logger.error(f"❌ VLLM 파인튜닝 실패: {error_msg}")
-                    return None
-                
-                # 타임아웃 확인
-                elapsed = (datetime.now() - start_time).total_seconds()
-                if elapsed > timeout:
-                    logger.error(f"⏰ VLLM 파인튜닝 타임아웃: {timeout}초")
-                    return None
-                
-                # 10초 대기
-                await asyncio.sleep(10)
-                
-            except Exception as e:
-                logger.error(f"VLLM 파인튜닝 상태 확인 실패: {e}")
-                return None
+    # 폴링 방식은 더 이상 사용하지 않음 (웹훅 기반으로 전환)
+    # async def _wait_for_vllm_finetuning(self, task_id: str, vllm_client, timeout: int = 3600) -> Optional[str]:
+    #     """VLLM 파인튜닝 완료 대기"""
+    #     import asyncio
+    #     
+    #     start_time = datetime.now()
+    #     
+    #     while True:
+    #         try:
+    #             status = await vllm_client.get_finetuning_status(task_id)
+    #             current_status = status.get("status")
+    #             
+    #             logger.info(f"VLLM 파인튜닝 상태: {current_status}")
+    #             
+    #             if current_status == "completed":
+    #                 hf_model_url = status.get("hf_model_url")
+    #                 logger.info(f"✅ VLLM 파인튜닝 완료: {hf_model_url}")
+    #                 return hf_model_url
+    #                 
+    #             elif current_status == "failed":
+    #                 error_msg = status.get("error_message", "알 수 없는 오류")
+    #                 logger.error(f"❌ VLLM 파인튜닝 실패: {error_msg}")
+    #                 return None
+    #             
+    #             # 타임아웃 확인
+    #             elapsed = (datetime.now() - start_time).total_seconds()
+    #             if elapsed > timeout:
+    #                 logger.error(f"⏰ VLLM 파인튜닝 타임아웃: {timeout}초")
+    #                 return None
+    #             
+    #             # 10초 대기
+    #             await asyncio.sleep(10)
+    #             
+    #         except Exception as e:
+    #             logger.error(f"VLLM 파인튜닝 상태 확인 실패: {e}")
+    #             return None
     
-    async def _run_local_finetuning(self, qa_data: List[Dict], system_message: str, hf_repo_id: str, hf_token: str, epochs: int) -> Optional[str]:
-        """로컬 파인튜닝 실행 (기존 로직)"""
-        try:
-            # 현재 디렉토리를 pipeline 폴더로 변경
-            original_dir = os.getcwd()
-            pipeline_dir = os.path.join(os.path.dirname(__file__), '../../pipeline')
-            pipeline_dir = os.path.abspath(pipeline_dir)
-
-            try:
-                os.chdir(pipeline_dir)
-
-                # fine_custom.py 임포트 및 실행
-                import sys
-                if pipeline_dir not in sys.path:
-                    sys.path.insert(0, pipeline_dir)
-                
-                # fine_custom 모듈 실행
-                import fine_custom
-                hf_model_url = fine_custom.main(
-                    qa_data=qa_data,
-                    system_message=system_message,
-                    hf_token=hf_token,
-                    hf_repo_id=hf_repo_id,
-                    training_epochs=epochs
-                )
-
-                if hf_model_url:
-                    logger.info(f"로컬 파인튜닝 완료: {hf_model_url}")
-                    return hf_model_url
-                else:
-                    raise Exception("파인튜닝 실행 실패 또는 모델 URL 반환 실패")
-
-            finally:
-                # 원래 디렉토리로 복원
-                os.chdir(original_dir)
-
-        except Exception as e:
-            logger.error(f"로컬 파인튜닝 실행 실패: {e}")
-            return None
     
     def start_finetuning_task(self, influencer_id: str, qa_task_id: str, 
-                            s3_qa_url: str, influencer_data: AIInfluencer, db=None) -> str:
+                            s3_qa_url: str, influencer_data: AIInfluencer, db=None,
+                            task_id: Optional[str] = None) -> str:
         """
         파인튜닝 작업 시작
         Args:
-            influencer_id: 인플루언서 ID
+            influencer_id: 인플루어서 ID
             qa_task_id: QA 생성 작업 ID
             s3_qa_url: S3 QA 데이터 URL
-            influencer_data: 인플루언서 정보 (딕셔너리 또는 모델 인스턴스)
+            influencer_data: 인플루어서 정보 (딕셔너리 또는 모델 인스턴스)
             db: 데이터베이스 세션
+            task_id: QA 생성 작업 ID (선택적)
         Returns:
             파인튜닝 작업 ID
         """
         import time
         
-        # 작업 ID 생성
-        task_id = f"ft_{influencer_id}_{int(time.time())}"
+        # 파인튜닝 작업 ID 생성
+        ft_task_id = f"ft_{influencer_id}_{int(time.time())}"
         
         # 인플루언서 이름 처리
         influencer_name = getattr(influencer_data, 'influencer_name', 'influencer')
@@ -428,19 +505,20 @@ class InfluencerFineTuningService:
         
         # 작업 생성
         task = FineTuningTask(
-            task_id=task_id,
+            task_id=ft_task_id,
             influencer_id=influencer_id,
             qa_task_id=qa_task_id,
             status=FineTuningStatus.PENDING,
             s3_qa_url=s3_qa_url,
             model_name=safe_name,
-            hf_repo_id=hf_repo_id
+            hf_repo_id=hf_repo_id,
+            qa_batch_task_id=task_id
         )
         
-        self.tasks[task_id] = task
-        logger.info(f"파인튜닝 작업 생성: {task_id}")
+        self.tasks[ft_task_id] = task
+        logger.info(f"파인튜닝 작업 생성: {ft_task_id}")
         
-        return task_id
+        return ft_task_id
     
     async def execute_finetuning_task(self, task_id: str, influencer_data: AIInfluencer, hf_token: str, db=None) -> bool:
         """
@@ -468,34 +546,46 @@ class InfluencerFineTuningService:
                 raise Exception("S3에서 QA 데이터 다운로드 실패")
             
             # 파인튜닝용 데이터 준비
-            finetuning_qa_data, system_message = self.prepare_finetuning_data(qa_data, influencer_data)
+            finetuning_qa_data, system_message = await self.prepare_finetuning_data(qa_data, influencer_data)
             
             # 2. 파인튜닝 실행 단계
             task.status = FineTuningStatus.TRAINING
             task.updated_at = datetime.now()
             
-            hf_model_url = await self.run_finetuning(
+            vllm_task_id = await self.run_finetuning(
                 qa_data=finetuning_qa_data,
                 system_message=system_message,
                 hf_repo_id=task.hf_repo_id,
                 hf_token=hf_token,
-                epochs=task.training_epochs
+                epochs=task.training_epochs,
+                task_id=task.qa_batch_task_id
             )
             
-            if hf_model_url:
-                # 3. 업로드 완료
-                task.status = FineTuningStatus.UPLOADING
-                task.hf_model_url = hf_model_url
-                task.updated_at = datetime.now()
+            if vllm_task_id:
+                # VLLM 서버에 작업이 제출됨
+                # 웹훅을 통해 완료 통지를 받을 예정
+                logger.info(f"파인튜닝 작업 제출됨: {task_id} → VLLM task_id: {vllm_task_id}")
                 
-                # 4. 완료
-                task.status = FineTuningStatus.COMPLETED
-                task.updated_at = datetime.now()
+                # BatchKey 테이블에 VLLM task_id 업데이트 (웹훅 처리를 위해)
+                if task.qa_batch_task_id:
+                    from app.database import get_db
+                    from app.models.influencer import BatchKey
+                    try:
+                        db_gen = get_db()
+                        db = next(db_gen)
+                        batch_key = db.query(BatchKey).filter(BatchKey.task_id == task.qa_batch_task_id).first()
+                        if batch_key:
+                            batch_key.vllm_task_id = vllm_task_id
+                            db.commit()
+                            logger.info(f"BatchKey에 VLLM task_id 저장: {vllm_task_id}")
+                    except Exception as e:
+                        logger.error(f"BatchKey 업데이트 실패: {e}")
+                    finally:
+                        db_gen.close()
                 
-                logger.info(f"파인튜닝 작업 완료: {task_id} → {task.hf_model_url}")
                 return True
             else:
-                raise Exception(f"파인튜닝 실행 실패: 모델 URL을 반환하지 못했습니다.")
+                raise Exception(f"파인튜닝 실행 실패: VLLM 작업 제출 실패")
             
         except Exception as e:
             task.status = FineTuningStatus.FAILED
@@ -576,13 +666,14 @@ class InfluencerFineTuningService:
             logger.error(f"파인튜닝 상태 확인 중 오류: {e}")
             return False
     
-    async def start_finetuning_for_influencer(self, influencer_id: str, s3_qa_file_url: str, db) -> bool:
+    async def start_finetuning_for_influencer(self, influencer_id: str, s3_qa_file_url: str, db, task_id: Optional[str] = None) -> bool:
         """
         인플루언서를 위한 파인튜닝 시작 (startup service용)
         Args:
             influencer_id: 인플루언서 ID  
             s3_qa_file_url: S3 QA 파일 URL
             db: 데이터베이스 세션
+            task_id: QA 생성 작업 ID (선택적)
         Returns:
             성공 여부
         """
@@ -601,22 +692,17 @@ class InfluencerFineTuningService:
             hf_token, hf_username = self._get_hf_info_from_influencer(influencer_data, db)
 
             # 파인튜닝 작업 시작 (모델 인스턴스 직접 사용)
-            task_id = self.start_finetuning_task(
+            ft_task_id = self.start_finetuning_task(
                 influencer_id=influencer_id,
                 qa_task_id=f"startup_restart_{influencer_id}",
                 s3_qa_url=s3_qa_file_url,
                 influencer_data=influencer_data,  # 모델 인스턴스 직접 전달
-                db=db
+                db=db,
+                task_id=task_id
             )
             
-            # 파인튜닝 실행 (백그라운드에서)
-            import asyncio
-            from functools import partial
-            
-            # 동기 함수를 비동기로 실행
-            loop = asyncio.get_event_loop()
-            execute_task = partial(self.execute_finetuning_task, task_id, influencer_data, hf_token, db)
-            success = await loop.run_in_executor(None, execute_task)
+            # 파인튜닝 실행
+            success = await self.execute_finetuning_task(ft_task_id, influencer_data, hf_token, db)
             
             if success:
                 logger.info(f"✅ 인플루언서 파인튜닝 자동 시작 성공: {influencer_id}")

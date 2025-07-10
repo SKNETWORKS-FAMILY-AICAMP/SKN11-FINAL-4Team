@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useRef } from "react"
 import { Navigation } from "@/components/navigation"
-import { RequireAuth } from "@/components/auth/protected-route"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -54,6 +53,16 @@ interface ComfyUIModel {
   description?: string
 }
 
+interface WorkflowTemplate {
+  id: string
+  name: string
+  description: string
+  category: string
+  tags: string[]
+  input_parameters: Record<string, any>
+  is_active: boolean
+}
+
 const PRESET_STYLES = [
   { id: 'realistic', name: '사실적', description: '실제 사진과 같은 고품질 이미지' },
   { id: 'artistic', name: '예술적', description: '예술 작품 스타일의 이미지' },
@@ -72,15 +81,16 @@ const PRESET_SIZES = [
 
 export default function ImageGeneratorPage() {
   const [images, setImages] = useState<GeneratedImage[]>([])
-  const [models, setModels] = useState<ComfyUIModel[]>([])
+  const [workflows, setWorkflows] = useState<WorkflowTemplate[]>([])
   const [loading, setLoading] = useState(false)
-  const [selectedModel, setSelectedModel] = useState<string>("")
+  // 모델 선택 기능 제거 - 워크플로우에 정의된 모델 자동 사용
+  const [selectedWorkflow, setSelectedWorkflow] = useState<string>("")
   const [selectedStyle, setSelectedStyle] = useState<string>("realistic")
   const [selectedSize, setSelectedSize] = useState<string>("square")
   
   // 생성 파라미터
   const [prompt, setPrompt] = useState("")
-  const [negativePrompt, setNegativePrompt] = useState("")
+  // 커스텀 템플릿에서는 부정 프롬프트 사용하지 않음
   const [steps, setSteps] = useState(20)
   const [cfgScale, setCfgScale] = useState(7)
   const [seed, setSeed] = useState(-1)
@@ -102,25 +112,34 @@ export default function ImageGeneratorPage() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const imageRef = useRef<HTMLImageElement>(null)
 
-  // 모델 목록 가져오기
+  // 모델 목록 가져오기 제거 - 워크플로우에 정의된 모델 자동 사용
+
+  // 워크플로우 목록 가져오기
   useEffect(() => {
-    const fetchModels = async () => {
+    const fetchWorkflows = async () => {
       try {
-        // ComfyUI 모델 목록 API 호출
-        const response = await fetch('/api/comfyui/models')
+        const response = await fetch('/api/comfyui/workflows')
         const data = await response.json()
         if (data.success) {
-          setModels(data.models)
-          if (data.models.length > 0) {
-            setSelectedModel(data.models[0].id)
+          // workflows가 배열인지 확인
+          const workflowsArray = Array.isArray(data.workflows) ? data.workflows : []
+          setWorkflows(workflowsArray)
+          if (workflowsArray.length > 0) {
+            setSelectedWorkflow(workflowsArray[0].id)
+          } else {
+            // 워크플로우가 없으면 기본 워크플로우 설정
+            setSelectedWorkflow('basic_txt2img')
           }
         }
       } catch (error) {
-        console.error('Failed to fetch models:', error)
+        console.error('Failed to fetch workflows:', error)
+        // 에러 발생 시 빈 배열로 설정하고 기본 워크플로우 설정
+        setWorkflows([])
+        setSelectedWorkflow('custom_workflow')
       }
     }
 
-    fetchModels()
+    fetchWorkflows()
   }, [])
 
   // 생성된 이미지 목록 가져오기
@@ -147,6 +166,36 @@ export default function ImageGeneratorPage() {
     setGenerationProgress(0)
 
     try {
+      // 1단계: 프롬프트 최적화 (임시 비활성화)
+      let optimizedPrompt = prompt
+      
+      // TODO: 백엔드 재시작 후 아래 코드 활성화
+      /*
+      const optimizationResponse = await fetch('/api/optimize-prompt', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          originalPrompt: prompt,
+          style: selectedStyle,
+          qualityLevel: 'high',
+          aspectRatio: selectedSize,
+          additionalTags: null
+        })
+      })
+
+      if (optimizationResponse.ok) {
+        const optimizationData = await optimizationResponse.json()
+        if (optimizationData.success) {
+          optimizedPrompt = optimizationData.optimized_prompt
+        }
+      } else {
+        console.warn('Prompt optimization failed, using original prompt')
+      }
+      */
+
+      // 2단계: 최적화된 프롬프트로 이미지 생성
       const selectedSizeData = PRESET_SIZES.find(size => size.id === selectedSize)
       const response = await fetch('/api/comfyui/generate', {
         method: 'POST',
@@ -154,26 +203,82 @@ export default function ImageGeneratorPage() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          prompt,
-          negative_prompt: negativePrompt,
-          model: selectedModel,
+          prompt: optimizedPrompt, // 최적화된 프롬프트 사용
+          // 커스텀 템플릿에서는 부정 프롬프트 사용하지 않음
           style: selectedStyle,
           width: selectedSizeData?.width || 512,
           height: selectedSizeData?.height || 512,
           steps,
           cfg_scale: cfgScale,
-          seed: seed === -1 ? Math.floor(Math.random() * 1000000) : seed
+          seed: seed === -1 ? Math.floor(Math.random() * 1000000) : seed,
+          workflow_id: selectedWorkflow
         })
       })
 
       const data = await response.json()
       
       if (data.success) {
-        // 생성 진행 상황 모니터링
-        const jobId = data.job_id
+        const jobId = data.job_id || data.prompt_id
+        
+        // 백엔드에서 즉시 완료된 이미지를 반환한 경우
+        if (data.status === 'completed' && data.image_url) {
+          setIsGenerating(false)
+          setGenerationProgress(100)
+          
+          // 1x1 투명 이미지인 경우 placeholder 이미지로 교체
+          let imageUrl = data.image_url
+          if (data.image_url.includes('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==')) {
+            imageUrl = '/api/placeholder-image'
+          }
+          
+          const newImage: GeneratedImage = {
+            id: jobId || Date.now().toString(),
+            prompt,
+            negative_prompt: '',
+            model: 'custom-template',
+            width: selectedSizeData?.width || 512,
+            height: selectedSizeData?.height || 512,
+            steps,
+            cfg_scale: cfgScale,
+            seed: Math.floor(Math.random() * 1000000),
+            image_url: imageUrl,
+            created_at: new Date().toISOString(),
+            status: 'completed'
+          }
+          
+          setImages(prev => [newImage, ...prev])
+          setPrompt("")
+          return
+        }
+        
+        if (!jobId) {
+          console.error('No job ID received from backend')
+          setIsGenerating(false)
+          return
+        }
+        
+        let pollCount = 0
+        const maxPollCount = 120 // 최대 2분 (120초)
+        
         const pollProgress = setInterval(async () => {
           try {
+            pollCount++
+            
+            // 최대 재시도 횟수 초과 시 중단
+            if (pollCount > maxPollCount) {
+              clearInterval(pollProgress)
+              setIsGenerating(false)
+              console.error('Generation timeout after 2 minutes')
+              return
+            }
+            
             const progressResponse = await fetch(`/api/comfyui/progress/${jobId}`)
+            
+            if (!progressResponse.ok) {
+              console.error('Progress check failed:', progressResponse.status)
+              return
+            }
+            
             const progressData = await progressResponse.json()
             
             if (progressData.success) {
@@ -186,23 +291,22 @@ export default function ImageGeneratorPage() {
                 
                 // 새로운 이미지를 목록에 추가
                 const newImage: GeneratedImage = {
-                  id: progressData.image_id,
+                  id: progressData.image_id || jobId,
                   prompt,
-                  negative_prompt: negativePrompt,
-                  model: selectedModel,
+                  negative_prompt: '', // 커스텀 템플릿에서는 부정 프롬프트 사용하지 않음
+                  model: progressData.model || 'custom', // 백엔드에서 사용된 모델 정보 사용
                   width: selectedSizeData?.width || 512,
                   height: selectedSizeData?.height || 512,
                   steps,
                   cfg_scale: cfgScale,
-                  seed: progressData.seed,
-                  image_url: progressData.image_url,
+                  seed: progressData.seed || Math.floor(Math.random() * 1000000),
+                  image_url: progressData.image_url || '/placeholder-image.jpg',
                   created_at: new Date().toISOString(),
                   status: 'completed'
                 }
                 
                 setImages(prev => [newImage, ...prev])
                 setPrompt("")
-                setNegativePrompt("")
               } else if (progressData.status === 'failed') {
                 clearInterval(pollProgress)
                 setIsGenerating(false)
@@ -211,6 +315,13 @@ export default function ImageGeneratorPage() {
             }
           } catch (error) {
             console.error('Failed to poll progress:', error)
+            
+            // 연속 실패 시 중단
+            if (pollCount > 10) {
+              clearInterval(pollProgress)
+              setIsGenerating(false)
+              console.error('Too many polling failures, stopping')
+            }
           }
         }, 1000)
         
@@ -449,7 +560,7 @@ export default function ImageGeneratorPage() {
           image: uploadedImageUrl,
           mask: maskData,
           prompt: inpaintPrompt,
-          model: selectedModel,
+          model: 'default', // 워크플로우에서 정의된 모델 사용
           steps,
           cfg_scale: cfgScale
         })
@@ -472,8 +583,7 @@ export default function ImageGeneratorPage() {
   }
 
   return (
-    <RequireAuth>
-      <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50">
         <Navigation />
 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -521,16 +631,7 @@ export default function ImageGeneratorPage() {
                           className="min-h-[100px]"
                         />
                       </div>
-                      <div>
-                        <Label htmlFor="negative-prompt">네거티브 프롬프트</Label>
-                        <Textarea
-                          id="negative-prompt"
-                          placeholder="생성하지 않았으면 하는 요소들을 입력하세요..."
-                          value={negativePrompt}
-                          onChange={(e) => setNegativePrompt(e.target.value)}
-                          className="min-h-[80px]"
-                        />
-                      </div>
+                      {/* 커스텀 템플릿에서는 부정 프롬프트 사용하지 않아 제거 */}
                     </CardContent>
                   </Card>
 
@@ -595,20 +696,34 @@ export default function ImageGeneratorPage() {
                     </CardHeader>
                     <CardContent className="space-y-4">
                       <div>
-                        <Label htmlFor="model">모델 선택</Label>
-                        <Select value={selectedModel} onValueChange={setSelectedModel}>
+                        <Label htmlFor="workflow">워크플로우 템플릿</Label>
+                        <Select value={selectedWorkflow} onValueChange={setSelectedWorkflow}>
                           <SelectTrigger>
-                            <SelectValue placeholder="모델을 선택하세요" />
+                            <SelectValue placeholder="워크플로우를 선택하세요" />
                           </SelectTrigger>
                           <SelectContent>
-                            {models.map((model) => (
-                              <SelectItem key={model.id} value={model.id}>
-                                {model.name}
+                            {Array.isArray(workflows) && workflows.length > 0 ? (
+                              workflows.map((workflow) => (
+                                <SelectItem key={workflow.id} value={workflow.id}>
+                                  {workflow.name}
+                                </SelectItem>
+                              ))
+                            ) : (
+                              <SelectItem value="custom_workflow">
+                                커스텀 워크플로우
                               </SelectItem>
-                            ))}
+                            )}
                           </SelectContent>
                         </Select>
+                        {selectedWorkflow && (
+                          <p className="text-sm text-gray-600 mt-1">
+                            {Array.isArray(workflows) ? workflows.find(w => w.id === selectedWorkflow)?.description || 
+                             (selectedWorkflow === 'custom_workflow' ? '커스텀 워크플로우가 자동으로 선택되었습니다.' : '') : ''}
+                          </p>
+                        )}
                       </div>
+                      
+                      {/* 모델 선택 UI 제거 - 커스텀 템플릿에 정의된 모델 자동 사용 */}
 
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div>
@@ -677,6 +792,10 @@ export default function ImageGeneratorPage() {
                       
                       <div className="space-y-2 text-sm">
                         <div className="flex justify-between">
+                          <span className="text-gray-600">워크플로우:</span>
+                          <span className="font-medium">{Array.isArray(workflows) ? workflows.find(w => w.id === selectedWorkflow)?.name || '기본' : '기본'}</span>
+                        </div>
+                        <div className="flex justify-between">
                           <span className="text-gray-600">스타일:</span>
                           <span className="font-medium">{getSelectedStyleData()?.name}</span>
                         </div>
@@ -697,7 +816,7 @@ export default function ImageGeneratorPage() {
                   <Button 
                     onClick={handleGenerateImage}
                     disabled={!prompt.trim() || isGenerating}
-                    className="w-full"
+                    className="w-full text-white bg-blue-600 hover:bg-blue-700"
                     size="lg"
                   >
                     {isGenerating ? (
@@ -991,7 +1110,6 @@ export default function ImageGeneratorPage() {
             </TabsContent>
           </Tabs>
         </div>
-      </div>
-    </RequireAuth>
+    </div>
   )
 }

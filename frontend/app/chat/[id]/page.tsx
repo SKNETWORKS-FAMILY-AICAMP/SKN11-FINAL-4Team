@@ -30,6 +30,8 @@ interface ChatModel {
   description: string
   learning_status: number
   chatbot_option: boolean
+  influencer_model_repo: string
+  group_id: string
 }
 
 export default function ChatPage() {
@@ -40,6 +42,7 @@ export default function ChatPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [isModelLoading, setIsModelLoading] = useState(true)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const wsRef = useRef<WebSocket | null>(null)
 
   // 모델 데이터 로드
   const loadModelData = async () => {
@@ -52,6 +55,8 @@ export default function ChatPage() {
         description: data.influencer_description || '',
         learning_status: data.learning_status,
         chatbot_option: data.chatbot_option,
+        influencer_model_repo: data.influencer_model_repo || '',
+        group_id: String(data.group_id || '')
       })
     } catch (error) {
       console.error("Error loading model data:", error)
@@ -60,46 +65,73 @@ export default function ChatPage() {
     }
   }
 
+  // WebSocket 연결 관리
+  useEffect(() => {
+    if (!model) return;
+    if (!model.id) return;
+    // influencer_id를 쿼리 파라미터로 전달
+    const accessToken = tokenUtils.getToken();
+    const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'ws://localhost:8000';
+    const ws = new WebSocket(
+      `${apiBaseUrl}/api/v1/chatbot/test?influencer_id=${model.id}&token=${accessToken}`
+    );
+    wsRef.current = ws;
+
+    ws.onmessage = (event) => {
+      setMessages(prev => [...prev, {
+        id: Date.now().toString(),
+        content: event.data,
+        sender: "bot",
+        timestamp: new Date(),
+      }]);
+    };
+    ws.onerror = (e) => {
+      setMessages(prev => [...prev, {
+        id: Date.now().toString(),
+        content: "서버와의 연결에 문제가 발생했습니다.",
+        sender: "bot",
+        timestamp: new Date(),
+      }]);
+    };
+    return () => {
+      ws.close();
+    };
+  }, [model]);
+
   // 메시지 전송
   const sendMessage = async () => {
-    if (!inputMessage.trim() || isLoading) return
-
+    if (!inputMessage.trim() || isLoading) return;
     const userMessage: Message = {
       id: Date.now().toString(),
       content: inputMessage,
       sender: "user",
       timestamp: new Date(),
-    }
-
-    setMessages(prev => [...prev, userMessage])
-    setInputMessage("")
-    setIsLoading(true)
-
+    };
+    setMessages(prev => [...prev, userMessage]);
+    setInputMessage("");
+    setIsLoading(true);
     try {
-      // 실제 API 호출 (임시로 시뮬레이션)
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
-      const botMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        content: `안녕하세요! ${model?.name}입니다. "${inputMessage}"에 대한 답변을 드리겠습니다. 이는 임시 응답입니다.`,
-        sender: "bot",
-        timestamp: new Date(),
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(inputMessage);
+      } else {
+        setMessages(prev => [...prev, {
+          id: (Date.now() + 1).toString(),
+          content: "서버와의 연결이 끊어졌습니다. 새로고침 해주세요.",
+          sender: "bot",
+          timestamp: new Date(),
+        }]);
       }
-
-      setMessages(prev => [...prev, botMessage])
     } catch (error) {
-      console.error('Error sending message:', error)
-      const errorMessage: Message = {
+      setMessages(prev => [...prev, {
         id: (Date.now() + 1).toString(),
-        content: "죄송합니다. 메시지 전송 중 오류가 발생했습니다. 다시 시도해주세요.",
+        content: "메시지 전송 중 오류가 발생했습니다.",
         sender: "bot",
         timestamp: new Date(),
-      }
-      setMessages(prev => [...prev, errorMessage])
+      }]);
     } finally {
-      setIsLoading(false)
+      setIsLoading(false);
     }
-  }
+  };
 
   // Enter 키로 메시지 전송, Shift+Enter로 줄바꿈
   const handleKeyPress = (e: React.KeyboardEvent) => {

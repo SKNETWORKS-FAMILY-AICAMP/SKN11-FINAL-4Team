@@ -14,7 +14,6 @@ import { AlertDialog, AlertDialogTrigger, AlertDialogContent, AlertDialogDescrip
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { useToast } from "@/hooks/use-toast"
-import { Toaster } from "@/components/ui/toaster"
 import { AdminService, type AdminTeam, type AdminUser, type AdminHFToken, type AdminCreateHFTokenRequest } from "@/lib/services/admin.service"
 
 export default function AdministratorPage() {
@@ -62,8 +61,6 @@ export default function AdministratorPage() {
           AdminService.getUsers()
         ])
 
-        console.log('Teams data:', teamsData)
-        console.log('Users data:', usersData)
 
         setTeams(teamsData)
         setAllUsers(usersData)
@@ -89,7 +86,6 @@ export default function AdministratorPage() {
     try {
       setLoadingTokens(true)
       const tokensData = await AdminService.getHFTokens({ include_assigned: true })
-      console.log('HF Tokens data:', tokensData)
       setHfTokens(tokensData)
     } catch (err: any) {
       console.error('Error loading HF tokens:', err)
@@ -114,7 +110,6 @@ export default function AdministratorPage() {
       }
 
       const newToken = await AdminService.createHFToken(tokenData)
-      console.log('Token created:', newToken)
 
       // 토큰 목록 새로고침
       await fetchHFTokens()
@@ -1656,7 +1651,6 @@ export default function AdministratorPage() {
           )}
         </div>
       </div>
-      <Toaster />
     </RequireAdmin>
   )
 }

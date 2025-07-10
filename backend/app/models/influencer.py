@@ -158,12 +158,14 @@ class AIInfluencer(Base, TimestampMixin):
     chat_messages = relationship("ChatMessage", back_populates="influencer")
     influencer_apis = relationship("InfluencerAPI", back_populates="influencer")
     boards = relationship("Board", back_populates="influencer")
+    generated_tones = relationship("GeneratedTone", back_populates="influencer")
 
     influencer_personality = Column(Text, comment="AI 인플루언서 성격")
     influencer_tone = Column(Text, comment="AI 인플루언서 말투/톤")
     influencer_age_group = Column(Integer, comment="AI 인플루언서 연령대")
     voice_option = Column(Boolean, default=False, comment="음성 생성 옵션")
     image_option = Column(Boolean, default=False, comment="이미지 생성 옵션")
+    system_prompt = Column(Text, comment="AI 인플루언서 시스템 프롬프트")
 
     # 기본키 설정
     __table_args__ = (
@@ -172,6 +174,33 @@ class AIInfluencer(Base, TimestampMixin):
             name="pk_ai_influencer",
         ),
     )
+
+
+class GeneratedTone(Base, TimestampMixin):
+    """생성된 어투 모델"""
+
+    __tablename__ = "GENERATED_TONE"
+
+    tone_id = Column(
+        String(255),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+        comment="생성된 어투 고유 식별자",
+    )
+    influencer_id = Column(
+        String(255),
+        ForeignKey("AI_INFLUENCER.influencer_id"),
+        nullable=False,
+        comment="인플루언서 고유 식별자",
+    )
+    title = Column(String(255), nullable=False, comment="어투 제목 (예: 말투 1)")
+    example = Column(Text, nullable=False, comment="어투 예시 대화")
+    tone_description = Column(String(255), nullable=False, comment="어투 설명")
+    hashtags = Column(String(255), nullable=True, comment="어투 관련 해시태그")
+    system_prompt = Column(Text, nullable=False, comment="어투 생성에 사용된 시스템 프롬프트")
+
+    # 관계
+    influencer = relationship("AIInfluencer", back_populates="generated_tones")
 
 
 class BatchKey(Base):
@@ -204,6 +233,7 @@ class BatchKey(Base):
     input_file_id = Column(String(255), nullable=True, comment="입력 파일 ID")
     output_file_id = Column(String(255), nullable=True, comment="출력 파일 ID")
     error_message = Column(Text, nullable=True, comment="오류 메시지")
+    vllm_task_id = Column(String(255), nullable=True, comment="VLLM 파인튜닝 작업 ID")
     
     # S3 업로드 정보
     s3_qa_file_url = Column(String(500), nullable=True, comment="S3 QA 파일 URL")

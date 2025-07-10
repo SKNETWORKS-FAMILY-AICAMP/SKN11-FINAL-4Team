@@ -35,11 +35,6 @@ export function InstagramDebugHelper() {
       }
       
       // 실제 client_id 값 콘솔에 출력 (디버깅용)
-      console.log('Environment Debug:', {
-        'NEXT_PUBLIC_INSTAGRAM_APP_ID': clientId,
-        'CLIENT_ID_LENGTH': clientId.length,
-        'ALL_ENV_VARS': Object.keys(process.env).filter(key => key.includes('INSTAGRAM'))
-      })
       
       setDebugInfo(info)
       setIsChecking(false)

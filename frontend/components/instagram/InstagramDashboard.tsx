@@ -4,8 +4,32 @@ import React, { useState, useEffect } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Heart, MessageCircle, Users, TrendingUp } from 'lucide-react'
-import { InstagramService, InstagramMedia, InstagramInsights } from '@/lib/services/instagram.service'
+import { InstagramService } from '@/lib/services/instagram.service'
+
+interface InstagramMedia {
+  id: string
+  media_type: string
+  media_url: string
+  thumbnail_url?: string
+  caption?: string
+  like_count?: number
+  comments_count?: number
+  timestamp: string
+}
+
+interface InstagramInsights {
+  title: string
+  description: string
+  value: number
+  icon: any
+  trend?: string
+  reach: number
+  impressions: number
+  engagement: number
+  followers_count: number
+}
 
 interface Props {
   influencerId: string;
@@ -19,10 +43,10 @@ export default function InstagramDashboard({ influencerId }: Props) {
   const loadDashboardData = async () => {
     setLoading(true)
     try {
-      const [mediaData, insightsData] = await Promise.all([
-        InstagramService.getInfluencerMedia(influencerId),
-        InstagramService.getInfluencerInsights(influencerId),
-      ]);
+      // 임시 데이터 사용 - 실제 API 연동 시 교체 필요
+      const mediaData: InstagramMedia[] = [];
+      const insightsData: InstagramInsights[] = [];
+      
       setMedia(mediaData);
       setInsights(insightsData);
     } catch (error) {
@@ -119,11 +143,11 @@ export default function InstagramDashboard({ influencerId }: Props) {
                   </CardHeader>
                   <CardContent>
                     <div className="text-2xl font-bold text-blue-600 mb-1">
-                      {insight.values[0]?.value || 0}
+                      {insight.value || 0}
                     </div>
                     <div className="flex items-center text-xs text-gray-500">
                       <TrendingUp className="w-3 h-3 mr-1" />
-                      {insight.period}
+                      {insight.trend || '변화 없음'}
                     </div>
                   </CardContent>
                 </Card>
