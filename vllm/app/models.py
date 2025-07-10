@@ -46,12 +46,14 @@ class FineTuningRequest(BaseModel):
     training_epochs: int = 5
     style_info: Optional[str] = ""
     is_converted: Optional[bool] = False
+    batch_id: Optional[str] = None
 
 class FineTuningResponse(BaseModel):
     task_id: str
     status: str
     message: str
     hf_repo_id: Optional[str] = None
+    batch_id: Optional[str] = None
 
 class FineTuningStatusResponse(BaseModel):
     task_id: str
@@ -59,6 +61,7 @@ class FineTuningStatusResponse(BaseModel):
     progress: Optional[Dict[str, Any]] = None
     error_message: Optional[str] = None
     hf_model_url: Optional[str] = None
+    batch_id: Optional[str] = None
 
 # Speech Generator 관련 모델
 class VLLMCharacterProfile(BaseModel):

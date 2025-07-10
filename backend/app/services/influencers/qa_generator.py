@@ -428,24 +428,37 @@ class InfluencerQAGenerator:
                 result = json.loads(line)
                 
                 if result.get('response', {}).get('status_code') == 200:
-                    content = result['response']['body']['choices'][0]['message']['content']
+                    # 응답 컨텐츠 가져오기
+                    content = result['response']['body']['choices'][0]['message']['content'].strip()
                     
-                    # Q: A: 형식으로 파싱
-                    if 'Q:' in content and 'A:' in content:
-                        try:
-                            parts = content.split('A:', 1)
-                            if len(parts) == 2:
-                                question = parts[0].replace('Q:', '').strip()
-                                answer = parts[1].strip()
-                                
-                                qa_pairs.append({
-                                    "question": question,
-                                    "answer": answer,
-                                    "custom_id": result.get('custom_id')
-                                })
-                        except Exception as e:
-                            print(f"QA 파싱 오류: {e}")
+                    try:
+                        # JSON 형식으로 파싱 시도 ({"q": "...", "a": "..."} 형식)
+                        qa_data = json.loads(content)
+                        if isinstance(qa_data, dict) and 'q' in qa_data and 'a' in qa_data:
+                            qa_pairs.append({
+                                "question": qa_data['q'],
+                                "answer": qa_data['a'],
+                                "custom_id": result.get('custom_id')
+                            })
                             continue
+                    except json.JSONDecodeError:
+                        # JSON 파싱 실패 시 기존 방식으로 폴백
+                        pass
+                    
+                    # 기존 형식 (Q: ... A: ...) 처리
+                    if 'Q:' in content and 'A:' in content:
+                        parts = content.split('A:', 1)
+                        if len(parts) == 2:
+                            question = parts[0].replace('Q:', '').strip()
+                            answer = parts[1].strip()
+                            qa_pairs.append({
+                                "question": question,
+                                "answer": answer,
+                                "custom_id": result.get('custom_id')
+                            })
+                    else:
+                        # JSON도 아니고 Q:A: 형식도 아닌 경우
+                        print(f"QA 파싱 실패 - 컨텐츠: {content[:100]}...")
         
         return qa_pairs
     
@@ -589,14 +602,48 @@ class InfluencerQAGenerator:
             self.save_qa_pairs_to_db(batch_key.influencer_id, qa_pairs, db)
             logger.info(f"💾 QA 쌍 DB 저장 완료")
             
+            # S3에 업로드
+            logger.info(f"☁️ S3 업로드 시작: influencer_id={batch_key.influencer_id}, task_id={task_id}")
+            try:
+                from app.services.s3_service import get_s3_service
+                s3_service = get_s3_service()
+                
+                if s3_service.is_available():
+                    # S3에 QA 결과 업로드
+                    s3_urls = s3_service.upload_qa_results(
+                        influencer_id=batch_key.influencer_id,
+                        task_id=task_id,
+                        qa_pairs=qa_pairs,
+                        raw_results_file=result_file_path
+                    )
+                    
+                    # S3 URL 저장
+                    if s3_urls:
+                        batch_key.s3_qa_file_url = s3_urls.get('processed_qa_url')
+                        batch_key.s3_processed_file_url = s3_urls.get('raw_results_url')
+                        batch_key.is_uploaded_to_s3 = True
+                        logger.info(f"✅ S3 업로드 성공: QA URL={batch_key.s3_qa_file_url}")
+                    else:
+                        logger.warning(f"⚠️ S3 업로드 실패: URL이 반환되지 않았습니다")
+                        batch_key.is_uploaded_to_s3 = False
+                else:
+                    logger.warning(f"⚠️ S3 서비스를 사용할 수 없습니다. 로컬 파일만 사용합니다.")
+                    batch_key.is_uploaded_to_s3 = False
+                    
+            except Exception as s3_error:
+                logger.error(f"❌ S3 업로드 중 오류 발생: {s3_error}", exc_info=True)
+                # S3 업로드 실패해도 전체 프로세스는 계속 진행
+                batch_key.is_uploaded_to_s3 = False
+            
             # BatchKey 상태 업데이트
             batch_key.status = QAGenerationStatus.COMPLETED.value
             batch_key.generated_qa_pairs = len(qa_pairs)
             batch_key.completed_at = datetime.now()
+            batch_key.is_processed = True
             db.commit()
             logger.info(f"🧠 BatchKey 상태 업데이트 완료 (DB)")
             
-            logger.info(f"✅ QA 생성 완료 - Task ID: {task_id}, QA 쌍: {len(qa_pairs)}개")
+            logger.info(f"✅ QA 생성 완료 - Task ID: {task_id}, QA 쌍: {len(qa_pairs)}개, S3 업로드: {batch_key.is_uploaded_to_s3}")
             return True
             
         except Exception as e:

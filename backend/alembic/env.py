@@ -72,12 +72,11 @@ def run_migrations_online() -> None:
     and associate a connection with the context.
 
     """
-    # alembic.ini의 sqlalchemy.url을 동적으로 설정
-    config.set_main_option("sqlalchemy.url", get_url())
-
-    connectable = engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
+    # URL을 직접 사용하여 엔진 생성 (config 설정을 우회)
+    from sqlalchemy import create_engine
+    
+    connectable = create_engine(
+        get_url(),
         poolclass=pool.NullPool,
     )
 

@@ -95,7 +95,6 @@ async def generate_character_qa(request: Dict[str, Any]):
                 tones_result = await speech_generator.generate_character_tones_for_question(character_profile, question, 1)
                 
                 if tones_result and len(tones_result) > 0:
-                    # 첫 번째 어투 사용
                     first_tone_key = list(tones_result.keys())[0]
                     tone_data = tones_result[first_tone_key][0]
                     
