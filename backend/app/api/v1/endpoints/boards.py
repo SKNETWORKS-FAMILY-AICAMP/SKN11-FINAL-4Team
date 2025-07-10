@@ -354,57 +354,6 @@ async def publish_board(
 # ===================================================================
 
 
-@router.post("/generate-content", response_model=SimpleContentResponse)
-async def generate_content_simple(
-    request: SimpleContentRequest,
-    db: Session = Depends(get_db),
-    # current_user: User = Depends(get_current_user),  # 임시로 주석 처리 (테스트용)
-):
-    """
-    간단한 AI 콘텐츠 생성 (프론트엔드 테스트용)
-
-    이 엔드포인트는 프론트엔드에서 사용자 입력을 받아
-    OpenAI + ComfyUI로 콘텐츠를 생성하는 핵심 워크플로우입니다.
-    """
-    if not request.include_content or not request.include_content.strip():
-        raise HTTPException(status_code=400, detail="본문 설명을 입력해 주세요.")
-    try:
-        logger.info(f"Starting content generation for topic: {request.topic}")
-
-        # 플랫폼 번호 매핑
-        platform_mapping = {"instagram": 0, "facebook": 1, "twitter": 2, "tiktok": 3}
-
-        platform_num = platform_mapping.get(request.platform.lower(), 0)
-
-        # AI 콘텐츠 생성 서비스 호출
-        content_response = await generate_content_for_board(
-            topic=request.topic,
-            platform=request.platform,
-            influencer_id=request.influencer_id,
-            user_id="test_user",  # 임시 사용자 ID (인증 활성화 시 current_user.user_id 사용)
-            team_id=1,  # 임시 팀 ID
-            include_content=request.include_content,
-            hashtags=request.hashtags,
-            generate_image=request.generate_image,
-        )
-
-        return SimpleContentResponse(
-            social_media_content=content_response.social_media_content,
-            hashtags=content_response.hashtags,
-            images=content_response.generated_images,
-            comfyui_prompt=content_response.comfyui_prompt,
-            generation_time=content_response.total_generation_time,
-            metadata=content_response.metadata,
-        )
-
-    except Exception as e:
-        logger.error(f"Content generation failed: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Content generation failed: {str(e)}",
-        )
-
-
 @router.post("/generate-and-save", response_model=AIContentGenerationResponse)
 async def generate_and_save_board(
     request: AIContentGenerationRequest,
@@ -1106,14 +1055,16 @@ class InfluencerStyleRequest(BaseModel):
     influencer_model_repo: str
     text: str
 
+
 class InfluencerStyleResponse(BaseModel):
     converted_text: str
+
 
 @router.post("/influencer-style/convert", response_model=InfluencerStyleResponse)
 async def convert_influencer_style(
     request: InfluencerStyleRequest,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
 ):
     user_id = current_user.get("sub")
     # 사용자 정보 및 소속 그룹 확인
@@ -1130,18 +1081,27 @@ async def convert_influencer_style(
     if not ai_influencer:
         raise HTTPException(status_code=404, detail="AI 인플루언서를 찾을 수 없습니다.")
     # 그룹 권한 체크 (본인 소유 또는 소속 그룹)
-    if ai_influencer.group_id not in user_group_ids and ai_influencer.user_id != user_id:
-        raise HTTPException(status_code=403, detail="해당 인플루언서에 대한 접근 권한이 없습니다.")
+    if (
+        ai_influencer.group_id not in user_group_ids
+        and ai_influencer.user_id != user_id
+    ):
+        raise HTTPException(
+            status_code=403, detail="해당 인플루언서에 대한 접근 권한이 없습니다."
+        )
     # hf_manage_id 확인
     if ai_influencer.hf_manage_id is None:
-        raise HTTPException(status_code=400, detail="허깅페이스 토큰이 설정되지 않았습니다.")
+        raise HTTPException(
+            status_code=400, detail="허깅페이스 토큰이 설정되지 않았습니다."
+        )
     hf_token = (
         db.query(HFTokenManage)
         .filter(HFTokenManage.hf_manage_id == ai_influencer.hf_manage_id)
         .first()
     )
     if not hf_token:
-        raise HTTPException(status_code=400, detail="허깅페이스 토큰을 찾을 수 없습니다.")
+        raise HTTPException(
+            status_code=400, detail="허깅페이스 토큰을 찾을 수 없습니다."
+        )
     encrypted_token_value = getattr(hf_token, "hf_token_value", None)
     if not encrypted_token_value:
         raise HTTPException(status_code=400, detail="토큰 값이 없습니다.")
@@ -1170,23 +1130,39 @@ async def convert_influencer_style(
     # 모델 로드 (간단화, 실제 운영시 캐싱 필요)
     model_name = request.influencer_model_repo
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True, token=decrypted_token)
-    model = AutoModelForCausalLM.from_pretrained(model_name, trust_remote_code=True, token=decrypted_token, device_map="auto" if device=="cuda" else None, torch_dtype=torch.float16 if device=="cuda" else torch.float32)
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_name, trust_remote_code=True, token=decrypted_token
+    )
+    model = AutoModelForCausalLM.from_pretrained(
+        model_name,
+        trust_remote_code=True,
+        token=decrypted_token,
+        device_map="auto" if device == "cuda" else None,
+        torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+    )
     # 입력 생성
     messages = [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": prompt}
+        {"role": "user", "content": prompt},
     ]
     try:
-        full_input = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        full_input = tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
     except Exception:
         full_input = system_prompt + "\n\n사용자: " + prompt + "\n\n어시스턴트: "
     # 생성
     input_ids = tokenizer(full_input, return_tensors="pt").input_ids.to(model.device)
-    gen_out = model.generate(input_ids, max_new_tokens=1024, do_sample=True, temperature=0.7)
+    gen_out = model.generate(
+        input_ids, max_new_tokens=1024, do_sample=True, temperature=0.7
+    )
     output = tokenizer.decode(gen_out[0], skip_special_tokens=True)
     # 후처리: 입력 프롬프트 부분 제거
-    answer = output.split("어시스턴트:")[-1].strip() if "어시스턴트:" in output else output.strip()
+    answer = (
+        output.split("어시스턴트:")[-1].strip()
+        if "어시스턴트:" in output
+        else output.strip()
+    )
     answer = re.sub(r"^\s+|\s+$", "", answer)
     return InfluencerStyleResponse(converted_text=answer)
 
@@ -1197,7 +1173,8 @@ async def upload_image_simple(file: UploadFile = File(...)):
     try:
         # 파일명 중복 방지: uuid 추가
         import uuid
-        ext = file.filename.split('.')[-1]
+
+        ext = file.filename.split(".")[-1]
         unique_filename = f"{uuid.uuid4()}.{ext}"
         file_location = UPLOAD_DIR / unique_filename
         with open(file_location, "wb") as buffer:
