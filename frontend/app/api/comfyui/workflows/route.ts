@@ -28,7 +28,6 @@ export async function GET(request: NextRequest) {
     if (response.ok) {
       workflows = await response.json()
     } else {
-      console.log('Backend workflows not available, using fallback')
     }
     
     return NextResponse.json({
@@ -39,7 +38,7 @@ export async function GET(request: NextRequest) {
     console.error('Error fetching workflows:', error)
     
     // 커스텀 템플릿만 사용 - 기본 워크플로우 제거
-    const mockWorkflows = [
+    const mockWorkflows: any[] = [
       // 커스텀 템플릿만 표시되도록 기본 워크플로우 제거
       // 사용자가 정의한 커스텀 템플릿들만 여기에 표시됩니다
     ]

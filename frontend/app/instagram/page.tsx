@@ -5,15 +5,17 @@ import { useAuth } from '@/hooks/use-auth'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import { Instagram, AlertCircle, CheckCircle, Settings } from 'lucide-react'
 import { InstagramService, InstagramStatus } from '@/lib/services/instagram.service'
 import { InstagramDebugHelper } from '@/components/instagram-debug-helper'
 import { useToast } from '@/hooks/use-toast'
+import { Suspense } from 'react'
 
 // 임시 인플루언서 ID (실제 앱에서는 동적으로 받아와야 함)
 const TEMP_INFLUENCER_ID = 'c85a6638-2289-4202-81a2-6e5a4e5b636a';
 
-export default function InstagramPage() {
+function InstagramPageContent() {
   const [status, setStatus] = useState<InstagramStatus | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -193,5 +195,13 @@ export default function InstagramPage() {
         </div>
       )}
     </div>
+  )
+}
+
+export default function InstagramPage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <InstagramPageContent />
+    </Suspense>
   )
 }

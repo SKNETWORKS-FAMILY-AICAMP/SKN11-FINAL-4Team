@@ -37,14 +37,16 @@ else:
         level=getattr(logging, settings.LOG_LEVEL), 
         format=settings.LOG_FORMAT
     )
-    # 외부 라이브러리 로그 비활성화
-    logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
-    logging.getLogger('sqlalchemy.pool').setLevel(logging.WARNING)
-    logging.getLogger('sqlalchemy.dialects').setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
-# 공통으로 비활성화할 로그들
+# SQLAlchemy 로그 완전 비활성화 (개발/프로덕션 공통)
+logging.getLogger('sqlalchemy.engine').setLevel(logging.CRITICAL)
+logging.getLogger('sqlalchemy.pool').setLevel(logging.CRITICAL)
+logging.getLogger('sqlalchemy.dialects').setLevel(logging.CRITICAL)
+logging.getLogger('sqlalchemy.orm').setLevel(logging.CRITICAL)
+
+# 기타 외부 라이브러리 로그 비활성화
 logging.getLogger('httpx').setLevel(logging.WARNING)
 logging.getLogger('httpcore').setLevel(logging.WARNING)
 logging.getLogger('sqlalchemy.pool').setLevel(logging.WARNING)
@@ -290,3 +292,13 @@ if settings.DEBUG:
         logger.info(f"📚 API Documentation: {settings.BACKEND_CORS_ORIGINS[0]}/docs")
         logger.info(f"🔍 ReDoc: {settings.BACKEND_CORS_ORIGINS[0]}/redoc")
         logger.info(f"💚 Health Check: {settings.BACKEND_CORS_ORIGINS[0]}/health")
+        
+        # 챗봇 옵션이 활성화된 인플루언서들의 vLLM 어댑터 자동 로드
+        try:
+            from app.database import get_db
+            from app.services.startup_service import load_adapters_for_chat_enabled_influencers
+            
+            db = next(get_db())
+            await load_adapters_for_chat_enabled_influencers(db)
+        except Exception as e:
+            logger.warning(f"⚠️ 시작 시 챗봇 인플루언서 어댑터 로드 실패: {str(e)}")

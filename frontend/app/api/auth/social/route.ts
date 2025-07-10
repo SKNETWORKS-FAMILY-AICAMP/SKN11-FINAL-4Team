@@ -5,7 +5,7 @@ export async function POST(request: NextRequest) {
     const { provider, accessToken, userData } = await request.json()
     
     // 소셜 로그인 성공 후 사용자 데이터 처리
-    const user = {
+    const user: any = {
       id: userData.id || userData.sub,
       email: userData.email,
       name: userData.name || userData.given_name + ' ' + userData.family_name,

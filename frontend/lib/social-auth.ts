@@ -49,7 +49,15 @@ export const instagramAuth = {
       
       // 리다이렉트 방식에서는 Promise가 의미가 없으므로 빈 Promise 반환
       // 실제 처리는 콜백 페이지에서 수행됨
-      resolve({ success: true, data: { provider: 'instagram' } });
+      resolve({ 
+        success: true, 
+        data: { 
+          id: '',
+          email: '',
+          name: '',
+          provider: 'instagram' 
+        } 
+      });
     });
   }
 };
@@ -88,7 +96,15 @@ export const googleAuth = {
       
       // 리다이렉트 방식에서는 Promise가 의미가 없으므로 빈 Promise 반환
       // 실제 처리는 콜백 페이지에서 수행됨
-      resolve({ success: true, data: { provider: 'google' } });
+      resolve({ 
+        success: true, 
+        data: { 
+          id: '',
+          email: '',
+          name: '',
+          provider: 'google' 
+        } 
+      });
     });
   }
 };
@@ -154,7 +170,15 @@ export const naverAuth = {
       
       // 리다이렉트 방식에서는 Promise가 의미가 없으므로 빈 Promise 반환
       // 실제 처리는 콜백 페이지에서 수행됨
-      resolve({ success: true, data: { provider: 'naver' } });
+      resolve({ 
+        success: true, 
+        data: { 
+          id: '',
+          email: '',
+          name: '',
+          provider: 'naver' 
+        } 
+      });
     });
   }
 };

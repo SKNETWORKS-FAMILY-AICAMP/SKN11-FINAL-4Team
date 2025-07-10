@@ -79,11 +79,11 @@ function PostListContent() {
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [modelFilter, setModelFilter] = useState<string>("all")
   const [platformFilter, setPlatformFilter] = useState<string>("all")
-
+          
   // 임시 필터 상태 (모달에서 사용)
   const [tempStatusFilter, setTempStatusFilter] = useState<string>("all")
   const [tempModelFilter, setTempModelFilter] = useState<string>("all")
-  const [tempPlatformFilter, setTempPlatformFilter] = useState<string>("all")
+  const [tempPlatformFilter, setTempPlatformFilter] = useState<string[]>([])
   const [isFilterModalOpen, setIsFilterModalOpen] = useState(false)
 
   // 게시글 상세 보기 모달 상태
@@ -230,7 +230,7 @@ function PostListContent() {
   // 고유한 모델 목록 추출
   const uniqueModels = Array.from(new Set(posts.map(post => post.modelName)))
   // 고유한 플랫폼 목록 추출
-  const uniquePlatforms = Array.from(new Set(posts.map(post => post.platform)))
+  const uniquePlatforms = Array.from(new Set(posts.map(post => post.platform).filter(Boolean))) as string[]
 
   const filteredPosts = posts.filter((post) => {
     const matchesSearch =
@@ -239,6 +239,7 @@ function PostListContent() {
       (post.author || 'AI 인플루언서').toLowerCase().includes(searchTerm.toLowerCase())
 
     const matchesStatus = statusFilter === "all" || post.status === statusFilter
+
     const matchesModel = modelFilter === "all" || (post.modelName || 'AI 인플루언서') === modelFilter
     const matchesPlatform = platformFilter === "all" || post.platform === platformFilter
 
@@ -501,9 +502,9 @@ function PostListContent() {
                 <Button variant="outline" className="flex items-center gap-2" onClick={handleOpenFilterModal}>
                   <Filter className="h-4 w-4" />
                   필터
-                  {(modelFilter !== "all" || platformFilter !== "all") && (
+                  {(modelFilter !== "all" || platformFilter.length > 0) && (
                     <Badge variant="secondary" className="ml-1">
-                      {[modelFilter, platformFilter].filter(f => f !== "all").length}
+                      {[modelFilter, ...platformFilter].filter(f => f !== "all").length}
                     </Badge>
                   )}
                 </Button>
@@ -589,7 +590,7 @@ function PostListContent() {
             </Dialog>
             <div className="flex-1 flex justify-end">
               <Link href="/create-post">
-                <Button className="flex items-center space-x-2">
+                <Button className="flex items-center space-x-2 text-white bg-blue-600 hover:bg-blue-700">
                   <Plus className="h-4 w-4" />
                   <span>새 게시글 작성</span>
                 </Button>
@@ -597,6 +598,46 @@ function PostListContent() {
             </div>
           </div>
 
+          {(modelFilter !== "all" || platformFilter.length > 0) && (
+            <div className="flex items-center gap-2 mb-4 flex-wrap">
+              <span className="text-sm text-gray-500">활성 필터:</span>
+              {modelFilter !== "all" && (
+                <Badge variant="outline" className="text-xs flex items-center gap-1">
+                  모델: {modelFilter}
+                  <button
+                    onClick={() => setModelFilter("all")}
+                    className="ml-1 hover:text-red-600 transition-colors"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </Badge>
+              )}
+              {platformFilter.map((platform) => (
+                <Badge key={platform} variant="outline" className="text-xs flex items-center gap-1">
+                  플랫폼: {platform}
+                  <button
+                    onClick={() => setPlatformFilter(platformFilter.filter(p => p !== platform))}
+                    className="ml-1 hover:text-red-600 transition-colors"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </Badge>
+              ))}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setStatusFilter("all");
+                  setModelFilter("all");
+                  setPlatformFilter([]);
+                }}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                모든 필터 초기화
+              </Button>
+            </div>
+          )}
+          
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
             <Card
               className={`cursor-pointer transition-shadow ${statusFilter === "all" ? "ring-2 ring-blue-400" : "hover:shadow-lg"}`}

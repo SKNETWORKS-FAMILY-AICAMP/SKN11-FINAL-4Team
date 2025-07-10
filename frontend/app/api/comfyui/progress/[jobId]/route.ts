@@ -29,7 +29,6 @@ export async function GET(
         return NextResponse.json(progressData)
       }
     } catch (error) {
-      console.log('Backend progress check failed, using fallback:', error)
     }
     
     // 백엔드 연결 실패 시 즉시 완료 응답 (테스트용)

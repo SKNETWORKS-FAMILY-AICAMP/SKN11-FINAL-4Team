@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useRef } from "react"
 import { Navigation } from "@/components/navigation"
-import { RequireAuth } from "@/components/auth/protected-route"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -168,7 +167,6 @@ export default function ImageGeneratorPage() {
 
     try {
       // 1단계: 프롬프트 최적화 (임시 비활성화)
-      console.log('Step 1: Optimizing prompt... (temporarily disabled)')
       let optimizedPrompt = prompt
       
       // TODO: 백엔드 재시작 후 아래 코드 활성화
@@ -191,10 +189,6 @@ export default function ImageGeneratorPage() {
         const optimizationData = await optimizationResponse.json()
         if (optimizationData.success) {
           optimizedPrompt = optimizationData.optimized_prompt
-          console.log('Prompt optimized:', {
-            original: prompt,
-            optimized: optimizedPrompt
-          })
         }
       } else {
         console.warn('Prompt optimization failed, using original prompt')
@@ -202,7 +196,6 @@ export default function ImageGeneratorPage() {
       */
 
       // 2단계: 최적화된 프롬프트로 이미지 생성
-      console.log('Step 2: Generating image with optimized prompt...')
       const selectedSizeData = PRESET_SIZES.find(size => size.id === selectedSize)
       const response = await fetch('/api/comfyui/generate', {
         method: 'POST',
@@ -226,7 +219,6 @@ export default function ImageGeneratorPage() {
       
       if (data.success) {
         const jobId = data.job_id || data.prompt_id
-        console.log('Received job ID:', jobId, 'Full response:', data)
         
         // 백엔드에서 즉시 완료된 이미지를 반환한 경우
         if (data.status === 'completed' && data.image_url) {
@@ -256,7 +248,6 @@ export default function ImageGeneratorPage() {
           
           setImages(prev => [newImage, ...prev])
           setPrompt("")
-          console.log('Image added to gallery:', newImage)
           return
         }
         
@@ -569,7 +560,7 @@ export default function ImageGeneratorPage() {
           image: uploadedImageUrl,
           mask: maskData,
           prompt: inpaintPrompt,
-          model: selectedModel,
+          model: 'default', // 워크플로우에서 정의된 모델 사용
           steps,
           cfg_scale: cfgScale
         })
@@ -592,8 +583,7 @@ export default function ImageGeneratorPage() {
   }
 
   return (
-    <RequireAuth>
-      <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50">
         <Navigation />
 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -727,8 +717,8 @@ export default function ImageGeneratorPage() {
                         </Select>
                         {selectedWorkflow && (
                           <p className="text-sm text-gray-600 mt-1">
-                            {Array.isArray(workflows) ? workflows.find(w => w.id === selectedWorkflow)?.description : null || 
-                             (selectedWorkflow === 'custom_workflow' ? '커스텀 워크플로우가 자동으로 선택되었습니다.' : '')}
+                            {Array.isArray(workflows) ? workflows.find(w => w.id === selectedWorkflow)?.description || 
+                             (selectedWorkflow === 'custom_workflow' ? '커스텀 워크플로우가 자동으로 선택되었습니다.' : '') : ''}
                           </p>
                         )}
                       </div>
@@ -803,7 +793,7 @@ export default function ImageGeneratorPage() {
                       <div className="space-y-2 text-sm">
                         <div className="flex justify-between">
                           <span className="text-gray-600">워크플로우:</span>
-                          <span className="font-medium">{Array.isArray(workflows) ? workflows.find(w => w.id === selectedWorkflow)?.name : null || '기본'}</span>
+                          <span className="font-medium">{Array.isArray(workflows) ? workflows.find(w => w.id === selectedWorkflow)?.name || '기본' : '기본'}</span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-gray-600">스타일:</span>
@@ -826,7 +816,7 @@ export default function ImageGeneratorPage() {
                   <Button 
                     onClick={handleGenerateImage}
                     disabled={!prompt.trim() || isGenerating}
-                    className="w-full"
+                    className="w-full text-white bg-blue-600 hover:bg-blue-700"
                     size="lg"
                   >
                     {isGenerating ? (
@@ -1120,7 +1110,6 @@ export default function ImageGeneratorPage() {
             </TabsContent>
           </Tabs>
         </div>
-      </div>
-    </RequireAuth>
+    </div>
   )
 }

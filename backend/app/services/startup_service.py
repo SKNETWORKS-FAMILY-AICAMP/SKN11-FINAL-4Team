@@ -2,6 +2,7 @@
 """
 애플리케이션 시작시 실행되는 서비스
 QA 데이터가 있지만 파인튜닝이 시작되지 않은 작업들을 자동으로 처리
+챗봇 옵션이 활성화된 인플루언서들의 vLLM 어댑터 자동 로드
 """
 
 import asyncio
@@ -14,7 +15,11 @@ from datetime import datetime
 from app.database import get_db
 # batch_job_service 제거됨 - BatchKey 모델 직접 사용
 from app.services.finetuning_service import get_finetuning_service
-from app.models.influencer import BatchKey as BatchJob
+from app.models.influencer import BatchKey as BatchJob, AIInfluencer
+from app.models.user import HFTokenManage
+from app.services.influencers.qa_generator import QAGenerationStatus
+from app.services.vllm_client import vllm_load_adapter_if_needed
+from app.core.encryption import decrypt_sensitive_data
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
@@ -58,8 +63,12 @@ class StartupService:
                     from app.services.batch_monitor import BatchMonitor # 순환 참조 방지를 위해 여기서 import
                     monitor = BatchMonitor()
                     for job in in_progress_jobs:
-                        await monitor.check_and_update_single_job(job, db)
-                    db.commit()
+                        try:
+                            await monitor.check_and_update_single_job(job, db)
+                            db.commit() # 개별 작업 처리 후 커밋
+                        except Exception as e:
+                            logger.error(f"❌ 진행 중이던 배치 작업 {job.batch_key_id} 처리 중 오류: {e}", exc_info=True)
+                            db.rollback() # 오류 발생 시 롤백
                 else:
                     logger.info("✅ 진행 중이던 배치 작업 없음")
 
@@ -98,17 +107,18 @@ class StartupService:
                                 job.s3_qa_file_url = s3_url
                                 job.is_uploaded_to_s3 = True
                                 job.updated_at = datetime.now()
+                                db.commit() # 개별 작업 처리 후 커밋
                                 logger.info(f"✅ S3 업로드 성공: {s3_url}")
                             else:
                                 logger.error(f"❌ S3 업로드 실패: task_id={job.task_id}")
 
                         except Exception as e:
                             logger.error(f"❌ S3 업로드 처리 중 오류: task_id={job.task_id}, error={e}")
+                            db.rollback() # 오류 발생 시 롤백
                         finally:
                             if tmp_file_path and os.path.exists(tmp_file_path):
                                 os.remove(tmp_file_path)
                     
-                    db.commit()
                 else:
                     logger.info("✅ S3 업로드 누락 작업 없음")
 
@@ -146,7 +156,7 @@ class StartupService:
                             logger.info(f"✅ 이미 파인튜닝 완료됨: influencer_id={batch_job.influencer_id}")
                             # 파인튜닝 시작 플래그 업데이트 (중복 시작 방지)
                             batch_job.is_finetuning_started = True
-                            db.commit()
+                            db.commit() # 개별 작업 처리 후 커밋
                             continue
                         
                         logger.info(f"🚀 파인튜닝 자동 재시작: task_id={batch_job.task_id}, influencer_id={batch_job.influencer_id}")
@@ -161,8 +171,8 @@ class StartupService:
                         if success:
                             # 파인튜닝 시작 표시 (BatchKey 모델 직접 사용)
                             batch_job.is_finetuning_started = True
-                            batch_job.updated_at = datetime.now()
-                            db.commit()
+                            batch_job.status = QAGenerationStatus.FINALIZED.value # 최종 완료 상태로 업데이트
+                            db.commit() # 개별 작업 처리 후 커밋
                             
                             restarted_count += 1
                             logger.info(f"✅ 파인튜닝 자동 재시작 완료: task_id={batch_job.task_id}")
@@ -171,6 +181,7 @@ class StartupService:
                     
                     except Exception as e:
                         logger.error(f"❌ 파인튜닝 재시작 중 오류: task_id={batch_job.task_id}, error={str(e)}")
+                        db.rollback() # 오류 발생 시 롤백
                         continue
                 
                 if restarted_count > 0:
@@ -206,9 +217,12 @@ class StartupService:
                 
                 cleaned_count = len(old_failed_jobs)
                 for job in old_failed_jobs:
-                    db.delete(job)
-                
-                db.commit()
+                    try:
+                        db.delete(job)
+                        db.commit() # 개별 삭제 후 커밋
+                    except Exception as e:
+                        logger.error(f"❌ 오래된 배치 작업 {job.batch_key_id} 정리 중 오류: {e}", exc_info=True)
+                        db.rollback() # 오류 발생 시 롤백
                 
                 if cleaned_count > 0:
                     logger.info(f"🗑️ {cleaned_count}개의 오래된 실패 작업 정리 완료")
@@ -235,8 +249,93 @@ class StartupService:
             
             logger.info(f"✅ 시작시 작업 완료 - 재시작: {restarted_count}개, 정리: {cleaned_count}개")
             
+            # 3. 챗봇 옵션 활성화된 인플루언서들의 vLLM 어댑터 로드
+            await self.load_adapters_for_chat_enabled_influencers()
+            
         except Exception as e:
             logger.error(f"❌ 시작시 작업 실행 중 오류: {str(e)}", exc_info=True)
+    
+    async def load_adapters_for_chat_enabled_influencers(self):
+        """챗봇 옵션이 활성화된 인플루언서들의 vLLM 어댑터 로드"""
+        logger.info("💬 챗봇 활성화된 인플루언서들의 vLLM 어댑터 로드 시작...")
+        
+        try:
+            db = next(get_db())
+            try:
+                # 챗봇 옵션이 활성화되고 파인튜닝된 모델을 가진 인플루언서 조회
+                chat_enabled_influencers = (
+                    db.query(AIInfluencer)
+                    .filter(
+                        AIInfluencer.chatbot_option == True,
+                        AIInfluencer.influencer_model_repo.isnot(None),
+                        AIInfluencer.influencer_model_repo != ""
+                    )
+                    .all()
+                )
+                
+                if not chat_enabled_influencers:
+                    logger.info("💬 챗봇 활성화된 인플루언서가 없습니다.")
+                    return
+                
+                logger.info(f"💬 챗봇 활성화된 인플루언서 {len(chat_enabled_influencers)}개 발견")
+                
+                loaded_count = 0
+                for influencer in chat_enabled_influencers:
+                    try:
+                        # 인플루언서에 직접 연결된 HF 토큰 조회
+                        hf_token_record = None
+                        if influencer.hf_manage_id:
+                            # 1. 인플루언서에 직접 할당된 토큰 조회
+                            hf_token_record = db.query(HFTokenManage).filter(
+                                HFTokenManage.hf_manage_id == influencer.hf_manage_id
+                            ).first()
+                        
+                        if not hf_token_record:
+                            # 2. 같은 그룹의 첫 번째 토큰 사용
+                            hf_token_record = db.query(HFTokenManage).filter(
+                                HFTokenManage.group_id == influencer.group_id
+                            ).first()
+                        
+                        if not hf_token_record:
+                            logger.warning(f"⚠️ 인플루언서 {influencer.influencer_id}의 HF 토큰을 찾을 수 없습니다.")
+                            continue
+                        
+                        # 토큰 복호화
+                        try:
+                            decrypted_token = decrypt_sensitive_data(hf_token_record.hf_token_value)
+                            if not decrypted_token:
+                                logger.warning(f"⚠️ 인플루언서 {influencer.influencer_id}의 HF 토큰 복호화에 실패했습니다.")
+                                continue
+                        except Exception as decrypt_error:
+                            logger.warning(f"⚠️ 인플루언서 {influencer.influencer_id}의 HF 토큰 복호화 중 오류: {decrypt_error}")
+                            continue
+                        
+                        # vLLM 어댑터 로드
+                        logger.info(f"🔄 어댑터 로드 중: {influencer.influencer_model_repo}")
+                        success = await vllm_load_adapter_if_needed(
+                            model_id=influencer.influencer_model_repo,
+                            hf_repo_name=influencer.influencer_model_repo,
+                            hf_token=decrypted_token,
+                            base_model_override="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct"  # 기본 베이스 모델 지정
+                        )
+                        
+                        if success:
+                            loaded_count += 1
+                            logger.info(f"✅ 어댑터 로드 성공: {influencer.influencer_model_repo}")
+                        else:
+                            logger.warning(f"⚠️ 어댑터 로드 실패: {influencer.influencer_model_repo}")
+                            
+                    except Exception as e:
+                        logger.error(f"❌ 인플루언서 {influencer.influencer_id} 어댑터 로드 중 오류: {str(e)}")
+                        continue
+                
+                logger.info(f"💬 챗봇 인플루언서 어댑터 로드 완료: {loaded_count}/{len(chat_enabled_influencers)}개 성공")
+                
+            finally:
+                db.close()
+                
+        except Exception as e:
+            logger.error(f"❌ 챗봇 인플루언서 어댑터 로드 중 오류: {str(e)}", exc_info=True)
 
 
 # 글로벌 시작시 서비스 인스턴스
@@ -252,3 +351,9 @@ async def run_startup_tasks():
     """애플리케이션 시작시 실행할 작업들"""
     service = get_startup_service()
     await service.run_startup_tasks()
+
+
+async def load_adapters_for_chat_enabled_influencers(db: Session):
+    """챗봇 옵션이 활성화된 인플루언서들의 vLLM 어댑터 로드 (main.py에서 사용)"""
+    service = get_startup_service()
+    await service.load_adapters_for_chat_enabled_influencers()

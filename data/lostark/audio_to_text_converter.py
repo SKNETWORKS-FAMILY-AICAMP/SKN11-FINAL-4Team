@@ -283,21 +283,6 @@ def get_api_key():
 def main():
     """메인 함수"""
     
-    if len(sys.argv) < 2:
-        print("=== OpenAI Whisper API STT 변환기 (긴 음성 지원) ===")
-        print("\n사용법:")
-        print("   python whisper_long_stt.py <오디오_파일> [언어]")
-        print("\n예시:")
-        print("   python whisper_long_stt.py audio.mp3")
-        print("   python whisper_long_stt.py audio.mp3 ko")
-        print("\n언어 코드: ko(한국어), en(영어), ja(일본어), zh(중국어) 등")
-        print("\n환경변수 설정:")
-        print("   export OPENAI_API_KEY=your_api_key_here")
-        print("\n특징:")
-        print("   - 긴 음성 파일 자동 분할 처리")
-        print("   - 타임스탬프 포함 결과")
-        print("   - 전체 음성 완전 변환")
-        return
     
     try:
         # API 키 가져오기

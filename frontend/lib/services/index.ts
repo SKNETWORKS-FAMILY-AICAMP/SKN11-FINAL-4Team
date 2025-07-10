@@ -12,11 +12,12 @@ export type {
 } from './user.service'
 
 export type {
-  CreateModelRequest,
-  UpdateModelRequest,
-  ModelListResponse,
-  ModelTrainingRequest,
-  ModelResponse
+  CreateInfluencerRequest,
+  UpdateInfluencerRequest,
+  AIInfluencer,
+  StylePreset,
+  ToneGenerationRequest,
+  ToneGenerationResponse
 } from './model.service'
 
 export type {

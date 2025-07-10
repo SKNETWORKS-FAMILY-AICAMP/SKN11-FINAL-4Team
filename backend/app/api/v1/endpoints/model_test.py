@@ -241,11 +241,16 @@ async def multi_chat(request: MultiChatRequest, db: Session = Depends(get_db), c
             elif adapter_repo.startswith("https://huggingface.co/"):
                 adapter_repo = adapter_repo.replace("https://huggingface.co/", "")
             
-            # 임시로 테스트용 레포지토리 사용 (실제 레포지토리가 없을 경우)
-            if adapter_repo in ["sample1", "sample2", "sample3"] or "sample" in adapter_repo:
-                logger.warning(f"Using test repository for {influencer_info.influencer_id}")
-                # 실제 유효한 Hugging Face 레포지토리로 대체 (테스트용)
-                adapter_repo = "microsoft/DialoGPT-medium"  # 임시 테스트용
+            # 어댑터 레포지토리 유효성 검사
+            if adapter_repo in ["sample1", "sample2", "sample3"] or "sample" in adapter_repo or not adapter_repo.strip():
+                logger.error(f"Invalid adapter repository for {influencer_info.influencer_id}: {adapter_repo}")
+                results.append(
+                    {
+                        "influencer_id": influencer_info.influencer_id,
+                        "response": "유효하지 않은 어댑터 레포지토리입니다. 실제 허깅페이스 모델 레포지토리를 설정해주세요.",
+                    }
+                )
+                continue
             
             logger.info(f"Processed adapter repo: {adapter_repo}")
             

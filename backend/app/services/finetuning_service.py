@@ -27,13 +27,29 @@ from app.utils.finetuning_utils import (
 logger = logging.getLogger(__name__)
 
 
-class FineTuningStatus(Enum):
-    PENDING = "pending"
-    PREPARING_DATA = "preparing_data"
-    TRAINING = "training"
-    UPLOADING = "uploading"
-    COMPLETED = "completed"
-    FAILED = "failed"
+# vLLM 서버의 FineTuningStatus import
+try:
+    import sys
+    import os
+    
+    # vLLM 경로 추가
+    vllm_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), '..', 'vllm')
+    sys.path.insert(0, vllm_path)
+    
+    from app.models import FineTuningStatus
+    logger.info("✅ vLLM FineTuningStatus import 성공")
+
+except ImportError as e:
+    logger.warning(f"⚠️ vLLM FineTuningStatus import 실패, 로컬 버전 사용: {e}")
+    
+    # 폴백: 로컬 버전
+    class FineTuningStatus(Enum):
+        PENDING = "pending"
+        PREPARING_DATA = "preparing_data"
+        TRAINING = "training"
+        UPLOADING = "uploading"
+        COMPLETED = "completed"
+        FAILED = "failed"
 
 
 @dataclass
@@ -191,7 +207,66 @@ class InfluencerFineTuningService:
                             else:
                                 logger.warning(f"S3 QA 데이터: OpenAI 형식에서 Q:A: 파싱 실패: {message_content}")
                         else:
-                            logger.warning(f"S3 QA 데이터: OpenAI 형식에서 Q: 또는 A: 키워드 없음: {message_content}")
+                            # Q: 또는 A: 키워드가 없는 경우, custom_id에서 질문을 추출하고 응답을 답변으로 사용
+                            logger.info(f"S3 QA 데이터: 키워드 없는 형식 처리 시작 - 데이터 구조: {list(data.keys())}")
+                            
+                            if 'custom_id' in data:
+                                custom_id = data['custom_id']
+                                logger.info(f"S3 QA 데이터: custom_id 확인: {custom_id}")
+                                
+                                # custom_id가 질문을 포함하고 있는지 확인하고 파싱
+                                # 일반적으로 custom_id에 질문이나 질문 식별자가 포함되어 있을 수 있음
+                                
+                                # 1. request 필드가 있는 경우 우선 처리
+                                if 'request' in data and 'body' in data['request']:
+                                    request_body = data['request']['body']
+                                    logger.info(f"S3 QA 데이터: request body 구조: {list(request_body.keys()) if isinstance(request_body, dict) else 'not dict'}")
+                                    
+                                    if 'messages' in request_body and isinstance(request_body['messages'], list):
+                                        # 사용자 메시지에서 질문 추출
+                                        user_message = None
+                                        for msg in request_body['messages']:
+                                            if msg.get('role') == 'user':
+                                                user_message = msg.get('content', '')
+                                                break
+                                        
+                                        if user_message:
+                                            # 질문을 추출하고 답변으로 message_content 사용
+                                            qa_pairs.append({"question": user_message, "answer": message_content})
+                                            logger.info(f"S3 QA 데이터: request에서 QA 쌍 추출 성공 - Q: {user_message[:50]}...")
+                                        else:
+                                            logger.warning(f"S3 QA 데이터: 요청에서 사용자 메시지를 찾을 수 없음")
+                                    else:
+                                        logger.warning(f"S3 QA 데이터: 요청에 messages 필드가 없음")
+                                else:
+                                    # 2. request 필드가 없는 경우, custom_id를 질문으로 사용하거나 기본 질문 생성
+                                    # custom_id에서 의미 있는 질문을 추출하거나, 범용 질문을 생성
+                                    
+                                    # custom_id가 "qa_" 로 시작하는 경우 등 패턴 확인
+                                    if custom_id.startswith('qa_') and len(custom_id) > 3:
+                                        # custom_id에서 질문 부분 추출 시도
+                                        potential_question = custom_id[3:].replace('_', ' ')
+                                        if len(potential_question) > 5:  # 최소 길이 체크
+                                            qa_pairs.append({"question": potential_question, "answer": message_content})
+                                            logger.info(f"S3 QA 데이터: custom_id에서 QA 쌍 추출 성공 - Q: {potential_question[:50]}...")
+                                        else:
+                                            # 범용 질문 생성
+                                            default_question = "이에 대해 답변해 주세요."
+                                            qa_pairs.append({"question": default_question, "answer": message_content})
+                                            logger.info(f"S3 QA 데이터: 기본 질문으로 QA 쌍 생성 - A: {message_content[:50]}...")
+                                    else:
+                                        # 범용 질문 생성
+                                        default_question = "이에 대해 답변해 주세요."
+                                        qa_pairs.append({"question": default_question, "answer": message_content})
+                                        logger.info(f"S3 QA 데이터: 기본 질문으로 QA 쌍 생성 - A: {message_content[:50]}...")
+                            else:
+                                # 키워드가 없는 경우에도 QA 쌍 생성 시도
+                                if len(message_content.strip()) > 0:
+                                    default_question = "이에 대해 답변해 주세요."
+                                    qa_pairs.append({"question": default_question, "answer": message_content})
+                                    logger.info(f"S3 QA 데이터: 키워드 없는 응답으로 QA 쌍 생성 - A: {message_content[:50]}...")
+                                else:
+                                    logger.warning(f"S3 QA 데이터: OpenAI 형식에서 Q: 또는 A: 키워드 없음: {message_content}")
                     
                     # Case 4: Top-level list of QA pairs (less common for JSONL, but possible)
                     elif isinstance(data, list):
@@ -219,7 +294,7 @@ class InfluencerFineTuningService:
             logger.error(f"S3에서 QA 데이터 다운로드 실패: {e}", exc_info=True)
             return None
     
-    def prepare_finetuning_data(self, qa_data: List[Dict], influencer_data: AIInfluencer) -> tuple[List[Dict], str]:
+    async def prepare_finetuning_data(self, qa_data: List[Dict], influencer_data: AIInfluencer) -> tuple[List[Dict], str]:
         """
         파인튜닝용 데이터 준비
         Args:
@@ -234,11 +309,11 @@ class InfluencerFineTuningService:
             personality = getattr(influencer_data, 'influencer_personality', '친근하고 활발한 성격')
             style_info = getattr(influencer_data, 'influencer_description', '')
             
-            # 시스템 메시지 생성 (공통 유틸리티 사용)
-            system_message = create_system_message(influencer_name, personality, style_info)
+            # 시스템 메시지 생성 (vLLM 서버 사용)
+            system_message = await create_system_message(influencer_name, personality, style_info)
 
-            # QA 데이터 변환 (공통 유틸리티 사용)
-            finetuning_data = convert_qa_data_for_finetuning(
+            # QA 데이터 변환 (vLLM 서버 사용)
+            finetuning_data = await convert_qa_data_for_finetuning(
                 qa_data, influencer_name, personality, style_info
             )
             
@@ -265,38 +340,43 @@ class InfluencerFineTuningService:
             logger.info(f"파인튜닝 시작: {hf_repo_id}")
 
             # VLLM 서버 상태 확인
-            if await vllm_health_check():
-                try:
-                    logger.info(f"🚀 VLLM 서버에서 파인튜닝 실행: {hf_repo_id}")
+            if not await vllm_health_check():
+                logger.error("VLLM 서버가 비활성화되었거나 연결할 수 없습니다.")
+                return None
+
+            try:
+                logger.info(f"🚀 VLLM 서버에서 파인튜닝 실행: {hf_repo_id}")
+                
+                # 인플루언서 정보 추출 (QA 데이터에서)
+                influencer_name = hf_repo_id.split('/')[-1].replace('-finetuned', '')
+                personality = "친근하고 활발한 성격"  # 기본값
+                
+                # 이미 변환된 데이터인지 확인
+                is_already_converted = (qa_data and isinstance(qa_data[0], dict) and "messages" in qa_data[0])
+                
+                vllm_client = await get_vllm_client()
+                result = await vllm_client.start_finetuning(
+                    influencer_id=influencer_name,
+                    influencer_name=influencer_name,
+                    personality=personality,
+                    qa_data=qa_data,
+                    hf_repo_id=hf_repo_id,
+                    hf_token=hf_token,
+                    training_epochs=epochs,
+                    style_info="",
+                    is_converted=is_already_converted
+                )
+                
+                task_id = result.get("task_id")
+                if task_id:
+                    # 파인튜닝 완료까지 대기 (폴링)
+                    return await self._wait_for_vllm_finetuning(task_id, vllm_client)
+                else:
+                    raise Exception("VLLM 파인튜닝 작업 시작 실패")
                     
-                    # 인플루언서 정보 추출 (QA 데이터에서)
-                    influencer_name = hf_repo_id.split('/')[-1].replace('-finetuned', '')
-                    personality = "친근하고 활발한 성격"  # 기본값
-                    
-                    vllm_client = await get_vllm_client()
-                    result = await vllm_client.start_finetuning(
-                        influencer_id=influencer_name,
-                        influencer_name=influencer_name,
-                        personality=personality,
-                        qa_data=qa_data,
-                        hf_repo_id=hf_repo_id,
-                        hf_token=hf_token,
-                        training_epochs=epochs
-                    )
-                    
-                    task_id = result.get("task_id")
-                    if task_id:
-                        # 파인튜닝 완료까지 대기 (폴링)
-                        return await self._wait_for_vllm_finetuning(task_id, vllm_client)
-                    else:
-                        raise Exception("VLLM 파인튜닝 작업 시작 실패")
-                        
-                except Exception as e:
-                    logger.warning(f"VLLM 파인튜닝 실패, 로컬로 폴백: {e}")
-                    return await self._run_local_finetuning(qa_data, system_message, hf_repo_id, hf_token, epochs)
-            else:
-                logger.info(f"🔧 로컬에서 파인튜닝 실행: {hf_repo_id}")
-                return await self._run_local_finetuning(qa_data, system_message, hf_repo_id, hf_token, epochs)
+            except Exception as e:
+                logger.error(f"VLLM 파인튜닝 실행 중 오류: {e}")
+                return None
 
         except Exception as e:
             logger.error(f"파인튜닝 실행 실패: {e}")
@@ -338,45 +418,6 @@ class InfluencerFineTuningService:
                 logger.error(f"VLLM 파인튜닝 상태 확인 실패: {e}")
                 return None
     
-    async def _run_local_finetuning(self, qa_data: List[Dict], system_message: str, hf_repo_id: str, hf_token: str, epochs: int) -> Optional[str]:
-        """로컬 파인튜닝 실행 (기존 로직)"""
-        try:
-            # 현재 디렉토리를 pipeline 폴더로 변경
-            original_dir = os.getcwd()
-            pipeline_dir = os.path.join(os.path.dirname(__file__), '../../pipeline')
-            pipeline_dir = os.path.abspath(pipeline_dir)
-
-            try:
-                os.chdir(pipeline_dir)
-
-                # fine_custom.py 임포트 및 실행
-                import sys
-                if pipeline_dir not in sys.path:
-                    sys.path.insert(0, pipeline_dir)
-                
-                # fine_custom 모듈 실행
-                import fine_custom
-                hf_model_url = fine_custom.main(
-                    qa_data=qa_data,
-                    system_message=system_message,
-                    hf_token=hf_token,
-                    hf_repo_id=hf_repo_id,
-                    training_epochs=epochs
-                )
-
-                if hf_model_url:
-                    logger.info(f"로컬 파인튜닝 완료: {hf_model_url}")
-                    return hf_model_url
-                else:
-                    raise Exception("파인튜닝 실행 실패 또는 모델 URL 반환 실패")
-
-            finally:
-                # 원래 디렉토리로 복원
-                os.chdir(original_dir)
-
-        except Exception as e:
-            logger.error(f"로컬 파인튜닝 실행 실패: {e}")
-            return None
     
     def start_finetuning_task(self, influencer_id: str, qa_task_id: str, 
                             s3_qa_url: str, influencer_data: AIInfluencer, db=None) -> str:
@@ -468,7 +509,7 @@ class InfluencerFineTuningService:
                 raise Exception("S3에서 QA 데이터 다운로드 실패")
             
             # 파인튜닝용 데이터 준비
-            finetuning_qa_data, system_message = self.prepare_finetuning_data(qa_data, influencer_data)
+            finetuning_qa_data, system_message = await self.prepare_finetuning_data(qa_data, influencer_data)
             
             # 2. 파인튜닝 실행 단계
             task.status = FineTuningStatus.TRAINING
@@ -609,14 +650,8 @@ class InfluencerFineTuningService:
                 db=db
             )
             
-            # 파인튜닝 실행 (백그라운드에서)
-            import asyncio
-            from functools import partial
-            
-            # 동기 함수를 비동기로 실행
-            loop = asyncio.get_event_loop()
-            execute_task = partial(self.execute_finetuning_task, task_id, influencer_data, hf_token, db)
-            success = await loop.run_in_executor(None, execute_task)
+            # 파인튜닝 실행
+            success = await self.execute_finetuning_task(task_id, influencer_data, hf_token, db)
             
             if success:
                 logger.info(f"✅ 인플루언서 파인튜닝 자동 시작 성공: {influencer_id}")

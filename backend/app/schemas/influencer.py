@@ -90,7 +90,7 @@ class AIInfluencerCreate(BaseSchema):
     influencer_data_url: Optional[str] = None
     learning_status: int = 0
     influencer_model_repo: str = ""
-    chatbot_option: bool = True
+    chatbot_option: bool = False
     
     # 프리셋 자동 생성을 위한 추가 필드들
     personality: Optional[str] = None  # 성격
@@ -101,6 +101,11 @@ class AIInfluencerCreate(BaseSchema):
     age: Optional[str] = None          # 나이
     hair_style: Optional[str] = None   # 헤어스타일
     mood: Optional[str] = None         # 분위기/스타일
+    system_prompt: Optional[str] = None # 시스템 프롬프트
+    
+    # 말투 정보 필드들
+    tone_type: Optional[str] = None    # "system" 또는 "custom"
+    tone_data: Optional[str] = None    # 선택된 시스템 프롬프트 또는 사용자 입력 데이터
 
 
 class AIInfluencerUpdate(BaseModel):
@@ -193,3 +198,47 @@ class APICallAggregationUpdate(BaseModel):
 
 class APICallAggregation(APICallAggregationBase, TimestampSchema):
     api_call_id: str
+
+
+# 파인튜닝 웹훅 요청 스키마
+class FinetuningWebhookRequest(BaseModel):
+    task_id: str
+    influencer_id: str
+    status: str  # FineTuningStatus의 문자열 값
+    hf_model_url: Optional[str] = None
+    error_message: Optional[str] = None
+
+
+# 말투 생성 요청 스키마
+class ToneGenerationRequest(BaseModel):
+    personality: str
+    name: Optional[str] = None
+    description: Optional[str] = None
+    mbti: Optional[str] = None
+    gender: Optional[str] = None
+    age: Optional[str] = None
+    tone_type: Optional[str] = None
+
+
+# 생성된 어투 스키마
+class GeneratedToneBase(BaseModel):
+    influencer_id: str
+    title: str
+    example: str
+    tone_description: str
+    hashtags: Optional[str] = None
+    system_prompt: str
+
+
+class GeneratedToneCreate(GeneratedToneBase):
+    pass
+
+
+class GeneratedTone(GeneratedToneBase, TimestampSchema):
+    tone_id: str
+
+
+# 시스템 프롬프트 저장 요청 스키마
+class SystemPromptSaveRequest(BaseModel):
+    type: str  # "system" 또는 "custom"
+    data: str  # system_prompt 또는 custom 입력 데이터
