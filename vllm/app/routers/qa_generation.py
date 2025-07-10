@@ -252,8 +252,6 @@ async def get_openai_batch_status_by_id(batch_id: str):
         logger.error(f"OpenAI 배치 상태 조회 실패: {str(e)}")
         raise HTTPException(status_code=500, detail=f"배치 상태 조회 중 오류 발생: {str(e)}")
 
-# LangChain QA 생성 엔드포인트 제거 - 배치 처리가 비용 효율적
-
 async def _run_qa_batch_generation(
     task_id: str,
     characters_data: List[CharacterData],
