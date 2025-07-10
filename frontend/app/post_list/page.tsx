@@ -78,8 +78,8 @@ function PostListContent() {
   const [searchTerm, setSearchTerm] = useState("")
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [modelFilter, setModelFilter] = useState<string>("all")
-  const [platformFilter, setPlatformFilter] = useState<string>("all")
-          
+  const [platformFilter, setPlatformFilter] = useState<string[]>([])
+
   // 임시 필터 상태 (모달에서 사용)
   const [tempStatusFilter, setTempStatusFilter] = useState<string>("all")
   const [tempModelFilter, setTempModelFilter] = useState<string>("all")
@@ -241,7 +241,7 @@ function PostListContent() {
     const matchesStatus = statusFilter === "all" || post.status === statusFilter
 
     const matchesModel = modelFilter === "all" || (post.modelName || 'AI 인플루언서') === modelFilter
-    const matchesPlatform = platformFilter === "all" || post.platform === platformFilter
+    const matchesPlatform = platformFilter.length === 0 || platformFilter.some(p => post.platform === p)
 
     return matchesSearch && matchesStatus && matchesModel && matchesPlatform
   })
@@ -504,7 +504,7 @@ function PostListContent() {
                   필터
                   {(modelFilter !== "all" || platformFilter.length > 0) && (
                     <Badge variant="secondary" className="ml-1">
-                      {[modelFilter, ...platformFilter].filter(f => f !== "all").length}
+                      {[modelFilter !== "all" ? 1 : 0, platformFilter.length].reduce((a, b) => a + b, 0)}
                     </Badge>
                   )}
                 </Button>
@@ -547,8 +547,8 @@ function PostListContent() {
                     <h3 className="font-medium text-sm text-gray-900 mb-3">플랫폼</h3>
                     <div className="grid grid-cols-2 gap-2">
                       <button
-                        onClick={() => setTempPlatformFilter("all")}
-                        className={`text-left px-3 py-2 rounded-md text-sm transition-colors ${tempPlatformFilter === "all"
+                        onClick={() => setTempPlatformFilter([])}
+                        className={`text-left px-3 py-2 rounded-md text-sm transition-colors ${tempPlatformFilter.length === 0
                           ? "bg-blue-100 text-blue-700 border border-blue-200"
                           : "bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-200"
                           }`}
@@ -558,8 +558,14 @@ function PostListContent() {
                       {uniquePlatforms.map((platform) => (
                         <button
                           key={platform}
-                          onClick={() => setTempPlatformFilter(platform || "")}
-                          className={`text-left px-3 py-2 rounded-md text-sm transition-colors flex items-center gap-2 ${tempPlatformFilter === platform
+                          onClick={() => {
+                            if (tempPlatformFilter.includes(platform || "")) {
+                              setTempPlatformFilter(tempPlatformFilter.filter(p => p !== platform))
+                            } else {
+                              setTempPlatformFilter([...tempPlatformFilter, platform || ""])
+                            }
+                          }}
+                          className={`text-left px-3 py-2 rounded-md text-sm transition-colors flex items-center gap-2 ${tempPlatformFilter.includes(platform || "")
                             ? "bg-purple-100 text-purple-700 border border-purple-200"
                             : "bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-200"
                             }`}
@@ -637,7 +643,7 @@ function PostListContent() {
               </Button>
             </div>
           )}
-          
+
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
             <Card
               className={`cursor-pointer transition-shadow ${statusFilter === "all" ? "ring-2 ring-blue-400" : "hover:shadow-lg"}`}
