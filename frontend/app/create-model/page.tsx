@@ -705,15 +705,15 @@ export default function CreateModelPage() {
                   </Select>
                 </div>
                 <div>
-                  <Label htmlFor="age">나이 (선택사항)</Label>
+                  <Label htmlFor="age">나이 (선택사항, 20살 이상)</Label>
                   <Input
                     id="age"
                     type="number"
-                    placeholder="나이 입력 (선택사항)"
+                    placeholder="나이 입력 (20살 이상)"
                     value={formData.age}
                     onChange={(e) => handleInputChange("age", e.target.value)}
-                    min="1"
-                    max="100"
+                    min="20"
+                    required
                   />
                 </div>
               </div>
