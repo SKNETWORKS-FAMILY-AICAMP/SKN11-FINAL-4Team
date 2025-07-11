@@ -19,6 +19,7 @@ import os
 import shutil
 from pathlib import Path
 from fastapi.responses import JSONResponse
+from datetime import datetime
 
 from app.database import get_db
 from app.models.board import Board
@@ -254,6 +255,75 @@ async def create_board(
             )
 
         logger.info(f"Board created successfully: {board.board_id}")
+
+        # 인스타그램 자동 업로드 시도 (board_status가 3이고 board_platform이 0인 경우)
+        if board.board_status == 3 and board.board_platform == 0:
+            try:
+                from app.services.instagram_posting_service import (
+                    InstagramPostingService,
+                )
+                from app.models.influencer import AIInfluencer
+
+                # 인플루언서 정보 조회
+                influencer = (
+                    db.query(AIInfluencer)
+                    .filter(AIInfluencer.influencer_id == board.influencer_id)
+                    .first()
+                )
+
+                if (
+                    influencer
+                    and influencer.instagram_is_active
+                    and influencer.instagram_access_token
+                    and influencer.instagram_id
+                ):
+                    logger.info(
+                        f"Attempting Instagram auto-upload for board: {board.board_id}"
+                    )
+
+                    # 토큰 유효성 사전 검증
+                    try:
+                        # 간단한 토큰 형식 검증
+                        access_token = str(influencer.instagram_access_token)
+                        if len(access_token) < 10:  # 최소 길이 검증
+                            raise ValueError("Access token too short")
+
+                        # 인스타그램 업로드 서비스 호출
+                        instagram_service = InstagramPostingService()
+                        result = await instagram_service.post_to_instagram(
+                            instagram_id=str(influencer.instagram_id),
+                            access_token=access_token,
+                            image_url=str(board.image_url),
+                            caption=str(board.board_description)
+                            or str(board.board_topic),
+                        )
+
+                        if result.get("success"):
+                            logger.info(
+                                f"Instagram auto-upload successful for board: {board.board_id}"
+                            )
+                            db.commit()
+                        else:
+                            logger.warning(
+                                f"Instagram auto-upload failed for board: {board.board_id}"
+                            )
+
+                    except ValueError as ve:
+                        logger.error(f"Invalid Instagram token format: {ve}")
+                    except Exception as e:
+                        logger.error(f"Instagram API error: {str(e)}")
+
+                else:
+                    logger.info(
+                        f"Ignoring Instagram auto-upload - influencer not connected: {board.influencer_id}"
+                    )
+
+            except Exception as e:
+                logger.error(
+                    f"Instagram auto-upload error for board {board.board_id}: {str(e)}"
+                )
+                # 인스타그램 업로드 실패해도 게시글 생성은 성공으로 처리
+
         return board
 
     except HTTPException:
@@ -1165,6 +1235,18 @@ async def convert_influencer_style(
     )
     answer = re.sub(r"^\s+|\s+$", "", answer)
     return InfluencerStyleResponse(converted_text=answer)
+
+
+@router.get("/upload-test-get")
+async def upload_test_get():
+    """업로드 테스트용 GET 엔드포인트 (인증 불필요)"""
+    return {"message": "Upload test GET endpoint working"}
+
+
+@router.post("/upload-test")
+async def upload_test_post(data: dict = Body(...)):
+    """업로드 테스트용 POST 엔드포인트 (인증 불필요)"""
+    return {"message": "Upload test POST endpoint working", "received_data": data}
 
 
 @router.post("/upload-image-simple")
