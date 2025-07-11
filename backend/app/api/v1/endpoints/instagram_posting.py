@@ -84,23 +84,23 @@ async def post_to_instagram(
     db: Session = Depends(get_db),
 ):
     """인스타그램에 게시글 업로드"""
+    print("post_to_instagram")
     try:
         # 1. 인플루언서 정보 조회
         influencer = (
             db.query(AIInfluencer)
             .filter(
-                AIInfluencer.influencer_id == influencer_id,
-                AIInfluencer.user_id == current_user.get("sub"),
+                AIInfluencer.influencer_id == influencer_id
             )
             .first()
         )
-
+        print("influencer", influencer)
         if not influencer:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="AI 인플루언서를 찾을 수 없거나 접근 권한이 없습니다.",
             )
-
+        print('찾기 완료')
         # 2. 인스타그램 연동 확인 - 안전한 필드 접근
         instagram_is_active = (
             bool(influencer.instagram_is_active)
@@ -113,13 +113,17 @@ async def post_to_instagram(
             else None
         )
         instagram_id = str(influencer.instagram_id) if influencer.instagram_id else None
-
+        print("instagram_is_active", instagram_is_active)
+        print("instagram_access_token", instagram_access_token)
+        print("instagram_id", instagram_id)
+        print('not instagram_is_active', not instagram_is_active)
+        print('not instagram_access_token', not instagram_access_token)
         if not instagram_is_active or not instagram_access_token:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="인스타그램 계정이 연동되지 않았습니다. 먼저 인스타그램 계정을 연동해주세요.",
             )
-
+        print('찾기 완료')
         logger.info(
             f"Instagram connection check: is_active={instagram_is_active}, has_token={bool(instagram_access_token)}"
         )
@@ -132,26 +136,14 @@ async def post_to_instagram(
             )
             .first()
         )
-
+        print("board", board)
         if not board:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="게시글을 찾을 수 없습니다.",
             )
-
-        # 4. 인스타그램 권한 확인
-        permissions_valid = (
-            await instagram_posting_service.verify_instagram_permissions(
-                instagram_access_token, instagram_id
-            )
-        )
-
-        if not permissions_valid:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="인스타그램 권한이 유효하지 않습니다. 계정을 다시 연동해주세요.",
-            )
-
+        print("asdadsas", board)
+    
         # 5. 캡션 생성
         caption = request.caption or str(board.board_description) or ""
 

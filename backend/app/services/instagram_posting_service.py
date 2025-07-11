@@ -11,7 +11,7 @@ class InstagramPostingService:
     """Instagram Graph API를 사용한 게시글 업로드 서비스"""
 
     def __init__(self):
-        self.base_url = "https://graph.facebook.com/v18.0"
+        self.base_url = "https://graph.instagram.com/v23.0"
 
     async def upload_image_to_instagram(
         self, image_url: str, access_token: str, instagram_id: str
@@ -19,16 +19,19 @@ class InstagramPostingService:
         """이미지를 Instagram에 업로드하고 media_id 반환"""
         try:
             async with httpx.AsyncClient() as client:
-                # 1. 이미지 URL을 Instagram에 등록
+                print("access_token", access_token)
                 response = await client.post(
                     f"{self.base_url}/{instagram_id}/media",
-                    params={
-                        "access_token": access_token,
+                    headers={
+                        "Authorization": f"Bearer {access_token}",
+                        "Content-Type": "application/json",
+                    },
+                    data={
                         "image_url": image_url,
-                        "caption": "AI Generated Content",
                     },
                 )
-
+                print('여기 안됨')
+                print("response", response.json())
                 if response.status_code != 200:
                     logger.error(
                         f"Image upload failed: {response.status_code} - {response.text}"
@@ -37,7 +40,6 @@ class InstagramPostingService:
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail=f"이미지 업로드에 실패했습니다: {response.text}",
                     )
-
                 data = response.json()
                 media_id = data.get("id")
 
@@ -103,12 +105,12 @@ class InstagramPostingService:
             media_id = await self.upload_image_to_instagram(
                 image_url, access_token, instagram_id
             )
-
+            print("media_id", media_id)
             # 2. 게시글 발행
             result = await self.publish_post_to_instagram(
                 media_id, caption, access_token, instagram_id
             )
-
+            print("result", result)
             logger.info(f"Instagram post completed successfully: {result.get('id')}")
             return {
                 "success": True,
@@ -138,6 +140,7 @@ class InstagramPostingService:
                         "fields": "id,username,account_type",
                     },
                 )
+                print("response", response.json())
 
                 if response.status_code == 200:
                     data = response.json()
