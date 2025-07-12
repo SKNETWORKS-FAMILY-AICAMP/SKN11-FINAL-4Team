@@ -7,6 +7,9 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import logging
 from typing import Dict
 from app.core.config import settings
+from app.models.influencer import InfluencerAPI, AIInfluencer
+from sqlalchemy.orm import Session
+from app.database import get_db
 
 # 로깅 설정
 logger = logging.getLogger(__name__)
@@ -251,3 +254,63 @@ def generate_jwt_payload(user_info: Dict, provider: str) -> Dict:
 
 # 전역 보안 모니터 인스턴스
 security_monitor = SecurityMonitor()
+
+async def get_current_user_by_api_key(
+    api_key: str = Depends(HTTPBearer()),
+    db: Session = Depends(get_db)
+) -> AIInfluencer:
+    """
+    API 키로 인증하여 인플루언서 정보를 반환
+    챗봇 기능만 접근 가능하도록 제한
+    """
+    try:
+        # API 키로 인플루언서 조회
+        influencer_api = (
+            db.query(InfluencerAPI)
+            .filter(InfluencerAPI.api_value == api_key)
+            .first()
+        )
+        
+        if not influencer_api:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid API key",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        # 인플루언서 정보 조회
+        influencer = (
+            db.query(AIInfluencer)
+            .filter(AIInfluencer.influencer_id == influencer_api.influencer_id)
+            .first()
+        )
+        
+        if not influencer:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Influencer not found",
+            )
+        
+        # 챗봇 옵션이 활성화된 인플루언서만 접근 가능
+        if not bool(influencer.chatbot_option):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Chatbot is not enabled for this influencer",
+            )
+        
+        # 학습 상태 확인 (사용 가능한 상태여야 함)
+        if influencer.learning_status != 1:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Influencer is not ready for chat",
+            )
+        
+        return influencer
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error",
+        )

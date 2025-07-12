@@ -191,12 +191,20 @@ function PostImage({ url, alt, className }: { url: string; alt?: string; classNa
       setImageUrl(url);
       return;
     }
-    apiClient.get(url, { responseType: "blob", requireAuth: false }).then((res) => {
-      const blobUrl = URL.createObjectURL(res.data);
-      setImageUrl(blobUrl);
+    apiClient.get(url, { requireAuth: false }).then((res: any) => {
+      if (res.data instanceof Blob) {
+        const blobUrl = URL.createObjectURL(res.data);
+        setImageUrl(blobUrl);
+      } else {
+        setImageUrl(url);
+      }
+    }).catch(() => {
+      setImageUrl(url);
     });
     return () => {
-      if (imageUrl) URL.revokeObjectURL(imageUrl);
+      if (imageUrl && imageUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(imageUrl);
+      }
     };
   }, [url]);
   if (!imageUrl) return <div className="bg-gray-100 w-full h-80 flex items-center justify-center text-gray-400">이미지 불러오는 중...</div>;
@@ -212,6 +220,15 @@ function ModelDetailContent() {
   const [selectedPost, setSelectedPost] = useState<ContentPost | null>(null)
   const [showApiKey, setShowApiKey] = useState(false)
   const [isUpdating, setIsUpdating] = useState(false)
+  const [isGeneratingApiKey, setIsGeneratingApiKey] = useState(false)
+  const [apiKeyInfo, setApiKeyInfo] = useState<{
+    api_key: string
+    created_at: string
+    updated_at: string
+  } | null>(null)
+  const [testMessage, setTestMessage] = useState("")
+  const [testResponse, setTestResponse] = useState("")
+  const [isTestingChatbot, setIsTestingChatbot] = useState(false)
   const [instagramStatus, setInstagramStatus] = useState<{
     is_connected: boolean
     connected_at?: string
@@ -259,12 +276,53 @@ function ModelDetailContent() {
         instagram_is_active: data.instagram_is_active,
         instagram_connected_at: data.instagram_connected_at,
       })
+      
+      // API 키 정보 로드
+      await loadApiKeyInfo()
     } catch (error) {
       console.error('Error loading model data:', error)
     } finally {
       setIsModelLoading(false)
     }
   }
+
+  // API 키 정보 로드
+  const loadApiKeyInfo = async () => {
+    try {
+      const apiKeyData = await ModelService.getApiKey(params.id as string)
+      setApiKeyInfo({
+        api_key: apiKeyData.api_key,
+        created_at: apiKeyData.created_at,
+        updated_at: apiKeyData.updated_at
+      })
+      // 모델 상태에 API 키 업데이트
+      setModel((prev: any) => ({
+        ...prev,
+        apiKey: apiKeyData.api_key
+      }))
+    } catch (error) {
+      console.error('Error loading API key:', error)
+      // API 키가 없는 경우 자동으로 생성
+      try {
+        const response = await ModelService.generateApiKey(params.id as string)
+        setApiKeyInfo({
+          api_key: response.api_key,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })
+        // 모델 상태에 API 키 업데이트
+        setModel((prev: any) => ({
+          ...prev,
+          apiKey: response.api_key
+        }))
+        console.log('API 키가 자동으로 생성되었습니다.')
+      } catch (generateError) {
+        console.error('API 키 자동 생성 실패:', generateError)
+        setApiKeyInfo(null)
+      }
+    }
+  }
+
   const [activeTab, setActiveTab] = useState(() => {
     // URL 파라미터에서 탭 정보 읽기
     return searchParams.get('tab') || 'analytics'
@@ -305,9 +363,44 @@ function ModelDetailContent() {
     }
   }
 
-  const generateNewApiKey = () => {
-    const newKey = "ai_inf_" + Math.random().toString(36).substring(2, 18)
-    setModel((prev: any) => ({ ...prev, apiKey: newKey }))
+  const generateNewApiKey = async () => {
+    setIsGeneratingApiKey(true)
+    try {
+      const response = await ModelService.generateApiKey(params.id as string)
+      setApiKeyInfo({
+        api_key: response.api_key,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      // 모델 상태에 API 키 업데이트
+      setModel((prev: any) => ({ ...prev, apiKey: response.api_key }))
+      alert("새로운 API 키가 성공적으로 생성되었습니다!")
+    } catch (error) {
+      console.error("API key generation error:", error)
+      alert("API 키 생성에 실패했습니다. 다시 시도해주세요.")
+    } finally {
+      setIsGeneratingApiKey(false)
+    }
+  }
+
+  const testChatbot = async () => {
+    if (!testMessage.trim() || !model.apiKey) {
+      alert("메시지를 입력하고 API 키가 있어야 합니다.")
+      return
+    }
+
+    setIsTestingChatbot(true)
+    try {
+      const response = await ModelService.callChatbot(model.apiKey, {
+        message: testMessage
+      })
+      setTestResponse(response.response)
+    } catch (error: any) {
+      console.error("Chatbot test error:", error)
+      setTestResponse(`오류: ${error.response?.data?.detail || error.message || '알 수 없는 오류'}`)
+    } finally {
+      setIsTestingChatbot(false)
+    }
   }
 
   // Instagram 연동 관련 함수들
@@ -1156,6 +1249,7 @@ function ModelDetailContent() {
                         value={model.apiKey || ""}
                         readOnly
                         className="font-mono"
+                        placeholder={isGeneratingApiKey ? "생성 중..." : "API 키를 불러오는 중..."}
                       />
                       <Button variant="outline" size="icon" onClick={() => setShowApiKey(!showApiKey)}>
                         {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -1164,10 +1258,28 @@ function ModelDetailContent() {
                         <Copy className="h-4 w-4" />
                       </Button>
                     </div>
+                    {apiKeyInfo && (
+                      <div className="mt-2 text-xs text-gray-500 space-y-1">
+                        <div>생성일: {new Date(apiKeyInfo.created_at).toLocaleDateString('ko-KR')}</div>
+                        {apiKeyInfo.updated_at !== apiKeyInfo.created_at && (
+                          <div>수정일: {new Date(apiKeyInfo.updated_at).toLocaleDateString('ko-KR')}</div>
+                        )}
+                      </div>
+                    )}
                   </div>
                   <div className="flex space-x-2">
-                    <Button variant="outline" onClick={generateNewApiKey}>
-                      <RefreshCw className="h-4 w-4 mr-2" />새 키 생성
+                    <Button variant="outline" onClick={generateNewApiKey} disabled={isGeneratingApiKey}>
+                      {isGeneratingApiKey ? (
+                        <>
+                          <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                          생성 중...
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="h-4 w-4 mr-2" />
+                          새 키 생성
+                        </>
+                      )}
                     </Button>
                   </div>
                 </CardContent>
@@ -1183,18 +1295,17 @@ function ModelDetailContent() {
                     <div>
                       <Label>엔드포인트</Label>
                       <div className="bg-gray-100 p-3 rounded-md font-mono text-sm">
-                        POST https://api.aiinfluencer.com/v1/chat
+                        POST https://api.aiinfluencer.com/v1/chat/chatbot
                       </div>
                     </div>
                     <div>
                       <Label>요청 예시</Label>
                       <pre className="bg-gray-100 p-3 rounded-md text-sm overflow-x-auto">
-                        {`curl -X POST https://api.aiinfluencer.com/v1/chat \\
+                        {`curl -X POST https://api.aiinfluencer.com/v1/chat/chatbot \\
     -H "Authorization: Bearer ${model.apiKey}" \\
     -H "Content-Type: application/json" \\
     -d '{
-      "message": "안녕하세요! 오늘 패션 추천 부탁드려요",
-      "model_id": "${model.id}"
+      "message": "안녕하세요! 오늘 패션 추천 부탁드려요"
     }'`}
                       </pre>
                     </div>

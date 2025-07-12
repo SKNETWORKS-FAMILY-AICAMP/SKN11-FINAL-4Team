@@ -12,6 +12,7 @@ import json
 import logging
 import base64
 import asyncio
+from app.core.config import settings
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -63,7 +64,7 @@ async def chatbot(websocket: WebSocket, lora_repo: str, group_id: int = Query(..
     try:
         # VLLM 서버 상태 확인
         if not await vllm_health_check():
-            logger.warning("[WS] VLLM 서버 연결 실패, 로컬 모델로 폴백")
+            logger.warning(f"[WS] VLLM 서버 연결 실패 (URL: {settings.VLLM_BASE_URL}), 로컬 모델로 폴백")
             await _websocket_local_fallback(websocket, lora_repo_decoded, group_id, db, influencer_id)
             return
         
@@ -255,4 +256,4 @@ async def model_load(req: ModelLoadRequest, db: Session = Depends(get_db)):
             
     except Exception as e:
         logger.error(f"[MODEL LOAD API] 모델 로드 실패: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) 
+        raise HTTPException(status_code=500, detail=str(e))

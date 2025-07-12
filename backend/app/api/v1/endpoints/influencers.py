@@ -4,6 +4,7 @@ from typing import List, Optional
 import os
 import logging
 import json
+import uuid
 from app.database import get_db
 from app.schemas.influencer import (
     AIInfluencer as AIInfluencerSchema,
@@ -48,7 +49,7 @@ from app.services.finetuning_service import (
     InfluencerFineTuningService,
 )
 from datetime import datetime
-from app.models.influencer import StylePreset, BatchKey, AIInfluencer
+from app.models.influencer import StylePreset, BatchKey, AIInfluencer, InfluencerAPI
 from fastapi import HTTPException
 from typing import Dict, Any
 from openai import OpenAI
@@ -926,3 +927,108 @@ async def save_system_prompt(
         logger.error(f"❌ 시스템 프롬프트 저장 중 오류: {str(e)}")
         db.rollback()
         raise HTTPException(status_code=500, detail=f"시스템 프롬프트 저장 중 오류가 발생했습니다: {str(e)}")
+
+
+@router.post("/{influencer_id}/api-key/generate")
+async def generate_api_key(
+    influencer_id: str,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """인플루언서 API 키 생성 또는 업데이트"""
+    user_id = current_user.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User ID not found")
+    
+    # 인플루언서 존재 확인 및 권한 확인
+    influencer = (
+        db.query(AIInfluencer)
+        .filter(
+            AIInfluencer.influencer_id == influencer_id,
+            AIInfluencer.user_id == user_id
+        )
+        .first()
+    )
+    
+    if not influencer:
+        raise HTTPException(status_code=404, detail="Influencer not found")
+    
+    try:
+        # 기존 API 키가 있는지 확인
+        existing_api = (
+            db.query(InfluencerAPI)
+            .filter(InfluencerAPI.influencer_id == influencer_id)
+            .first()
+        )
+        
+        # 새로운 API 키 생성 (ai_inf_ 접두사 + 랜덤 문자열)
+        new_api_key = f"am_{uuid.uuid4().hex[:16]}"
+        
+        if existing_api:
+            # 기존 API 키 업데이트
+            existing_api.api_value = new_api_key
+            existing_api.updated_at = datetime.utcnow()
+            db.commit()
+            logger.info(f"✅ API 키 업데이트 완료 - influencer_id: {influencer_id}")
+        else:
+            # 새로운 API 키 생성
+            new_api = InfluencerAPI(
+                influencer_id=influencer_id,
+                api_value=new_api_key
+            )
+            db.add(new_api)
+            db.commit()
+            logger.info(f"✅ API 키 생성 완료 - influencer_id: {influencer_id}")
+        
+        return {
+            "influencer_id": influencer_id,
+            "api_key": new_api_key,
+            "message": "API 키가 성공적으로 생성되었습니다."
+        }
+        
+    except Exception as e:
+        db.rollback()
+        logger.error(f"❌ API 키 생성 실패 - influencer_id: {influencer_id}, error: {str(e)}")
+        raise HTTPException(status_code=500, detail="API 키 생성 중 오류가 발생했습니다.")
+
+
+@router.get("/{influencer_id}/api-key")
+async def get_api_key(
+    influencer_id: str,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """인플루언서 API 키 조회"""
+    user_id = current_user.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User ID not found")
+    
+    # 인플루언서 존재 확인 및 권한 확인
+    influencer = (
+        db.query(AIInfluencer)
+        .filter(
+            AIInfluencer.influencer_id == influencer_id,
+            AIInfluencer.user_id == user_id
+        )
+        .first()
+    )
+    
+    if not influencer:
+        raise HTTPException(status_code=404, detail="Influencer not found")
+    
+    # API 키 조회
+    api_key = (
+        db.query(InfluencerAPI)
+        .filter(InfluencerAPI.influencer_id == influencer_id)
+        .first()
+    )
+    
+    if not api_key:
+        raise HTTPException(status_code=404, detail="API key not found")
+    
+    return {
+        "influencer_id": influencer_id,
+        "api_key": api_key.api_value,
+        "created_at": api_key.created_at,
+        "updated_at": api_key.updated_at
+    }

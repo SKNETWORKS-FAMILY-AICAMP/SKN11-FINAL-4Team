@@ -14,7 +14,7 @@ from app.api.v1.endpoints import (
     content_enhancement,
     hf_tokens,
     admin,
-    # chatbot,  # 임시 비활성화
+    chatbot,  # 챗봇 활성화
     comfyui,
 )
 from app.api.v1 import images
@@ -42,8 +42,8 @@ api_router.include_router(boards.router, prefix="/boards", tags=["Boards"])
 # 채팅 API
 api_router.include_router(chat.router, prefix="/chat", tags=["Chat"])
 
-# 챗봇 WebSocket API (임시 비활성화)
-# api_router.include_router(chatbot.router, prefix="/chatbot", tags=["Chatbot"])
+# 챗봇 WebSocket API
+api_router.include_router(chatbot.router, prefix="/chatbot", tags=["Chatbot"])
 
 # 분석 및 집계 API
 api_router.include_router(analytics.router, prefix="/analytics", tags=["Analytics"])

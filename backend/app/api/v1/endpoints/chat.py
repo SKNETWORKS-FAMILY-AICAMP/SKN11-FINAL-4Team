@@ -1,17 +1,105 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from typing import List
 from datetime import datetime
+from pydantic import BaseModel
 
 from app.database import get_db
-from app.models.influencer import ChatMessage, AIInfluencer
+from app.models.influencer import ChatMessage, AIInfluencer, InfluencerAPI, APICallAggregation
 from app.models.user import User
 from app.schemas.influencer import ChatMessageCreate, ChatMessage as ChatMessageSchema
-from app.core.security import get_current_user
+from app.core.security import get_current_user, get_current_user_by_api_key
 
 router = APIRouter()
 
+# 챗봇 API에 대한 CORS 설정
+@router.options("/chatbot")
+async def chatbot_options():
+    """챗봇 API CORS preflight 요청 처리"""
+    return {"message": "OK"}
 
+# API 키로 접근 가능한 챗봇 요청 스키마
+class ChatbotRequest(BaseModel):
+    message: str
+    session_id: str | None = None
+
+class ChatbotResponse(BaseModel):
+    response: str
+    session_id: str
+    influencer_name: str
+
+# API 키로 접근 가능한 챗봇 엔드포인트
+@router.post("/chatbot", response_model=ChatbotResponse)
+async def chatbot_chat(
+    request: ChatbotRequest,
+    influencer: AIInfluencer = Depends(get_current_user_by_api_key),
+    db: Session = Depends(get_db),
+):
+    """
+    API 키로 접근 가능한 챗봇 엔드포인트
+    인플루언서와 대화할 수 있습니다.
+    """
+    try:
+        # API 사용량 추적
+        await track_api_usage(db, influencer.influencer_id)
+        
+        # VLLM 서비스 호출 (실제 구현에서는 VLLM API 호출)
+        # 여기서는 간단한 응답으로 대체
+        response_text = f"안녕하세요! 저는 {influencer.influencer_name}입니다. '{request.message}'에 대한 답변을 드리겠습니다."
+        
+        # 세션 ID 생성 (실제로는 더 복잡한 로직 필요)
+        session_id = request.session_id or f"session_{datetime.now().timestamp()}"
+        
+        return ChatbotResponse(
+            response=response_text,
+            session_id=session_id,
+            influencer_name=str(influencer.influencer_name)
+        )
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Chatbot error: {str(e)}"
+        )
+
+async def track_api_usage(db: Session, influencer_id: str):
+    """API 사용량 추적"""
+    try:
+        today = datetime.now().date()
+        
+        # 오늘 날짜의 API 호출 집계 조회
+        aggregation = (
+            db.query(APICallAggregation)
+            .filter(
+                APICallAggregation.influencer_id == influencer_id,
+                APICallAggregation.created_at >= today
+            )
+            .first()
+        )
+        
+        if aggregation:
+            # 기존 집계 업데이트
+            aggregation.daily_call_count += 1
+            aggregation.updated_at = datetime.now()
+        else:
+            # 새로운 집계 생성
+            aggregation = APICallAggregation(
+                influencer_id=influencer_id,
+                daily_call_count=1,
+                created_at=datetime.now(),
+                updated_at=datetime.now()
+            )
+            db.add(aggregation)
+        
+        db.commit()
+        
+    except Exception as e:
+        # API 사용량 추적 실패는 로그만 남기고 계속 진행
+        print(f"API usage tracking failed: {e}")
+        db.rollback()
+
+# 기존 사용자 인증 기반 엔드포인트들 (관리용)
 @router.get("", response_model=List[ChatMessageSchema])
 async def get_chat_messages(
     influencer_id: str,
