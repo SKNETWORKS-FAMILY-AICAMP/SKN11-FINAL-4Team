@@ -139,6 +139,17 @@ class Settings(BaseSettings):
     APP_VERSION: str = os.getenv("APP_VERSION", "1.0.0")
     HOST: str = os.getenv("HOST", "0.0.0.0")
     PORT: int = int(os.getenv("PORT", "8000"))
+    
+    # Backend URL 설정
+    BACKEND_URL: str = os.getenv("BACKEND_URL", "http://localhost:8000")
+    
+    # AWS S3 설정
+    AWS_ACCESS_KEY_ID: str = os.getenv("AWS_ACCESS_KEY_ID", "")
+    AWS_SECRET_ACCESS_KEY: str = os.getenv("AWS_SECRET_ACCESS_KEY", "")
+    AWS_REGION: str = os.getenv("AWS_REGION", "ap-northeast-2")
+    S3_BUCKET_NAME: str = os.getenv("S3_BUCKET_NAME", "aimex-influencer")
+    S3_ENABLED: bool = os.getenv("S3_ENABLED", "true").lower() == "true"
+    
     ALLOWED_ORIGINS: str = os.getenv(
         "ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000"
     )

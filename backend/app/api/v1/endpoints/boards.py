@@ -61,6 +61,101 @@ UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
 
 # ========================
+# 정적 라우트 (동적 라우트보다 위에 배치)
+# ========================
+
+@router.get("/test-s3-connection", include_in_schema=False)
+async def test_s3_connection():
+    """S3 연결 상태 테스트 (인증 불필요)"""
+    try:
+        from app.services.s3_image_service import get_s3_image_service
+        s3_service = get_s3_image_service()
+        
+        if s3_service.is_available():
+            return {
+                "status": "success",
+                "message": "S3 서비스가 정상적으로 연결되었습니다.",
+                "bucket": s3_service.bucket_name,
+                "region": s3_service.region
+            }
+        else:
+            return {
+                "status": "error",
+                "message": "S3 서비스에 연결할 수 없습니다. AWS 설정을 확인하세요."
+            }
+    except Exception as e:
+        return JSONResponse(
+            status_code=500, 
+            content={"status": "error", "message": f"S3 연결 테스트 실패: {str(e)}"}
+        )
+
+
+@router.get("/upload-test-get")
+async def upload_test_get():
+    """업로드 테스트용 GET 엔드포인트 (인증 불필요)"""
+    return {"message": "Upload test GET endpoint working"}
+
+
+@router.post("/upload-test")
+async def upload_test_post(data: dict = Body(...)):
+    """업로드 테스트용 POST 엔드포인트 (인증 불필요)"""
+    return {"message": "Upload test POST endpoint working", "received_data": data}
+
+
+@router.get("/test-image-url/{image_path:path}")
+async def test_image_url(image_path: str):
+    """이미지 URL 접근 테스트"""
+    try:
+        from app.services.instagram_posting_service import InstagramPostingService
+        
+        # 이미지 URL 생성
+        image_url = f"/uploads/{image_path}"
+        
+        # InstagramPostingService 인스턴스 생성
+        service = InstagramPostingService()
+        
+        # 공개 URL로 변환
+        public_url = service._convert_to_public_url(image_url)
+        
+        # 이미지 유효성 검사
+        is_valid = service._validate_image_url(public_url)
+        
+        return {
+            "original_url": image_url,
+            "public_url": public_url,
+            "is_valid": is_valid,
+            "backend_url": service.backend_url
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.post("/upload-image-simple")
+async def upload_image_simple(file: UploadFile = File(...)):
+    """이미지 파일을 업로드하고 저장 경로를 반환"""
+    try:
+        # S3 서비스 사용 가능한지 확인
+        from app.services.s3_image_service import get_s3_image_service
+        s3_service = get_s3_image_service()
+        
+        if s3_service.is_available():
+            # S3에 업로드
+            file_content = await file.read()
+            s3_url = await s3_service.upload_image(file_content, file.filename or "uploaded_image.png")
+            return {"file_url": s3_url}
+        else:
+            # 로컬 저장 (기존 방식)
+            import uuid
+            ext = file.filename.split(".")[-1] if file.filename else "png"
+            unique_filename = f"{uuid.uuid4()}.{ext}"
+            file_location = UPLOAD_DIR / unique_filename
+            with open(file_location, "wb") as buffer:
+                buffer.write(await file.read())
+            return {"file_url": f"/uploads/{unique_filename}"}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+# ========================
 # 테스트/개발용 엔드포인트 삭제됨
 # ========================
 
@@ -304,25 +399,61 @@ async def create_board(
                             )
                             db.commit()
                         else:
-                            logger.warning(
+                            # 인스타그램 업로드 실패 시 게시글 생성도 실패로 처리
+                            logger.error(
                                 f"Instagram auto-upload failed for board: {board.board_id}"
+                            )
+                            # 게시글 삭제
+                            db.delete(board)
+                            db.commit()
+                            raise HTTPException(
+                                status_code=status.HTTP_400_BAD_REQUEST,
+                                detail="인스타그램 업로드에 실패했습니다. 게시글이 생성되지 않았습니다.",
                             )
 
                     except ValueError as ve:
                         logger.error(f"Invalid Instagram token format: {ve}")
+                        # 게시글 삭제
+                        db.delete(board)
+                        db.commit()
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="인스타그램 토큰이 유효하지 않습니다. 게시글이 생성되지 않았습니다.",
+                        )
+                    except HTTPException:
+                        # 이미 HTTPException이 발생한 경우 게시글 삭제 후 재발생
+                        db.delete(board)
+                        db.commit()
+                        raise
                     except Exception as e:
                         logger.error(f"Instagram API error: {str(e)}")
+                        # 게시글 삭제
+                        db.delete(board)
+                        db.commit()
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"인스타그램 업로드 중 오류가 발생했습니다: {str(e)}. 게시글이 생성되지 않았습니다.",
+                        )
 
                 else:
                     logger.info(
                         f"Ignoring Instagram auto-upload - influencer not connected: {board.influencer_id}"
                     )
 
+            except HTTPException:
+                # 이미 HTTPException이 발생한 경우 재발생
+                raise
             except Exception as e:
                 logger.error(
                     f"Instagram auto-upload error for board {board.board_id}: {str(e)}"
                 )
-                # 인스타그램 업로드 실패해도 게시글 생성은 성공으로 처리
+                # 게시글 삭제
+                db.delete(board)
+                db.commit()
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"인스타그램 업로드 중 예상치 못한 오류가 발생했습니다: {str(e)}. 게시글이 생성되지 않았습니다.",
+                )
 
         return board
 
@@ -1237,31 +1368,4 @@ async def convert_influencer_style(
     return InfluencerStyleResponse(converted_text=answer)
 
 
-@router.get("/upload-test-get")
-async def upload_test_get():
-    """업로드 테스트용 GET 엔드포인트 (인증 불필요)"""
-    return {"message": "Upload test GET endpoint working"}
 
-
-@router.post("/upload-test")
-async def upload_test_post(data: dict = Body(...)):
-    """업로드 테스트용 POST 엔드포인트 (인증 불필요)"""
-    return {"message": "Upload test POST endpoint working", "received_data": data}
-
-
-@router.post("/upload-image-simple")
-async def upload_image_simple(file: UploadFile = File(...)):
-    """이미지 파일을 업로드하고 저장 경로를 반환"""
-    try:
-        # 파일명 중복 방지: uuid 추가
-        import uuid
-
-        ext = file.filename.split(".")[-1]
-        unique_filename = f"{uuid.uuid4()}.{ext}"
-        file_location = UPLOAD_DIR / unique_filename
-        with open(file_location, "wb") as buffer:
-            buffer.write(await file.read())
-        # 실제 서비스라면 S3 업로드 등으로 대체 가능
-        return {"file_url": f"/uploads/{unique_filename}"}
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})

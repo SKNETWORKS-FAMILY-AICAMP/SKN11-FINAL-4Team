@@ -234,6 +234,22 @@ export default function CreatePostPage() {
     setImagePreview(null)
   }
 
+  // S3 연결 상태 확인
+  const [s3Status, setS3Status] = useState<{status: string, message: string} | null>(null)
+  
+  const checkS3Connection = async () => {
+    try {
+      const response = await fetch('/api/boards/test-s3-connection')
+      const data = await response.json()
+      setS3Status(data)
+    } catch (error) {
+      setS3Status({
+        status: 'error',
+        message: 'S3 연결 확인 중 오류가 발생했습니다.'
+      })
+    }
+  }
+
   // 게시글 설명 향상
   const isGenerateEnabled = !!formData.influencer_id && !!formData.board_topic && !!formData.board_description.trim();
 
@@ -459,7 +475,15 @@ export default function CreatePostPage() {
       })
 
       if (!response.ok) {
-        throw new Error('게시글 생성에 실패했습니다.')
+        const errorData = await response.json().catch(() => ({}));
+        const errorMessage = errorData.detail || errorData.message || '게시글 생성에 실패했습니다.';
+        
+        // 인스타그램 업로드 관련 에러인 경우 특별 처리
+        if (errorMessage.includes('로컬 이미지 URL') || errorMessage.includes('인스타그램 API')) {
+          throw new Error('인스타그램 업로드에 실패했습니다. 로컬 이미지는 인스타그램에서 접근할 수 없습니다. S3 등의 클라우드 스토리지를 사용하거나 공개 URL을 사용하세요.');
+        }
+        
+        throw new Error(errorMessage);
       }
 
       router.push('/post_list')
@@ -541,6 +565,30 @@ export default function CreatePostPage() {
                 <CardDescription>게시글의 기본 정보를 설정하세요</CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
+                {/* S3 연결 상태 */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label>S3 연결 상태</Label>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={checkS3Connection}
+                    >
+                      연결 확인
+                    </Button>
+                  </div>
+                  {s3Status && (
+                    <div className={`p-3 rounded-md text-sm ${
+                      s3Status.status === 'success' 
+                        ? 'bg-green-50 text-green-700 border border-green-200' 
+                        : 'bg-red-50 text-red-700 border border-red-200'
+                    }`}>
+                      {s3Status.message}
+                    </div>
+                  )}
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
                     <Label htmlFor="influencer_id">AI 인플루언서 선택</Label>
