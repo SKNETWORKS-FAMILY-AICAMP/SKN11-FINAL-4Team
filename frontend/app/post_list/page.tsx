@@ -26,7 +26,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import { Plus, Search, Edit, Trash2, Eye, Calendar, User, Filter, X, Copy, ExternalLink, Heart, MessageCircle, Share2, MoreHorizontal, UploadCloud, Instagram } from "lucide-react"
+import { Plus, Search, Edit, Trash2, Eye, Calendar, User, Filter, X, Copy, ExternalLink, Heart, MessageCircle, Share2, MoreHorizontal, UploadCloud, Instagram, Users, BarChart3, Bookmark } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import apiClient from "@/lib/api"
 import { useToast } from "@/hooks/use-toast"
@@ -61,15 +61,25 @@ interface Post {
   engagement?: {
     likes: number
     comments: number
-    shares: number
-    views?: number
   }
   media?: {
     type: "image" | "video" | "carousel"
     urls: string[]
     thumbnailUrl?: string
   }
+  // 인스타그램 통계 추가
+  instagram_stats?: {
+    impressions?: number
+    reach?: number
+    profile_views?: number
+    follower_count?: number
+    saved_count?: number
+    video_views?: number
+  }
+  // Instagram 링크 추가
+  instagram_link?: string
 }
+
 
 
 function PostListContent() {
@@ -96,6 +106,8 @@ function PostListContent() {
   const [editHashtags, setEditHashtags] = useState("");
   const [editScheduledAt, setEditScheduledAt] = useState("");
 
+
+
   const searchParams = useSearchParams()
   const hasAddedNewPost = useRef(false)
   const router = useRouter()
@@ -107,31 +119,63 @@ function PostListContent() {
       console.log('Fetching posts from API...')
 
       const boardData = await apiClient.get<any[]>('/api/v1/boards')
-      console.log('API response:', boardData)
 
-      // API 데이터를 Post 인터페이스에 맞게 변환
-      const transformedPosts: Post[] = boardData.map((board: any) => ({
-        ...board,
-        id: board.board_id,
-        title: board.board_topic,
-        content: board.board_description,
-        createdAt: board.created_at,
-        platform: getPlatformName(board.board_platform),
-        hashtags: board.board_hash_tag ? board.board_hash_tag.split(' ').filter((tag: string) => tag.trim()).map((tag: string) => tag.startsWith('#') ? tag : `#${tag}`) : [],
-        status: getStatusName(board.board_status),
-        author: 'AI 인플루언서',
-        modelName: 'AI 인플루언서',
-        engagement: { likes: 0, comments: 0, shares: 0 },
-        scheduledAt: board.reservation_at,
-        publishedAt: board.pulished_at,
-        media: {
-          type: "image" as const,
-          urls: [board.image_url || "/placeholder.svg?height=400&width=400"],
-          thumbnailUrl: board.image_url || "/placeholder.svg?height=400&width=400"
-        }
-      }))
+      // 각 게시글에 대해 인스타그램 통계 정보 가져오기
+      const transformedPosts: Post[] = await Promise.all(
+        boardData.map(async (board: any) => {
+          const basePost = {
+            ...board,
+            id: board.board_id,
+            title: board.board_topic,
+            content: board.board_description,
+            createdAt: board.created_at,
+            platform: getPlatformName(board.board_platform),
+            hashtags: board.board_hash_tag ? board.board_hash_tag.split(' ').filter((tag: string) => tag.trim()).map((tag: string) => tag.startsWith('#') ? tag : `#${tag}`) : [],
+            status: getStatusName(board.board_status),
+            author: 'AI 인플루언서',
+            modelName: 'AI 인플루언서',
+            scheduledAt: board.reservation_at,
+            publishedAt: board.pulished_at,
+            media: {
+              type: "image" as const,
+              urls: [board.image_url || "/placeholder.svg?height=400&width=400"],
+              thumbnailUrl: board.image_url || "/placeholder.svg?height=400&width=400"
+            }
+          }
 
-      console.log('Transformed posts:', transformedPosts)
+          // 백엔드에서 제공하는 인스타그램 통계 사용
+          const instagramStats = board.instagram_stats || {
+            like_count: 0,
+            comments_count: 0,
+            shares_count: 0,
+            views_count: 0,
+            impressions: 0,
+            reach: 0,
+            profile_views: 0,
+            follower_count: 0,
+            saved_count: 0,
+            video_views: 0
+          }
+
+          return {
+            ...basePost,
+            engagement: {
+              likes: instagramStats.like_count || 0,
+              comments: instagramStats.comments_count || 0
+            },
+            instagram_stats: {
+              impressions: instagramStats.impressions || 0,
+              reach: instagramStats.reach || 0,
+              profile_views: instagramStats.profile_views || 0,
+              follower_count: instagramStats.follower_count || 0,
+              saved_count: instagramStats.saved_count || 0,
+              video_views: instagramStats.video_views || 0
+            },
+            instagram_link: board.instagram_link || null
+          }
+        })
+      )
+
       setPosts(transformedPosts)
     } catch (error) {
       console.error('Failed to fetch posts:', error)
@@ -216,7 +260,7 @@ function PostListContent() {
         group_id: 1,
         board_hash_tag: newPostHashtags || "",
         image_url: "/placeholder.svg?height=400&width=400",
-        engagement: { likes: 0, comments: 0, shares: 0 },
+        engagement: { likes: 0, comments: 0 },
         hashtags: newPostHashtags ? newPostHashtags.split(' ').filter(tag => tag.trim()).map(tag => tag.startsWith('#') ? tag : `#${tag}`) : [],
         media: {
           type: "image",
@@ -577,6 +621,8 @@ function PostListContent() {
     }
   };
 
+
+
   return (
     <div className="min-h-screen bg-gray-50">
       <Navigation />
@@ -589,6 +635,8 @@ function PostListContent() {
               <p className="text-gray-600 mt-2">AI 인플루언서가 생성한 게시글을 관리하세요</p>
             </div>
           </div>
+
+
 
           <div className="flex items-center gap-2 mb-6">
             <div className="relative flex-1 max-w-md">
@@ -855,17 +903,24 @@ function PostListContent() {
                           </div>
                           <div className="flex items-center space-x-1">
                             <MessageCircle className="h-4 w-4 text-blue-500" />
-                            <span>{post.engagement.comments}</span>
+                            <span>{post.engagement.comments.toLocaleString()}</span>
                           </div>
-                          <div className="flex items-center space-x-1">
-                            <Share2 className="h-4 w-4 text-green-500" />
-                            <span>{post.engagement.shares}</span>
-                          </div>
-                          {post.engagement.views && (
-                            <div className="flex items-center space-x-1">
-                              <Eye className="h-4 w-4 text-purple-500" />
-                              <span>{post.engagement.views.toLocaleString()}</span>
-                            </div>
+                          {/* 인스타그램 추가 통계 표시 */}
+                          {post.platform === 'Instagram' && post.instagram_stats && (
+                            <>
+                              {post.instagram_stats.reach > 0 && (
+                                <div className="flex items-center space-x-1">
+                                  <Users className="h-4 w-4 text-orange-500" />
+                                  <span>{post.instagram_stats.reach.toLocaleString()}</span>
+                                </div>
+                              )}
+                              {post.instagram_stats.impressions > 0 && (
+                                <div className="flex items-center space-x-1">
+                                  <BarChart3 className="h-4 w-4 text-teal-500" />
+                                  <span>{post.instagram_stats.impressions.toLocaleString()}</span>
+                                </div>
+                              )}
+                            </>
                           )}
                         </>
                       )}
@@ -1055,7 +1110,7 @@ function PostListContent() {
                   <div className="space-y-2">
                     <h4 className="text-sm font-medium text-gray-900">성과 지표</h4>
                     <div className="bg-gray-50 rounded-lg p-4">
-                      <div className="grid grid-cols-3 gap-4">
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                         <div className="text-center">
                           <div className="flex items-center justify-center space-x-2 mb-1">
                             <Heart className="h-5 w-5 text-red-500" />
@@ -1069,24 +1124,59 @@ function PostListContent() {
                           <div className="flex items-center justify-center space-x-2 mb-1">
                             <MessageCircle className="h-5 w-5 text-blue-500" />
                             <span className="text-lg font-bold text-gray-900">
-                              {selectedPost.engagement.comments}
+                              {selectedPost.engagement.comments.toLocaleString()}
                             </span>
                           </div>
                           <p className="text-sm text-gray-600">댓글</p>
                         </div>
-                        <div className="text-center">
-                          <div className="flex items-center justify-center space-x-2 mb-1">
-                            <Share2 className="h-5 w-5 text-green-500" />
-                            <span className="text-lg font-bold text-gray-900">
-                              {selectedPost.engagement.shares}
-                            </span>
-                          </div>
-                          <p className="text-sm text-gray-600">공유</p>
-                        </div>
+
+                        
+                        {/* Instagram 인사이트 추가 */}
+                        {selectedPost.platform === 'Instagram' && selectedPost.instagram_stats && (
+                          <>
+                            {selectedPost.instagram_stats.reach > 0 && (
+                              <div className="text-center">
+                                <div className="flex items-center justify-center space-x-2 mb-1">
+                                  <Users className="h-5 w-5 text-orange-500" />
+                                  <span className="text-lg font-bold text-gray-900">
+                                    {selectedPost.instagram_stats.reach.toLocaleString()}
+                                  </span>
+                                </div>
+                                <p className="text-sm text-gray-600">도달</p>
+                              </div>
+                            )}
+                            {selectedPost.instagram_stats.impressions > 0 && (
+                              <div className="text-center">
+                                <div className="flex items-center justify-center space-x-2 mb-1">
+                                  <BarChart3 className="h-5 w-5 text-teal-500" />
+                                  <span className="text-lg font-bold text-gray-900">
+                                    {selectedPost.instagram_stats.impressions.toLocaleString()}
+                                  </span>
+                                </div>
+                                <p className="text-sm text-gray-600">노출</p>
+                              </div>
+                            )}
+                            {selectedPost.instagram_stats.saved_count > 0 && (
+                              <div className="text-center">
+                                <div className="flex items-center justify-center space-x-2 mb-1">
+                                  <Bookmark className="h-5 w-5 text-yellow-500" />
+                                  <span className="text-lg font-bold text-gray-900">
+                                    {selectedPost.instagram_stats.saved_count.toLocaleString()}
+                                  </span>
+                                </div>
+                                <p className="text-sm text-gray-600">저장</p>
+                              </div>
+                            )}
+                          </>
+                        )}
                       </div>
+                      
+
                     </div>
                   </div>
                 )}
+
+
 
                 {/* 액션 버튼 */}
                 <div className="flex justify-end space-x-2 pt-4 border-t">
@@ -1111,18 +1201,21 @@ function PostListContent() {
                       </Button>
                     )
                   )}
-                  {selectedPost.status === "published" && (
-                    <a
-                      href={`/post/${selectedPost.id}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{ textDecoration: 'none' }}
+                  {selectedPost.status === "published" && selectedPost.instagram_link && (
+                    <Button 
+                      variant="outline" 
+                      size="sm"
+                      onClick={() => {
+                        // 백엔드에서 제공하는 인스타그램 링크로 이동
+                        if (selectedPost.instagram_link) {
+                          window.open(selectedPost.instagram_link, '_blank');
+                        }
+                      }}
+                      className="flex items-center space-x-2"
                     >
-                      <Button variant="outline" size="sm" asChild={false}>
-                        <ExternalLink className="h-4 w-4 mr-2" />
-                        게시글 링크로 이동
-                      </Button>
-                    </a>
+                      <ExternalLink className="h-4 w-4" />
+                      <span>게시글 링크로 이동</span>
+                    </Button>
                   )}
                 </div>
               </div>

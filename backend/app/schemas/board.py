@@ -42,10 +42,14 @@ class BoardUpdate(BaseModel):
 
 class Board(BoardBase, TimestampSchema):
     board_id: str
+    # 인스타그램 관련 필드 추가
+    instagram_stats: Optional[dict] = None
+    instagram_link: Optional[str] = None
 
 
 class BoardWithInfluencer(Board):
     influencer_name: Optional[str] = None
+    # 인스타그램 관련 필드 추가 (Board에서 상속됨)
 
 
 # AI 콘텐츠 생성 관련 스키마 추가

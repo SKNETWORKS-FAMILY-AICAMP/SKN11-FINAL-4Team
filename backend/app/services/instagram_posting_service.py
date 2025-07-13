@@ -155,6 +155,7 @@ class InstagramPostingService:
 
                 data = response.json()
                 logger.info(f"Post published successfully: {data.get('id')}")
+                logger.info(f"Full publish API response: {data}")
                 return data
 
         except Exception as e:
@@ -182,9 +183,34 @@ class InstagramPostingService:
             )
             print("result", result)
             logger.info(f"Instagram post completed successfully: {result.get('id')}")
+            logger.info(f"Full Instagram API response: {result}")
+            
+            # 인스타그램 API 응답에서 post ID 추출 (여러 가능한 필드 확인)
+            logger.info(f"Full Instagram API response: {result}")
+            logger.info(f"Response keys: {list(result.keys())}")
+            
+            instagram_post_id = (
+                result.get("id") or 
+                result.get("post_id") or 
+                result.get("media_id") or 
+                result.get("creation_id")
+            )
+            logger.info(f"Extracted instagram_post_id: {instagram_post_id}")
+            logger.info(f"Available fields: id={result.get('id')}, post_id={result.get('post_id')}, media_id={result.get('media_id')}, creation_id={result.get('creation_id')}")
+            
+            # post ID가 없으면 에러 발생
+            if not instagram_post_id:
+                logger.error(f"No post ID found in Instagram API response: {result}")
+                logger.error(f"Response type: {type(result)}")
+                logger.error(f"Response keys: {list(result.keys()) if isinstance(result, dict) else 'Not a dict'}")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="인스타그램에서 post ID를 받지 못했습니다. API 응답을 확인해주세요.",
+                )
+            
             return {
                 "success": True,
-                "instagram_post_id": result.get("id"),
+                "instagram_post_id": instagram_post_id,
                 "message": "인스타그램에 성공적으로 업로드되었습니다.",
             }
 
@@ -317,7 +343,7 @@ class InstagramPostingService:
                     f"{self.base_url}/{post_id}/insights",
                     params={
                         "access_token": access_token,
-                        "metric": "impressions,reach,profile_views,website_clicks"
+                        "metric": ""
                     }
                 )
 
@@ -375,3 +401,35 @@ class InstagramPostingService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"게시물 댓글 조회 중 오류가 발생했습니다: {str(e)}",
             )
+
+    async def get_instagram_post_info_batch(
+        self, post_ids: List[str], access_token: str, instagram_id: str
+    ) -> Dict[str, Dict]:
+        """인스타그램 게시물 정보 배치 조회"""
+        results = {}
+        
+        for post_id in post_ids:
+            try:
+                post_info = await self.get_instagram_post_info(post_id, access_token, instagram_id)
+                results[post_id] = post_info
+            except Exception as e:
+                logger.error(f"Failed to get post info for {post_id}: {str(e)}")
+                results[post_id] = None
+        
+        return results
+
+    async def get_instagram_post_insights_batch(
+        self, post_ids: List[str], access_token: str, instagram_id: str
+    ) -> Dict[str, Dict]:
+        """인스타그램 게시물 인사이트 배치 조회"""
+        results = {}
+        
+        for post_id in post_ids:
+            try:
+                insights = await self.get_instagram_post_insights(post_id, access_token, instagram_id)
+                results[post_id] = insights
+            except Exception as e:
+                logger.error(f"Failed to get insights for {post_id}: {str(e)}")
+                results[post_id] = None
+        
+        return results

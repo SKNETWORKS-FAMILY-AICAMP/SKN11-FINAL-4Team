@@ -232,11 +232,55 @@ function ModelDetailContent() {
     is_connected: false
   })
   const [isConnecting, setIsConnecting] = useState(false)
+  const [analyticsData, setAnalyticsData] = useState({
+    totalApiCalls: 0,
+    todayApiCalls: 0,
+    totalPosts: 0,
+    publishedPosts: 0,
+    totalLikes: 0,
+    totalComments: 0,
+    totalViews: 0
+  })
 
   // Instagram 상태 변경 시 처리
   React.useEffect(() => {
     // Instagram 상태 업데이트 처리
   }, [instagramStatus])
+
+  // 분석 데이터 로드
+  const loadAnalyticsData = async () => {
+    try {
+      // 실제 API 호출로 분석 데이터 가져오기
+      const analyticsResponse = await fetch(`/api/v1/analytics/influencer/${params.id}`)
+      if (analyticsResponse.ok) {
+        const data = await analyticsResponse.json()
+        setAnalyticsData({
+          totalApiCalls: data.total_api_calls || 0,
+          todayApiCalls: data.today_api_calls || 0,
+          totalPosts: data.total_posts || 0,
+          publishedPosts: data.published_posts || 0,
+          totalLikes: data.total_likes || 0,
+          totalComments: data.total_comments || 0,
+          totalViews: data.total_views || 0
+        })
+      } else {
+        throw new Error(`API 호출 실패: ${analyticsResponse.status}`)
+      }
+    } catch (error) {
+      console.error('Error loading analytics data:', error)
+      // API 호출 실패 시 posts 데이터로 계산 (fallback)
+      const publishedPosts = posts.filter((p) => p.status === "published")
+      setAnalyticsData({
+        totalApiCalls: 0,
+        todayApiCalls: 0,
+        totalPosts: posts.length,
+        publishedPosts: publishedPosts.length,
+        totalLikes: publishedPosts.reduce((sum, p) => sum + p.engagement.likes, 0),
+        totalComments: publishedPosts.reduce((sum, p) => sum + p.engagement.comments, 0),
+        totalViews: publishedPosts.reduce((sum, p) => sum + (p.engagement.views || 0), 0)
+      })
+    }
+  }
 
   // 모델 데이터 로드
   const loadModelData = async () => {
@@ -258,6 +302,9 @@ function ModelDetailContent() {
         instagram_is_active: data.instagram_is_active,
         instagram_connected_at: data.instagram_connected_at,
       })
+      
+      // 분석 데이터도 함께 로드
+      await loadAnalyticsData()
     } catch (error) {
       console.error('Error loading model data:', error)
     } finally {
@@ -944,7 +991,9 @@ function ModelDetailContent() {
               <Card>
                 <CardContent className="p-6">
                   <div className="text-center">
-                    <p className="text-2xl font-bold text-blue-600">1,234</p>
+                    <p className="text-2xl font-bold text-blue-600">
+                      {analyticsData.totalApiCalls.toLocaleString()}
+                    </p>
                     <p className="text-sm text-gray-600">총 API 호출</p>
                   </div>
                 </CardContent>
@@ -952,7 +1001,9 @@ function ModelDetailContent() {
               <Card>
                 <CardContent className="p-6">
                   <div className="text-center">
-                    <p className="text-2xl font-bold text-orange-600">89</p>
+                    <p className="text-2xl font-bold text-orange-600">
+                      {analyticsData.todayApiCalls.toLocaleString()}
+                    </p>
                     <p className="text-sm text-gray-600">오늘 호출</p>
                   </div>
                 </CardContent>
@@ -961,7 +1012,7 @@ function ModelDetailContent() {
                 <CardContent className="p-6">
                   <div className="text-center">
                     <p className="text-2xl font-bold text-green-600">
-                      {posts.filter((p) => p.status === "published").length}
+                      {analyticsData.publishedPosts.toLocaleString()}
                     </p>
                     <p className="text-sm text-gray-600">발행된 게시글</p>
                   </div>
@@ -971,10 +1022,7 @@ function ModelDetailContent() {
                 <CardContent className="p-6">
                   <div className="text-center">
                     <p className="text-2xl font-bold text-purple-600">
-                      {posts
-                        .filter((p) => p.status === "published")
-                        .reduce((sum, p) => sum + p.engagement.likes, 0)
-                        .toLocaleString()}
+                      {analyticsData.totalLikes.toLocaleString()}
                     </p>
                     <p className="text-sm text-gray-600">총 좋아요</p>
                   </div>

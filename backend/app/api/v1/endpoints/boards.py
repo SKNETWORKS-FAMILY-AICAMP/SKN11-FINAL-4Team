@@ -19,7 +19,7 @@ import os
 import shutil
 from pathlib import Path
 from fastapi.responses import JSONResponse
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from app.database import get_db
 from app.models.board import Board
@@ -170,30 +170,149 @@ async def get_boards(
     current_user: dict = Depends(get_current_user),
 ):
     """로그인된 사용자가 소속된 그룹이 사용한 인플루언서가 작성한 게시글만 조회"""
-    user_id = current_user.get("sub")
+    try:
+        user_id = current_user.get("sub")
+        if not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User authentication required",
+            )
 
-    # 1. 내가 속한 그룹 id 리스트 조회
-    user = db.query(User).filter(User.user_id == user_id).first()
-    group_ids = [team.group_id for team in user.teams]
+        # 1. 사용자 존재 확인
+        user = db.query(User).filter(User.user_id == user_id).first()
+        if not user:
+            logger.warning(f"User not found: {user_id}")
+            return []
 
-    # 2. 해당 그룹의 인플루언서 id 리스트 조회
-    influencer_ids = (
-        db.query(AIInfluencer.influencer_id)
-        .filter(AIInfluencer.group_id.in_(group_ids))
-        .all()
-    )
-    influencer_ids = [row[0] for row in influencer_ids]
+        # 2. 사용자 팀 정보 안전하게 조회
+        try:
+            group_ids = [team.group_id for team in user.teams] if user.teams else []
+            if not group_ids:
+                logger.info(f"User {user_id} has no teams")
+                return []
+        except Exception as e:
+            logger.error(f"Failed to get user teams: {str(e)}")
+            return []
 
-    # 3. 그 인플루언서로 작성된 게시글만 조회
-    boards = (
-        db.query(Board)
-        .filter(Board.influencer_id.in_(influencer_ids))
-        .order_by(Board.created_at.desc())
-        .offset(skip)
-        .limit(limit)
-        .all()
-    )
-    return boards
+        # 3. 해당 그룹의 인플루언서 조회
+        try:
+            influencers = db.query(AIInfluencer).filter(
+                AIInfluencer.group_id.in_(group_ids)
+            ).all()
+            influencer_ids = [inf.influencer_id for inf in influencers]
+            
+            if not influencer_ids:
+                logger.info(f"No influencers found for groups: {group_ids}")
+                return []
+        except Exception as e:
+            logger.error(f"Failed to get influencers: {str(e)}")
+            return []
+
+        # 4. 게시글 조회
+        try:
+            boards = (
+                db.query(Board)
+                .filter(Board.influencer_id.in_(influencer_ids))
+                .order_by(Board.created_at.desc())
+                .offset(skip)
+                .limit(limit)
+                .all()
+            )
+        except Exception as e:
+            logger.error(f"Failed to get boards: {str(e)}")
+            return []
+        
+        # 5. 인스타그램 통계 정보 추가 (배치 처리로 개선)
+        from app.services.instagram_posting_service import InstagramPostingService
+        instagram_service = InstagramPostingService()
+        
+        # 인플루언서 정보를 미리 조회하여 캐시
+        influencer_cache = {inf.influencer_id: inf for inf in influencers}
+        
+        enhanced_boards = []
+        for board in boards:
+            board_dict = {
+                "board_id": board.board_id,
+                "influencer_id": board.influencer_id,
+                "user_id": board.user_id,
+                "team_id": board.team_id,
+                "group_id": board.group_id,
+                "board_topic": board.board_topic,
+                "board_description": board.board_description,
+                "board_platform": board.board_platform,
+                "board_hash_tag": board.board_hash_tag,
+                "board_status": board.board_status,
+                "image_url": board.image_url,
+                "reservation_at": board.reservation_at,
+                "published_at": board.published_at,
+                "platform_post_id": board.platform_post_id,
+                "created_at": board.created_at,
+                "updated_at": board.updated_at,
+                # 기본 통계 초기화 (실제 사용 가능한 필드만)
+                "instagram_stats": {
+                    "like_count": 0,
+                    "comments_count": 0
+                }
+            }
+            
+            # 인스타그램 게시글이고 발행된 상태이며 platform_post_id가 있는 경우 통계 가져오기
+            if (board.board_platform == 0 and 
+                board.board_status == 3 and 
+                board.platform_post_id and 
+                board.influencer_id):
+                
+                try:
+                    # 캐시된 인플루언서 정보 사용
+                    influencer = influencer_cache.get(board.influencer_id)
+                    
+                    if (influencer and 
+                        influencer.instagram_is_active and 
+                        influencer.instagram_access_token and 
+                        influencer.instagram_id):
+                        
+                        # 인스타그램 게시글 정보 가져오기
+                        post_info = await instagram_service.get_instagram_post_info(
+                            board.platform_post_id,
+                            str(influencer.instagram_access_token),
+                            str(influencer.instagram_id)
+                        )
+                        
+                        if post_info:
+                            board_dict["instagram_stats"].update({
+                                "like_count": post_info.get("like_count", 0),
+                                "comments_count": post_info.get("comments_count", 0),
+                                "shares_count": post_info.get("shares_count", 0),
+                                "views_count": post_info.get("views_count", 0)
+                            })
+                            
+
+                            
+                            # Instagram 링크를 API에서 받아온 permalink로 설정
+                            if post_info.get("permalink"):
+                                board_dict["instagram_link"] = post_info.get("permalink")
+                            else:
+                                # permalink가 없는 경우 동적 생성
+                                board_dict["instagram_link"] = f"https://www.instagram.com/p/{board.platform_post_id}/"
+
+                        # insights API 호출 제거 - 기본 게시물 정보만 사용
+                            
+                except Exception as e:
+                    logger.error(f"Failed to fetch Instagram stats for board {board.board_id}: {str(e)}")
+                    # 통계 가져오기 실패 시 기본값 유지
+                    board_dict["instagram_link"] = f"https://www.instagram.com/p/{board.platform_post_id}/"
+            
+            enhanced_boards.append(board_dict)
+        
+        return enhanced_boards
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in get_boards: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"게시글 목록 조회 중 오류가 발생했습니다: {str(e)}",
+        )
 
 
 @router.get("/{board_id}", response_model=BoardWithInfluencer)
@@ -203,18 +322,94 @@ async def get_board(
     current_user: dict = Depends(get_current_user),
 ):
     """특정 게시글 조회"""
-    user_id = current_user.get("sub")
-    board = (
-        db.query(Board)
-        .filter(Board.board_id == board_id, Board.user_id == user_id)
-        .first()
-    )
-
-    if board is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Board not found"
+    try:
+        user_id = current_user.get("sub")
+        if not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User authentication required",
+            )
+            
+        board = (
+            db.query(Board)
+            .filter(Board.board_id == board_id, Board.user_id == user_id)
+            .first()
         )
-    return board
+
+        if board is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Board not found"
+            )
+        
+        # Instagram 링크는 동적으로 생성 (데이터베이스에 저장하지 않음)
+        board_dict = {
+            "board_id": board.board_id,
+            "influencer_id": board.influencer_id,
+            "user_id": board.user_id,
+            "team_id": board.team_id,
+            "group_id": board.group_id,
+            "board_topic": board.board_topic,
+            "board_description": board.board_description,
+            "board_platform": board.board_platform,
+            "board_hash_tag": board.board_hash_tag,
+            "board_status": board.board_status,
+            "image_url": board.image_url,
+            "reservation_at": board.reservation_at,
+            "published_at": board.published_at,
+            "platform_post_id": board.platform_post_id,
+            "created_at": board.created_at,
+            "updated_at": board.updated_at,
+            "influencer_name": None  # BoardWithInfluencer 스키마에 맞춤
+        }
+        
+        # Instagram 링크는 API에서 받아오거나 동적으로 생성
+        if board.platform_post_id and board.board_platform == 0:
+            try:
+                # 인플루언서 정보 조회
+                influencer = db.query(AIInfluencer).filter(
+                    AIInfluencer.influencer_id == board.influencer_id
+                ).first()
+                
+                if (influencer and 
+                    influencer.instagram_is_active and 
+                    influencer.instagram_access_token and 
+                    influencer.instagram_id):
+                    
+                    # 인스타그램 게시글 정보 가져오기
+                    instagram_service = InstagramPostingService()
+                    post_info = await instagram_service.get_instagram_post_info(
+                        board.platform_post_id,
+                        str(influencer.instagram_access_token),
+                        str(influencer.instagram_id)
+                    )
+                    
+                    if post_info and post_info.get("permalink"):
+                        board_dict["instagram_link"] = post_info.get("permalink")
+                        logger.info(f"Instagram link from API: {board_dict['instagram_link']}")
+                    else:
+                        # permalink가 없는 경우 동적 생성
+                        board_dict["instagram_link"] = f"https://www.instagram.com/p/{board.platform_post_id}/"
+                        logger.info(f"Generated Instagram link: {board_dict['instagram_link']}")
+                else:
+                    # 인플루언서 정보가 없는 경우 동적 생성
+                    board_dict["instagram_link"] = f"https://www.instagram.com/p/{board.platform_post_id}/"
+                    logger.info(f"Generated Instagram link: {board_dict['instagram_link']}")
+            except Exception as e:
+                logger.error(f"Failed to fetch Instagram link for board {board.board_id}: {str(e)}")
+                # 에러 발생 시 동적 생성
+                board_dict["instagram_link"] = f"https://www.instagram.com/p/{board.platform_post_id}/"
+                logger.info(f"Generated Instagram link after error: {board_dict['instagram_link']}")
+        
+        return board_dict
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in get_board: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"게시글 조회 중 오류가 발생했습니다: {str(e)}",
+        )
 
 
 @router.post("", response_model=BoardSchema)
@@ -314,11 +509,12 @@ async def create_board(
         # 예약 발행인 경우 스케줄러에 등록
         if board_dict.get("board_status") == 2 and board_dict.get("scheduled_at"):
             try:
-                from datetime import datetime, timezone
                 import pytz
 
                 # 프론트엔드에서 받은 로컬 시간을 한국 시간으로 처리
                 scheduled_time_str = board_dict.get("scheduled_at")
+                if not scheduled_time_str or not isinstance(scheduled_time_str, str):
+                    raise ValueError("scheduled_at 값이 올바르지 않습니다.")
 
                 # ISO 형식 문자열을 datetime으로 변환
                 if scheduled_time_str.endswith(":00"):
@@ -333,6 +529,7 @@ async def create_board(
                 if scheduled_time.tzinfo is None:
                     scheduled_time = korea_tz.localize(scheduled_time)
 
+                # board_id는 uuid 문자열이므로 변환 없이 그대로 사용
                 await scheduler_service.schedule_post(board_id, scheduled_time)
                 logger.info(
                     f"게시글 {board_id} 스케줄링 등록 완료: {scheduled_time} (한국시간)"
@@ -397,6 +594,18 @@ async def create_board(
                             logger.info(
                                 f"Instagram auto-upload successful for board: {board.board_id}"
                             )
+                            
+                            # Instagram post ID를 데이터베이스에 저장
+                            instagram_post_id = result.get("instagram_post_id")
+                            if instagram_post_id:
+                                logger.info(f"Saving Instagram post ID: {instagram_post_id}")
+                                board.platform_post_id = instagram_post_id
+                                board.published_at = datetime.utcnow()
+                                db.commit()
+                                logger.info(f"Instagram post ID saved successfully: {instagram_post_id}")
+                            else:
+                                logger.warning("No Instagram post ID found in result")
+                            
                             db.commit()
                         else:
                             # 인스타그램 업로드 실패 시 게시글 생성도 실패로 처리
@@ -648,6 +857,7 @@ async def generate_and_save_board(
             board_hash_tag=hashtag_str,
             board_status=0,  # 최초 생성 상태
             image_url=image_urls,
+            platform_post_id=None,  # AI 생성 시에는 아직 플랫폼에 업로드되지 않음
             # reservation_at=request.reservation_at  # 나중에 구현
         )
 
