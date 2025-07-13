@@ -26,10 +26,11 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import { Plus, Search, Edit, Trash2, Eye, Calendar, User, Filter, X, Copy, ExternalLink, Heart, MessageCircle, Share2, MoreHorizontal, UploadCloud } from "lucide-react"
+import { Plus, Search, Edit, Trash2, Eye, Calendar, User, Filter, X, Copy, ExternalLink, Heart, MessageCircle, Share2, MoreHorizontal, UploadCloud, Instagram } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import apiClient from "@/lib/api"
 import { useToast } from "@/hooks/use-toast"
+import { InstagramPostingService } from "@/lib/services/instagram-posting.service"
 
 // 게시글 타입 정의
 interface Post {
@@ -281,18 +282,61 @@ function PostListContent() {
     const platform = postToPublish?.platform || "소셜미디어"
 
     try {
+      // 1. 먼저 데이터베이스 상태 업데이트
       await apiClient.put(`/api/v1/boards/${postId}`, { board_status: 3 }) // 3 = published
+
+      // 2. 인스타그램 플랫폼인 경우 자동 업로드 시도
+      if (postToPublish?.platform === "Instagram" && postToPublish?.influencer_id) {
+        try {
+          // 인스타그램 업로드 가능 여부 확인
+          const canUpload = await InstagramPostingService.checkInstagramPostingAvailability(postToPublish.influencer_id);
+
+          if (canUpload) {
+            // 인스타그램에 업로드
+            const result = await InstagramPostingService.postToInstagram(postToPublish.influencer_id!, {
+              board_id: postToPublish.board_id!,
+              caption: postToPublish.content || postToPublish.board_description,
+              hashtags: postToPublish.hashtags || []
+            });
+
+            if (result.success) {
+              toast({
+                title: "✅ 게시글 발행 및 인스타그램 업로드 완료",
+                description: `"${postTitle}" 게시글이 성공적으로 발행되고 인스타그램에도 업로드되었습니다.`,
+                variant: "default",
+              })
+            }
+          } else {
+            toast({
+              title: "📤 게시글 발행 완료 (인스타그램 미연동)",
+              description: `"${postTitle}" 게시글이 발행되었습니다. 인스타그램 업로드를 원하시면 계정을 연동해주세요.`,
+              variant: "default",
+            })
+          }
+        } catch (instagramError: any) {
+          console.error('Instagram upload error:', instagramError)
+          toast({
+            title: "📤 게시글 발행 완료 (인스타그램 업로드 실패)",
+            description: `"${postTitle}" 게시글이 발행되었지만 인스타그램 업로드에 실패했습니다: ${instagramError.message}`,
+            variant: "destructive",
+          })
+        }
+      } else {
+        // 인스타그램이 아닌 경우 일반 발행
+        toast({
+          title: "📤 게시글 발행 완료",
+          description: `"${postTitle}" 게시글이 성공적으로 발행되었습니다.`,
+          variant: "default",
+        })
+      }
+
+      // 3. UI 상태 업데이트
       setPosts(currentPosts =>
         currentPosts.map(p =>
           (p.id || p.board_id) === postId ? { ...p, status: 'published' as const, board_status: 3 } : p
         )
       );
 
-      toast({
-        title: "📤 게시글 발행 완료",
-        description: `"${postTitle}" 게시글이 성공적으로 발행되었습니다.`,
-        variant: "default",
-      })
     } catch (error) {
       console.error('Failed to publish post:', error)
       toast({
@@ -302,6 +346,65 @@ function PostListContent() {
       })
     }
   };
+
+  const handleInstagramUpload = async (post: Post) => {
+    if (!post.influencer_id || !post.board_id) {
+      toast({
+        title: "❌ 업로드 실패",
+        description: "인플루언서 정보가 없습니다.",
+        variant: "destructive",
+      })
+      return;
+    }
+
+    try {
+      // 인스타그램 업로드 가능 여부 확인
+      const canUpload = await InstagramPostingService.checkInstagramPostingAvailability(post.influencer_id);
+
+      if (!canUpload) {
+        toast({
+          title: "❌ 인스타그램 연동 필요",
+          description: "먼저 인스타그램 계정을 연동해주세요.",
+          variant: "destructive",
+        })
+        return;
+      }
+
+      // 인스타그램에 업로드
+      const result = await InstagramPostingService.postToInstagram(post.influencer_id, {
+        board_id: post.board_id,
+        caption: post.content || post.board_description,
+        hashtags: post.hashtags || []
+      });
+
+      if (result.success) {
+        toast({
+          title: "✅ 인스타그램 업로드 완료",
+          description: result.message,
+          variant: "default",
+        })
+
+        // 게시글 상태 업데이트
+        setPosts(posts => posts.map(p => {
+          if (p.board_id === post.board_id) {
+            return {
+              ...p,
+              status: 'published' as const,
+              publishedAt: new Date().toISOString()
+            };
+          }
+          return p;
+        }));
+      }
+    } catch (error: any) {
+      console.error('Instagram upload error:', error)
+      toast({
+        title: "❌ 인스타그램 업로드 실패",
+        description: error.message || "인스타그램 업로드 중 오류가 발생했습니다.",
+        variant: "destructive",
+      })
+    }
+  }
 
   const handleApplyFilters = () => {
     setStatusFilter(tempStatusFilter)
@@ -770,10 +873,23 @@ function PostListContent() {
 
                     <div className="flex items-center space-x-2" onClick={e => e.stopPropagation()}>
                       {post.status !== 'published' && (
-                        <Button size="sm" variant="outline" className="flex items-center space-x-1" onClick={() => handlePublishPost(post.id || post.board_id || "")}>
-                          <UploadCloud className="h-4 w-4" />
-                          <span>업로드</span>
-                        </Button>
+                        <>
+                          <Button size="sm" variant="outline" className="flex items-center space-x-1" onClick={() => handlePublishPost(post.id || post.board_id || "")}>
+                            <UploadCloud className="h-4 w-4" />
+                            <span>업로드</span>
+                          </Button>
+                          {post.platform === 'Instagram' && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="flex items-center space-x-1 bg-pink-50 border-pink-200 text-pink-700 hover:bg-pink-100"
+                              onClick={() => handleInstagramUpload(post)}
+                            >
+                              <Instagram className="h-4 w-4" />
+                              <span>인스타그램</span>
+                            </Button>
+                          )}
+                        </>
                       )}
                       <AlertDialog>
                         <AlertDialogTrigger asChild>
