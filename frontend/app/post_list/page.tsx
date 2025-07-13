@@ -31,54 +31,9 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import apiClient from "@/lib/api"
 import { useToast } from "@/hooks/use-toast"
 import { InstagramPostingService } from "@/lib/services/instagram-posting.service"
+import { PostCard, Post } from "@/components/ui/post-card"
 
-// 게시글 타입 정의
-interface Post {
-  board_id?: string
-  id?: string
-  board_topic?: string
-  title?: string
-  board_description?: string
-  content?: string
-  influencer_id?: string
-  user_id?: string
-  team_id?: number
-  group_id?: number
-  board_platform?: number
-  platform?: string
-  board_hash_tag?: string
-  hashtags?: string[]
-  board_status?: number
-  status?: "draft" | "published" | "scheduled"
-  image_url?: string
-  created_at?: string
-  updated_at?: string
-  createdAt?: string
-  author?: string
-  modelName?: string
-  publishedAt?: string
-  scheduledAt?: string
-  engagement?: {
-    likes: number
-    comments: number
-  }
-  media?: {
-    type: "image" | "video" | "carousel"
-    urls: string[]
-    thumbnailUrl?: string
-  }
-  // 인스타그램 통계 추가
-  instagram_stats?: {
-    impressions?: number
-    reach?: number
-    profile_views?: number
-    follower_count?: number
-    saved_count?: number
-    video_views?: number
-  }
-  // Instagram 링크 추가
-  instagram_link?: string
-}
+
 
 
 
@@ -123,6 +78,22 @@ function PostListContent() {
       // 각 게시글에 대해 인스타그램 통계 정보 가져오기
       const transformedPosts: Post[] = await Promise.all(
         boardData.map(async (board: any) => {
+          // 인플루언서 정보 조회
+          let influencerName = 'AI 인플루언서'
+          let influencerDescription = ''
+          
+          if (board.influencer_id) {
+            try {
+              const influencerResponse = await apiClient.get(`/api/v1/influencers/${board.influencer_id}`)
+              if (influencerResponse) {
+                influencerName = influencerResponse.influencer_name || 'AI 인플루언서'
+                influencerDescription = influencerResponse.influencer_description || ''
+              }
+            } catch (error) {
+              console.warn(`Failed to fetch influencer info for ${board.influencer_id}:`, error)
+            }
+          }
+
           const basePost = {
             ...board,
             id: board.board_id,
@@ -132,10 +103,13 @@ function PostListContent() {
             platform: getPlatformName(board.board_platform),
             hashtags: board.board_hash_tag ? board.board_hash_tag.split(' ').filter((tag: string) => tag.trim()).map((tag: string) => tag.startsWith('#') ? tag : `#${tag}`) : [],
             status: getStatusName(board.board_status),
-            author: 'AI 인플루언서',
-            modelName: 'AI 인플루언서',
+            author: influencerName,
+            modelName: influencerName,
             scheduledAt: board.reservation_at,
-            publishedAt: board.pulished_at,
+            publishedAt: board.published_at,
+            // 인플루언서 정보: 별도 조회한 값 사용
+            influencerName: influencerName,
+            influencerDescription: influencerDescription,
             media: {
               type: "image" as const,
               urls: [board.image_url || "/placeholder.svg?height=400&width=400"],
@@ -469,46 +443,7 @@ function PostListContent() {
     setIsViewModalOpen(true)
   }
 
-  const getStatusBadge = (status: Post["status"]) => {
-    switch (status) {
-      case "published":
-        return <Badge className="bg-green-100 text-green-800">발행됨</Badge>
-      case "scheduled":
-        return <Badge className="bg-blue-100 text-blue-800">예약됨</Badge>
-      default:
-        return <Badge variant="secondary">알 수 없음</Badge>
-    }
-  }
 
-  const getPlatformIcon = (platform: string | undefined) => {
-    if (!platform) return "📱"
-    switch (platform.toLowerCase()) {
-      case "instagram":
-        return "📷"
-      case "youtube":
-        return "📺"
-      case "tiktok":
-        return "🎵"
-      case "blog":
-        return "📝"
-      default:
-        return "📱"
-    }
-  }
-
-  const getPlatformBadge = (platform: string | undefined) => {
-    if (!platform) return <Badge className="bg-gray-100 text-gray-800">알 수 없음</Badge>
-    const colors: Record<string, string> = {
-      Instagram: "bg-pink-100 text-pink-800",
-      Facebook: "bg-blue-100 text-blue-800",
-      Twitter: "bg-sky-100 text-sky-800",
-      TikTok: "bg-purple-100 text-purple-800",
-      YouTube: "bg-red-100 text-red-800",
-      Blog: "bg-green-100 text-green-800",
-    }
-
-    return <Badge className={colors[platform] || "bg-gray-100 text-gray-800"}>{platform}</Badge>
-  }
 
   const formatDate = (dateString: string | undefined) => {
     if (!dateString) return ""
@@ -721,7 +656,6 @@ function PostListContent() {
                             : "bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-200"
                             }`}
                         >
-                          <span className="text-base">{getPlatformIcon(platform || "")}</span>
                           {platform}
                         </button>
                       ))}
@@ -837,138 +771,19 @@ function PostListContent() {
             <p className="text-gray-500 text-lg">게시글을 불러오는 중...</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="grid gap-4">
             {filteredPosts.map((post) => (
-              <Card
+              <PostCard
                 key={post.id}
-                className="hover:shadow-lg transition-shadow cursor-pointer group"
-                onClick={() => handleViewPost(post)}
-              >
-                <CardContent className="p-6">
-                  <div className="flex justify-between items-start mb-4">
-                    <div className="flex-1">
-                      <div className="flex items-center space-x-3 mb-2">
-                        <h4 className="text-lg font-semibold text-gray-900">{post.title || post.board_topic}</h4>
-                        {getStatusBadge(post.status)}
-                        {getPlatformBadge(post.platform || "")}
-                      </div>
-                      <p className="text-gray-600 text-sm line-clamp-3 mb-3">
-                        {(post.content || post.board_description || '').length > 150 ? `${(post.content || post.board_description || '').substring(0, 150)}...` : (post.content || post.board_description || '')}
-                      </p>
-                      <div className="flex flex-wrap gap-1 mb-3">
-                        {(post.hashtags || []).length > 0 ? (
-                          (post.hashtags || []).map((tag, index) => (
-                            <span key={index} className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded">
-                              {tag}
-                            </span>
-                          ))
-                        ) : (
-                          post.board_hash_tag && post.board_hash_tag.split(' ').filter(tag => tag.trim()).map((tag, index) => (
-                            <span key={index} className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded">
-                              {tag.startsWith('#') ? tag : `#${tag}`}
-                            </span>
-                          ))
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex justify-between items-center">
-                    <div className="flex items-center space-x-4 text-sm text-gray-500">
-                      <div className="flex items-center space-x-1">
-                        <User className="h-4 w-4" />
-                        <span>{post.author || 'AI 인플루언서'}</span>
-                      </div>
-                    </div>
-                    <div className="flex items-center space-x-1 text-sm text-gray-500">
-                      <Calendar className="h-4 w-4" />
-                      {post.status === 'scheduled' && post.scheduledAt ? (
-                        <span>예약: {formatDate(post.scheduledAt)}</span>
-                      ) : post.status === 'published' && post.publishedAt ? (
-                        <span>발행: {formatDate(post.publishedAt)}</span>
-                      ) : (
-                        <span>생성: {formatDate(post.createdAt || post.created_at || "")}</span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* 성과지표와 액션 버튼들 */}
-                  <div className="flex items-center justify-between pt-3 border-t mt-3">
-                    <div className="flex items-center space-x-4 text-sm text-gray-600">
-                      {post.status === "published" && post.engagement && (
-                        <>
-                          <div className="flex items-center space-x-1">
-                            <Heart className="h-4 w-4 text-red-500" />
-                            <span>{post.engagement.likes.toLocaleString()}</span>
-                          </div>
-                          <div className="flex items-center space-x-1">
-                            <MessageCircle className="h-4 w-4 text-blue-500" />
-                            <span>{post.engagement.comments.toLocaleString()}</span>
-                          </div>
-                          {/* 인스타그램 추가 통계 표시 */}
-                          {post.platform === 'Instagram' && post.instagram_stats && (
-                            <>
-                              {post.instagram_stats.reach > 0 && (
-                                <div className="flex items-center space-x-1">
-                                  <Users className="h-4 w-4 text-orange-500" />
-                                  <span>{post.instagram_stats.reach.toLocaleString()}</span>
-                                </div>
-                              )}
-                              {post.instagram_stats.impressions > 0 && (
-                                <div className="flex items-center space-x-1">
-                                  <BarChart3 className="h-4 w-4 text-teal-500" />
-                                  <span>{post.instagram_stats.impressions.toLocaleString()}</span>
-                                </div>
-                              )}
-                            </>
-                          )}
-                        </>
-                      )}
-                    </div>
-
-                    <div className="flex items-center space-x-2" onClick={e => e.stopPropagation()}>
-                      {post.status !== 'published' && (
-                        <>
-                          <Button size="sm" variant="outline" className="flex items-center space-x-1" onClick={() => handlePublishPost(post.id || post.board_id || "")}>
-                            <UploadCloud className="h-4 w-4" />
-                            <span>업로드</span>
-                          </Button>
-                          {post.platform === 'Instagram' && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="flex items-center space-x-1 bg-pink-50 border-pink-200 text-pink-700 hover:bg-pink-100"
-                              onClick={() => handleInstagramUpload(post)}
-                            >
-                              <Instagram className="h-4 w-4" />
-                              <span>인스타그램</span>
-                            </Button>
-                          )}
-                        </>
-                      )}
-                      <AlertDialog>
-                        <AlertDialogTrigger asChild>
-                          <Button size="icon" variant="ghost" title="삭제">
-                            <Trash2 className="h-4 w-4 text-red-500" />
-                          </Button>
-                        </AlertDialogTrigger>
-                        <AlertDialogContent>
-                          <AlertDialogHeader>
-                            <AlertDialogTitle>게시글 삭제</AlertDialogTitle>
-                            <AlertDialogDescription>
-                              정말 이 게시글을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.
-                            </AlertDialogDescription>
-                          </AlertDialogHeader>
-                          <AlertDialogFooter>
-                            <AlertDialogCancel>취소</AlertDialogCancel>
-                            <AlertDialogAction onClick={() => handleDeletePost(post.id || post.board_id || "")} className="bg-red-600 hover:bg-red-700">삭제</AlertDialogAction>
-                          </AlertDialogFooter>
-                        </AlertDialogContent>
-                      </AlertDialog>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
+                post={post}
+                onView={handleViewPost}
+                onDelete={handleDeletePost}
+                onPublish={handlePublishPost}
+                onInstagramUpload={handleInstagramUpload}
+                showActions={true}
+                showInfluencerInfo={false}
+                variant="list"
+              />
             ))}
           </div>
         )}
@@ -1005,8 +820,24 @@ function PostListContent() {
                       ) : (
                         <h3 className="font-semibold text-gray-900">{selectedPost.title || selectedPost.board_topic}</h3>
                       )}
-                      {getStatusBadge(selectedPost.status)}
-                      {getPlatformBadge(selectedPost.platform || "")}
+                      <Badge className={
+                        selectedPost.status === "published" ? "bg-green-100 text-green-800" :
+                        selectedPost.status === "scheduled" ? "bg-blue-100 text-blue-800" :
+                        "bg-gray-100 text-gray-800"
+                      }>
+                        {selectedPost.status === "published" ? "발행됨" :
+                         selectedPost.status === "scheduled" ? "예약됨" : "임시저장"}
+                      </Badge>
+                      {selectedPost.platform && (
+                        <Badge className={
+                          selectedPost.platform === "Instagram" ? "bg-pink-100 text-pink-800" :
+                          selectedPost.platform === "Blog" ? "bg-orange-100 text-orange-800" :
+                          selectedPost.platform === "Facebook" ? "bg-blue-100 text-blue-800" :
+                          "bg-gray-100 text-gray-800"
+                        }>
+                          {selectedPost.platform}
+                        </Badge>
+                      )}
                     </div>
                     <div className="flex items-center space-x-2 text-sm text-gray-500 mt-1">
                       <User className="h-4 w-4" />

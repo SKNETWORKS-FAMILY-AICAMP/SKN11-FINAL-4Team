@@ -166,6 +166,7 @@ async def upload_image_simple(file: UploadFile = File(...)):
 async def get_boards(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=100),
+    influencer_id: str = Query(None, description="특정 인플루언서 ID로 필터링"),
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
@@ -210,9 +211,14 @@ async def get_boards(
 
         # 4. 게시글 조회
         try:
+            query = db.query(Board).filter(Board.influencer_id.in_(influencer_ids))
+            
+            # influencer_id 필터링 적용
+            if influencer_id is not None:
+                query = query.filter(Board.influencer_id == influencer_id)
+            
             boards = (
-                db.query(Board)
-                .filter(Board.influencer_id.in_(influencer_ids))
+                query
                 .order_by(Board.created_at.desc())
                 .offset(skip)
                 .limit(limit)
@@ -231,6 +237,9 @@ async def get_boards(
         
         enhanced_boards = []
         for board in boards:
+            # 인플루언서 정보 조회
+            influencer = influencer_cache.get(board.influencer_id)
+            
             board_dict = {
                 "board_id": board.board_id,
                 "influencer_id": board.influencer_id,
@@ -248,6 +257,9 @@ async def get_boards(
                 "platform_post_id": board.platform_post_id,
                 "created_at": board.created_at,
                 "updated_at": board.updated_at,
+                # 인플루언서 정보 추가
+                "influencer_name": influencer.influencer_name if influencer else None,
+                "influencer_description": influencer.influencer_description if influencer else None,
                 # 기본 통계 초기화 (실제 사용 가능한 필드만)
                 "instagram_stats": {
                     "like_count": 0,
@@ -341,6 +353,11 @@ async def get_board(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Board not found"
             )
         
+        # 인플루언서 정보 조회
+        influencer = db.query(AIInfluencer).filter(
+            AIInfluencer.influencer_id == board.influencer_id
+        ).first()
+        
         # Instagram 링크는 동적으로 생성 (데이터베이스에 저장하지 않음)
         board_dict = {
             "board_id": board.board_id,
@@ -359,23 +376,26 @@ async def get_board(
             "platform_post_id": board.platform_post_id,
             "created_at": board.created_at,
             "updated_at": board.updated_at,
-            "influencer_name": None  # BoardWithInfluencer 스키마에 맞춤
+            "influencer_name": influencer.influencer_name if influencer else None,
+            # 기본 통계 초기화
+            "instagram_stats": {
+                "like_count": 0,
+                "comments_count": 0,
+                "shares_count": 0,
+                "views_count": 0
+            }
         }
         
-        # Instagram 링크는 API에서 받아오거나 동적으로 생성
+        # Instagram 링크와 통계는 API에서 받아오거나 동적으로 생성
         if board.platform_post_id and board.board_platform == 0:
             try:
-                # 인플루언서 정보 조회
-                influencer = db.query(AIInfluencer).filter(
-                    AIInfluencer.influencer_id == board.influencer_id
-                ).first()
-                
                 if (influencer and 
                     influencer.instagram_is_active and 
                     influencer.instagram_access_token and 
                     influencer.instagram_id):
                     
                     # 인스타그램 게시글 정보 가져오기
+                    from app.services.instagram_posting_service import InstagramPostingService
                     instagram_service = InstagramPostingService()
                     post_info = await instagram_service.get_instagram_post_info(
                         board.platform_post_id,
@@ -383,22 +403,32 @@ async def get_board(
                         str(influencer.instagram_id)
                     )
                     
-                    if post_info and post_info.get("permalink"):
-                        board_dict["instagram_link"] = post_info.get("permalink")
-                        logger.info(f"Instagram link from API: {board_dict['instagram_link']}")
+                    if post_info:
+                        # Instagram 링크 설정
+                        if post_info.get("permalink"):
+                            board_dict["instagram_link"] = post_info.get("permalink")
+                        else:
+                            board_dict["instagram_link"] = f"https://www.instagram.com/p/{board.platform_post_id}/"
+                        
+                        # Instagram 통계 정보 업데이트
+                        board_dict["instagram_stats"].update({
+                            "like_count": post_info.get("like_count", 0),
+                            "comments_count": post_info.get("comments_count", 0),
+                            "shares_count": post_info.get("shares_count", 0),
+                            "views_count": post_info.get("views_count", 0)
+                        })
+                        
+                        logger.info(f"Instagram data fetched for board {board.board_id}")
                     else:
-                        # permalink가 없는 경우 동적 생성
+                        # post_info가 없는 경우 기본값 설정
                         board_dict["instagram_link"] = f"https://www.instagram.com/p/{board.platform_post_id}/"
-                        logger.info(f"Generated Instagram link: {board_dict['instagram_link']}")
                 else:
-                    # 인플루언서 정보가 없는 경우 동적 생성
+                    # 인플루언서 정보가 없는 경우 기본값 설정
                     board_dict["instagram_link"] = f"https://www.instagram.com/p/{board.platform_post_id}/"
-                    logger.info(f"Generated Instagram link: {board_dict['instagram_link']}")
             except Exception as e:
-                logger.error(f"Failed to fetch Instagram link for board {board.board_id}: {str(e)}")
-                # 에러 발생 시 동적 생성
+                logger.error(f"Failed to fetch Instagram data for board {board.board_id}: {str(e)}")
+                # 에러 발생 시 기본값 설정
                 board_dict["instagram_link"] = f"https://www.instagram.com/p/{board.platform_post_id}/"
-                logger.info(f"Generated Instagram link after error: {board_dict['instagram_link']}")
         
         return board_dict
         
