@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef, useMemo } from "react"
+import { useState, useEffect, useRef, useMemo, useCallback } from "react"
 import { Navigation } from "@/components/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -149,13 +149,15 @@ export default function ImageGeneratorPage() {
   const [dragActive, setDragActive] = useState(false)
   const [maskMode, setMaskMode] = useState(false)
   const [isDrawing, setIsDrawing] = useState(false)
-  const [brushSize, setBrushSize] = useState(20)
-  const [maskColor, setMaskColor] = useState("#FF0000") // 마스킹 색상 (기본값: 빨간색)
+  const [brushSize, setBrushSize] = useState(10)
+  const [maskColor, setMaskColor] = useState("#FFFFFF") // 마스킹 색상 (기본값: 빨간색)
   const [lastPoint, setLastPoint] = useState<{x: number, y: number} | null>(null)
+  const [activeImageIndex, setActiveImageIndex] = useState(0) // 현재 마스킹 중인 이미지 인덱스
   
   // Canvas refs
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const imageRef = useRef<HTMLImageElement>(null)
+  const lastPointRef = useRef<{x: number, y: number} | null>(null)
 
   // 모델 목록 가져오기 제거 - 워크플로우에 정의된 모델 자동 사용
 
@@ -218,7 +220,7 @@ export default function ImageGeneratorPage() {
       const selectedSizeData = PRESET_SIZES.find(size => size.id === selectedSize)
       
       const testImage: GeneratedImage = {
-        id: Date.now().toString(),
+        id: `img_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         prompt,
         negative_prompt: '',
         model: 'test-model',
@@ -307,32 +309,88 @@ export default function ImageGeneratorPage() {
 
   // 갤러리에서 이미지 선택 함수
   const handleSelectFromGallery = (image: GeneratedImage) => {
-    if (selectedImages.length >= 2) {
-      alert('최대 2개까지 이미지를 선택할 수 있습니다.')
+    const maxAllowed = getRequiredImageCount()
+    if (selectedImages.length >= maxAllowed) {
+      alert(`최대 ${maxAllowed}개까지 이미지를 선택할 수 있습니다.`)
       return
     }
     
     const newImage = {
-      id: `gallery_${image.id}`,
+      id: `gallery_${image.id}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       url: image.image_url,
       type: 'gallery' as const,
       galleryImage: image
     }
     
     setSelectedImages(prev => [...prev, newImage])
+  }
+
+  // 갤러리에서 추가 선택 함수
+  const handleAddFromGallery = (image: GeneratedImage) => {
+    const currentCount = selectedImages.length
+    const maxAllowed = getRequiredImageCount()
+    const remainingSlots = maxAllowed - currentCount
+    
+    if (remainingSlots <= 0) {
+      alert(`최대 ${maxAllowed}개까지 이미지를 선택할 수 있습니다.`)
+      return
+    }
+    
+    const newImage = {
+      id: `gallery_${image.id}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      url: image.image_url,
+      type: 'gallery' as const,
+      galleryImage: image
+    }
+    
+    setSelectedImages(prev => [...prev, newImage])
+  }
+
+  // 갤러리에서 선택된 이미지들
+  const [gallerySelectedImages, setGallerySelectedImages] = useState<GeneratedImage[]>([])
+
+  // 갤러리 모달에서 이미지 선택/해제
+  const handleGalleryImageToggle = (image: GeneratedImage) => {
+    const isSelected = gallerySelectedImages.some(img => img.id === image.id)
+    
+    if (isSelected) {
+      setGallerySelectedImages(prev => prev.filter(img => img.id !== image.id))
+    } else {
+      const currentCount = selectedImages.length + gallerySelectedImages.length
+      const maxAllowed = getRequiredImageCount()
+      if (currentCount >= maxAllowed) {
+        alert(`최대 ${maxAllowed}개까지 이미지를 선택할 수 있습니다.`)
+        return
+      }
+      setGallerySelectedImages(prev => [...prev, image])
+    }
+  }
+
+  // 갤러리에서 선택 완료
+  const handleGallerySelectionComplete = () => {
+    const newImages = gallerySelectedImages.map(image => ({
+      id: `gallery_${image.id}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      url: image.image_url,
+      type: 'gallery' as const,
+      galleryImage: image
+    }))
+    
+    setSelectedImages(prev => [...prev, ...newImages])
+    setGallerySelectedImages([])
     setShowGallerySelector(false)
   }
 
   // 파일 업로드 핸들러
   const handleFileUpload = (file: File) => {
     if (file && file.type.startsWith('image/')) {
-      if (selectedImages.length >= 2) {
-        alert('최대 2개까지 이미지를 선택할 수 있습니다.')
+      const maxAllowed = getRequiredImageCount()
+      if (selectedImages.length >= maxAllowed) {
+        alert(`최대 ${maxAllowed}개까지 이미지를 선택할 수 있습니다.`)
         return
       }
       
       const newImage = {
-        id: `upload_${Date.now()}`,
+        id: `upload_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         url: URL.createObjectURL(file),
         type: 'upload' as const,
         file: file
@@ -387,13 +445,21 @@ export default function ImageGeneratorPage() {
     }, 100)
   }
 
+  // 이미지 영역 내부인지 확인하는 함수
+  const isPointInImageBounds = useCallback((x: number, y: number): boolean => {
+    const image = imageRef.current
+    if (!image) return false
+    
+    return x >= 0 && x <= image.naturalWidth && y >= 0 && y <= image.naturalHeight
+  }, [])
+
   // 마스크 그리기 종료
   const stopMaskDrawing = () => {
     setMaskMode(false)
   }
 
   // 마스크 지우기
-  const clearMask = () => {
+  const clearMask = useCallback(() => {
     const canvas = canvasRef.current
     if (canvas) {
       const ctx = canvas.getContext('2d')
@@ -401,22 +467,30 @@ export default function ImageGeneratorPage() {
         ctx.clearRect(0, 0, canvas.width, canvas.height)
       }
     }
-  }
+  }, [])
 
   // Canvas 마우스 이벤트
-  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!maskMode) return
     setIsDrawing(true)
     
     const canvas = canvasRef.current
-    if (canvas) {
+    const image = imageRef.current
+    if (canvas && image) {
       const rect = canvas.getBoundingClientRect()
       const scaleX = canvas.width / rect.width
       const scaleY = canvas.height / rect.height
       
-      const x = (e.clientX - rect.left) * scaleX
-      const y = (e.clientY - rect.top) * scaleY
+      let x = (e.clientX - rect.left) * scaleX
+      let y = (e.clientY - rect.top) * scaleY
       
+      // 이미지 영역 내부인지 확인
+      if (!isPointInImageBounds(x, y)) {
+        setIsDrawing(false)
+        return
+      }
+      
+      lastPointRef.current = { x, y }
       setLastPoint({ x, y })
       
       const ctx = canvas.getContext('2d')
@@ -428,19 +502,25 @@ export default function ImageGeneratorPage() {
         ctx.fill()
       }
     }
-  }
+  }, [maskMode, maskColor, brushSize, isPointInImageBounds])
 
-  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!maskMode || !isDrawing) return
     
     const canvas = canvasRef.current
-    if (canvas && lastPoint) {
+    const image = imageRef.current
+    if (canvas && image && lastPointRef.current) {
       const rect = canvas.getBoundingClientRect()
       const scaleX = canvas.width / rect.width
       const scaleY = canvas.height / rect.height
       
-      const x = (e.clientX - rect.left) * scaleX
-      const y = (e.clientY - rect.top) * scaleY
+      let x = (e.clientX - rect.left) * scaleX
+      let y = (e.clientY - rect.top) * scaleY
+      
+      // 이미지 영역 내부인지 확인
+      if (!isPointInImageBounds(x, y)) {
+        return
+      }
       
       const ctx = canvas.getContext('2d')
       if (ctx) {
@@ -451,19 +531,20 @@ export default function ImageGeneratorPage() {
         ctx.lineJoin = 'round'
         
         ctx.beginPath()
-        ctx.moveTo(lastPoint.x, lastPoint.y)
+        ctx.moveTo(lastPointRef.current.x, lastPointRef.current.y)
         ctx.lineTo(x, y)
         ctx.stroke()
         
-        setLastPoint({ x, y })
+        lastPointRef.current = { x, y }
       }
     }
-  }
+  }, [maskMode, isDrawing, maskColor, brushSize, isPointInImageBounds])
 
-  const handleMouseUp = () => {
+  const handleMouseUp = useCallback(() => {
     setIsDrawing(false)
     setLastPoint(null)
-  }
+    lastPointRef.current = null
+  }, [])
 
   // 마스크 데이터 추출
   const getMaskData = () => {
@@ -554,7 +635,7 @@ export default function ImageGeneratorPage() {
         const selectedSizeData = PRESET_SIZES.find(size => size.id === selectedSize)
         
         const newTestImage: GeneratedImage = {
-          id: Date.now().toString(),
+          id: `img_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
           prompt: previewImage?.prompt || prompt,
           negative_prompt: '',
           model: 'test-model',
@@ -599,10 +680,13 @@ export default function ImageGeneratorPage() {
     setUploadedFile(null)
     setUploadedImageUrl(null)
     setSelectedGalleryImage(null)
+    setGallerySelectedImages([])
     setMaskMode(false)
-    setBrushSize(20)
-    setMaskColor("#FF0000")
+    setBrushSize(10)
+    setMaskColor("#FFFFFF")
     setLastPoint(null)
+    lastPointRef.current = null
+    setActiveImageIndex(0)
     if (canvasRef.current) {
       const ctx = canvasRef.current.getContext('2d')
       if (ctx) {
@@ -610,8 +694,6 @@ export default function ImageGeneratorPage() {
       }
     }
   }
-
-
 
   // 필터 관련 함수들
   const handleApplyFilters = () => {
@@ -695,25 +777,47 @@ export default function ImageGeneratorPage() {
   const selectMethod1 = () => {
     setMaskMode(false)
     setSelectedMethod(1)
-    // 방법 1: 단순 프롬프트 수정 모드로 전환
+    // 방법 1: 단순 프롬프트 수정 모드로 전환 (이미지 1개 필요)
+    if (selectedImages.length > 1) {
+      // 첫 번째 이미지만 유지하고 나머지는 제거
+      const firstImage = selectedImages[0]
+      selectedImages.slice(1).forEach(image => {
+        if (image.type === 'upload' && image.url) {
+          URL.revokeObjectURL(image.url)
+        }
+      })
+      setSelectedImages([firstImage])
+    }
   }
 
   const selectMethod2 = () => {
     setMaskMode(true)
     setSelectedMethod(2)
-    // 방법 2: 마스킹 수정 모드로 전환
+    // 방법 2: 마스킹 수정 모드로 전환 (이미지 1개 필요)
+    if (selectedImages.length > 1) {
+      // 첫 번째 이미지만 유지하고 나머지는 제거
+      const firstImage = selectedImages[0]
+      selectedImages.slice(1).forEach(image => {
+        if (image.type === 'upload' && image.url) {
+          URL.revokeObjectURL(image.url)
+        }
+      })
+      setSelectedImages([firstImage])
+    }
   }
 
   const selectMethod3 = () => {
     setMaskMode(false)
     setSelectedMethod(3)
-    // 방법 3: 이미지 합성 모드로 전환
+    // 방법 3: 이미지 합성 모드로 전환 (이미지 2개 필요)
+    // 이미지가 2개 미만이면 추가 선택 안내
   }
 
   const selectMethod4 = () => {
     setMaskMode(true)
     setSelectedMethod(4)
-    // 방법 4: 복합 마스킹 모드로 전환
+    // 방법 4: 복합 마스킹 모드로 전환 (이미지 2개 필요)
+    // 이미지가 2개 미만이면 추가 선택 안내
   }
 
   // 현재 선택된 방법 확인
@@ -970,10 +1074,10 @@ export default function ImageGeneratorPage() {
                           </div>
                           <div>
                             <h4 className="font-medium text-sm">단순 설명 수정</h4>
-                            <p className="text-xs text-gray-600">이미지 1개 + 수정정</p>
+                            <p className="text-xs text-gray-600">이미지 1개 + 수정</p>
                           </div>
                         </div>
-                        <p className="text-xs text-gray-500">기존 이미지를 프롬프트로 전체 수정</p>
+                        <p className="text-xs text-gray-500">기존 이미지를 설명으로 전체 수정</p>
                       </button>
 
                       {/* 방법 2: 마스킹 수정 */}
@@ -1015,7 +1119,7 @@ export default function ImageGeneratorPage() {
                             <p className="text-xs text-gray-600">이미지 2개 + 프롬프트</p>
                           </div>
                         </div>
-                        <p className="text-xs text-gray-500">두 이미지를 프롬프트로 합성</p>
+                        <p className="text-xs text-gray-500">두 이미지를 설명과 함께 합성</p>
                       </button>
 
                       {/* 방법 4: 복합 마스킹 */}
@@ -1059,87 +1163,174 @@ export default function ImageGeneratorPage() {
                       </div>
 
                       {selectedImages.length === 0 ? (
-                        <div className="space-y-4">
+                        <div className="space-y-6">
+                          {/* 메인 업로드 영역 */}
                           <div 
-                            className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
+                            className={`relative group transition-all duration-300 ${
                               dragActive 
-                                ? "border-blue-400 bg-blue-50" 
-                                : "border-gray-300 hover:border-gray-400"
+                                ? "scale-105" 
+                                : "hover:scale-[1.02]"
                             }`}
                             onDragEnter={handleDrag}
                             onDragLeave={handleDrag}
                             onDragOver={handleDrag}
                             onDrop={handleDrop}
                           >
-                            <Upload className={`h-12 w-12 mx-auto mb-4 ${
-                              dragActive ? "text-blue-600" : "text-gray-400"
-                            }`} />
-                            <p className="text-lg font-medium text-gray-900 mb-2">이미지 업로드</p>
-                            <p className="text-sm text-gray-600 mb-4">
-                              {getRequiredImageCount() === 1 
-                                ? "수정할 이미지를 드래그하여 놓거나 클릭하여 선택하세요"
-                                : "합성할 이미지들을 드래그하여 놓거나 클릭하여 선택하세요"
+                            <div className={`
+                              relative overflow-hidden rounded-xl border-2 border-dashed transition-all duration-300
+                              ${dragActive 
+                                ? "border-blue-500 bg-gradient-to-br from-blue-50 to-indigo-50 shadow-lg shadow-blue-100" 
+                                : "border-gray-300 bg-gradient-to-br from-gray-50 to-white hover:border-blue-400 hover:bg-gradient-to-br hover:from-blue-50 hover:to-indigo-50"
                               }
-                            </p>
-                            <input
-                              type="file"
-                              accept="image/*"
-                              multiple
-                              onChange={handleFileSelect}
-                              className="hidden"
-                              id="file-upload"
-                            />
-                            <label htmlFor="file-upload">
-                              <Button variant="outline" asChild className="cursor-pointer">
-                                <span>
-                                  <Upload className="h-4 w-4 mr-2" />
-                                  파일 선택
-                                </span>
-                              </Button>
-                            </label>
+                            `}>
+                              {/* 배경 패턴 */}
+                              <div className="absolute inset-0 opacity-5">
+                                <div className="absolute top-4 left-4 w-8 h-8 border-2 border-gray-400 rounded-lg"></div>
+                                <div className="absolute top-12 right-8 w-6 h-6 border-2 border-gray-400 rounded-full"></div>
+                                <div className="absolute bottom-8 left-12 w-4 h-4 border-2 border-gray-400 rotate-45"></div>
+                                <div className="absolute bottom-16 right-4 w-10 h-10 border-2 border-gray-400 rounded-lg"></div>
+                              </div>
+                              
+                              <div className="relative p-12 text-center">
+                                {/* 아이콘 영역 */}
+                                <div className={`
+                                  relative mx-auto mb-6 w-20 h-20 rounded-full flex items-center justify-center transition-all duration-300
+                                  ${dragActive 
+                                    ? "bg-blue-100 shadow-lg shadow-blue-200" 
+                                    : "bg-gray-100 group-hover:bg-blue-100 group-hover:shadow-lg group-hover:shadow-blue-200"
+                                  }
+                                `}>
+                                  <Upload className={`
+                                    h-8 w-8 transition-all duration-300
+                                    ${dragActive 
+                                      ? "text-blue-600 scale-110" 
+                                      : "text-gray-500 group-hover:text-blue-600 group-hover:scale-110"
+                                    }
+                                  `} />
+                                  {/* 애니메이션 효과 */}
+                                  {dragActive && (
+                                    <div className="absolute inset-0 rounded-full border-2 border-blue-300 animate-ping"></div>
+                                  )}
+                                </div>
+                                
+                                {/* 텍스트 영역 */}
+                                <div className="space-y-3">
+                                  <h3 className={`
+                                    text-xl font-semibold transition-colors duration-300
+                                    ${dragActive ? "text-blue-700" : "text-gray-800 group-hover:text-blue-700"}
+                                  `}>
+                                    {dragActive ? "여기에 놓으세요!" : "이미지 업로드"}
+                                  </h3>
+                                  <p className={`
+                                    text-sm transition-colors duration-300 max-w-md mx-auto
+                                    ${dragActive ? "text-blue-600" : "text-gray-600 group-hover:text-blue-600"}
+                                  `}>
+                                    {getRequiredImageCount() === 1 
+                                      ? "수정할 이미지를 드래그하여 놓거나 클릭하여 선택하세요"
+                                      : "합성할 이미지들을 드래그하여 놓거나 클릭하여 선택하세요"
+                                    }
+                                  </p>
+                                  <p className="text-xs text-gray-500">
+                                    지원 형식: JPG, PNG, GIF, WebP
+                                  </p>
+                                </div>
+                                
+                                {/* 파일 선택 버튼 */}
+                                <div className="mt-6">
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    multiple
+                                    onChange={handleFileSelect}
+                                    className="hidden"
+                                    id="file-upload"
+                                  />
+                                  <label htmlFor="file-upload">
+                                    <Button 
+                                      className={`
+                                        transition-all duration-300 cursor-pointer
+                                        ${dragActive 
+                                          ? "bg-blue-600 hover:bg-blue-700 text-white shadow-lg" 
+                                          : "bg-white hover:bg-blue-50 text-gray-700 border-gray-300 hover:border-blue-400 hover:text-blue-700 shadow-sm hover:shadow-md"
+                                        }
+                                      `} 
+                                      asChild
+                                    >
+                                      <span className="flex items-center gap-2">
+                                        <Upload className="h-4 w-4" />
+                                        파일 선택
+                                      </span>
+                                    </Button>
+                                  </label>
+                                </div>
+                              </div>
+                            </div>
                           </div>
                           
-                          <div className="text-center">
-                            <p className="text-sm text-gray-500 mb-3">또는</p>
+                          {/* 구분선 */}
+                          <div className="relative">
+                            <div className="absolute inset-0 flex items-center">
+                              <div className="w-full border-t border-gray-200"></div>
+                            </div>
+                            <div className="relative flex justify-center text-sm">
+                              <span className="bg-white px-4 text-gray-500">또는</span>
+                            </div>
+                          </div>
+                          
+                          {/* 갤러리 선택 버튼 */}
+                          <div className="text-center mb-8">
                             <Button 
                               variant="outline" 
                               onClick={() => setShowGallerySelector(true)}
                               disabled={images.length === 0}
+                              className="px-8 py-3 text-base font-medium transition-all duration-300 hover:scale-105"
                             >
-                              <ImageIcon className="h-4 w-4 mr-2" />
+                              <ImageIcon className="h-5 w-5 mr-2" />
                               갤러리에서 선택
                             </Button>
                             {images.length === 0 && (
-                              <p className="text-xs text-gray-400 mt-2">
-                                갤러리에 이미지가 없습니다. 먼저 이미지를 생성해보세요.
-                              </p>
+                              <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                                <p className="text-sm text-amber-700">
+                                  💡 갤러리에 이미지가 없습니다. 먼저 이미지를 생성해보세요.
+                                </p>
+                              </div>
                             )}
                           </div>
                         </div>
                       ) : (
                         <div className="space-y-4">
                           {/* 선택된 이미지들 표시 */}
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className={`grid gap-6 ${
+                            selectedImages.length === 1 
+                              ? 'grid-cols-1' 
+                              : 'grid-cols-1 md:grid-cols-2'
+                          }`}>
                             {selectedImages.map((image, index) => (
                               <div key={image.id} className="relative group">
-                                <div className="absolute top-2 left-2 bg-blue-500 text-white text-xs px-2 py-1 rounded z-10">
+                                <div className="absolute top-3 left-3 bg-blue-500 text-white text-xs px-2 py-1 rounded z-10 shadow-sm">
                                   이미지 {index + 1}
                                 </div>
-                                <img
-                                  src={image.url}
-                                  alt={`선택된 이미지 ${index + 1}`}
-                                  className="w-full h-32 object-contain rounded-lg shadow-md bg-gray-50"
-                                />
+                                <div className={`bg-gray-50 rounded-lg shadow-md overflow-hidden ${
+                                  selectedImages.length === 1 
+                                    ? 'aspect-video' 
+                                    : 'aspect-square'
+                                }`}>
+                                  <img
+                                    src={image.url}
+                                    alt={`선택된 이미지 ${index + 1}`}
+                                    className="w-full h-full object-contain p-2"
+                                  />
+                                </div>
                                 <Button
                                   variant="destructive"
                                   size="sm"
                                   onClick={() => handleRemoveImage(image.id)}
-                                  className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
+                                  className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
                                 >
                                   <Trash2 className="h-4 w-4" />
                                 </Button>
                                 {image.type === 'gallery' && image.galleryImage && (
-                                  <div className="absolute bottom-2 left-2 bg-blue-600 text-white text-xs px-2 py-1 rounded">
+                                  <div className="absolute bottom-3 left-3 bg-blue-600 text-white text-xs px-2 py-1 rounded shadow-sm">
                                     갤러리
                                   </div>
                                 )}
@@ -1149,37 +1340,55 @@ export default function ImageGeneratorPage() {
 
                           {/* 추가 선택 옵션 */}
                           {selectedImages.length < getRequiredImageCount() && (
-                            <div className="flex gap-2 justify-center">
-                              <input
-                                type="file"
-                                accept="image/*"
-                                multiple
-                                onChange={handleFileSelect}
-                                className="hidden"
-                                id="additional-file-upload"
-                              />
-                              <label htmlFor="additional-file-upload">
-                                <Button variant="outline" asChild size="sm">
-                                  <span>
-                                    <Upload className="h-4 w-4 mr-2" />
-                                    추가 업로드
-                                  </span>
-                                </Button>
-                              </label>
-                              <Button 
-                                variant="outline" 
-                                onClick={() => setShowGallerySelector(true)}
-                                disabled={images.length === 0}
-                                size="sm"
-                              >
-                                <ImageIcon className="h-4 w-4 mr-2" />
-                                갤러리에서 추가
-                              </Button>
+                            <div className="mt-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                              <div className="text-center space-y-3">
+                                <p className="text-sm font-medium text-gray-700">
+                                  추가 이미지가 필요합니다 ({selectedImages.length}/{getRequiredImageCount()})
+                                </p>
+                                <div className="flex gap-3 justify-center">
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    multiple
+                                    onChange={handleFileSelect}
+                                    className="hidden"
+                                    id="additional-file-upload"
+                                  />
+                                  <label htmlFor="additional-file-upload">
+                                    <Button 
+                                      variant="outline" 
+                                      asChild 
+                                      size="sm"
+                                      className="transition-all duration-300 hover:scale-105"
+                                    >
+                                      <span className="flex items-center gap-2">
+                                        <Upload className="h-4 w-4" />
+                                        추가 업로드
+                                      </span>
+                                    </Button>
+                                  </label>
+                                  <Button 
+                                    variant="outline" 
+                                    onClick={() => setShowGallerySelector(true)}
+                                    disabled={images.length === 0}
+                                    size="sm"
+                                    className="transition-all duration-300 hover:scale-105"
+                                  >
+                                    <ImageIcon className="h-4 w-4 mr-2" />
+                                    갤러리에서 추가
+                                  </Button>
+                                </div>
+                              </div>
                             </div>
                           )}
 
-                          <div className="text-center">
-                            <Button variant="outline" onClick={handleRemoveAllImages} size="sm">
+                          <div className="text-center pt-4 border-t border-gray-200">
+                            <Button 
+                              variant="outline" 
+                              onClick={handleRemoveAllImages} 
+                              size="sm"
+                              className="text-red-600 border-red-200 hover:bg-red-50 hover:border-red-300 transition-all duration-300 mb-6"
+                            >
                               <Trash2 className="h-4 w-4 mr-2" />
                               모든 이미지 제거
                             </Button>
@@ -1189,9 +1398,9 @@ export default function ImageGeneratorPage() {
                     </div>
                   )}
 
-                  {/* 단계 3: 프롬프트 입력 (이미지가 선택된 경우에만 표시) */}
-                  {selectedImages.length > 0 && (
-                    <div className="border-t pt-6 space-y-4">
+                  {/* 단계 3: 프롬프트 입력 (수정 방법이 선택된 경우에만 표시) */}
+                  {getCurrentMethod() > 0 && (
+                    <div className="border-t pt-6 space-y-4 mt-6">
                       <div className="flex items-center gap-2">
                         <div className="w-6 h-6 rounded-full flex items-center justify-center text-sm font-medium bg-blue-500 text-white">
                           3
@@ -1220,7 +1429,7 @@ export default function ImageGeneratorPage() {
 
                   {/* 단계 4: 추가 도구 (방법이 선택된 경우에만 표시) */}
                   {getCurrentMethod() > 0 && (
-                    <div className="border-t pt-6 space-y-4">
+                    <div className="border-t pt-6 space-y-4 mt-6">
                       <div className="flex items-center gap-2">
                         <div className="w-6 h-6 rounded-full flex items-center justify-center text-sm font-medium bg-blue-500 text-white">
                           4
@@ -1238,6 +1447,29 @@ export default function ImageGeneratorPage() {
                         {(getCurrentMethod() === 2 || getCurrentMethod() === 4) && (
                           <div className="space-y-3">
                             <Label className="text-sm font-medium">수정할 영역 선택</Label>
+                            
+                            {/* 방법 4번일 때 이미지 선택 버튼 */}
+                            {getCurrentMethod() === 4 && selectedImages.length > 1 && (
+                              <div className="flex gap-2">
+                                <Button
+                                  variant={activeImageIndex === 0 ? "default" : "outline"}
+                                  size="sm"
+                                  onClick={() => setActiveImageIndex(0)}
+                                  className="flex-1"
+                                >
+                                  이미지 1 마스킹
+                                </Button>
+                                <Button
+                                  variant={activeImageIndex === 1 ? "default" : "outline"}
+                                  size="sm"
+                                  onClick={() => setActiveImageIndex(1)}
+                                  className="flex-1"
+                                >
+                                  이미지 2 마스킹
+                                </Button>
+                              </div>
+                            )}
+                            
                             <div className="space-y-3">
                               {/* 브러시 크기 조절 */}
                               <div>
@@ -1269,7 +1501,7 @@ export default function ImageGeneratorPage() {
                                     className="w-12 h-8 rounded border cursor-pointer"
                                   />
                                   <div className="flex gap-1">
-                                    {['#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF', '#00FFFF', '#FFA500', '#800080'].map((color) => (
+                                    {['#FFFFFF', '#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF', '#00FFFF', '#FFA500', '#800080'].map((color) => (
                                       <button
                                         key={color}
                                         onClick={() => setMaskColor(color)}
@@ -1288,8 +1520,8 @@ export default function ImageGeneratorPage() {
                               <div className="relative border rounded-lg overflow-hidden bg-gray-50">
                                 <img
                                   ref={imageRef}
-                                  src={selectedImages[0]?.url}
-                                  alt="마스킹 대상 이미지"
+                                  src={selectedImages[activeImageIndex]?.url}
+                                  alt={`마스킹 대상 이미지 ${activeImageIndex + 1}`}
                                   className="w-full h-auto max-h-64 object-contain"
                                   style={{ display: maskMode ? 'block' : 'none' }}
                                 />
@@ -1319,7 +1551,7 @@ export default function ImageGeneratorPage() {
 
                         {/* 수정 실행 버튼 */}
                         <Button 
-                          className="w-full"
+                          className="w-full bg-blue-600 hover:bg-blue-700 text-white"
                           size="lg"
                           onClick={() => {
                             const editPrompt = (document.getElementById('edit-prompt') as HTMLTextAreaElement)?.value
@@ -1483,6 +1715,9 @@ export default function ImageGeneratorPage() {
               <DialogTitle>
                 생성된 이미지
               </DialogTitle>
+              <p>
+                생성된 이미지는 자동으로 갤러리에 저장됩니다.
+              </p>
             </DialogHeader>
             {previewImage ? (
               <div className="space-y-6">
@@ -1519,12 +1754,11 @@ export default function ImageGeneratorPage() {
                     다운로드
                   </Button>
                   <Button
-                    onClick={() => handleDeleteImage(previewImage.id)}
-                    variant="destructive"
-                    className="flex-1"
+                    onClick={handleRegenerate}
+                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
                   >
-                    <Trash2 className="h-4 w-4 mr-2" />
-                    삭제
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    재생성
                   </Button>
                 </div>
               </div>
@@ -1605,42 +1839,63 @@ export default function ImageGeneratorPage() {
             <DialogHeader>
               <DialogTitle>갤러리에서 이미지 선택</DialogTitle>
               <p className="text-sm text-gray-600">
-                생성된 이미지 중에서 수정하고 싶은 이미지를 선택하세요.
+                생성된 이미지 중에서 수정하고 싶은 이미지를 선택하세요. (최대 {getRequiredImageCount()}개까지 선택 가능)
               </p>
+              <div className="flex items-center gap-2 text-sm text-blue-600">
+                <span>선택된 이미지: {gallerySelectedImages.length}개</span>
+                {selectedImages.length > 0 && (
+                  <span className="text-gray-500">(기존: {selectedImages.length}개)</span>
+                )}
+              </div>
             </DialogHeader>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-              {images.map((image) => (
-                <Card key={image.id} className="overflow-hidden cursor-pointer" onClick={() => handleSelectFromGallery(image)}>
-                  <div className="aspect-square relative">
-                    <img
-                      src={image.image_url}
-                      alt={image.prompt}
-                      className="w-full h-full object-cover"
-                    />
-                    <div className="absolute top-2 right-2">
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          handleDeleteImage(image.id)
-                        }}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+              {images.map((image) => {
+                const isSelected = gallerySelectedImages.some(img => img.id === image.id)
+                return (
+                  <Card 
+                    key={image.id} 
+                    className={`overflow-hidden cursor-pointer transition-all duration-200 ${
+                      isSelected ? 'ring-2 ring-blue-500 bg-blue-50' : 'hover:shadow-md'
+                    }`} 
+                    onClick={() => handleGalleryImageToggle(image)}
+                  >
+                    <div className="aspect-square relative">
+                      <img
+                        src={image.image_url}
+                        alt={image.prompt}
+                        className="w-full h-full object-cover"
+                      />
+                      {/* 선택 표시 */}
+                      {isSelected && (
+                        <div className="absolute top-2 left-2 bg-blue-500 text-white rounded-full w-6 h-6 flex items-center justify-center">
+                          <span className="text-xs font-bold">✓</span>
+                        </div>
+                      )}
+                      <div className="absolute top-2 right-2">
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleDeleteImage(image.id)
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </div>
-                  </div>
-                  <CardContent className="p-4">
-                    <p className="text-sm text-gray-600 line-clamp-2 mb-2">
-                      {image.prompt}
-                    </p>
-                    <div className="flex justify-between items-center text-xs text-gray-500">
-                      <span>{image.width} × {image.height}</span>
-                      <span>{new Date(image.created_at).toLocaleDateString()}</span>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
+                    <CardContent className="p-4">
+                      <p className="text-sm text-gray-600 line-clamp-2 mb-2">
+                        {image.prompt}
+                      </p>
+                      <div className="flex justify-between items-center text-xs text-gray-500">
+                        <span>{image.width} × {image.height}</span>
+                        <span>{new Date(image.created_at).toLocaleDateString()}</span>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )
+              })}
             </div>
             {images.length === 0 && (
               <div className="text-center py-12">
@@ -1649,10 +1904,30 @@ export default function ImageGeneratorPage() {
                 <p className="text-gray-600">먼저 이미지를 생성해보세요</p>
               </div>
             )}
-            <div className="flex justify-end mt-4">
-              <Button variant="outline" onClick={handleCloseGallerySelector}>
-                닫기
-              </Button>
+            <div className="flex justify-between items-center mt-6 pt-4 border-t">
+              <div className="text-sm text-gray-600">
+                {gallerySelectedImages.length > 0 && (
+                  <span>선택된 이미지: {gallerySelectedImages.length}개</span>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <Button 
+                  variant="outline" 
+                  onClick={() => {
+                    setGallerySelectedImages([])
+                    setShowGallerySelector(false)
+                  }}
+                >
+                  취소
+                </Button>
+                <Button 
+                  onClick={handleGallerySelectionComplete}
+                  disabled={gallerySelectedImages.length === 0}
+                  className="bg-blue-600 hover:bg-blue-700 text-white"
+                >
+                  선택하기 ({gallerySelectedImages.length}개)
+                </Button>
+              </div>
             </div>
           </DialogContent>
         </Dialog>

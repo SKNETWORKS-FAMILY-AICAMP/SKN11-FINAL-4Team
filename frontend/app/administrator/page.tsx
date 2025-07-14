@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { User, Save, ShieldCheck, ShieldX, Plus, Trash2, Users, Eye, EyeOff, Key, Loader2 } from "lucide-react"
+import { User, Save, ShieldCheck, ShieldX, Plus, Trash2, Users, Eye, EyeOff, Key, Loader2, FileText, Upload, Download } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { AlertDialog, AlertDialogTrigger, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogCancel, AlertDialogAction } from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
@@ -50,6 +50,13 @@ export default function AdministratorPage() {
   const [selectedTeamForUserAssignment, setSelectedTeamForUserAssignment] = useState<number | null>(null)
   const [editingTokenAlias, setEditingTokenAlias] = useState<string>("")
   const [isEditingAlias, setIsEditingAlias] = useState(false)
+
+  // 문서 관리 관련 상태들
+  const [documents, setDocuments] = useState<any[]>([])
+  const [loadingDocuments, setLoadingDocuments] = useState(false)
+  const [uploadingDocument, setUploadingDocument] = useState(false)
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([])
+  const [dragActive, setDragActive] = useState(false)
 
   // API에서 데이터 로드
   useEffect(() => {
@@ -543,6 +550,7 @@ export default function AdministratorPage() {
                 <TabsList className="mb-6">
                   <TabsTrigger value="group">권한 그룹 관리</TabsTrigger>
                   <TabsTrigger value="hf">허깅페이스 토큰 관리</TabsTrigger>
+                  <TabsTrigger value="documents">문서 관리</TabsTrigger>
                 </TabsList>
                 <TabsContent value="group">
                   <Card>
@@ -1074,6 +1082,249 @@ export default function AdministratorPage() {
                           </div>
                         </div>
                       )}
+                    </CardContent>
+                  </Card>
+                </TabsContent>
+                
+                {/* 문서 관리 탭 */}
+                <TabsContent value="documents">
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <FileText className="h-5 w-5 text-blue-600" />
+                        문서 관리
+                      </CardTitle>
+                      <CardDescription>
+                        RAG 챗봇에서 사용할 문서를 업로드하고 관리할 수 있습니다.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      {/* 문서 업로드 섹션 */}
+                      <div className="mb-6 pb-6 border-b">
+                        <h4 className="font-medium text-gray-900 mb-4">문서 업로드</h4>
+                        
+                        {/* 드래그 앤 드롭 영역 */}
+                        <div 
+                          className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
+                            dragActive 
+                              ? "border-blue-400 bg-blue-50" 
+                              : "border-gray-300 hover:border-gray-400"
+                          }`}
+                          onDragEnter={(e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            setDragActive(true)
+                          }}
+                          onDragLeave={(e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            setDragActive(false)
+                          }}
+                          onDragOver={(e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                          }}
+                          onDrop={(e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            setDragActive(false)
+                            
+                            const files = Array.from(e.dataTransfer.files)
+                            setSelectedFiles(prev => [...prev, ...files])
+                          }}
+                        >
+                          <Upload className={`h-12 w-12 mx-auto mb-4 ${
+                            dragActive ? "text-blue-600" : "text-gray-400"
+                          }`} />
+                          <p className="text-lg font-medium text-gray-900 mb-2">문서 업로드</p>
+                          <p className="text-sm text-gray-600 mb-4">
+                            PDF, DOCX, TXT 파일을 드래그하여 놓거나 클릭하여 선택하세요
+                          </p>
+                          <input
+                            type="file"
+                            accept=".pdf,.docx,.txt"
+                            multiple
+                            onChange={(e) => {
+                              const files = Array.from(e.target.files || [])
+                              setSelectedFiles(prev => [...prev, ...files])
+                            }}
+                            className="hidden"
+                            id="document-upload"
+                          />
+                          <label htmlFor="document-upload">
+                            <Button variant="outline" asChild className="cursor-pointer">
+                              <span>
+                                <Upload className="h-4 w-4 mr-2" />
+                                파일 선택
+                              </span>
+                            </Button>
+                          </label>
+                        </div>
+
+                        {/* 선택된 파일 목록 */}
+                        {selectedFiles.length > 0 && (
+                          <div className="mt-4">
+                            <h5 className="font-medium text-gray-900 mb-2">선택된 파일 ({selectedFiles.length}개)</h5>
+                            <div className="space-y-2">
+                              {selectedFiles.map((file, index) => (
+                                <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                                  <div className="flex items-center gap-3">
+                                    <FileText className="h-5 w-5 text-gray-500" />
+                                    <div>
+                                      <p className="font-medium text-sm">{file.name}</p>
+                                      <p className="text-xs text-gray-500">
+                                        {(file.size / 1024 / 1024).toFixed(2)} MB
+                                      </p>
+                                    </div>
+                                  </div>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => {
+                                      setSelectedFiles(prev => prev.filter((_, i) => i !== index))
+                                    }}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              ))}
+                            </div>
+                            <div className="flex gap-2 mt-4">
+                              <Button
+                                onClick={() => setSelectedFiles([])}
+                                variant="outline"
+                                size="sm"
+                              >
+                                모든 파일 제거
+                              </Button>
+                              <Button
+                                onClick={() => {
+                                  // TODO: 실제 업로드 로직 구현
+                                  console.log('업로드할 파일들:', selectedFiles)
+                                  setUploadingDocument(true)
+                                  setTimeout(() => {
+                                    setUploadingDocument(false)
+                                    setSelectedFiles([])
+                                    toast({
+                                      title: "업로드 완료",
+                                      description: `${selectedFiles.length}개의 문서가 성공적으로 업로드되었습니다.`,
+                                      variant: "default",
+                                    })
+                                  }, 2000)
+                                }}
+                                disabled={selectedFiles.length === 0 || uploadingDocument}
+                                className="bg-blue-600 hover:bg-blue-700 text-white"
+                              >
+                                {uploadingDocument ? (
+                                  <>
+                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                    업로드 중...
+                                  </>
+                                ) : (
+                                  <>
+                                    <Upload className="h-4 w-4 mr-2" />
+                                    업로드 ({selectedFiles.length}개)
+                                  </>
+                                )}
+                              </Button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 문서 목록 섹션 */}
+                      <div>
+                        <div className="flex items-center justify-between mb-4">
+                          <h4 className="font-medium text-gray-900">업로드된 문서</h4>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              // TODO: 문서 목록 새로고침
+                              setLoadingDocuments(true)
+                              setTimeout(() => {
+                                setLoadingDocuments(false)
+                                // 임시 데이터
+                                setDocuments([
+                                  { id: 1, name: '회사_정책서.pdf', size: '2.5 MB', uploaded_at: '2024-01-15', status: 'processed' },
+                                  { id: 2, name: '제품_매뉴얼.docx', size: '1.8 MB', uploaded_at: '2024-01-14', status: 'processing' },
+                                  { id: 3, name: 'FAQ.txt', size: '0.3 MB', uploaded_at: '2024-01-13', status: 'processed' },
+                                ])
+                              }, 1000)
+                            }}
+                            disabled={loadingDocuments}
+                          >
+                            {loadingDocuments ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              '새로고침'
+                            )}
+                          </Button>
+                        </div>
+
+                        {documents.length === 0 ? (
+                          <div className="text-center py-12">
+                            <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                            <p className="text-lg font-medium text-gray-900 mb-2">업로드된 문서가 없습니다</p>
+                            <p className="text-gray-600">위에서 문서를 업로드해보세요</p>
+                          </div>
+                        ) : (
+                          <div className="space-y-3">
+                            {documents.map((doc) => (
+                              <div key={doc.id} className="flex items-center justify-between p-4 border rounded-lg">
+                                <div className="flex items-center gap-3">
+                                  <FileText className="h-5 w-5 text-gray-500" />
+                                  <div>
+                                    <p className="font-medium">{doc.name}</p>
+                                    <p className="text-sm text-gray-500">
+                                      {doc.size} • {doc.uploaded_at}
+                                    </p>
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <Badge 
+                                    variant={doc.status === 'processed' ? 'default' : 'secondary'}
+                                    className="text-xs"
+                                  >
+                                    {doc.status === 'processed' ? '처리 완료' : '처리 중'}
+                                  </Badge>
+                                  <AlertDialog>
+                                    <AlertDialogTrigger asChild>
+                                      <Button variant="ghost" size="sm">
+                                        <Trash2 className="h-4 w-4" />
+                                      </Button>
+                                    </AlertDialogTrigger>
+                                    <AlertDialogContent>
+                                      <AlertDialogHeader>
+                                        <AlertDialogTitle>문서 삭제</AlertDialogTitle>
+                                        <AlertDialogDescription>
+                                          정말 이 문서를 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.
+                                        </AlertDialogDescription>
+                                      </AlertDialogHeader>
+                                      <AlertDialogFooter>
+                                        <AlertDialogCancel>취소</AlertDialogCancel>
+                                        <AlertDialogAction
+                                          onClick={() => {
+                                            setDocuments(prev => prev.filter(d => d.id !== doc.id))
+                                            toast({
+                                              title: "문서 삭제 완료",
+                                              description: `${doc.name}이(가) 삭제되었습니다.`,
+                                              variant: "default",
+                                            })
+                                          }}
+                                          className="bg-red-600 hover:bg-red-700"
+                                        >
+                                          삭제
+                                        </AlertDialogAction>
+                                      </AlertDialogFooter>
+                                    </AlertDialogContent>
+                                  </AlertDialog>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </CardContent>
                   </Card>
                 </TabsContent>

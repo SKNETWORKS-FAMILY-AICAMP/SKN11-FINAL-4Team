@@ -15,6 +15,8 @@ import {
   User,
   MessageSquare,
   Loader2,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react"
 
 interface Message {
@@ -42,6 +44,7 @@ export default function ChatPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [isModelLoading, setIsModelLoading] = useState(true)
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('connecting')
+  const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const timeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -281,27 +284,47 @@ export default function ChatPage() {
           <CardContent className="flex-1 flex flex-col p-0 h-full">
             {/* 인플루언서 정보 헤더 */}
             <div className="border-b p-4 bg-gray-50 flex-shrink-0">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-3">
-                  <Avatar className="h-10 w-10">
+              <div className="flex items-center justify-between min-w-0">
+                <div className="flex items-center space-x-3 min-w-0 flex-1">
+                  <Avatar className="h-10 w-10 flex-shrink-0">
                     <AvatarFallback className="bg-green-500 text-white">
                       <Bot className="h-5 w-5" />
                     </AvatarFallback>
                   </Avatar>
-                  <div>
-                    <h3 className="font-semibold text-gray-900">{model.name}</h3>
-                    <p className="text-sm text-gray-600">{model.description}</p>
+                  <div className="min-w-0 flex-1">
+                    <h3 className="font-semibold text-gray-900 truncate">{model.name}</h3>
+                    {model.description && (
+                      <div className="flex items-center space-x-1">
+                        <p className={`text-sm text-gray-600 ${isDescriptionExpanded ? '' : 'truncate'}`}>
+                          {model.description}
+                        </p>
+                        {model.description.length > 50 && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setIsDescriptionExpanded(!isDescriptionExpanded)}
+                            className="h-4 w-4 p-0 flex-shrink-0"
+                          >
+                            {isDescriptionExpanded ? (
+                              <ChevronUp className="h-3 w-3" />
+                            ) : (
+                              <ChevronDown className="h-3 w-3" />
+                            )}
+                          </Button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
-                <div className="flex items-center space-x-2">
+                <div className="flex items-center space-x-2 flex-shrink-0 ml-4">
                   {/* 연결 상태 표시 */}
                   <div className="flex items-center space-x-1">
-                    <div className={`w-2 h-2 rounded-full ${
+                    <div className={`w-2 h-2 rounded-full flex-shrink-0 ${
                       connectionStatus === 'connected' ? 'bg-green-500' :
                       connectionStatus === 'connecting' ? 'bg-yellow-500' :
                       connectionStatus === 'error' ? 'bg-red-500' : 'bg-gray-400'
                     }`} />
-                    <span className="text-xs text-gray-600">
+                    <span className="text-xs text-gray-600 whitespace-nowrap">
                       {connectionStatus === 'connected' ? '연결됨' :
                        connectionStatus === 'connecting' ? '연결 중' :
                        connectionStatus === 'error' ? '연결 오류' : '연결 끊김'}
@@ -314,6 +337,7 @@ export default function ChatPage() {
                       size="sm"
                       variant="outline"
                       disabled={connectionStatus === 'connecting'}
+                      className="flex-shrink-0"
                     >
                       {connectionStatus === 'connecting' ? (
                         <Loader2 className="h-3 w-3 animate-spin" />
