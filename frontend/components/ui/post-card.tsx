@@ -3,7 +3,8 @@
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Calendar, User, Heart, MessageCircle, Users, BarChart3, UploadCloud, Instagram, Trash2 } from "lucide-react"
+import { Calendar, User, Heart, MessageCircle, Users, BarChart3, UploadCloud, Instagram, Trash2, Bookmark } from "lucide-react"
+import { convertUTCToKST, formatDateKorean } from "@/lib/utils/timezone"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -77,17 +78,17 @@ interface PostCardProps {
   variant?: "list" | "content"
 }
 
-export function PostCard({ 
-  post, 
-  onView, 
-  onDelete, 
-  onPublish, 
-  onInstagramUpload, 
+export function PostCard({
+  post,
+  onView,
+  onDelete,
+  onPublish,
+  onInstagramUpload,
   showActions = true,
   showInfluencerInfo = false,
   variant = "list"
 }: PostCardProps) {
-  
+
   // 상태 배지 생성
   const getStatusBadge = (status: Post["status"]) => {
     switch (status) {
@@ -105,41 +106,29 @@ export function PostCard({
   // 플랫폼 배지 생성
   const getPlatformBadge = (platform: string | undefined) => {
     if (!platform) return null
-    
+
     const platformColors = {
       'Instagram': 'bg-pink-100 text-pink-800',
       'Blog': 'bg-orange-100 text-orange-800',
       'Facebook': 'bg-blue-100 text-blue-800'
     }
-    
+
     const colorClass = platformColors[platform as keyof typeof platformColors] || 'bg-gray-100 text-gray-800'
-    
+
     return <Badge className={colorClass}>{platform}</Badge>
   }
 
   // 날짜 포맷팅
   const formatDate = (dateString: string | undefined) => {
     if (!dateString) return ""
-    
-    try {
-      const date = new Date(dateString)
-      return date.toLocaleDateString('ko-KR', {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      })
-    } catch {
-      return dateString
-    }
+    return convertUTCToKST(dateString)
   }
 
   // 해시태그 렌더링
   const renderHashtags = () => {
     const hashtags = post.hashtags || []
-    const boardHashtags = post.board_hash_tag ? 
-      post.board_hash_tag.split(' ').filter(tag => tag.trim()).map(tag => tag.startsWith('#') ? tag : `#${tag}`) : 
+    const boardHashtags = post.board_hash_tag ?
+      post.board_hash_tag.split(' ').filter(tag => tag.trim()).map(tag => tag.startsWith('#') ? tag : `#${tag}`) :
       []
 
     const allHashtags = hashtags.length > 0 ? hashtags : boardHashtags
@@ -193,16 +182,28 @@ export function PostCard({
         {/* 인스타그램 추가 통계 표시 */}
         {post.platform === 'Instagram' && post.instagram_stats && (
           <>
-            {post.instagram_stats.reach > 0 && (
+            {typeof post.instagram_stats.reach === 'number' && post.instagram_stats.reach > 0 && (
               <div className="flex items-center space-x-1">
                 <Users className="h-4 w-4 text-orange-500" />
                 <span>{post.instagram_stats.reach.toLocaleString()}</span>
               </div>
             )}
-            {post.instagram_stats.impressions > 0 && (
+            {typeof post.instagram_stats.impressions === 'number' && post.instagram_stats.impressions > 0 && (
               <div className="flex items-center space-x-1">
                 <BarChart3 className="h-4 w-4 text-teal-500" />
                 <span>{post.instagram_stats.impressions.toLocaleString()}</span>
+              </div>
+            )}
+            {typeof post.instagram_stats.saved_count === 'number' && post.instagram_stats.saved_count > 0 && (
+              <div className="flex items-center space-x-1">
+                <Bookmark className="h-4 w-4 text-yellow-500" />
+                <span>{post.instagram_stats.saved_count.toLocaleString()}</span>
+              </div>
+            )}
+            {typeof post.instagram_stats.video_views === 'number' && post.instagram_stats.video_views > 0 && (
+              <div className="flex items-center space-x-1">
+                <BarChart3 className="h-4 w-4 text-purple-500" />
+                <span>{post.instagram_stats.video_views.toLocaleString()}</span>
               </div>
             )}
           </>
@@ -217,32 +218,6 @@ export function PostCard({
 
     return (
       <div className="flex items-center space-x-2" onClick={e => e.stopPropagation()}>
-        {post.status !== 'published' && (
-          <>
-            {onPublish && (
-              <Button 
-                size="sm" 
-                variant="outline" 
-                className="flex items-center space-x-1" 
-                onClick={() => onPublish(post.id || post.board_id || "")}
-              >
-                <UploadCloud className="h-4 w-4" />
-                <span>업로드</span>
-              </Button>
-            )}
-            {post.platform === 'Instagram' && onInstagramUpload && (
-              <Button
-                size="sm"
-                variant="outline"
-                className="flex items-center space-x-1 bg-pink-50 border-pink-200 text-pink-700 hover:bg-pink-100"
-                onClick={() => onInstagramUpload(post)}
-              >
-                <Instagram className="h-4 w-4" />
-                <span>인스타그램</span>
-              </Button>
-            )}
-          </>
-        )}
         {onDelete && (
           <AlertDialog>
             <AlertDialogTrigger asChild>
@@ -259,8 +234,8 @@ export function PostCard({
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel>취소</AlertDialogCancel>
-                <AlertDialogAction 
-                  onClick={() => onDelete(post.id || post.board_id || "")} 
+                <AlertDialogAction
+                  onClick={() => onDelete(post.id || post.board_id || "")}
                   className="bg-red-600 hover:bg-red-700"
                 >
                   삭제
@@ -275,9 +250,8 @@ export function PostCard({
 
   return (
     <Card
-      className={`hover:shadow-md transition-shadow cursor-pointer ${
-        variant === "content" ? "" : "group"
-      }`}
+      className={`hover:shadow-md transition-shadow cursor-pointer ${variant === "content" ? "" : "group"
+        }`}
       onClick={() => onView?.(post)}
     >
       <CardContent className="p-6">
@@ -290,15 +264,15 @@ export function PostCard({
               {getStatusBadge(post.status)}
               {getPlatformBadge(post.platform || "")}
             </div>
-            
+
             {renderInfluencerInfo()}
-            
+
             <p className="text-gray-600 text-sm line-clamp-3 mb-3">
-              {(post.content || post.board_description || '').length > 150 
-                ? `${(post.content || post.board_description || '').substring(0, 150)}...` 
+              {(post.content || post.board_description || '').length > 150
+                ? `${(post.content || post.board_description || '').substring(0, 150)}...`
                 : (post.content || post.board_description || '')}
             </p>
-            
+
             {renderHashtags()}
           </div>
         </div>
@@ -324,8 +298,12 @@ export function PostCard({
 
         {/* 성과지표와 액션 버튼들 */}
         <div className="flex items-center justify-between pt-3 border-t mt-3">
-          {renderEngagement()}
-          {renderActions()}
+          <div className="flex-1">
+            {renderEngagement()}
+          </div>
+          <div className="flex items-center">
+            {renderActions()}
+          </div>
         </div>
       </CardContent>
     </Card>

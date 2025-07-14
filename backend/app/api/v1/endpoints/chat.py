@@ -8,6 +8,7 @@ from app.models.influencer import ChatMessage, AIInfluencer
 from app.models.user import User
 from app.schemas.influencer import ChatMessageCreate, ChatMessage as ChatMessageSchema
 from app.core.security import get_current_user
+from app.utils.timezone_utils import get_current_kst
 
 router = APIRouter()
 
@@ -72,7 +73,7 @@ async def create_chat_message(
     message = ChatMessage(
         influencer_id=message_data.influencer_id,
         message_content=message_data.message_content,
-        created_at=datetime.now().isoformat(),
+        created_at=get_current_kst().isoformat(),
         end_at=message_data.end_at,
     )
 

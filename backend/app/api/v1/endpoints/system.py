@@ -8,6 +8,7 @@ from app.database import get_db
 from app.models.user import SystemLog, User
 from app.schemas.user import SystemLogCreate, SystemLog as SystemLogSchema
 from app.core.security import get_current_user
+from app.utils.timezone_utils import get_current_kst
 
 router = APIRouter()
 
@@ -44,7 +45,7 @@ async def create_system_log(
         user_id=current_user.user_id,
         log_type=log_data.log_type,
         log_content=log_data.log_content,
-        created_at=datetime.now().isoformat(),
+        created_at=get_current_kst().isoformat(),
     )
 
     db.add(log)

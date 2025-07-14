@@ -26,12 +26,13 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import { Plus, Search, Edit, Trash2, Eye, Calendar, User, Filter, X, Copy, ExternalLink, Heart, MessageCircle, Share2, MoreHorizontal, UploadCloud, Instagram, Users, BarChart3, Bookmark } from "lucide-react"
+import { Plus, Search, Edit, Trash2, Eye, Calendar, User, Filter, X, Copy, ExternalLink, Heart, MessageCircle, MoreHorizontal, UploadCloud, Instagram, Users, BarChart3, Bookmark } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import apiClient from "@/lib/api"
 import { useToast } from "@/hooks/use-toast"
 import { InstagramPostingService } from "@/lib/services/instagram-posting.service"
 import { PostCard, Post } from "@/components/ui/post-card"
+import { convertUTCToKST, formatDateKorean, getRelativeTime } from "@/lib/utils/timezone"
 
 
 
@@ -60,6 +61,7 @@ function PostListContent() {
   const [editContent, setEditContent] = useState("");
   const [editHashtags, setEditHashtags] = useState("");
   const [editScheduledAt, setEditScheduledAt] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
 
 
 
@@ -81,7 +83,7 @@ function PostListContent() {
           // 인플루언서 정보 조회
           let influencerName = 'AI 인플루언서'
           let influencerDescription = ''
-          
+
           if (board.influencer_id) {
             try {
               const influencerResponse = await apiClient.get(`/api/v1/influencers/${board.influencer_id}`)
@@ -121,8 +123,6 @@ function PostListContent() {
           const instagramStats = board.instagram_stats || {
             like_count: 0,
             comments_count: 0,
-            shares_count: 0,
-            views_count: 0,
             impressions: 0,
             reach: 0,
             profile_views: 0,
@@ -447,58 +447,48 @@ function PostListContent() {
 
   const formatDate = (dateString: string | undefined) => {
     if (!dateString) return ""
-    const date = new Date(dateString)
-    // 유효한 날짜인지 확인
-    if (isNaN(date.getTime())) return ""
-
-    // 한국 시간으로 변환 (UTC + 9시간)
-    const koreanTime = new Date(date.getTime() + (9 * 60 * 60 * 1000))
-
-    return koreanTime.toLocaleString("ko-KR", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit"
-    })
+    return convertUTCToKST(dateString)
   }
 
   const formatFullDate = (dateString: string | undefined) => {
     if (!dateString) return ""
-    const date = new Date(dateString)
-    // 유효한 날짜인지 확인
-    if (isNaN(date.getTime())) return ""
+    return formatDateKorean(dateString)
+  }
 
-    // 한국 시간으로 변환 (UTC + 9시간)
-    const koreanTime = new Date(date.getTime() + (9 * 60 * 60 * 1000))
-
-    return koreanTime.toLocaleString("ko-KR", {
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-      weekday: "long",
-      hour: "2-digit",
-      minute: "2-digit"
-    })
+  const formatRelativeTime = (dateString: string | undefined) => {
+    if (!dateString) return ""
+    return getRelativeTime(dateString)
   }
 
   useEffect(() => {
     if (isViewModalOpen && selectedPost) {
+      console.log('Setting edit mode data:', {
+        title: selectedPost.title || selectedPost.board_topic,
+        content: selectedPost.content || selectedPost.board_description,
+        hashtags: selectedPost.hashtags,
+        scheduledAt: selectedPost.scheduledAt
+      });
+
       setEditMode(false);
       setEditTitle(selectedPost.title || selectedPost.board_topic || "");
       setEditContent(selectedPost.content || selectedPost.board_description || "");
       setEditHashtags(selectedPost.hashtags ? selectedPost.hashtags.join(" ") : "");
-      setEditScheduledAt(selectedPost.scheduledAt ? selectedPost.scheduledAt.slice(0, 16) : "");
+
+      // 예약 날짜 설정
+      const formattedDate = selectedPost.scheduledAt ? selectedPost.scheduledAt.slice(0, 16) : "";
+      console.log('Setting scheduled date:', { scheduledAt: selectedPost.scheduledAt, formattedDate });
+      setEditScheduledAt(formattedDate);
     }
   }, [isViewModalOpen, selectedPost]);
 
-  const handleEditSave = () => {
-    if (!selectedPost) return;
+  const handleEditSave = async () => {
+    if (!selectedPost || isSaving) return;
 
     const originalTitle = selectedPost.title || selectedPost.board_topic || "게시글"
     const hasChanges = editTitle !== originalTitle ||
       editContent !== (selectedPost.content || selectedPost.board_description) ||
-      editHashtags !== (selectedPost.hashtags?.join(" ") || "")
+      editHashtags !== (selectedPost.hashtags?.join(" ") || "") ||
+      editScheduledAt !== (selectedPost.scheduledAt ? selectedPost.scheduledAt.slice(0, 16) : "")
 
     if (!hasChanges) {
       toast({
@@ -510,28 +500,39 @@ function PostListContent() {
       return
     }
 
+    setIsSaving(true);
     try {
+      // 백엔드 API 호출하여 게시글 수정
+      const boardId = selectedPost.board_id || selectedPost.id;
+      const updateData = {
+        board_topic: editTitle,
+        board_description: editContent,
+        board_hash_tag: editHashtags,
+        ...(editScheduledAt && { reservation_at: `${editScheduledAt}:00` })
+      };
+
+      console.log('Updating board:', boardId, updateData);
+
+      const response = await apiClient.put(`/api/v1/boards/${boardId}`, updateData);
+      console.log('API response:', response);
+
+      // apiClient는 성공 시 데이터를 직접 반환하고, 실패 시 예외를 던집니다
+      // 따라서 여기까지 왔다면 성공한 것입니다
+
+      // 성공 시 프론트엔드 상태 업데이트
       setPosts(posts => {
         const newPosts = posts.map(post => {
           if (post.id !== selectedPost.id) return post;
-          let newStatus = post.status;
-          let newScheduledAt = post.scheduledAt;
-          if (post.status === "scheduled") {
-            if (editScheduledAt) {
-              newStatus = "scheduled";
-              newScheduledAt = editScheduledAt;
-            } else {
-              newStatus = "published";
-              newScheduledAt = undefined;
-            }
-          }
+
+          // 게시글 수정 시에는 상태를 변경하지 않고 원래 상태 유지
           return {
             ...post,
             title: editTitle,
             content: editContent,
             hashtags: editHashtags.split(" ").filter(tag => tag.startsWith("#")),
-            status: newStatus,
-            scheduledAt: newScheduledAt,
+            // 상태는 원래대로 유지
+            status: post.status,
+            scheduledAt: post.scheduledAt,
           };
         });
         // 최신 selectedPost로 갱신
@@ -540,6 +541,7 @@ function PostListContent() {
         return newPosts;
       });
       setEditMode(false);
+      setIsViewModalOpen(false); // 모달 닫기
 
       toast({
         title: "✏️ 게시글 수정 완료",
@@ -553,6 +555,8 @@ function PostListContent() {
         description: `"${editTitle}" 게시글 수정 중 오류가 발생했습니다.`,
         variant: "destructive",
       })
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -822,18 +826,18 @@ function PostListContent() {
                       )}
                       <Badge className={
                         selectedPost.status === "published" ? "bg-green-100 text-green-800" :
-                        selectedPost.status === "scheduled" ? "bg-blue-100 text-blue-800" :
-                        "bg-gray-100 text-gray-800"
+                          selectedPost.status === "scheduled" ? "bg-blue-100 text-blue-800" :
+                            "bg-gray-100 text-gray-800"
                       }>
                         {selectedPost.status === "published" ? "발행됨" :
-                         selectedPost.status === "scheduled" ? "예약됨" : "임시저장"}
+                          selectedPost.status === "scheduled" ? "예약됨" : "임시저장"}
                       </Badge>
                       {selectedPost.platform && (
                         <Badge className={
                           selectedPost.platform === "Instagram" ? "bg-pink-100 text-pink-800" :
-                          selectedPost.platform === "Blog" ? "bg-orange-100 text-orange-800" :
-                          selectedPost.platform === "Facebook" ? "bg-blue-100 text-blue-800" :
-                          "bg-gray-100 text-gray-800"
+                            selectedPost.platform === "Blog" ? "bg-orange-100 text-orange-800" :
+                              selectedPost.platform === "Facebook" ? "bg-blue-100 text-blue-800" :
+                                "bg-gray-100 text-gray-800"
                         }>
                           {selectedPost.platform}
                         </Badge>
@@ -887,24 +891,23 @@ function PostListContent() {
                   )}
                 </div>
 
-                {/* 예약 날짜 (임시저장/예약 상태 모두) */}
-                {(selectedPost.status === "scheduled") && (
-                  <div className="space-y-2">
-                    <h4 className="text-sm font-medium text-gray-900">예약 날짜</h4>
-                    {editMode ? (
-                      <input
-                        type="datetime-local"
-                        value={editScheduledAt}
-                        onChange={e => setEditScheduledAt(e.target.value)}
-                        className="w-full p-2 border rounded"
-                      />
-                    ) : (
-                      <div className="text-gray-800">
-                        {selectedPost.scheduledAt ? formatFullDate(selectedPost.scheduledAt) : "-"}
-                      </div>
-                    )}
-                  </div>
-                )}
+                {/* 예약 날짜 */}
+                <div className="space-y-2">
+                  <h4 className="text-sm font-medium text-gray-900">예약 날짜</h4>
+                  {editMode ? (
+                    <input
+                      type="datetime-local"
+                      value={editScheduledAt}
+                      onChange={e => setEditScheduledAt(e.target.value)}
+                      className="w-full p-2 border rounded"
+                      placeholder="예약 날짜 선택"
+                    />
+                  ) : (
+                    <div className="text-gray-800">
+                      {selectedPost.scheduledAt ? formatFullDate(selectedPost.scheduledAt) : "예약되지 않음"}
+                    </div>
+                  )}
+                </div>
 
                 {/* 미디어 정보 */}
                 {selectedPost.media && (
@@ -961,7 +964,7 @@ function PostListContent() {
                           <p className="text-sm text-gray-600">댓글</p>
                         </div>
 
-                        
+
                         {/* Instagram 인사이트 추가 */}
                         {selectedPost.platform === 'Instagram' && selectedPost.instagram_stats && (
                           <>
@@ -1001,7 +1004,7 @@ function PostListContent() {
                           </>
                         )}
                       </div>
-                      
+
 
                     </div>
                   </div>
@@ -1014,8 +1017,13 @@ function PostListContent() {
                   {selectedPost.status !== "published" && (
                     editMode ? (
                       <>
-                        <Button variant="outline" size="sm" onClick={handleEditSave}>
-                          저장
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleEditSave}
+                          disabled={isSaving}
+                        >
+                          {isSaving ? "저장 중..." : "저장"}
                         </Button>
                         <Button variant="ghost" size="sm" onClick={() => setEditMode(false)}>
                           취소
@@ -1033,8 +1041,8 @@ function PostListContent() {
                     )
                   )}
                   {selectedPost.status === "published" && selectedPost.instagram_link && (
-                    <Button 
-                      variant="outline" 
+                    <Button
+                      variant="outline"
                       size="sm"
                       onClick={() => {
                         // 백엔드에서 제공하는 인스타그램 링크로 이동

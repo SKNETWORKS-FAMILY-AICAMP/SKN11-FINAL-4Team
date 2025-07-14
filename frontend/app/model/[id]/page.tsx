@@ -31,7 +31,6 @@ import {
   Calendar,
   Heart,
   MessageCircle,
-  Share2,
   Play,
   MoreHorizontal,
   Bookmark,
@@ -155,53 +154,53 @@ function ModelDetailContent() {
     setIsPostsLoading(true)
     try {
       console.log('Fetching posts for influencer:', params.id)
-      
+
       // 특정 인플루언서의 게시글만 조회
       const boardData = await apiClient.get<any[]>(`/api/v1/boards?influencer_id=${params.id}`)
-      
+
       // 게시글 데이터 변환 (백엔드에서 제공하는 인플루언서 정보 사용)
       const transformedPosts: ContentPost[] = boardData.map((board: any) => {
         // 백엔드에서 이미 제공하는 인플루언서 정보 사용
         const influencerName = board.influencer_name || model?.name || 'AI 인플루언서'
         const influencerDescription = board.influencer_description || model?.description || ''
 
-          const basePost = {
-            id: board.board_id,
-            title: board.board_topic || '제목 없음',
-            content: board.board_description || '',
-            platform: getPlatformName(board.board_platform),
-            status: getStatusName(board.board_status),
-            publishedAt: board.published_at || board.created_at || '',
-            scheduledAt: board.reservation_at || '',
-            hashtags: board.board_hash_tag ? 
-              board.board_hash_tag.split(' ').filter((tag: string) => tag.trim()).map((tag: string) => 
-                tag.startsWith('#') ? tag : `#${tag}`
-              ) : [],
-            media: {
-              type: "image" as const,
-              urls: [board.image_url || "/placeholder.svg?height=400&width=400"],
-              thumbnailUrl: board.image_url || "/placeholder.svg?height=400&width=400"
-            },
-            // 인플루언서 정보: 조회한 값 사용
-            influencerId: board.influencer_id,
-            influencerName: influencerName,
-            influencerDescription: influencerDescription
-          }
+        const basePost = {
+          id: board.board_id,
+          title: board.board_topic || '제목 없음',
+          content: board.board_description || '',
+          platform: getPlatformName(board.board_platform),
+          status: getStatusName(board.board_status),
+          publishedAt: board.published_at || board.created_at || '',
+          scheduledAt: board.reservation_at || '',
+          hashtags: board.board_hash_tag ?
+            board.board_hash_tag.split(' ').filter((tag: string) => tag.trim()).map((tag: string) =>
+              tag.startsWith('#') ? tag : `#${tag}`
+            ) : [],
+          media: {
+            type: "image" as const,
+            urls: [board.image_url || "/placeholder.svg?height=400&width=400"],
+            thumbnailUrl: board.image_url || "/placeholder.svg?height=400&width=400"
+          },
+          // 인플루언서 정보: 조회한 값 사용
+          influencerId: board.influencer_id,
+          influencerName: influencerName,
+          influencerDescription: influencerDescription
+        }
 
-          // 인스타그램 통계 정보 추가
-          const instagramStats = board.instagram_stats || {
-            like_count: 0,
-            comments_count: 0
-          }
+        // 인스타그램 통계 정보 추가
+        const instagramStats = board.instagram_stats || {
+          like_count: 0,
+          comments_count: 0
+        }
 
-          return {
-            ...basePost,
-            engagement: {
-              likes: instagramStats.like_count || 0,
-              comments: instagramStats.comments_count || 0
-            }
+        return {
+          ...basePost,
+          engagement: {
+            likes: instagramStats.like_count || 0,
+            comments: instagramStats.comments_count || 0
           }
-        })
+        }
+      })
 
       setPosts(transformedPosts)
     } catch (error) {
@@ -300,7 +299,7 @@ function ModelDetailContent() {
     // URL 파라미터에서 탭 정보 읽기
     return searchParams.get('tab') || 'analytics'
   })
-  
+
 
   const handleUpdateModel = async () => {
     setIsUpdating(true)
@@ -344,38 +343,38 @@ function ModelDetailContent() {
   // Instagram 연동 관련 함수들
   const handleInstagramConnect = async () => {
     setIsConnecting(true)
-    
+
     try {
       // Instagram API with Instagram Login OAuth URL 생성
       const instagramAppId = process.env.NEXT_PUBLIC_INSTAGRAM_APP_ID
       const redirectUri = `${window.location.origin}/auth/instagram/callback`
       // Instagram API with Instagram Login 스코프 설정
       const scope = "instagram_business_basic,instagram_business_manage_messages,instagram_business_manage_comments,instagram_business_content_publish"
-      
+
       const authUrl = `https://api.instagram.com/oauth/authorize` +
         `?client_id=${instagramAppId}` +
         `&redirect_uri=${encodeURIComponent(redirectUri)}` +
         `&scope=${scope}` +
         `&response_type=code` +
         `&state=${params.id}` // 모델 ID를 state로 전달
-      
+
       // 팝업 창으로 Instagram OAuth 페이지 열기
       const popup = window.open(
         authUrl,
         'instagram-auth',
         'width=600,height=700,scrollbars=yes,resizable=yes'
       )
-      
+
       // 팝업에서 메시지를 기다림
       const handleMessage = async (event: MessageEvent) => {
         if (event.origin !== window.location.origin) return
-        
+
         const { type, code, error, state } = event.data
-        
+
         if (type === 'INSTAGRAM_AUTH_SUCCESS' && code && state === params.id) {
           popup?.close()
           window.removeEventListener('message', handleMessage)
-          
+
           try {
             // 백엔드에 code 전송하여 토큰 교환 및 계정 연동
             const data = await ModelService.connectInstagram(params.id as string, {
@@ -398,7 +397,7 @@ function ModelDetailContent() {
             console.error('Instagram 연동 오류:', error)
             alert('Instagram 연동에 실패했습니다. 다시 시도해주세요.')
           }
-          
+
           setIsConnecting(false)
         } else if (type === 'INSTAGRAM_AUTH_ERROR' || error) {
           popup?.close()
@@ -407,9 +406,9 @@ function ModelDetailContent() {
           alert('Instagram 연동이 취소되었거나 오류가 발생했습니다.')
         }
       }
-      
+
       window.addEventListener('message', handleMessage)
-      
+
       // 팝업이 닫힌 경우 처리
       const checkClosed = setInterval(() => {
         if (popup?.closed) {
@@ -418,7 +417,7 @@ function ModelDetailContent() {
           setIsConnecting(false)
         }
       }, 1000)
-      
+
     } catch (error) {
       console.error("Instagram 연동 오류:", error)
       setIsConnecting(false)
@@ -430,7 +429,7 @@ function ModelDetailContent() {
     try {
       // API 호출하여 Instagram 연동 해제
       await ModelService.disconnectInstagram(params.id as string)
-      
+
       setInstagramStatus({
         is_connected: false
       })
@@ -620,7 +619,6 @@ function ModelDetailContent() {
                 <div className="flex items-center space-x-4">
                   <Heart className="h-6 w-6" />
                   <MessageCircle className="h-6 w-6" />
-                  <Share2 className="h-6 w-6" />
                 </div>
                 <Bookmark className="h-6 w-6" />
               </div>
@@ -645,7 +643,7 @@ function ModelDetailContent() {
 
               {/* 댓글 보기 */}
               <p className="text-gray-500 text-sm mt-2">댓글 {post.engagement?.comments || 0}개 모두 보기</p>
-                              <p className="text-gray-400 text-xs mt-1">{formatDate(post.publishedAt || '')}</p>
+              <p className="text-gray-400 text-xs mt-1">{formatDate(post.publishedAt || '')}</p>
             </div>
           </div>
         )
@@ -932,22 +930,22 @@ function ModelDetailContent() {
               <h1 className="text-3xl font-bold text-gray-900">{model.name}</h1>
               <p className="text-gray-600 mt-2">{model.description}</p>
               <div className="flex items-center space-x-4 mt-4">
-                                <Badge className={
-                  model.learning_status === 1 ? "bg-green-100 text-green-800" : 
-                  model.learning_status === 0 ? "bg-yellow-100 text-yellow-800" : 
-                  "bg-red-100 text-red-800"
+                <Badge className={
+                  model.learning_status === 1 ? "bg-green-100 text-green-800" :
+                    model.learning_status === 0 ? "bg-yellow-100 text-yellow-800" :
+                      "bg-red-100 text-red-800"
                 }>
-                  {model.learning_status === 1 ? "사용 가능" : 
-                   model.learning_status === 0 ? "생성 중" : 
-                   "오류"}
+                  {model.learning_status === 1 ? "사용 가능" :
+                    model.learning_status === 0 ? "생성 중" :
+                      "오류"}
                 </Badge>
                 <span className="text-sm text-gray-500">생성일: {model.createdAt}</span>
               </div>
             </div>
             <div className="flex space-x-2">
               {model.learning_status === 1 && (
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   size="sm"
                   onClick={() => window.open(`/chat/${model.id}`, '_blank')}
                 >
@@ -962,28 +960,28 @@ function ModelDetailContent() {
                     모델 삭제
                   </Button>
                 </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>모델 삭제 확인</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    "{model.name}" 모델을 완전히 삭제하시겠습니까?
-                    <br />
-                    <br />
-                    <strong>이 작업은 되돌릴 수 없으며, 다음 데이터가 모두 삭제됩니다:</strong>
-                    <br />• 모든 게시글 및 콘텐츠
-                    <br />• API 키 및 설정
-                    <br />• 학습 데이터 및 모델 정보
-                    <br />• 분석 데이터 및 통계
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>취소</AlertDialogCancel>
-                  <AlertDialogAction onClick={handleDeleteModel} className="bg-red-600 hover:bg-red-700">
-                    영구 삭제
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>모델 삭제 확인</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      "{model.name}" 모델을 완전히 삭제하시겠습니까?
+                      <br />
+                      <br />
+                      <strong>이 작업은 되돌릴 수 없으며, 다음 데이터가 모두 삭제됩니다:</strong>
+                      <br />• 모든 게시글 및 콘텐츠
+                      <br />• API 키 및 설정
+                      <br />• 학습 데이터 및 모델 정보
+                      <br />• 분석 데이터 및 통계
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>취소</AlertDialogCancel>
+                    <AlertDialogAction onClick={handleDeleteModel} className="bg-red-600 hover:bg-red-700">
+                      영구 삭제
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </div>
           </div>
         </div>
@@ -1248,11 +1246,10 @@ function ModelDetailContent() {
                   {instagramStatus.is_connected ? (
                     <div className="space-y-6">
                       {/* 연동된 계정 정보 */}
-                      <div className={`flex items-start space-x-4 p-4 rounded-lg border-2 ${
-                        instagramStatus.token_expired 
-                          ? 'bg-yellow-50 border-yellow-200' 
-                          : 'bg-green-50 border-green-200'
-                      }`}>
+                      <div className={`flex items-start space-x-4 p-4 rounded-lg border-2 ${instagramStatus.token_expired
+                        ? 'bg-yellow-50 border-yellow-200'
+                        : 'bg-green-50 border-green-200'
+                        }`}>
                         <div className="w-12 h-12 bg-gradient-to-br from-pink-500 to-purple-600 rounded-full flex items-center justify-center shadow-sm">
                           {instagramStatus.instagram_info?.profile_picture_url ? (
                             <PostImage url={instagramStatus.instagram_info.profile_picture_url} alt="Profile" className="w-12 h-12 rounded-full object-cover" />
@@ -1267,21 +1264,18 @@ function ModelDetailContent() {
                             ) : (
                               <CheckCircle className="h-4 w-4 text-green-600" />
                             )}
-                            <p className={`font-medium ${
-                              instagramStatus.token_expired ? 'text-yellow-900' : 'text-green-900'
-                            }`}>
+                            <p className={`font-medium ${instagramStatus.token_expired ? 'text-yellow-900' : 'text-green-900'
+                              }`}>
                               {instagramStatus.token_expired ? 'Instagram 계정 재연동 필요' : 'Instagram 계정 연동됨'}
                             </p>
                           </div>
-                          <p className={`text-sm ${
-                            instagramStatus.token_expired ? 'text-yellow-700' : 'text-green-700'
-                          }`}>
+                          <p className={`text-sm ${instagramStatus.token_expired ? 'text-yellow-700' : 'text-green-700'
+                            }`}>
                             @{instagramStatus.instagram_info?.username || 'Unknown'} • {instagramStatus.instagram_info?.account_type || 'Unknown'} 계정
                           </p>
                           {instagramStatus.connected_at && (
-                            <p className={`text-xs mt-1 ${
-                              instagramStatus.token_expired ? 'text-yellow-600' : 'text-green-600'
-                            }`}>
+                            <p className={`text-xs mt-1 ${instagramStatus.token_expired ? 'text-yellow-600' : 'text-green-600'
+                              }`}>
                               연동일: {new Date(instagramStatus.connected_at).toLocaleDateString('ko-KR')}
                             </p>
                           )}
@@ -1322,7 +1316,7 @@ function ModelDetailContent() {
                                   <p className="text-sm font-medium text-gray-900">{instagramStatus.instagram_info.name}</p>
                                 </div>
                               )}
-                              
+
                               {instagramStatus.instagram_info.biography && (
                                 <div>
                                   <p className="text-xs text-gray-500 mb-1">소개</p>
@@ -1331,13 +1325,13 @@ function ModelDetailContent() {
                                   </p>
                                 </div>
                               )}
-                              
+
                               {instagramStatus.instagram_info.website && (
                                 <div>
                                   <p className="text-xs text-gray-500 mb-1">웹사이트</p>
-                                  <a 
-                                    href={instagramStatus.instagram_info.website} 
-                                    target="_blank" 
+                                  <a
+                                    href={instagramStatus.instagram_info.website}
+                                    target="_blank"
                                     rel="noopener noreferrer"
                                     className="text-sm text-blue-600 hover:text-blue-800 underline"
                                   >
@@ -1356,7 +1350,7 @@ function ModelDetailContent() {
                           <CheckCircle className="h-5 w-5 text-green-500 flex-shrink-0" />
                           <span className="text-sm font-medium text-gray-900">AI 생성 콘텐츠 자동 포스팅</span>
                         </div>
-                        
+
                         <div className="flex items-center space-x-3">
                           <CheckCircle className="h-5 w-5 text-green-500 flex-shrink-0" />
                           <span className="text-sm font-medium text-gray-900">인사이트 및 분석 데이터 수집</span>
@@ -1378,7 +1372,7 @@ function ModelDetailContent() {
                       {/* 재연동/연동 해제 버튼 */}
                       <div className="pt-2 space-y-3">
                         {instagramStatus.token_expired && (
-                          <Button 
+                          <Button
                             onClick={handleInstagramConnect}
                             disabled={isConnecting}
                             className="w-full bg-yellow-500 hover:bg-yellow-600 text-white font-medium py-2.5"
@@ -1396,8 +1390,8 @@ function ModelDetailContent() {
                             )}
                           </Button>
                         )}
-                        <Button 
-                          variant="outline" 
+                        <Button
+                          variant="outline"
                           onClick={handleInstagramDisconnect}
                           className="w-full text-red-600 border-red-200 hover:bg-red-50 font-medium py-2.5"
                         >
@@ -1414,7 +1408,7 @@ function ModelDetailContent() {
                           <CheckCircle className="h-5 w-5 text-green-500 flex-shrink-0" />
                           <span className="text-sm font-medium text-gray-900">AI 생성 콘텐츠 자동 포스팅</span>
                         </div>
-                        
+
                         <div className="flex items-center space-x-3">
                           <CheckCircle className="h-5 w-5 text-green-500 flex-shrink-0" />
                           <span className="text-sm font-medium text-gray-900">인사이트 및 분석 데이터 수집</span>
@@ -1427,7 +1421,7 @@ function ModelDetailContent() {
                       </div>
 
                       {/* 연동 버튼 */}
-                      <Button 
+                      <Button
                         onClick={handleInstagramConnect}
                         disabled={isConnecting}
                         className="w-full bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white font-medium py-3 text-base"
@@ -1480,7 +1474,7 @@ function ModelDetailContent() {
                           </div>
                         </div>
                       </div>
-                      
+
                       <div className="text-center space-y-3">
                         <p className="text-sm text-gray-500">권장 크기: 400x400px, 최대 5MB</p>
                         <div className="flex flex-col space-y-2 w-full max-w-xs">
@@ -1527,9 +1521,9 @@ function ModelDetailContent() {
                           />
                         </div>
                       </div>
-                      <Button 
-                        onClick={handleUpdateModel} 
-                        disabled={isUpdating || isModelLoading} 
+                      <Button
+                        onClick={handleUpdateModel}
+                        disabled={isUpdating || isModelLoading}
                         className="w-full bg-gray-800 hover:bg-gray-900 text-white font-medium py-2.5"
                       >
                         {isUpdating ? "업데이트 중..." : isModelLoading ? "로딩 중..." : "정보 저장"}
