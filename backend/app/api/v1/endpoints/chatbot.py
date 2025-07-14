@@ -65,7 +65,7 @@ async def chatbot(websocket: WebSocket, lora_repo: str, group_id: int = Query(..
         # VLLM 서버 상태 확인
         if not await vllm_health_check():
             logger.warning(f"[WS] VLLM 서버 연결 실패 (URL: {settings.VLLM_BASE_URL}), 로컬 모델로 폴백")
-            await _websocket_local_fallback(websocket, lora_repo_decoded, group_id, db, influencer_id)
+            # await _websocket_local_fallback(websocket, lora_repo_decoded, group_id, db, influencer_id)
             return
         
         logger.info(f"[WS] VLLM WebSocket 연결 시작: lora_repo={lora_repo_decoded}, group_id={group_id}")
