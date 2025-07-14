@@ -297,12 +297,12 @@ export class ModelService {
   }
 
   /**
-   * API 키 생성 또는 업데이트
+   * API 키 생성 또는 업데이트 (공개 엔드포인트)
    */
   static async generateApiKey(influencerId: string): Promise<APIKeyResponse> {
     console.log('🔧 ModelService.generateApiKey 호출:', influencerId)
     try {
-      const result = await apiClient.post<APIKeyResponse>(`/api/v1/influencers/${influencerId}/api-key/generate`)
+      const result = await apiClient.post<APIKeyResponse>(`/api/v1/influencers/${influencerId}/api-key/generate-public`)
       console.log('✅ ModelService.generateApiKey 성공:', result)
       return result
     } catch (error) {
@@ -312,12 +312,12 @@ export class ModelService {
   }
 
   /**
-   * API 키 조회
+   * API 키 조회 (공개 엔드포인트)
    */
   static async getApiKey(influencerId: string): Promise<APIKeyInfo> {
     console.log('🔍 ModelService.getApiKey 호출:', influencerId)
     try {
-      const result = await apiClient.get<APIKeyInfo>(`/api/v1/influencers/${influencerId}/api-key`)
+      const result = await apiClient.get<APIKeyInfo>(`/api/v1/influencers/${influencerId}/api-key/public`)
       console.log('✅ ModelService.getApiKey 성공:', result)
       return result
     } catch (error) {

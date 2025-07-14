@@ -943,7 +943,7 @@ async def generate_api_key(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    """인플루언서 API 키 생성 또는 업데이트"""
+    """인플루언서 API 키 생성 또는 업데이트 (소유자만)"""
     user_id = current_user.get("sub")
     if not user_id:
         raise HTTPException(status_code=401, detail="User ID not found")
@@ -1025,13 +1025,81 @@ async def generate_api_key(
         raise HTTPException(status_code=500, detail="API 키 생성 중 오류가 발생했습니다.")
 
 
+@router.post("/{influencer_id}/api-key/generate-public", response_model=APIKeyResponse)
+async def generate_api_key_public(
+    influencer_id: str,
+    db: Session = Depends(get_db),
+):
+    """인플루언서 API 키 생성 (공개 엔드포인트 - 인증 불필요)"""
+    logger.info(f"🔍 공개 API 키 생성 시도 - influencer_id: {influencer_id}")
+    
+    # 인플루언서 존재 확인
+    influencer = (
+        db.query(AIInfluencer)
+        .filter(AIInfluencer.influencer_id == influencer_id)
+        .first()
+    )
+    
+    if not influencer:
+        logger.error(f"❌ 공개 API 키 생성 실패 - 인플루언서가 존재하지 않음: influencer_id: {influencer_id}")
+        raise HTTPException(status_code=404, detail="Influencer not found")
+    
+    # 인플루언서가 사용 가능한 상태인지 확인
+    if influencer.learning_status != 1:
+        logger.warning(f"⚠️ 공개 API 키 생성 실패 - 인플루언서 학습 미완료: influencer_id: {influencer_id}, learning_status: {influencer.learning_status}")
+        raise HTTPException(
+            status_code=400, 
+            detail="인플루언서가 아직 학습 중입니다. 학습이 완료된 후 API 키를 발급받을 수 있습니다."
+        )
+    
+    # 이미 API 키가 있는지 확인
+    existing_api = (
+        db.query(InfluencerAPI)
+        .filter(InfluencerAPI.influencer_id == influencer_id)
+        .first()
+    )
+    
+    if existing_api:
+        logger.warning(f"⚠️ 공개 API 키 생성 실패 - 이미 API 키가 존재함: influencer_id: {influencer_id}")
+        raise HTTPException(
+            status_code=400, 
+            detail="이미 API 키가 존재합니다. 기존 API 키를 사용하거나, 소유자 계정으로 재생성해주세요."
+        )
+    
+    try:
+        # 새로운 API 키 생성 (am_ 접두사 + 랜덤 문자열)
+        new_api_key = f"am_{uuid.uuid4().hex[:16]}"
+        
+        # 새로운 API 키 생성
+        new_api = InfluencerAPI(
+            influencer_id=influencer_id,
+            api_value=new_api_key
+        )
+        db.add(new_api)
+        db.commit()
+        logger.info(f"✅ 공개 API 키 생성 완료 - influencer_id: {influencer_id}")
+        
+        return {
+            "influencer_id": influencer_id,
+            "api_key": new_api_key,
+            "message": "API 키가 성공적으로 생성되었습니다.",
+            "created_at": datetime.utcnow().isoformat(),
+            "influencer_name": influencer.influencer_name
+        }
+        
+    except Exception as e:
+        db.rollback()
+        logger.error(f"❌ 공개 API 키 생성 실패 - influencer_id: {influencer_id}, error: {str(e)}")
+        raise HTTPException(status_code=500, detail="API 키 생성 중 오류가 발생했습니다.")
+
+
 @router.get("/{influencer_id}/api-key", response_model=APIKeyInfo)
 async def get_api_key(
     influencer_id: str,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    """인플루언서 API 키 조회"""
+    """인플루언서 API 키 조회 (소유자만)"""
     user_id = current_user.get("sub")
     if not user_id:
         raise HTTPException(status_code=401, detail="User ID not found")
@@ -1074,6 +1142,55 @@ async def get_api_key(
     if not api_key:
         logger.info(f"📝 API 키가 존재하지 않음 - influencer_id: {influencer_id}")
         raise HTTPException(status_code=404, detail="API key not found")
+    
+    return {
+        "influencer_id": influencer_id,
+        "api_key": api_key.api_value,
+        "created_at": api_key.created_at,
+        "updated_at": api_key.updated_at,
+        "influencer_name": influencer.influencer_name
+    }
+
+
+@router.get("/{influencer_id}/api-key/public", response_model=APIKeyInfo)
+async def get_api_key_public(
+    influencer_id: str,
+    db: Session = Depends(get_db),
+):
+    """인플루언서 API 키 조회 (공개 엔드포인트 - 인증 불필요)"""
+    logger.info(f"🔍 공개 API 키 조회 시도 - influencer_id: {influencer_id}")
+    
+    # 인플루언서 존재 확인
+    influencer = (
+        db.query(AIInfluencer)
+        .filter(AIInfluencer.influencer_id == influencer_id)
+        .first()
+    )
+    
+    if not influencer:
+        logger.error(f"❌ 공개 API 키 조회 실패 - 인플루언서가 존재하지 않음: influencer_id: {influencer_id}")
+        raise HTTPException(status_code=404, detail="Influencer not found")
+    
+    # 인플루언서가 사용 가능한 상태인지 확인
+    if influencer.learning_status != 1:
+        logger.warning(f"⚠️ 공개 API 키 조회 실패 - 인플루언서 학습 미완료: influencer_id: {influencer_id}, learning_status: {influencer.learning_status}")
+        raise HTTPException(
+            status_code=400, 
+            detail="인플루언서가 아직 학습 중입니다. 학습이 완료된 후 API 키를 조회할 수 있습니다."
+        )
+    
+    # API 키 조회
+    api_key = (
+        db.query(InfluencerAPI)
+        .filter(InfluencerAPI.influencer_id == influencer_id)
+        .first()
+    )
+    
+    if not api_key:
+        logger.info(f"📝 공개 API 키 조회 실패 - API 키가 존재하지 않음: influencer_id: {influencer_id}")
+        raise HTTPException(status_code=404, detail="API key not found")
+    
+    logger.info(f"✅ 공개 API 키 조회 완료 - influencer_id: {influencer_id}")
     
     return {
         "influencer_id": influencer_id,
