@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 import { Separator } from "@/components/ui/separator"
 import { Progress } from "@/components/ui/progress"
@@ -107,17 +108,17 @@ export default function ImageGeneratorPage() {
   const [uploadedFile, setUploadedFile] = useState<File | null>(null)
   const [uploadedImageUrl, setUploadedImageUrl] = useState<string | null>(null)
   const [selectedGalleryImage, setSelectedGalleryImage] = useState<GeneratedImage | null>(null)
-  
+
   // 새로 추가된 상태
   const [previewImage, setPreviewImage] = useState<GeneratedImage | null>(null)
   const [showImageModal, setShowImageModal] = useState(false) // 이미지 생성용 모달
   const [showGalleryImageModal, setShowGalleryImageModal] = useState(false) // 갤러리용 모달
   const [showDownloadDialog, setShowDownloadDialog] = useState(false)
   const [downloadFileName, setDownloadFileName] = useState("")
-  
+
   // 갤러리에서 이미지 선택
   const [showGallerySelector, setShowGallerySelector] = useState(false)
-  
+
   // 최대 2개 이미지 선택을 위한 상태
   const [selectedImages, setSelectedImages] = useState<Array<{
     id: string
@@ -126,37 +127,39 @@ export default function ImageGeneratorPage() {
     file?: File
     galleryImage?: GeneratedImage
   }>>([])
-  
+
   // 선택된 수정 방법 상태
   const [selectedMethod, setSelectedMethod] = useState<number>(0)
-  
+
   // 갤러리 필터 상태
   const [galleryFilter, setGalleryFilter] = useState<string>("all")
   const [tempGalleryFilter, setTempGalleryFilter] = useState<string>("all")
   const [isFilterModalOpen, setIsFilterModalOpen] = useState(false)
-  
+
   // 필터링된 이미지 목록
   const filteredImages = useMemo(() => {
     if (galleryFilter === "all") {
       return images
     }
-    
+
     const [width, height] = galleryFilter.split("x").map(Number)
     return images.filter(image => image.width === width && image.height === height)
   }, [images, galleryFilter])
-  
+
   // 드래그 이벤트 핸들러
   const [dragActive, setDragActive] = useState(false)
   const [maskMode, setMaskMode] = useState(false)
   const [isDrawing, setIsDrawing] = useState(false)
   const [brushSize, setBrushSize] = useState(20)
+  const [maskColor, setMaskColor] = useState("#FFFFFF")
   const [lastPoint, setLastPoint] = useState<{ x: number, y: number } | null>(null)
+  const [activeImageIndex, setActiveImageIndex] = useState(0)
 
 
   // Canvas refs
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const imageRef = useRef<HTMLImageElement>(null)
-  const lastPointRef = useRef<{x: number, y: number} | null>(null)
+  const lastPointRef = useRef<{ x: number, y: number } | null>(null)
 
   // 모델 목록 가져오기 제거 - 워크플로우에 정의된 모델 자동 사용
 
@@ -210,7 +213,7 @@ export default function ImageGeneratorPage() {
 
     setIsGenerating(true)
     setGenerationProgress(0)
-                
+
     try {
       // 1단계: 프롬프트 최적화 (임시 비활성화)
       let optimizedPrompt = prompt
@@ -409,10 +412,10 @@ export default function ImageGeneratorPage() {
   const handleDownloadWithCustomName = async () => {
     if (previewImage && downloadFileName.trim()) {
       const fileExtension = '.png'
-      const finalFileName = downloadFileName.endsWith(fileExtension) 
-        ? downloadFileName 
+      const finalFileName = downloadFileName.endsWith(fileExtension)
+        ? downloadFileName
         : downloadFileName + fileExtension
-      
+
       await handleDownloadImage(previewImage.image_url, finalFileName)
       setShowDownloadDialog(false)
       setDownloadFileName("")
@@ -428,7 +431,7 @@ export default function ImageGeneratorPage() {
         .replace(/[^a-zA-Z0-9가-힣\s]/g, '') // 특수문자 제거
         .replace(/\s+/g, '_') // 공백을 언더스코어로 변경
         .trim()
-      
+
       setDownloadFileName(defaultName || 'generated_image')
       setShowDownloadDialog(true)
     }
@@ -450,14 +453,14 @@ export default function ImageGeneratorPage() {
       alert(`최대 ${maxAllowed}개까지 이미지를 선택할 수 있습니다.`)
       return
     }
-    
+
     const newImage = {
       id: `gallery_${image.id}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       url: image.image_url,
       type: 'gallery' as const,
       galleryImage: image
     }
-    
+
     setSelectedImages(prev => [...prev, newImage])
   }
 
@@ -466,19 +469,19 @@ export default function ImageGeneratorPage() {
     const currentCount = selectedImages.length
     const maxAllowed = getRequiredImageCount()
     const remainingSlots = maxAllowed - currentCount
-    
+
     if (remainingSlots <= 0) {
       alert(`최대 ${maxAllowed}개까지 이미지를 선택할 수 있습니다.`)
       return
     }
-    
+
     const newImage = {
       id: `gallery_${image.id}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       url: image.image_url,
       type: 'gallery' as const,
       galleryImage: image
     }
-    
+
     setSelectedImages(prev => [...prev, newImage])
   }
 
@@ -488,7 +491,7 @@ export default function ImageGeneratorPage() {
   // 갤러리 모달에서 이미지 선택/해제
   const handleGalleryImageToggle = (image: GeneratedImage) => {
     const isSelected = gallerySelectedImages.some(img => img.id === image.id)
-    
+
     if (isSelected) {
       setGallerySelectedImages(prev => prev.filter(img => img.id !== image.id))
     } else {
@@ -502,14 +505,55 @@ export default function ImageGeneratorPage() {
     }
   }
 
-  // 드롭 이벤트 핸들러
+  // 파일 업로드 처리 함수
+  const handleFileUpload = (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      alert('이미지 파일만 업로드할 수 있습니다.')
+      return
+    }
+
+    if (selectedImages.length >= 2) {
+      alert('최대 2개까지 선택 가능합니다.')
+      return
+    }
+
+    const imageId = `upload-${Date.now()}-${Math.random()}`
+    const imageUrl = URL.createObjectURL(file)
+
+    const newImage = {
+      id: imageId,
+      url: imageUrl,
+      type: 'upload' as const,
+      file: file
+    }
+
+    setSelectedImages(prev => [...prev, newImage])
+  }
+
+  // 드롭 이벤트 핸들러 (다중 파일 지원)
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault()
     e.stopPropagation()
     setDragActive(false)
 
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      handleFileUpload(e.dataTransfer.files[0])
+    if (e.dataTransfer.files) {
+      const files = Array.from(e.dataTransfer.files).filter(file => file.type.startsWith('image/'))
+
+      if (files.length === 0) {
+        alert('이미지 파일만 업로드할 수 있습니다.')
+        return
+      }
+
+      const remainingSlots = 2 - selectedImages.length
+      const filesToUpload = files.slice(0, remainingSlots)
+
+      if (files.length > remainingSlots) {
+        alert(`최대 2개까지 선택 가능합니다. ${remainingSlots}개 파일만 업로드됩니다.`)
+      }
+
+      filesToUpload.forEach(file => {
+        handleFileUpload(file)
+      })
     }
   }
 
@@ -562,7 +606,7 @@ export default function ImageGeneratorPage() {
   const isPointInImageBounds = useCallback((x: number, y: number): boolean => {
     const image = imageRef.current
     if (!image) return false
-    
+
     return x >= 0 && x <= image.naturalWidth && y >= 0 && y <= image.naturalHeight
   }, [])
 
@@ -709,12 +753,12 @@ export default function ImageGeneratorPage() {
     if (previewImage) {
       // 이전 이미지를 DB에 저장 (이미지 목록에 추가)
       setImages(prev => [previewImage, ...prev])
-      
+
       // 모달에서 로딩 상태로 변경
       setPreviewImage(null)
       setIsGenerating(true)
       setGenerationProgress(0)
-      
+
       // 진행률 시뮬레이션
       const progressInterval = setInterval(() => {
         setGenerationProgress(prev => {
@@ -725,15 +769,15 @@ export default function ImageGeneratorPage() {
           return prev + Math.random() * 10
         })
       }, 200)
-      
+
       // 새로운 이미지 생성
       setTimeout(() => {
         clearInterval(progressInterval)
         setIsGenerating(false)
         setGenerationProgress(100)
-        
+
         const selectedSizeData = PRESET_SIZES.find(size => size.id === selectedSize)
-        
+
         const newTestImage: GeneratedImage = {
           id: `img_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
           prompt: previewImage?.prompt || prompt,
@@ -748,7 +792,7 @@ export default function ImageGeneratorPage() {
           created_at: new Date().toISOString(),
           status: 'completed'
         }
-        
+
         setPreviewImage(newTestImage) // 모달에 새 이미지 표시
       }, 2000) // 2초 후 완료
     }
@@ -822,51 +866,26 @@ export default function ImageGeneratorPage() {
     }
   }
 
-  // 드롭 이벤트 핸들러
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setDragActive(false)
-    
-    if (e.dataTransfer.files) {
-      const files = Array.from(e.dataTransfer.files).filter(file => file.type.startsWith('image/'))
-      
-      if (files.length === 0) {
-        alert('이미지 파일만 업로드할 수 있습니다.')
-        return
-      }
-      
-      const remainingSlots = 2 - selectedImages.length
-      const filesToUpload = files.slice(0, remainingSlots)
-      
-      if (files.length > remainingSlots) {
-        alert(`최대 2개까지 선택 가능합니다. ${remainingSlots}개 파일만 업로드됩니다.`)
-      }
-      
-      filesToUpload.forEach(file => {
-        handleFileUpload(file)
-      })
-    }
-  }
+
 
   // 파일 선택 핸들러 (다중 선택 지원)
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files
     if (files) {
       const imageFiles = Array.from(files).filter(file => file.type.startsWith('image/'))
-      
+
       if (imageFiles.length === 0) {
         alert('이미지 파일만 선택할 수 있습니다.')
         return
       }
-      
+
       const remainingSlots = 2 - selectedImages.length
       const filesToUpload = imageFiles.slice(0, remainingSlots)
-      
+
       if (imageFiles.length > remainingSlots) {
         alert(`최대 2개까지 선택 가능합니다. ${remainingSlots}개 파일만 업로드됩니다.`)
       }
-      
+
       filesToUpload.forEach(file => {
         handleFileUpload(file)
       })
@@ -1261,7 +1280,7 @@ export default function ImageGeneratorPage() {
                         <Button
                           variant="destructive"
                           size="sm"
-                          onClick={handleRemoveUploadedImage}
+                          onClick={() => handleRemoveImage(uploadedFile?.name || 'uploaded')}
                           className="absolute top-2 right-2"
                         >
                           <Trash2 className="h-4 w-4" />
@@ -1390,7 +1409,7 @@ export default function ImageGeneratorPage() {
 
                     {/* 새 이미지 업로드 버튼 */}
                     <div className="text-center">
-                      <Button variant="outline" onClick={handleRemoveUploadedImage}>
+                      <Button variant="outline" onClick={() => handleRemoveImage(uploadedFile?.name || 'uploaded')}>
                         <Plus className="h-4 w-4 mr-2" />
                         다른 이미지 업로드
                       </Button>

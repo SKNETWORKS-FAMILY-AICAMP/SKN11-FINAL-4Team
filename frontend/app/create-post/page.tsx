@@ -21,7 +21,10 @@ import {
   AlertCircle,
   Loader2,
   User,
-  Upload
+  Upload,
+  Instagram,
+  BookOpen,
+  Facebook
 } from "lucide-react"
 import { usePermission } from "@/hooks/use-auth"
 import { ModelService, type AIInfluencer } from "@/lib/services/model.service"
@@ -41,13 +44,13 @@ interface PlatformOption {
   value: number
   label: string
   description: string
-  icon: string
+  icon: React.ComponentType<{ className?: string }>
 }
 
 const PLATFORM_OPTIONS: PlatformOption[] = [
-  { value: 0, label: "Instagram", description: "이미지 중심의 소셜 미디어", icon: "/icons/instagram.png" },
-  { value: 1, label: "Blog", description: "긴 글 형태의 블로그 포스트", icon: "/icons/blog.png" },
-  { value: 2, label: "Facebook", description: "다양한 형태의 소셜 미디어", icon: "/icons/facebook.png" }
+  { value: 0, label: "Instagram", description: "이미지 중심의 소셜 미디어", icon: Instagram },
+  { value: 1, label: "Blog", description: "긴 글 형태의 블로그 포스트", icon: BookOpen },
+  { value: 2, label: "Facebook", description: "다양한 형태의 소셜 미디어", icon: Facebook }
 ]
 
 // 기본 해시태그 목록
@@ -236,20 +239,9 @@ export default function CreatePostPage() {
   }
 
   // S3 연결 상태 확인
-  const [s3Status, setS3Status] = useState<{ status: string, message: string } | null>(null)
 
-  const checkS3Connection = async () => {
-    try {
-      const response = await fetch('/api/boards/test-s3-connection')
-      const data = await response.json()
-      setS3Status(data)
-    } catch (error) {
-      setS3Status({
-        status: 'error',
-        message: 'S3 연결 확인 중 오류가 발생했습니다.'
-      })
-    }
-  }
+
+
 
   // 게시글 설명 향상
   const isGenerateEnabled = !!formData.influencer_id && !!formData.board_topic && !!formData.board_description.trim();
@@ -519,29 +511,6 @@ export default function CreatePostPage() {
                 <CardDescription>게시글의 기본 정보를 설정하세요</CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
-                {/* S3 연결 상태 */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <Label>S3 연결 상태</Label>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={checkS3Connection}
-                    >
-                      연결 확인
-                    </Button>
-                  </div>
-                  {s3Status && (
-                    <div className={`p-3 rounded-md text-sm ${s3Status.status === 'success'
-                      ? 'bg-green-50 text-green-700 border border-green-200'
-                      : 'bg-red-50 text-red-700 border border-red-200'
-                      }`}>
-                      {s3Status.message}
-                    </div>
-                  )}
-                </div>
-
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
                     <Label htmlFor="influencer_id">AI 인플루언서 선택</Label>
@@ -574,17 +543,20 @@ export default function CreatePostPage() {
                         <SelectValue placeholder="플랫폼을 선택하세요" />
                       </SelectTrigger>
                       <SelectContent>
-                        {PLATFORM_OPTIONS.map((platform) => (
-                          <SelectItem key={platform.value} value={platform.value.toString()}>
-                            <div className="flex items-center space-x-2">
-                              <img src={platform.icon} alt={platform.label} className="w-5 h-5 rounded" />
-                              <div>
-                                <div className="font-medium">{platform.label}</div>
-                                <div className="text-xs text-gray-500">{platform.description}</div>
+                        {PLATFORM_OPTIONS.map((platform) => {
+                          const IconComponent = platform.icon;
+                          return (
+                            <SelectItem key={platform.value} value={platform.value.toString()}>
+                              <div className="flex items-center space-x-2">
+                                <IconComponent className="w-5 h-5 text-gray-600" />
+                                <div>
+                                  <div className="font-medium">{platform.label}</div>
+                                  <div className="text-xs text-gray-500">{platform.description}</div>
+                                </div>
                               </div>
-                            </div>
-                          </SelectItem>
-                        ))}
+                            </SelectItem>
+                          );
+                        })}
                       </SelectContent>
                     </Select>
                   </div>
@@ -812,20 +784,19 @@ export default function CreatePostPage() {
                     </div>
                   ) : (
                     /* 업로드 영역 */
-                    <div 
-                      className={`relative group transition-all duration-300 ${
-                        isDragOver 
-                          ? "scale-105" 
-                          : "hover:scale-[1.02]"
-                      }`}
+                    <div
+                      className={`relative group transition-all duration-300 ${isDragOver
+                        ? "scale-105"
+                        : "hover:scale-[1.02]"
+                        }`}
                       onDragOver={handleDragOver}
                       onDragLeave={handleDragLeave}
                       onDrop={handleDrop}
                     >
                       <div className={`
                         relative overflow-hidden rounded-xl border-2 border-dashed transition-all duration-300
-                        ${isDragOver 
-                          ? "border-blue-500 bg-gradient-to-br from-blue-50 to-indigo-50 shadow-lg shadow-blue-100" 
+                        ${isDragOver
+                          ? "border-blue-500 bg-gradient-to-br from-blue-50 to-indigo-50 shadow-lg shadow-blue-100"
                           : "border-gray-300 bg-gradient-to-br from-gray-50 to-white hover:border-blue-400 hover:bg-gradient-to-br hover:from-blue-50 hover:to-indigo-50"
                         }
                       `}>
@@ -836,20 +807,20 @@ export default function CreatePostPage() {
                           <div className="absolute bottom-8 left-12 w-4 h-4 border-2 border-gray-400 rotate-45"></div>
                           <div className="absolute bottom-16 right-4 w-10 h-10 border-2 border-gray-400 rounded-lg"></div>
                         </div>
-                        
+
                         <div className="relative p-12 text-center">
                           {/* 아이콘 영역 */}
                           <div className={`
                             relative mx-auto mb-6 w-20 h-20 rounded-full flex items-center justify-center transition-all duration-300
-                            ${isDragOver 
-                              ? "bg-blue-100 shadow-lg shadow-blue-200" 
+                            ${isDragOver
+                              ? "bg-blue-100 shadow-lg shadow-blue-200"
                               : "bg-gray-100 group-hover:bg-blue-100 group-hover:shadow-lg group-hover:shadow-blue-200"
                             }
                           `}>
                             <Upload className={`
                               h-8 w-8 transition-all duration-300
-                              ${isDragOver 
-                                ? "text-blue-600 scale-110" 
+                              ${isDragOver
+                                ? "text-blue-600 scale-110"
                                 : "text-gray-500 group-hover:text-blue-600 group-hover:scale-110"
                               }
                             `} />
@@ -858,7 +829,7 @@ export default function CreatePostPage() {
                               <div className="absolute inset-0 rounded-full border-2 border-blue-300 animate-ping"></div>
                             )}
                           </div>
-                          
+
                           {/* 텍스트 영역 */}
                           <div className="space-y-3">
                             <h3 className={`
@@ -877,7 +848,7 @@ export default function CreatePostPage() {
                               지원 형식: JPG, PNG, GIF, WebP (최대 5MB)
                             </p>
                           </div>
-                          
+
                           {/* 파일 선택 버튼 */}
                           <div className="mt-6">
                             <input
@@ -888,14 +859,14 @@ export default function CreatePostPage() {
                               className="hidden"
                             />
                             <label htmlFor="image_upload">
-                              <Button 
+                              <Button
                                 className={`
                                   transition-all duration-300 cursor-pointer
-                                  ${isDragOver 
-                                    ? "bg-blue-600 hover:bg-blue-700 text-white shadow-lg" 
+                                  ${isDragOver
+                                    ? "bg-blue-600 hover:bg-blue-700 text-white shadow-lg"
                                     : "bg-white hover:bg-blue-50 text-gray-700 border-gray-300 hover:border-blue-400 hover:text-blue-700 shadow-sm hover:shadow-md"
                                   }
-                                `} 
+                                `}
                                 asChild
                               >
                                 <span className="flex items-center gap-2">
