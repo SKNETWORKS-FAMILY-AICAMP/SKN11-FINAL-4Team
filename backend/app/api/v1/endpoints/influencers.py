@@ -17,6 +17,11 @@ from app.schemas.influencer import (
     FinetuningWebhookRequest,
     ToneGenerationRequest,
     SystemPromptSaveRequest,
+    APIKeyResponse,
+    APIKeyInfo,
+    APIKeyUsage,
+    APIKeyTestRequest,
+    APIKeyTestResponse,
 )
 from app.core.security import get_current_user
 from app.services.influencers.crud import (
@@ -56,6 +61,7 @@ from openai import OpenAI
 import os
 import json
 from pydantic import BaseModel
+from app.models.influencer import APICallAggregation
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -929,7 +935,9 @@ async def save_system_prompt(
         raise HTTPException(status_code=500, detail=f"시스템 프롬프트 저장 중 오류가 발생했습니다: {str(e)}")
 
 
-@router.post("/{influencer_id}/api-key/generate")
+# API 키 관리 관련 엔드포인트들 개선
+
+@router.post("/{influencer_id}/api-key/generate", response_model=APIKeyResponse)
 async def generate_api_key(
     influencer_id: str,
     db: Session = Depends(get_db),
@@ -941,6 +949,20 @@ async def generate_api_key(
         raise HTTPException(status_code=401, detail="User ID not found")
     
     # 인플루언서 존재 확인 및 권한 확인
+    logger.info(f"🔍 API 키 생성 시도 - influencer_id: {influencer_id}, user_id: {user_id}")
+    
+    # 먼저 인플루언서가 존재하는지 확인 (권한 무관)
+    influencer_exists = (
+        db.query(AIInfluencer)
+        .filter(AIInfluencer.influencer_id == influencer_id)
+        .first()
+    )
+    
+    if not influencer_exists:
+        logger.error(f"❌ API 키 생성 실패 - 인플루언서가 존재하지 않음: influencer_id: {influencer_id}")
+        raise HTTPException(status_code=404, detail="Influencer not found")
+    
+    # 권한 확인
     influencer = (
         db.query(AIInfluencer)
         .filter(
@@ -951,7 +973,16 @@ async def generate_api_key(
     )
     
     if not influencer:
+        logger.error(f"❌ API 키 생성 실패 - 인플루언서 권한 없음: influencer_id: {influencer_id}, user_id: {user_id}, 실제 소유자: {influencer_exists.user_id}")
         raise HTTPException(status_code=404, detail="Influencer not found")
+    
+    # 인플루언서가 사용 가능한 상태인지 확인
+    if influencer.learning_status != 1:
+        logger.warning(f"⚠️ API 키 생성 실패 - 인플루언서 학습 미완료: influencer_id: {influencer_id}, learning_status: {influencer.learning_status}")
+        raise HTTPException(
+            status_code=400, 
+            detail="인플루언서가 아직 학습 중입니다. 학습이 완료된 후 API 키를 발급받을 수 있습니다."
+        )
     
     try:
         # 기존 API 키가 있는지 확인
@@ -961,7 +992,7 @@ async def generate_api_key(
             .first()
         )
         
-        # 새로운 API 키 생성 (ai_inf_ 접두사 + 랜덤 문자열)
+        # 새로운 API 키 생성 (am_ 접두사 + 랜덤 문자열)
         new_api_key = f"am_{uuid.uuid4().hex[:16]}"
         
         if existing_api:
@@ -983,7 +1014,9 @@ async def generate_api_key(
         return {
             "influencer_id": influencer_id,
             "api_key": new_api_key,
-            "message": "API 키가 성공적으로 생성되었습니다."
+            "message": "API 키가 성공적으로 생성/재생성되었습니다.",
+            "created_at": datetime.utcnow().isoformat(),
+            "influencer_name": influencer.influencer_name
         }
         
     except Exception as e:
@@ -992,13 +1025,71 @@ async def generate_api_key(
         raise HTTPException(status_code=500, detail="API 키 생성 중 오류가 발생했습니다.")
 
 
-@router.get("/{influencer_id}/api-key")
+@router.get("/{influencer_id}/api-key", response_model=APIKeyInfo)
 async def get_api_key(
     influencer_id: str,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
     """인플루언서 API 키 조회"""
+    user_id = current_user.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User ID not found")
+    
+    # 인플루언서 존재 확인 및 권한 확인
+    logger.info(f"🔍 API 키 조회 시도 - influencer_id: {influencer_id}, user_id: {user_id}")
+    
+    # 먼저 인플루언서가 존재하는지 확인 (권한 무관)
+    influencer_exists = (
+        db.query(AIInfluencer)
+        .filter(AIInfluencer.influencer_id == influencer_id)
+        .first()
+    )
+    
+    if not influencer_exists:
+        logger.error(f"❌ 인플루언서가 존재하지 않음 - influencer_id: {influencer_id}")
+        raise HTTPException(status_code=404, detail="Influencer not found")
+    
+    # 권한 확인
+    influencer = (
+        db.query(AIInfluencer)
+        .filter(
+            AIInfluencer.influencer_id == influencer_id,
+            AIInfluencer.user_id == user_id
+        )
+        .first()
+    )
+    
+    if not influencer:
+        logger.error(f"❌ 인플루언서 권한 없음 - influencer_id: {influencer_id}, user_id: {user_id}, 실제 소유자: {influencer_exists.user_id}")
+        raise HTTPException(status_code=404, detail="Influencer not found")
+    
+    # API 키 조회
+    api_key = (
+        db.query(InfluencerAPI)
+        .filter(InfluencerAPI.influencer_id == influencer_id)
+        .first()
+    )
+    
+    if not api_key:
+        logger.info(f"📝 API 키가 존재하지 않음 - influencer_id: {influencer_id}")
+        raise HTTPException(status_code=404, detail="API key not found")
+    
+    return {
+        "influencer_id": influencer_id,
+        "api_key": api_key.api_value,
+        "created_at": api_key.created_at,
+        "updated_at": api_key.updated_at,
+        "influencer_name": influencer.influencer_name
+    }
+
+@router.get("/{influencer_id}/api-key/usage", response_model=APIKeyUsage)
+async def get_api_key_usage(
+    influencer_id: str,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """인플루언서 API 키 사용량 조회"""
     user_id = current_user.get("sub")
     if not user_id:
         raise HTTPException(status_code=401, detail="User ID not found")
@@ -1026,9 +1117,148 @@ async def get_api_key(
     if not api_key:
         raise HTTPException(status_code=404, detail="API key not found")
     
+    # 오늘 날짜의 사용량 조회
+    from datetime import date
+    today = date.today()
+    
+    usage = (
+        db.query(APICallAggregation)
+        .filter(
+            APICallAggregation.api_id == api_key.api_id,
+            APICallAggregation.created_at >= today
+        )
+        .first()
+    )
+    
+    # 전체 사용량 조회
+    total_usage = (
+        db.query(APICallAggregation)
+        .filter(APICallAggregation.api_id == api_key.api_id)
+        .all()
+    )
+    
+    total_calls = sum(u.daily_call_count for u in total_usage)
+    
     return {
         "influencer_id": influencer_id,
-        "api_key": api_key.api_value,
-        "created_at": api_key.created_at,
-        "updated_at": api_key.updated_at
+        "influencer_name": influencer.influencer_name,
+        "today_calls": usage.daily_call_count if usage else 0,
+        "total_calls": total_calls,
+        "api_key_created_at": api_key.created_at,
+        "api_key_updated_at": api_key.updated_at,
+        "usage_limit": {
+            "daily_limit": 1000,
+            "monthly_limit": 30000,
+            "rate_limit": "60 requests per minute"
+        }
     }
+
+
+@router.post("/{influencer_id}/api-key/test", response_model=APIKeyTestResponse)
+async def test_api_key(
+    influencer_id: str,
+    test_request: APIKeyTestRequest,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """인플루언서 API 키 테스트"""
+    user_id = current_user.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User ID not found")
+    
+    # 인플루언서 존재 확인 및 권한 확인
+    influencer = (
+        db.query(AIInfluencer)
+        .filter(
+            AIInfluencer.influencer_id == influencer_id,
+            AIInfluencer.user_id == user_id
+        )
+        .first()
+    )
+    
+    if not influencer:
+        raise HTTPException(status_code=404, detail="Influencer not found")
+    
+    # API 키 조회
+    api_key = (
+        db.query(InfluencerAPI)
+        .filter(InfluencerAPI.influencer_id == influencer_id)
+        .first()
+    )
+    
+    if not api_key:
+        raise HTTPException(status_code=404, detail="API key not found")
+    
+    # 테스트 메시지 추출
+    test_message = test_request.message
+    
+    try:
+        # 실제 API 호출을 시뮬레이션 (실제로는 VLLM 서버 호출)
+        # 여기서는 간단한 응답으로 대체
+        response_text = f"안녕하세요! 저는 {influencer.influencer_name}입니다. '{test_message}'에 대한 답변을 드리겠습니다."
+        
+        # API 사용량 증가 (테스트 호출도 카운트)
+        await track_api_usage(db, influencer_id)
+        
+        return {
+            "success": True,
+            "response": response_text,
+            "influencer_name": influencer.influencer_name,
+            "test_message": test_message,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ API 키 테스트 실패 - influencer_id: {influencer_id}, error: {str(e)}")
+        raise HTTPException(status_code=500, detail="API 키 테스트 중 오류가 발생했습니다.")
+
+
+# API 사용량 추적 함수 (기존 함수 개선)
+async def track_api_usage(db: Session, influencer_id: str):
+    """API 사용량 추적 및 집계"""
+    try:
+        # API 키 조회
+        api_key = (
+            db.query(InfluencerAPI)
+            .filter(InfluencerAPI.influencer_id == influencer_id)
+            .first()
+        )
+        
+        if not api_key:
+            logger.warning(f"API 키를 찾을 수 없음 - influencer_id: {influencer_id}")
+            return
+        
+        # 오늘 날짜의 사용량 조회
+        from datetime import date
+        today = date.today()
+        
+        usage = (
+            db.query(APICallAggregation)
+            .filter(
+                APICallAggregation.api_id == api_key.api_id,
+                APICallAggregation.created_at >= today
+            )
+            .first()
+        )
+        
+        if usage:
+            # 기존 사용량 증가
+            usage.daily_call_count += 1
+            usage.updated_at = datetime.utcnow()
+        else:
+            # 새로운 사용량 기록 생성
+            new_usage = APICallAggregation(
+                api_id=api_key.api_id,
+                influencer_id=influencer_id,
+                daily_call_count=1,
+                created_at=today,
+                updated_at=datetime.utcnow()
+            )
+            db.add(new_usage)
+        
+        db.commit()
+        logger.info(f"📊 API 사용량 업데이트 - influencer_id: {influencer_id}")
+        
+    except Exception as e:
+        db.rollback()
+        logger.error(f"❌ API 사용량 추적 실패 - influencer_id: {influencer_id}, error: {str(e)}")

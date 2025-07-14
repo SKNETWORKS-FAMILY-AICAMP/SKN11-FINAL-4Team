@@ -255,62 +255,96 @@ def generate_jwt_payload(user_info: Dict, provider: str) -> Dict:
 # 전역 보안 모니터 인스턴스
 security_monitor = SecurityMonitor()
 
-async def get_current_user_by_api_key(
-    api_key: str = Depends(HTTPBearer()),
-    db: Session = Depends(get_db)
-) -> AIInfluencer:
-    """
-    API 키로 인증하여 인플루언서 정보를 반환
-    챗봇 기능만 접근 가능하도록 제한
-    """
-    try:
-        # API 키로 인플루언서 조회
-        influencer_api = (
-            db.query(InfluencerAPI)
-            .filter(InfluencerAPI.api_value == api_key)
-            .first()
-        )
-        
-        if not influencer_api:
+# API 키 인증을 위한 커스텀 의존성
+class APIKeyAuth:
+    def __init__(self):
+        self.scheme = HTTPBearer(auto_error=False)
+    
+    async def __call__(self, request: Request, db: Session = Depends(get_db)) -> AIInfluencer:
+        # Authorization 헤더에서 Bearer 토큰 추출
+        authorization = request.headers.get("Authorization")
+        if not authorization:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid API key",
+                detail="Authorization header missing",
                 headers={"WWW-Authenticate": "Bearer"},
             )
         
-        # 인플루언서 정보 조회
-        influencer = (
-            db.query(AIInfluencer)
-            .filter(AIInfluencer.influencer_id == influencer_api.influencer_id)
-            .first()
-        )
-        
-        if not influencer:
+        # Bearer 토큰 형식 확인
+        if not authorization.startswith("Bearer "):
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Influencer not found",
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid authorization header format",
+                headers={"WWW-Authenticate": "Bearer"},
             )
         
-        # 챗봇 옵션이 활성화된 인플루언서만 접근 가능
-        if not bool(influencer.chatbot_option):
+        # API 키 추출 (Bearer 제거)
+        api_key = authorization[7:]  # "Bearer " 이후의 문자열
+        
+        if not api_key:
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Chatbot is not enabled for this influencer",
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="API key missing",
+                headers={"WWW-Authenticate": "Bearer"},
             )
         
-        # 학습 상태 확인 (사용 가능한 상태여야 함)
-        if influencer.learning_status != 1:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Influencer is not ready for chat",
+        try:
+            # API 키로 인플루언서 조회
+            influencer_api = (
+                db.query(InfluencerAPI)
+                .filter(InfluencerAPI.api_value == api_key)
+                .first()
             )
-        
-        return influencer
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Internal server error",
-        )
+            
+            if not influencer_api:
+                logger.warning(f"❌ 잘못된 API 키 시도: {api_key[:10]}...")
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid API key",
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+            
+            # 인플루언서 정보 조회
+            influencer = (
+                db.query(AIInfluencer)
+                .filter(AIInfluencer.influencer_id == influencer_api.influencer_id)
+                .first()
+            )
+            
+            if not influencer:
+                logger.error(f"❌ API 키는 유효하지만 인플루언서를 찾을 수 없음: {influencer_api.influencer_id}")
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Influencer not found",
+                )
+            
+            # 챗봇 옵션이 활성화된 인플루언서만 접근 가능
+            if influencer.chatbot_option is not True:
+                logger.warning(f"⚠️ 챗봇이 비활성화된 인플루언서 접근 시도: {influencer.influencer_name}")
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Chatbot is not enabled for this influencer",
+                )
+            
+            # 학습 상태 확인 (사용 가능한 상태여야 함)
+            if influencer.learning_status != 1:
+                logger.warning(f"⚠️ 학습이 완료되지 않은 인플루언서 접근 시도: {influencer.influencer_name} (status: {influencer.learning_status})")
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Influencer is not ready for chat",
+                )
+            
+            logger.info(f"✅ API 키 인증 성공: {influencer.influencer_name}")
+            return influencer
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"❌ API 키 인증 중 오류: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Internal server error",
+            )
+
+# API 키 인증 의존성 인스턴스
+get_current_user_by_api_key = APIKeyAuth()

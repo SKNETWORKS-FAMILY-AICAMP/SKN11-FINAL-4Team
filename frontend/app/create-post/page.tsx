@@ -20,7 +20,8 @@ import {
   Sparkles,
   AlertCircle,
   Loader2,
-  User
+  User,
+  Upload
 } from "lucide-react"
 import { usePermission } from "@/hooks/use-auth"
 import { ModelService, type AIInfluencer } from "@/lib/services/model.service"
@@ -811,38 +812,100 @@ export default function CreatePostPage() {
                     </div>
                   ) : (
                     /* 업로드 영역 */
-                    <div
-                      className={`mt-2 border-2 border-dashed rounded-lg p-6 transition-colors ${isDragOver
-                        ? 'border-blue-500 bg-blue-50'
-                        : 'border-gray-300 hover:border-gray-400'
-                        }`}
+                    <div 
+                      className={`relative group transition-all duration-300 ${
+                        isDragOver 
+                          ? "scale-105" 
+                          : "hover:scale-[1.02]"
+                      }`}
                       onDragOver={handleDragOver}
                       onDragLeave={handleDragLeave}
                       onDrop={handleDrop}
                     >
-                      <input
-                        id="image_upload"
-                        type="file"
-                        accept="image/*"
-                        onChange={handleImageUpload}
-                        className="hidden"
-                      />
-                      <div className="text-center">
-                        <ImageIcon className="h-12 w-12 mx-auto text-gray-400 mb-4" />
-                        <p className="text-gray-600 mb-2">
-                          이미지를 드래그 앤 드롭하거나 클릭하여 선택하세요
-                        </p>
-                        <p className="text-xs text-gray-400 mb-4">
-                          JPG, PNG, GIF 파일 (최대 5MB)
-                        </p>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() => document.getElementById('image_upload')?.click()}
-                        >
-                          <ImageIcon className="h-4 w-4 mr-2" />
-                          파일 선택
-                        </Button>
+                      <div className={`
+                        relative overflow-hidden rounded-xl border-2 border-dashed transition-all duration-300
+                        ${isDragOver 
+                          ? "border-blue-500 bg-gradient-to-br from-blue-50 to-indigo-50 shadow-lg shadow-blue-100" 
+                          : "border-gray-300 bg-gradient-to-br from-gray-50 to-white hover:border-blue-400 hover:bg-gradient-to-br hover:from-blue-50 hover:to-indigo-50"
+                        }
+                      `}>
+                        {/* 배경 패턴 */}
+                        <div className="absolute inset-0 opacity-5">
+                          <div className="absolute top-4 left-4 w-8 h-8 border-2 border-gray-400 rounded-lg"></div>
+                          <div className="absolute top-12 right-8 w-6 h-6 border-2 border-gray-400 rounded-full"></div>
+                          <div className="absolute bottom-8 left-12 w-4 h-4 border-2 border-gray-400 rotate-45"></div>
+                          <div className="absolute bottom-16 right-4 w-10 h-10 border-2 border-gray-400 rounded-lg"></div>
+                        </div>
+                        
+                        <div className="relative p-12 text-center">
+                          {/* 아이콘 영역 */}
+                          <div className={`
+                            relative mx-auto mb-6 w-20 h-20 rounded-full flex items-center justify-center transition-all duration-300
+                            ${isDragOver 
+                              ? "bg-blue-100 shadow-lg shadow-blue-200" 
+                              : "bg-gray-100 group-hover:bg-blue-100 group-hover:shadow-lg group-hover:shadow-blue-200"
+                            }
+                          `}>
+                            <Upload className={`
+                              h-8 w-8 transition-all duration-300
+                              ${isDragOver 
+                                ? "text-blue-600 scale-110" 
+                                : "text-gray-500 group-hover:text-blue-600 group-hover:scale-110"
+                              }
+                            `} />
+                            {/* 애니메이션 효과 */}
+                            {isDragOver && (
+                              <div className="absolute inset-0 rounded-full border-2 border-blue-300 animate-ping"></div>
+                            )}
+                          </div>
+                          
+                          {/* 텍스트 영역 */}
+                          <div className="space-y-3">
+                            <h3 className={`
+                              text-xl font-semibold transition-colors duration-300
+                              ${isDragOver ? "text-blue-700" : "text-gray-800 group-hover:text-blue-700"}
+                            `}>
+                              {isDragOver ? "여기에 놓으세요!" : "이미지 업로드"}
+                            </h3>
+                            <p className={`
+                              text-sm transition-colors duration-300 max-w-md mx-auto
+                              ${isDragOver ? "text-blue-600" : "text-gray-600 group-hover:text-blue-600"}
+                            `}>
+                              게시글에 사용할 이미지를 드래그하여 놓거나 클릭하여 선택하세요
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              지원 형식: JPG, PNG, GIF, WebP (최대 5MB)
+                            </p>
+                          </div>
+                          
+                          {/* 파일 선택 버튼 */}
+                          <div className="mt-6">
+                            <input
+                              id="image_upload"
+                              type="file"
+                              accept="image/*"
+                              onChange={handleImageUpload}
+                              className="hidden"
+                            />
+                            <label htmlFor="image_upload">
+                              <Button 
+                                className={`
+                                  transition-all duration-300 cursor-pointer
+                                  ${isDragOver 
+                                    ? "bg-blue-600 hover:bg-blue-700 text-white shadow-lg" 
+                                    : "bg-white hover:bg-blue-50 text-gray-700 border-gray-300 hover:border-blue-400 hover:text-blue-700 shadow-sm hover:shadow-md"
+                                  }
+                                `} 
+                                asChild
+                              >
+                                <span className="flex items-center gap-2">
+                                  <Upload className="h-4 w-4" />
+                                  파일 선택
+                                </span>
+                              </Button>
+                            </label>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   )}

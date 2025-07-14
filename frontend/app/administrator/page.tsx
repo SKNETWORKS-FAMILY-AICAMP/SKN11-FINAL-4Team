@@ -1105,10 +1105,10 @@ export default function AdministratorPage() {
                         
                         {/* 드래그 앤 드롭 영역 */}
                         <div 
-                          className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
+                          className={`relative group transition-all duration-300 ${
                             dragActive 
-                              ? "border-blue-400 bg-blue-50" 
-                              : "border-gray-300 hover:border-gray-400"
+                              ? "scale-105" 
+                              : "hover:scale-[1.02]"
                           }`}
                           onDragEnter={(e) => {
                             e.preventDefault()
@@ -1133,13 +1133,64 @@ export default function AdministratorPage() {
                             setSelectedFiles(prev => [...prev, ...files])
                           }}
                         >
-                          <Upload className={`h-12 w-12 mx-auto mb-4 ${
-                            dragActive ? "text-blue-600" : "text-gray-400"
-                          }`} />
-                          <p className="text-lg font-medium text-gray-900 mb-2">문서 업로드</p>
-                          <p className="text-sm text-gray-600 mb-4">
-                            PDF, DOCX, TXT 파일을 드래그하여 놓거나 클릭하여 선택하세요
+                          <div className={`
+                            relative overflow-hidden rounded-xl border-2 border-dashed transition-all duration-300
+                            ${dragActive 
+                              ? "border-blue-500 bg-gradient-to-br from-blue-50 to-indigo-50 shadow-lg shadow-blue-100" 
+                              : "border-gray-300 bg-gradient-to-br from-gray-50 to-white hover:border-blue-400 hover:bg-gradient-to-br hover:from-blue-50 hover:to-indigo-50"
+                            }
+                          `}>
+                            {/* 배경 패턴 */}
+                            <div className="absolute inset-0 opacity-5">
+                              <div className="absolute top-4 left-4 w-8 h-8 border-2 border-gray-400 rounded-lg"></div>
+                              <div className="absolute top-12 right-8 w-6 h-6 border-2 border-gray-400 rounded-full"></div>
+                              <div className="absolute bottom-8 left-12 w-4 h-4 border-2 border-gray-400 rotate-45"></div>
+                              <div className="absolute bottom-16 right-4 w-10 h-10 border-2 border-gray-400 rounded-lg"></div>
+                            </div>
+                            
+                            <div className="relative p-12 text-center">
+                              {/* 아이콘 영역 */}
+                              <div className={`
+                                relative mx-auto mb-6 w-20 h-20 rounded-full flex items-center justify-center transition-all duration-300
+                                ${dragActive 
+                                  ? "bg-blue-100 shadow-lg shadow-blue-200" 
+                                  : "bg-gray-100 group-hover:bg-blue-100 group-hover:shadow-lg group-hover:shadow-blue-200"
+                                }
+                              `}>
+                                <Upload className={`
+                                  h-8 w-8 transition-all duration-300
+                                  ${dragActive 
+                                    ? "text-blue-600 scale-110" 
+                                    : "text-gray-500 group-hover:text-blue-600 group-hover:scale-110"
+                                  }
+                                `} />
+                                {/* 애니메이션 효과 */}
+                                {dragActive && (
+                                  <div className="absolute inset-0 rounded-full border-2 border-blue-300 animate-ping"></div>
+                                )}
+                              </div>
+                              
+                              {/* 텍스트 영역 */}
+                              <div className="space-y-3">
+                                <h3 className={`
+                                  text-xl font-semibold transition-colors duration-300
+                                  ${dragActive ? "text-blue-700" : "text-gray-800 group-hover:text-blue-700"}
+                                `}>
+                                  {dragActive ? "여기에 놓으세요!" : "문서 업로드"}
+                                </h3>
+                                <p className={`
+                                  text-sm transition-colors duration-300 max-w-md mx-auto
+                                  ${dragActive ? "text-blue-600" : "text-gray-600 group-hover:text-blue-600"}
+                                `}>
+                                  RAG 챗봇 학습용 문서들을 드래그하여 놓거나 클릭하여 선택하세요
                           </p>
+                                <p className="text-xs text-gray-500">
+                                  지원 형식: PDF, DOCX, TXT (여러 파일 선택 가능)
+                                </p>
+                              </div>
+                              
+                              {/* 파일 선택 버튼 */}
+                              <div className="mt-6">
                           <input
                             type="file"
                             accept=".pdf,.docx,.txt"
@@ -1152,13 +1203,25 @@ export default function AdministratorPage() {
                             id="document-upload"
                           />
                           <label htmlFor="document-upload">
-                            <Button variant="outline" asChild className="cursor-pointer">
-                              <span>
-                                <Upload className="h-4 w-4 mr-2" />
+                                  <Button 
+                                    className={`
+                                      transition-all duration-300 cursor-pointer
+                                      ${dragActive 
+                                        ? "bg-blue-600 hover:bg-blue-700 text-white shadow-lg" 
+                                        : "bg-white hover:bg-blue-50 text-gray-700 border-gray-300 hover:border-blue-400 hover:text-blue-700 shadow-sm hover:shadow-md"
+                                      }
+                                    `} 
+                                    asChild
+                                  >
+                                    <span className="flex items-center gap-2">
+                                      <Upload className="h-4 w-4" />
                                 파일 선택
                               </span>
                             </Button>
                           </label>
+                              </div>
+                            </div>
+                          </div>
                         </div>
 
                         {/* 선택된 파일 목록 */}

@@ -260,7 +260,11 @@ function ModelDetailContent() {
   const loadModelData = async () => {
     setIsModelLoading(true)
     try {
+      console.log('🔍 모델 데이터 로드 시작 - influencer_id:', params.id)
+      
       const data = await ModelService.getInfluencer(params.id as string)
+      console.log('✅ 모델 데이터 로드 성공:', data)
+      
       setModel({
         ...data,
         id: data.influencer_id,
@@ -280,7 +284,7 @@ function ModelDetailContent() {
       // API 키 정보 로드
       await loadApiKeyInfo()
     } catch (error) {
-      console.error('Error loading model data:', error)
+      console.error('❌ 모델 데이터 로드 실패:', error)
     } finally {
       setIsModelLoading(false)
     }
@@ -288,8 +292,29 @@ function ModelDetailContent() {
 
   // API 키 정보 로드
   const loadApiKeyInfo = async () => {
+    console.log('🔍 API 키 정보 로드 시작 - influencer_id:', params.id)
+    
+    // 현재 로그인한 사용자 정보 확인
+    const token = localStorage.getItem('access_token')
+    if (token) {
+      try {
+        const payload = JSON.parse(atob(token.split('.')[1]))
+        console.log('👤 현재 로그인한 사용자:', {
+          user_id: payload.sub,
+          email: payload.email,
+          name: payload.name
+        })
+      } catch (e) {
+        console.log('❌ 토큰 파싱 실패:', e)
+      }
+    } else {
+      console.log('❌ 로그인 토큰이 없습니다')
+    }
+    
     try {
       const apiKeyData = await ModelService.getApiKey(params.id as string)
+      console.log('✅ API 키 조회 성공:', apiKeyData)
+      
       setApiKeyInfo({
         api_key: apiKeyData.api_key,
         created_at: apiKeyData.created_at,
@@ -300,24 +325,47 @@ function ModelDetailContent() {
         ...prev,
         apiKey: apiKeyData.api_key
       }))
-    } catch (error) {
-      console.error('Error loading API key:', error)
-      // API 키가 없는 경우 자동으로 생성
-      try {
-        const response = await ModelService.generateApiKey(params.id as string)
-        setApiKeyInfo({
-          api_key: response.api_key,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        })
-        // 모델 상태에 API 키 업데이트
-        setModel((prev: any) => ({
-          ...prev,
-          apiKey: response.api_key
-        }))
-        console.log('API 키가 자동으로 생성되었습니다.')
-      } catch (generateError) {
-        console.error('API 키 자동 생성 실패:', generateError)
+    } catch (error: any) {
+      console.error('❌ API 키 조회 실패:', {
+        error: error,
+        status: error.status,
+        detail: error.data?.detail,
+        message: error.message,
+        influencer_id: params.id,
+        stack: error.stack
+      })
+      
+      // API 키가 없는 경우 (404)에만 자동 생성 시도
+      if (error.status === 404 && error.data?.detail === "API key not found") {
+        console.log('🔄 API 키가 없어서 자동 생성 시도...')
+        try {
+          const response = await ModelService.generateApiKey(params.id as string)
+          console.log('✅ API 키 자동 생성 성공:', response)
+          
+          setApiKeyInfo({
+            api_key: response.api_key,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          })
+          // 모델 상태에 API 키 업데이트
+          setModel((prev: any) => ({
+            ...prev,
+            apiKey: response.api_key
+          }))
+          console.log('API 키가 자동으로 생성되었습니다.')
+        } catch (generateError: any) {
+          console.error('❌ API 키 자동 생성 실패:', {
+            error: generateError,
+            status: generateError.status,
+            detail: generateError.data?.detail,
+            message: generateError.message,
+            stack: generateError.stack
+          })
+          setApiKeyInfo(null)
+        }
+      } else {
+        // 다른 오류 (인플루언서를 찾을 수 없음 등)는 그대로 표시
+        console.error('API 키 조회 실패:', error.response?.data?.detail || error.message)
         setApiKeyInfo(null)
       }
     }
@@ -1153,7 +1201,7 @@ function ModelDetailContent() {
 
               <div className="grid gap-4">
                 {posts.map((post) => (
-                  <Card key={post.id} className="hover:shadow-md transition-shadow">
+                  <Card key={post.id}>
                     <CardContent className="p-6">
                       <div className="flex justify-between items-start mb-4">
                         <div className="flex-1">

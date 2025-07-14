@@ -693,36 +693,40 @@ function PostListContent() {
                 className="hover:shadow-lg transition-shadow cursor-pointer group"
                 onClick={() => handleViewPost(post)}
               >
-                <CardContent className="p-6">
-                  <div className="flex justify-between items-start mb-4">
-                    <div className="flex-1">
-                      <div className="flex items-center space-x-3 mb-2">
-                        <h4 className="text-lg font-semibold text-gray-900">{post.title || post.board_topic}</h4>
-                        {getStatusBadge(post.status)}
-                        {getPlatformBadge(post.platform || "")}
-                      </div>
-                      <p className="text-gray-600 text-sm line-clamp-3 mb-3">
-                        {(post.content || post.board_description || '').length > 150 ? `${(post.content || post.board_description || '').substring(0, 150)}...` : (post.content || post.board_description || '')}
-                      </p>
-                      <div className="flex flex-wrap gap-1 mb-3">
-                        {(post.hashtags || []).length > 0 ? (
-                          (post.hashtags || []).map((tag, index) => (
-                            <span key={index} className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded">
-                              {tag}
-                            </span>
-                          ))
-                        ) : (
-                          post.board_hash_tag && post.board_hash_tag.split(' ').filter(tag => tag.trim()).map((tag, index) => (
-                            <span key={index} className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded">
-                              {tag.startsWith('#') ? tag : `#${tag}`}
-                            </span>
-                          ))
-                        )}
+                <CardContent className="p-6 flex flex-col h-full">
+                  <div className="flex-1">
+                    <div className="flex justify-between items-start mb-4">
+                      <div className="flex-1">
+                        <div className="flex items-center space-x-3 mb-2">
+                          <h4 className="text-lg font-semibold text-gray-900">{post.title || post.board_topic}</h4>
+                          {getStatusBadge(post.status)}
+                          {getPlatformBadge(post.platform || "")}
+                        </div>
+                        <p className="text-gray-600 text-sm line-clamp-3 mb-3">
+                          {(post.content || post.board_description || '').length > 150 ? `${(post.content || post.board_description || '').substring(0, 150)}...` : (post.content || post.board_description || '')}
+                        </p>
+                        <div className="flex flex-wrap gap-1 mb-3">
+                          {(post.hashtags || []).length > 0 ? (
+                            (post.hashtags || []).map((tag, index) => (
+                              <span key={index} className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded">
+                                {tag}
+                              </span>
+                            ))
+                          ) : (
+                            post.board_hash_tag && post.board_hash_tag.split(' ').filter(tag => tag.trim()).map((tag, index) => (
+                              <span key={index} className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded">
+                                {tag.startsWith('#') ? tag : `#${tag}`}
+                              </span>
+                            ))
+                          )}
+                        </div>
                       </div>
                     </div>
+
                   </div>
 
-                  <div className="flex justify-between items-center">
+                  {/* 작성자와 생성일 - 보더라인 위 */}
+                  <div className="flex justify-between items-center mt-3 flex-shrink-0">
                     <div className="flex items-center space-x-4 text-sm text-gray-500">
                       <div className="flex items-center space-x-1">
                         <User className="h-4 w-4" />
@@ -741,8 +745,8 @@ function PostListContent() {
                     </div>
                   </div>
 
-                  {/* 성과지표와 액션 버튼들 */}
-                  <div className="flex items-center justify-between pt-3 border-t mt-3">
+                  {/* 성과지표와 액션 버튼들 - 보더라인 아래 */}
+                  <div className="flex items-center justify-between pt-3 border-t mt-3 flex-shrink-0">
                     <div className="flex items-center space-x-4 text-sm text-gray-600">
                       {post.status === "published" && post.engagement && (
                         <>
