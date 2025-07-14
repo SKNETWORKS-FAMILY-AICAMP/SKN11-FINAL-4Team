@@ -75,6 +75,11 @@ class Board(Base, TimestampMixin):
         nullable=True,
         comment="실제 발행 시간"
     )
+    platform_post_id = Column(
+        String(255),
+        nullable=True,
+        comment="각 플랫폼에 업로드된 게시글의 post ID (인스타그램, 페이스북, 블로그 등)"
+    )
     # created_at과 updated_at은 TimestampMixin에서 제공됨
 
     # 복합 외래키 제약조건 (USER_GROUP 테이블 참조)

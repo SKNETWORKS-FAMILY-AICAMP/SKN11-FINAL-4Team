@@ -26,31 +26,30 @@ if settings.DEBUG:
         format="%(asctime)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s",
         handlers=[
             logging.StreamHandler(),  # 콘솔 출력
-        ]
+        ],
     )
     # SQLAlchemy 로그 비활성화 (디버깅 시 불편함)
-    logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
-    logging.getLogger('app').setLevel(logging.DEBUG)
+    logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+    logging.getLogger("app").setLevel(logging.DEBUG)
 else:
     # 프로덕션 환경에서는 기존 설정 유지
     logging.basicConfig(
-        level=getattr(logging, settings.LOG_LEVEL), 
-        format=settings.LOG_FORMAT
+        level=getattr(logging, settings.LOG_LEVEL), format=settings.LOG_FORMAT
     )
 
 logger = logging.getLogger(__name__)
 
 # SQLAlchemy 로그 완전 비활성화 (개발/프로덕션 공통)
-logging.getLogger('sqlalchemy.engine').setLevel(logging.CRITICAL)
-logging.getLogger('sqlalchemy.pool').setLevel(logging.CRITICAL)
-logging.getLogger('sqlalchemy.dialects').setLevel(logging.CRITICAL)
-logging.getLogger('sqlalchemy.orm').setLevel(logging.CRITICAL)
+logging.getLogger("sqlalchemy.engine").setLevel(logging.CRITICAL)
+logging.getLogger("sqlalchemy.pool").setLevel(logging.CRITICAL)
+logging.getLogger("sqlalchemy.dialects").setLevel(logging.CRITICAL)
+logging.getLogger("sqlalchemy.orm").setLevel(logging.CRITICAL)
 
 # 기타 외부 라이브러리 로그 비활성화
-logging.getLogger('httpx').setLevel(logging.WARNING)
-logging.getLogger('httpcore').setLevel(logging.WARNING)
-logging.getLogger('sqlalchemy.pool').setLevel(logging.WARNING)
-logging.getLogger('sqlalchemy.dialects').setLevel(logging.WARNING)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("sqlalchemy.pool").setLevel(logging.WARNING)
+logging.getLogger("sqlalchemy.dialects").setLevel(logging.WARNING)
 
 
 @asynccontextmanager
@@ -90,7 +89,7 @@ async def lifespan(app: FastAPI):
 
     # 종료 시 실행
     logger.info("🛑 Shutting down AIMEX API Server...")
-    
+
     # 배치 모니터링 중지
     try:
         await stop_batch_monitoring()
@@ -130,10 +129,7 @@ app.add_middleware(
 )
 
 # 신뢰할 수 있는 호스트 미들웨어 (보안 강화)
-app.add_middleware(
-    TrustedHostMiddleware,
-    allowed_hosts=["*"]
-)
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=["*"])
 
 
 # 파일 업로드 크기 제한 미들웨어
@@ -143,16 +139,21 @@ class FileSizeMiddleware(BaseHTTPMiddleware):
         self.max_size = max_size
 
     async def dispatch(self, request: Request, call_next):
-        if request.method == "POST" and "multipart/form-data" in request.headers.get("content-type", ""):
+        if request.method == "POST" and "multipart/form-data" in request.headers.get(
+            "content-type", ""
+        ):
             content_length = request.headers.get("content-length")
             if content_length and int(content_length) > self.max_size:
                 return JSONResponse(
                     status_code=413,
-                    content={"detail": f"File too large. Maximum size is {self.max_size} bytes"}
+                    content={
+                        "detail": f"File too large. Maximum size is {self.max_size} bytes"
+                    },
                 )
-        
+
         response = await call_next(request)
         return response
+
 
 # app.add_middleware(FileSizeMiddleware)  # 임시 비활성화
 
@@ -256,6 +257,7 @@ async def root():
         "health": "/health",
     }
 
+
 # 개발용 로그 테스트 엔드포인트
 @app.get("/test-logs")
 async def test_logs():
@@ -264,22 +266,23 @@ async def test_logs():
     logger.info("ℹ️ INFO 레벨 로그 테스트")
     logger.warning("⚠️ WARNING 레벨 로그 테스트")
     logger.error("❌ ERROR 레벨 로그 테스트")
-    
+
     return {
         "message": "로그 테스트 완료",
         "debug_mode": settings.DEBUG,
-        "log_level": settings.LOG_LEVEL
+        "log_level": settings.LOG_LEVEL,
     }
 
 
 # API 라우터 등록
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
-# 정적 파일(이미지) 서빙
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+# S3 전용 이미지 서빙 (로컬 uploads 디렉토리 제거)
+# app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 # 버전 없는 라우터 추가 (하위 호환성)
 from app.api.v1.endpoints.auth import router as auth_router
+
 app.include_router(auth_router, prefix="/api/auth", tags=["Authentication (Legacy)"])
 
 
@@ -293,12 +296,14 @@ if settings.DEBUG:
         logger.info(f"📚 API Documentation: {settings.BACKEND_CORS_ORIGINS[0]}/docs")
         logger.info(f"🔍 ReDoc: {settings.BACKEND_CORS_ORIGINS[0]}/redoc")
         logger.info(f"💚 Health Check: {settings.BACKEND_CORS_ORIGINS[0]}/health")
-        
+
         # 챗봇 옵션이 활성화된 인플루언서들의 vLLM 어댑터 자동 로드
         try:
             from app.database import get_db
-            from app.services.startup_service import load_adapters_for_chat_enabled_influencers
-            
+            from app.services.startup_service import (
+                load_adapters_for_chat_enabled_influencers,
+            )
+
             db = next(get_db())
             await load_adapters_for_chat_enabled_influencers(db)
         except Exception as e:
