@@ -125,6 +125,7 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
     expose_headers=["*"],
+    max_age=86400,  # CORS preflight 캐시 24시간
 )
 
 # 신뢰할 수 있는 호스트 미들웨어 (보안 강화)

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useMemo, useCallback } from "react"
 import { Navigation } from "@/components/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -10,7 +10,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+
 import { Separator } from "@/components/ui/separator"
 import { Progress } from "@/components/ui/progress"
 import {
@@ -27,7 +27,11 @@ import {
   History,
   Sparkles,
   Palette,
-  Sliders
+  Sliders,
+  X,
+  Maximize2,
+  Eraser,
+  Filter
 } from "lucide-react"
 
 interface GeneratedImage {
@@ -68,8 +72,7 @@ const PRESET_STYLES = [
   { id: 'artistic', name: '예술적', description: '예술 작품 스타일의 이미지' },
   { id: 'anime', name: '애니메이션', description: '애니메이션/만화 스타일' },
   { id: 'portrait', name: '인물 사진', description: '인물 중심의 포트레이트' },
-  { id: 'landscape', name: '풍경', description: '자연 풍경 및 배경' },
-  { id: 'abstract', name: '추상화', description: '추상적이고 창의적인 디자인' }
+  { id: 'landscape', name: '풍경', description: '자연 풍경 및 배경' }
 ]
 
 const PRESET_SIZES = [
@@ -100,17 +103,60 @@ export default function ImageGeneratorPage() {
   const [isGenerating, setIsGenerating] = useState(false)
   const [generationProgress, setGenerationProgress] = useState(0)
   const [selectedImage, setSelectedImage] = useState<GeneratedImage | null>(null)
+  // 이미지 수정 관련 상태
   const [uploadedFile, setUploadedFile] = useState<File | null>(null)
   const [uploadedImageUrl, setUploadedImageUrl] = useState<string | null>(null)
+  const [selectedGalleryImage, setSelectedGalleryImage] = useState<GeneratedImage | null>(null)
+  
+  // 새로 추가된 상태
+  const [previewImage, setPreviewImage] = useState<GeneratedImage | null>(null)
+  const [showImageModal, setShowImageModal] = useState(false) // 이미지 생성용 모달
+  const [showGalleryImageModal, setShowGalleryImageModal] = useState(false) // 갤러리용 모달
+  const [showDownloadDialog, setShowDownloadDialog] = useState(false)
+  const [downloadFileName, setDownloadFileName] = useState("")
+  
+  // 갤러리에서 이미지 선택
+  const [showGallerySelector, setShowGallerySelector] = useState(false)
+  
+  // 최대 2개 이미지 선택을 위한 상태
+  const [selectedImages, setSelectedImages] = useState<Array<{
+    id: string
+    url: string
+    type: 'upload' | 'gallery'
+    file?: File
+    galleryImage?: GeneratedImage
+  }>>([])
+  
+  // 선택된 수정 방법 상태
+  const [selectedMethod, setSelectedMethod] = useState<number>(0)
+  
+  // 갤러리 필터 상태
+  const [galleryFilter, setGalleryFilter] = useState<string>("all")
+  const [tempGalleryFilter, setTempGalleryFilter] = useState<string>("all")
+  const [isFilterModalOpen, setIsFilterModalOpen] = useState(false)
+  
+  // 필터링된 이미지 목록
+  const filteredImages = useMemo(() => {
+    if (galleryFilter === "all") {
+      return images
+    }
+    
+    const [width, height] = galleryFilter.split("x").map(Number)
+    return images.filter(image => image.width === width && image.height === height)
+  }, [images, galleryFilter])
+  
+  // 드래그 이벤트 핸들러
   const [dragActive, setDragActive] = useState(false)
   const [maskMode, setMaskMode] = useState(false)
   const [isDrawing, setIsDrawing] = useState(false)
   const [brushSize, setBrushSize] = useState(20)
   const [lastPoint, setLastPoint] = useState<{ x: number, y: number } | null>(null)
 
+
   // Canvas refs
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const imageRef = useRef<HTMLImageElement>(null)
+  const lastPointRef = useRef<{x: number, y: number} | null>(null)
 
   // 모델 목록 가져오기 제거 - 워크플로우에 정의된 모델 자동 사용
 
@@ -143,19 +189,19 @@ export default function ImageGeneratorPage() {
   }, [])
 
   // 생성된 이미지 목록 가져오기
-  useEffect(() => {
-    const fetchImages = async () => {
-      try {
-        const response = await fetch('/api/comfyui/images')
-        const data = await response.json()
-        if (data.success) {
-          setImages(data.images)
-        }
-      } catch (error) {
-        console.error('Failed to fetch images:', error)
+  const fetchImages = async () => {
+    try {
+      const response = await fetch('/api/comfyui/images')
+      const data = await response.json()
+      if (data.success) {
+        setImages(data.images)
       }
+    } catch (error) {
+      console.error('Failed to fetch images:', error)
     }
+  }
 
+  useEffect(() => {
     fetchImages()
   }, [])
 
@@ -164,7 +210,7 @@ export default function ImageGeneratorPage() {
 
     setIsGenerating(true)
     setGenerationProgress(0)
-
+                
     try {
       // 1단계: 프롬프트 최적화 (임시 비활성화)
       let optimizedPrompt = prompt
@@ -328,6 +374,7 @@ export default function ImageGeneratorPage() {
     } catch (error) {
       setIsGenerating(false)
     }
+
   }
 
   const handleDeleteImage = async (imageId: string) => {
@@ -358,42 +405,100 @@ export default function ImageGeneratorPage() {
     }
   }
 
+  // 파일 이름 변경 다운로드 함수
+  const handleDownloadWithCustomName = async () => {
+    if (previewImage && downloadFileName.trim()) {
+      const fileExtension = '.png'
+      const finalFileName = downloadFileName.endsWith(fileExtension) 
+        ? downloadFileName 
+        : downloadFileName + fileExtension
+      
+      await handleDownloadImage(previewImage.image_url, finalFileName)
+      setShowDownloadDialog(false)
+      setDownloadFileName("")
+    }
+  }
+
+  // 다운로드 다이얼로그 열기
+  const openDownloadDialog = () => {
+    if (previewImage) {
+      // 기본 파일 이름 설정 (프롬프트 기반)
+      const defaultName = previewImage.prompt
+        .slice(0, 30) // 30자로 제한
+        .replace(/[^a-zA-Z0-9가-힣\s]/g, '') // 특수문자 제거
+        .replace(/\s+/g, '_') // 공백을 언더스코어로 변경
+        .trim()
+      
+      setDownloadFileName(defaultName || 'generated_image')
+      setShowDownloadDialog(true)
+    }
+  }
+
   const getSelectedSizeData = () => {
     return PRESET_SIZES.find(size => size.id === selectedSize)
   }
 
   const getSelectedStyleData = () => {
+    if (!selectedStyle) return null
     return PRESET_STYLES.find(style => style.id === selectedStyle)
   }
 
-  // 파일 업로드 핸들러
-  const handleFileUpload = (file: File) => {
-    if (file && file.type.startsWith('image/')) {
-      setUploadedFile(file)
-      const reader = new FileReader()
-      reader.onload = (e) => {
-        setUploadedImageUrl(e.target?.result as string)
+  // 갤러리에서 이미지 선택 함수
+  const handleSelectFromGallery = (image: GeneratedImage) => {
+    const maxAllowed = getRequiredImageCount()
+    if (selectedImages.length >= maxAllowed) {
+      alert(`최대 ${maxAllowed}개까지 이미지를 선택할 수 있습니다.`)
+      return
+    }
+    
+    const newImage = {
+      id: `gallery_${image.id}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      url: image.image_url,
+      type: 'gallery' as const,
+      galleryImage: image
+    }
+    
+    setSelectedImages(prev => [...prev, newImage])
+  }
+
+  // 갤러리에서 추가 선택 함수
+  const handleAddFromGallery = (image: GeneratedImage) => {
+    const currentCount = selectedImages.length
+    const maxAllowed = getRequiredImageCount()
+    const remainingSlots = maxAllowed - currentCount
+    
+    if (remainingSlots <= 0) {
+      alert(`최대 ${maxAllowed}개까지 이미지를 선택할 수 있습니다.`)
+      return
+    }
+    
+    const newImage = {
+      id: `gallery_${image.id}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      url: image.image_url,
+      type: 'gallery' as const,
+      galleryImage: image
+    }
+    
+    setSelectedImages(prev => [...prev, newImage])
+  }
+
+  // 갤러리에서 선택된 이미지들
+  const [gallerySelectedImages, setGallerySelectedImages] = useState<GeneratedImage[]>([])
+
+  // 갤러리 모달에서 이미지 선택/해제
+  const handleGalleryImageToggle = (image: GeneratedImage) => {
+    const isSelected = gallerySelectedImages.some(img => img.id === image.id)
+    
+    if (isSelected) {
+      setGallerySelectedImages(prev => prev.filter(img => img.id !== image.id))
+    } else {
+      const currentCount = selectedImages.length + gallerySelectedImages.length
+      const maxAllowed = getRequiredImageCount()
+      if (currentCount >= maxAllowed) {
+        alert(`최대 ${maxAllowed}개까지 이미지를 선택할 수 있습니다.`)
+        return
       }
-      reader.readAsDataURL(file)
-    }
-  }
-
-  // 파일 선택 핸들러
-  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
-    if (file) {
-      handleFileUpload(file)
-    }
-  }
-
-  // 드래그 이벤트 핸들러
-  const handleDrag = (e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    if (e.type === "dragenter" || e.type === "dragover") {
-      setDragActive(true)
-    } else if (e.type === "dragleave") {
-      setDragActive(false)
+      setGallerySelectedImages(prev => [...prev, image])
     }
   }
 
@@ -408,11 +513,25 @@ export default function ImageGeneratorPage() {
     }
   }
 
-  // 업로드된 이미지 제거
-  const handleRemoveUploadedImage = () => {
-    setUploadedFile(null)
-    setUploadedImageUrl(null)
-    setMaskMode(false)
+  // 이미지 제거 함수
+  const handleRemoveImage = (imageId: string) => {
+    setSelectedImages(prev => {
+      const imageToRemove = prev.find(img => img.id === imageId)
+      if (imageToRemove?.type === 'upload' && imageToRemove.url) {
+        URL.revokeObjectURL(imageToRemove.url)
+      }
+      return prev.filter(img => img.id !== imageId)
+    })
+  }
+
+  // 모든 이미지 제거
+  const handleRemoveAllImages = () => {
+    selectedImages.forEach(image => {
+      if (image.type === 'upload' && image.url) {
+        URL.revokeObjectURL(image.url)
+      }
+    })
+    setSelectedImages([])
   }
 
   // 마스크 그리기 시작
@@ -439,13 +558,21 @@ export default function ImageGeneratorPage() {
     }, 100)
   }
 
+  // 이미지 영역 내부인지 확인하는 함수
+  const isPointInImageBounds = useCallback((x: number, y: number): boolean => {
+    const image = imageRef.current
+    if (!image) return false
+    
+    return x >= 0 && x <= image.naturalWidth && y >= 0 && y <= image.naturalHeight
+  }, [])
+
   // 마스크 그리기 종료
   const stopMaskDrawing = () => {
     setMaskMode(false)
   }
 
   // 마스크 지우기
-  const clearMask = () => {
+  const clearMask = useCallback(() => {
     const canvas = canvasRef.current
     if (canvas) {
       const ctx = canvas.getContext('2d')
@@ -453,40 +580,41 @@ export default function ImageGeneratorPage() {
         ctx.clearRect(0, 0, canvas.width, canvas.height)
       }
     }
-  }
+  }, [])
 
   // Canvas 마우스 이벤트
-  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!maskMode) return
     setIsDrawing(true)
 
     const canvas = canvasRef.current
-    if (canvas) {
+    const image = imageRef.current
+    if (canvas && image) {
       const rect = canvas.getBoundingClientRect()
       const scaleX = canvas.width / rect.width
       const scaleY = canvas.height / rect.height
 
       const x = (e.clientX - rect.left) * scaleX
       const y = (e.clientY - rect.top) * scaleY
-
       setLastPoint({ x, y })
 
       const ctx = canvas.getContext('2d')
       if (ctx) {
         ctx.globalCompositeOperation = 'source-over'
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.8)'
+        ctx.fillStyle = maskColor + '80' // 선택된 색상에 투명도 추가
         ctx.beginPath()
         ctx.arc(x, y, brushSize / 2, 0, 2 * Math.PI)
         ctx.fill()
       }
     }
-  }
+  }, [maskMode, maskColor, brushSize, isPointInImageBounds])
 
-  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!maskMode || !isDrawing) return
 
     const canvas = canvasRef.current
-    if (canvas && lastPoint) {
+    const image = imageRef.current
+    if (canvas && image && lastPointRef.current) {
       const rect = canvas.getBoundingClientRect()
       const scaleX = canvas.width / rect.width
       const scaleY = canvas.height / rect.height
@@ -497,25 +625,27 @@ export default function ImageGeneratorPage() {
       const ctx = canvas.getContext('2d')
       if (ctx) {
         ctx.globalCompositeOperation = 'source-over'
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)'
+        ctx.strokeStyle = maskColor + '80' // 선택된 색상에 투명도 추가
         ctx.lineWidth = brushSize
         ctx.lineCap = 'round'
         ctx.lineJoin = 'round'
 
         ctx.beginPath()
-        ctx.moveTo(lastPoint.x, lastPoint.y)
+        ctx.moveTo(lastPointRef.current.x, lastPointRef.current.y)
         ctx.lineTo(x, y)
         ctx.stroke()
 
         setLastPoint({ x, y })
+
       }
     }
-  }
+  }, [maskMode, isDrawing, maskColor, brushSize, isPointInImageBounds])
 
-  const handleMouseUp = () => {
+  const handleMouseUp = useCallback(() => {
     setIsDrawing(false)
     setLastPoint(null)
-  }
+    lastPointRef.current = null
+  }, [])
 
   // 마스크 데이터 추출
   const getMaskData = () => {
@@ -572,6 +702,237 @@ export default function ImageGeneratorPage() {
     } finally {
       setIsGenerating(false)
     }
+  }
+
+  // 재생성 기능
+  const handleRegenerate = () => {
+    if (previewImage) {
+      // 이전 이미지를 DB에 저장 (이미지 목록에 추가)
+      setImages(prev => [previewImage, ...prev])
+      
+      // 모달에서 로딩 상태로 변경
+      setPreviewImage(null)
+      setIsGenerating(true)
+      setGenerationProgress(0)
+      
+      // 진행률 시뮬레이션
+      const progressInterval = setInterval(() => {
+        setGenerationProgress(prev => {
+          if (prev >= 90) {
+            clearInterval(progressInterval)
+            return prev
+          }
+          return prev + Math.random() * 10
+        })
+      }, 200)
+      
+      // 새로운 이미지 생성
+      setTimeout(() => {
+        clearInterval(progressInterval)
+        setIsGenerating(false)
+        setGenerationProgress(100)
+        
+        const selectedSizeData = PRESET_SIZES.find(size => size.id === selectedSize)
+        
+        const newTestImage: GeneratedImage = {
+          id: `img_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          prompt: previewImage?.prompt || prompt,
+          negative_prompt: '',
+          model: 'test-model',
+          width: selectedSizeData?.width || 512,
+          height: selectedSizeData?.height || 512,
+          steps,
+          cfg_scale: cfgScale,
+          seed: Math.floor(Math.random() * 1000000),
+          image_url: 'https://picsum.photos/512/512?random=' + Date.now(), // 새로운 랜덤 이미지
+          created_at: new Date().toISOString(),
+          status: 'completed'
+        }
+        
+        setPreviewImage(newTestImage) // 모달에 새 이미지 표시
+      }, 2000) // 2초 후 완료
+    }
+  }
+
+  // 모달 닫기
+  const handleCloseModal = () => {
+    setShowImageModal(false)
+    setPreviewImage(null)
+  }
+
+  // 탭 변경 시 상태 초기화
+  const handleTabChange = (newTab: string) => {
+    setActiveTab(newTab)
+    // 탭 변경 시 상태 초기화
+    setPrompt("")
+    setSelectedSize("")
+    setSelectedStyle("")
+    setPreviewImage(null)
+    setShowImageModal(false)
+    setShowGalleryImageModal(false)
+    setShowDownloadDialog(false)
+    setDownloadFileName("")
+    setShowGallerySelector(false)
+    setIsFilterModalOpen(false)
+    setSelectedImages([])
+    setSelectedMethod(0)
+    setGalleryFilter("all")
+    setUploadedFile(null)
+    setUploadedImageUrl(null)
+    setSelectedGalleryImage(null)
+    setGallerySelectedImages([])
+    setMaskMode(false)
+    setBrushSize(10)
+    setMaskColor("#FFFFFF")
+    setLastPoint(null)
+    lastPointRef.current = null
+    setActiveImageIndex(0)
+    if (canvasRef.current) {
+      const ctx = canvasRef.current.getContext('2d')
+      if (ctx) {
+        ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height)
+      }
+    }
+  }
+
+  // 필터 관련 함수들
+  const handleApplyFilters = () => {
+    setGalleryFilter(tempGalleryFilter)
+    setIsFilterModalOpen(false)
+  }
+
+  const handleOpenFilterModal = () => {
+    setTempGalleryFilter(galleryFilter)
+    setIsFilterModalOpen(true)
+  }
+
+  // 갤러리 선택기 닫기
+  const handleCloseGallerySelector = () => {
+    setShowGallerySelector(false)
+  }
+
+  // 드래그 이벤트 핸들러
+  const handleDrag = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (e.type === "dragenter" || e.type === "dragover") {
+      setDragActive(true)
+    } else if (e.type === "dragleave") {
+      setDragActive(false)
+    }
+  }
+
+  // 드롭 이벤트 핸들러
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setDragActive(false)
+    
+    if (e.dataTransfer.files) {
+      const files = Array.from(e.dataTransfer.files).filter(file => file.type.startsWith('image/'))
+      
+      if (files.length === 0) {
+        alert('이미지 파일만 업로드할 수 있습니다.')
+        return
+      }
+      
+      const remainingSlots = 2 - selectedImages.length
+      const filesToUpload = files.slice(0, remainingSlots)
+      
+      if (files.length > remainingSlots) {
+        alert(`최대 2개까지 선택 가능합니다. ${remainingSlots}개 파일만 업로드됩니다.`)
+      }
+      
+      filesToUpload.forEach(file => {
+        handleFileUpload(file)
+      })
+    }
+  }
+
+  // 파일 선택 핸들러 (다중 선택 지원)
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files
+    if (files) {
+      const imageFiles = Array.from(files).filter(file => file.type.startsWith('image/'))
+      
+      if (imageFiles.length === 0) {
+        alert('이미지 파일만 선택할 수 있습니다.')
+        return
+      }
+      
+      const remainingSlots = 2 - selectedImages.length
+      const filesToUpload = imageFiles.slice(0, remainingSlots)
+      
+      if (imageFiles.length > remainingSlots) {
+        alert(`최대 2개까지 선택 가능합니다. ${remainingSlots}개 파일만 업로드됩니다.`)
+      }
+      
+      filesToUpload.forEach(file => {
+        handleFileUpload(file)
+      })
+    }
+  }
+
+  // 수정 방법 선택 함수들
+  const selectMethod1 = () => {
+    setMaskMode(false)
+    setSelectedMethod(1)
+    // 방법 1: 단순 프롬프트 수정 모드로 전환 (이미지 1개 필요)
+    if (selectedImages.length > 1) {
+      // 첫 번째 이미지만 유지하고 나머지는 제거
+      const firstImage = selectedImages[0]
+      selectedImages.slice(1).forEach(image => {
+        if (image.type === 'upload' && image.url) {
+          URL.revokeObjectURL(image.url)
+        }
+      })
+      setSelectedImages([firstImage])
+    }
+  }
+
+  const selectMethod2 = () => {
+    setMaskMode(true)
+    setSelectedMethod(2)
+    // 방법 2: 마스킹 수정 모드로 전환 (이미지 1개 필요)
+    if (selectedImages.length > 1) {
+      // 첫 번째 이미지만 유지하고 나머지는 제거
+      const firstImage = selectedImages[0]
+      selectedImages.slice(1).forEach(image => {
+        if (image.type === 'upload' && image.url) {
+          URL.revokeObjectURL(image.url)
+        }
+      })
+      setSelectedImages([firstImage])
+    }
+  }
+
+  const selectMethod3 = () => {
+    setMaskMode(false)
+    setSelectedMethod(3)
+    // 방법 3: 이미지 합성 모드로 전환 (이미지 2개 필요)
+    // 이미지가 2개 미만이면 추가 선택 안내
+  }
+
+  const selectMethod4 = () => {
+    setMaskMode(true)
+    setSelectedMethod(4)
+    // 방법 4: 복합 마스킹 모드로 전환 (이미지 2개 필요)
+    // 이미지가 2개 미만이면 추가 선택 안내
+  }
+
+  // 현재 선택된 방법 확인
+  const getCurrentMethod = () => {
+    return selectedMethod
+  }
+
+  // 선택된 방법에 따른 필요한 이미지 개수
+  const getRequiredImageCount = () => {
+    if (selectedMethod === 1 || selectedMethod === 2) {
+      return 1
+    } else if (selectedMethod === 3 || selectedMethod === 4) {
+      return 2
+    }
+    return 0
   }
 
   return (
@@ -664,6 +1025,7 @@ export default function ImageGeneratorPage() {
                             className={`p-3 rounded-lg border text-center transition-colors ${selectedSize === size.id
                               ? "bg-blue-100 border-blue-300 text-blue-700"
                               : "bg-white border-gray-200 hover:bg-gray-50"
+
                               }`}
                           >
                             <div className="font-medium text-sm">{size.name}</div>
@@ -1088,6 +1450,7 @@ export default function ImageGeneratorPage() {
               ))}
             </div>
 
+
             {images.length === 0 && (
               <div className="text-center py-12">
                 <ImageIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
@@ -1099,5 +1462,6 @@ export default function ImageGeneratorPage() {
         </Tabs>
       </div>
     </div>
+
   )
 }

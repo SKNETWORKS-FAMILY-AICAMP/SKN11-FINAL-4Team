@@ -128,6 +128,12 @@ export default function DashboardPage() {
     }
   }
 
+  // 문자열이 너무 길면 ...으로 자르는 유틸 함수
+  function truncateText(text: string | undefined | null, maxLength = 60) {
+    if (!text) return '-';
+    return text.length > maxLength ? text.slice(0, maxLength - 3) + '...' : text;
+  }
+
   // 그룹이 할당되지 않은 사용자는 빈 대시보드 표시
   if (!hasValidGroup) {
     return (
@@ -368,18 +374,18 @@ export default function DashboardPage() {
                     <div>
                       <p className="text-sm font-medium text-gray-700">성격</p>
                       <p className="text-sm text-gray-600">
-                        {influencer.style_preset?.influencer_personality || '-'}
+                        {truncateText(influencer.style_preset?.influencer_personality)}
                       </p>
                     </div>
                     <div>
                       <p className="text-sm font-medium text-gray-700">말투</p>
                       <p className="text-sm text-gray-600">
-                        {influencer.style_preset?.influencer_speech || '-'}
+                        {truncateText(influencer.style_preset?.influencer_speech)}
                       </p>
                     </div>
                     <div>
                       <p className="text-sm font-medium text-gray-700">MBTI</p>
-                      <p className="text-sm text-gray-600">{influencer.mbti?.mbti_name || '-'}</p>
+                      <p className="text-sm text-gray-600">{truncateText(influencer.mbti?.mbti_name)}</p>
                     </div>
                     <div>
                       <p className="text-sm font-medium text-gray-700">챗봇 옵션</p>
@@ -394,7 +400,7 @@ export default function DashboardPage() {
                           <PlatformBadge
                             platform="instagram"
                             isConnected={!!influencer.instagram_is_active}
-                            username={influencer.instagram_username}
+                            username={truncateText(influencer.instagram_username)}
                           />
                         ) : (
                           <span className="text-gray-400 text-sm">-</span>

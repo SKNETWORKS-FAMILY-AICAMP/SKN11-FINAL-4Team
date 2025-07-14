@@ -242,3 +242,45 @@ class GeneratedTone(GeneratedToneBase, TimestampSchema):
 class SystemPromptSaveRequest(BaseModel):
     type: str  # "system" 또는 "custom"
     data: str  # system_prompt 또는 custom 입력 데이터
+
+# API 키 관리 관련 스키마 추가
+
+class APIKeyResponse(BaseModel):
+    """API 키 응답 스키마"""
+    influencer_id: str
+    api_key: str
+    message: str
+    created_at: str
+    influencer_name: str
+
+class APIKeyInfo(BaseModel):
+    """API 키 정보 스키마"""
+    influencer_id: str
+    api_key: str
+    created_at: datetime
+    updated_at: datetime
+    influencer_name: str
+
+class APIKeyUsage(BaseModel):
+    """API 키 사용량 스키마"""
+    influencer_id: str
+    influencer_name: str
+    today_calls: int
+    total_calls: int
+    api_key_created_at: datetime
+    api_key_updated_at: datetime
+    usage_limit: dict
+
+class APIKeyTestRequest(BaseModel):
+    """API 키 테스트 요청 스키마"""
+    message: str = "안녕하세요!"
+
+class APIKeyTestResponse(BaseModel):
+    """API 키 테스트 응답 스키마"""
+    success: bool
+    response: str
+    influencer_name: str
+    test_message: str
+    timestamp: str
+
+

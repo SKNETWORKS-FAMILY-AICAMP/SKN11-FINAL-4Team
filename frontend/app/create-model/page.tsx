@@ -896,25 +896,63 @@ export default function CreateModelPage() {
                   <TabsContent value="upload" className="mt-4">
                     <div>
                       <Label className="text-base font-medium mb-3 block">이미지 파일 업로드</Label>
-                      <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-gray-400 transition-colors">
-                        <Upload className="h-8 w-8 text-gray-400 mx-auto mb-2" />
-                        <p className="text-sm text-gray-600 mb-2">이미지 파일을 드래그하거나 클릭하여 업로드</p>
-                        <input
-                          type="file"
-                          multiple
-                          accept=".jpg,.jpeg,.png,.webp"
-                          onChange={(e) => handleFileUpload("imageSamples", e.target.files)}
-                          className="hidden"
-                          id="image-upload"
-                        />
-                        <Label htmlFor="image-upload" className="cursor-pointer">
-                          <Button type="button" variant="outline" size="sm">
-                            파일 선택
-                          </Button>
-                        </Label>
-                        {files.imageSamples && (
-                          <p className="text-xs text-green-600 mt-2">{files.imageSamples.length}개 파일 선택됨</p>
-                        )}
+                      <div className="relative group transition-all duration-300 hover:scale-[1.02]">
+                        <div className="relative overflow-hidden rounded-xl border-2 border-dashed transition-all duration-300 border-gray-300 bg-gradient-to-br from-gray-50 to-white hover:border-blue-400 hover:bg-gradient-to-br hover:from-blue-50 hover:to-indigo-50">
+                          {/* 배경 패턴 */}
+                          <div className="absolute inset-0 opacity-5">
+                            <div className="absolute top-4 left-4 w-8 h-8 border-2 border-gray-400 rounded-lg"></div>
+                            <div className="absolute top-12 right-8 w-6 h-6 border-2 border-gray-400 rounded-full"></div>
+                            <div className="absolute bottom-8 left-12 w-4 h-4 border-2 border-gray-400 rotate-45"></div>
+                            <div className="absolute bottom-16 right-4 w-10 h-10 border-2 border-gray-400 rounded-lg"></div>
+                          </div>
+                          
+                          <div className="relative p-12 text-center">
+                            {/* 아이콘 영역 */}
+                            <div className="relative mx-auto mb-6 w-20 h-20 rounded-full flex items-center justify-center transition-all duration-300 bg-gray-100 group-hover:bg-blue-100 group-hover:shadow-lg group-hover:shadow-blue-200">
+                              <Upload className="h-8 w-8 transition-all duration-300 text-gray-500 group-hover:text-blue-600 group-hover:scale-110" />
+                            </div>
+                            
+                            {/* 텍스트 영역 */}
+                            <div className="space-y-3">
+                              <h3 className="text-xl font-semibold transition-colors duration-300 text-gray-800 group-hover:text-blue-700">
+                                이미지 업로드
+                              </h3>
+                              <p className="text-sm transition-colors duration-300 max-w-md mx-auto text-gray-600 group-hover:text-blue-600">
+                                AI 인플루언서 학습용 이미지들을 드래그하여 놓거나 클릭하여 선택하세요
+                              </p>
+                              <p className="text-xs text-gray-500">
+                                지원 형식: JPG, PNG, WebP (여러 파일 선택 가능)
+                              </p>
+                            </div>
+                            
+                            {/* 파일 선택 버튼 */}
+                            <div className="mt-6">
+                              <input
+                                type="file"
+                                multiple
+                                accept=".jpg,.jpeg,.png,.webp"
+                                onChange={(e) => handleFileUpload("imageSamples", e.target.files)}
+                                className="hidden"
+                                id="image-upload"
+                              />
+                              <label htmlFor="image-upload">
+                                <Button 
+                                  className="transition-all duration-300 cursor-pointer bg-white hover:bg-blue-50 text-gray-700 border-gray-300 hover:border-blue-400 hover:text-blue-700 shadow-sm hover:shadow-md" 
+                                  asChild
+                                >
+                                  <span className="flex items-center gap-2">
+                                    <Upload className="h-4 w-4" />
+                                    파일 선택
+                                  </span>
+                                </Button>
+                              </label>
+                            </div>
+                            
+                            {files.imageSamples && (
+                              <p className="text-xs text-green-600 mt-2">{files.imageSamples.length}개 파일 선택됨</p>
+                            )}
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </TabsContent>
