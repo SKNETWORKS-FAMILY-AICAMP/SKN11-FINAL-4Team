@@ -389,8 +389,7 @@ export default function CreatePostPage() {
 
     try {
       // 백엔드 URL 가져오기
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://localhost:8000';
-      console.log('Backend URL:', backendUrl);
+      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
 
       // 발행 상태 결정
       let boardStatus = 1; // 기본값: 임시저장
@@ -420,9 +419,6 @@ export default function CreatePostPage() {
       formDataToSend.append('board_data', JSON.stringify(boardData))
       formDataToSend.append('file', formData.uploaded_image)
 
-      console.log('Creating board with image...', boardData);
-      console.log('FormData entries:', Array.from(formDataToSend.entries()));
-
       const response = await fetch(`${backendUrl}/api/v1/boards/create-with-image`, {
         method: 'POST',
         headers: {
@@ -446,7 +442,6 @@ export default function CreatePostPage() {
 
       router.push('/post_list')
     } catch (err) {
-      console.error('Failed to create post:', err)
       setError(err instanceof Error ? err.message : '게시글 생성에 실패했습니다.')
     } finally {
       setSubmitting(false)
@@ -538,8 +533,8 @@ export default function CreatePostPage() {
                   </div>
                   {s3Status && (
                     <div className={`p-3 rounded-md text-sm ${s3Status.status === 'success'
-                        ? 'bg-green-50 text-green-700 border border-green-200'
-                        : 'bg-red-50 text-red-700 border border-red-200'
+                      ? 'bg-green-50 text-green-700 border border-green-200'
+                      : 'bg-red-50 text-red-700 border border-red-200'
                       }`}>
                       {s3Status.message}
                     </div>

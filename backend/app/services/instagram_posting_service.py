@@ -124,7 +124,6 @@ class InstagramPostingService:
                     )
 
                 async with httpx.AsyncClient() as client:
-                    print("access_token", access_token)
 
                     # Instagram API 요청 데이터 (캡션 포함)
                     request_data = {
@@ -378,7 +377,6 @@ class InstagramPostingService:
                 image_url, access_token, instagram_id, caption
             )
             logger.info(f"이미지 업로드 성공 - media_id: {media_id}")
-            print("media_id", media_id)
 
             # 2. 게시글 발행 (캡션은 이미 이미지 업로드 시 포함됨)
             logger.info("=== 2단계: 게시글 발행 시작 ===")
@@ -387,7 +385,6 @@ class InstagramPostingService:
                 media_id, "", access_token, instagram_id  # 빈 캡션 전달
             )
             logger.info(f"게시글 발행 성공 - result: {result}")
-            print("result", result)
             logger.info(f"Instagram post completed successfully: {result.get('id')}")
             logger.info(f"Full Instagram API response: {result}")
 
@@ -466,7 +463,6 @@ class InstagramPostingService:
                         "fields": "id,username,account_type,media_count",
                     },
                 )
-                print("response", response.json())
 
                 if response.status_code == 200:
                     data = response.json()

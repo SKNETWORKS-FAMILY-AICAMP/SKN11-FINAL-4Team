@@ -73,7 +73,6 @@ function PostListContent() {
   const fetchPosts = async () => {
     try {
       setLoading(true)
-      console.log('Fetching posts from API...')
 
       const boardData = await apiClient.get<any[]>('/api/v1/boards')
 
@@ -92,7 +91,6 @@ function PostListContent() {
                 influencerDescription = influencerResponse.influencer_description || ''
               }
             } catch (error) {
-              console.warn(`Failed to fetch influencer info for ${board.influencer_id}:`, error)
             }
           }
 
@@ -152,7 +150,6 @@ function PostListContent() {
 
       setPosts(transformedPosts)
     } catch (error) {
-      console.error('Failed to fetch posts:', error)
       toast({
         title: "게시글 목록 불러오기 실패",
         description: error instanceof Error ? error.message : "알 수 없는 오류가 발생했습니다.",
@@ -282,7 +279,6 @@ function PostListContent() {
         variant: "default",
       })
     } catch (error) {
-      console.error('Failed to delete post:', error)
       toast({
         title: "❌ 게시글 삭제 실패",
         description: `"${postTitle}" 게시글 삭제 중 오류가 발생했습니다.`,
@@ -332,7 +328,6 @@ function PostListContent() {
             })
           }
         } catch (instagramError: any) {
-          console.error('Instagram upload error:', instagramError)
           toast({
             title: "📤 게시글 발행 완료 (인스타그램 업로드 실패)",
             description: `"${postTitle}" 게시글이 발행되었지만 인스타그램 업로드에 실패했습니다: ${instagramError.message}`,
@@ -356,7 +351,6 @@ function PostListContent() {
       );
 
     } catch (error) {
-      console.error('Failed to publish post:', error)
       toast({
         title: "❌ 게시글 발행 실패",
         description: `"${postTitle}" 게시글 발행 중 오류가 발생했습니다.`,
@@ -415,7 +409,6 @@ function PostListContent() {
         }));
       }
     } catch (error: any) {
-      console.error('Instagram upload error:', error)
       toast({
         title: "❌ 인스타그램 업로드 실패",
         description: error.message || "인스타그램 업로드 중 오류가 발생했습니다.",
@@ -462,13 +455,6 @@ function PostListContent() {
 
   useEffect(() => {
     if (isViewModalOpen && selectedPost) {
-      console.log('Setting edit mode data:', {
-        title: selectedPost.title || selectedPost.board_topic,
-        content: selectedPost.content || selectedPost.board_description,
-        hashtags: selectedPost.hashtags,
-        scheduledAt: selectedPost.scheduledAt
-      });
-
       setEditMode(false);
       setEditTitle(selectedPost.title || selectedPost.board_topic || "");
       setEditContent(selectedPost.content || selectedPost.board_description || "");
@@ -476,7 +462,6 @@ function PostListContent() {
 
       // 예약 날짜 설정
       const formattedDate = selectedPost.scheduledAt ? selectedPost.scheduledAt.slice(0, 16) : "";
-      console.log('Setting scheduled date:', { scheduledAt: selectedPost.scheduledAt, formattedDate });
       setEditScheduledAt(formattedDate);
     }
   }, [isViewModalOpen, selectedPost]);
@@ -511,10 +496,7 @@ function PostListContent() {
         ...(editScheduledAt && { reservation_at: `${editScheduledAt}:00` })
       };
 
-      console.log('Updating board:', boardId, updateData);
-
       const response = await apiClient.put(`/api/v1/boards/${boardId}`, updateData);
-      console.log('API response:', response);
 
       // apiClient는 성공 시 데이터를 직접 반환하고, 실패 시 예외를 던집니다
       // 따라서 여기까지 왔다면 성공한 것입니다
@@ -549,7 +531,6 @@ function PostListContent() {
         variant: "default",
       })
     } catch (error) {
-      console.error('Failed to edit post:', error)
       toast({
         title: "❌ 게시글 수정 실패",
         description: `"${editTitle}" 게시글 수정 중 오류가 발생했습니다.`,

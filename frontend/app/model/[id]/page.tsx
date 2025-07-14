@@ -153,8 +153,6 @@ function ModelDetailContent() {
   const loadPostsData = async () => {
     setIsPostsLoading(true)
     try {
-      console.log('Fetching posts for influencer:', params.id)
-
       // 특정 인플루언서의 게시글만 조회
       const boardData = await apiClient.get<any[]>(`/api/v1/boards?influencer_id=${params.id}`)
 
@@ -204,7 +202,6 @@ function ModelDetailContent() {
 
       setPosts(transformedPosts)
     } catch (error) {
-      console.error('Error loading posts data:', error)
       // 에러 시 빈 배열로 설정
       setPosts([])
     } finally {
@@ -249,7 +246,6 @@ function ModelDetailContent() {
         totalComments: publishedPosts.reduce((sum, p) => sum + (p.engagement?.comments || 0), 0)
       })
     } catch (error) {
-      console.error('Error calculating analytics data:', error)
       // 기본값 설정
       setAnalyticsData({
         totalApiCalls: 0,
@@ -290,7 +286,7 @@ function ModelDetailContent() {
         instagram_connected_at: data.instagram_connected_at,
       })
     } catch (error) {
-      console.error('Error loading model data:', error)
+      // 에러 처리
     } finally {
       setIsModelLoading(false)
     }
@@ -314,7 +310,6 @@ function ModelDetailContent() {
       }))
       alert("모델 정보가 성공적으로 업데이트되었습니다!")
     } catch (error) {
-      console.error("Model update error:", error)
       alert("모델 정보 업데이트에 실패했습니다. 다시 시도해주세요.")
     } finally {
       setIsUpdating(false)
@@ -394,7 +389,6 @@ function ModelDetailContent() {
             })
             alert('Instagram 비즈니스 계정이 성공적으로 연동되었습니다!')
           } catch (error: any) {
-            console.error('Instagram 연동 오류:', error)
             alert('Instagram 연동에 실패했습니다. 다시 시도해주세요.')
           }
 
@@ -419,7 +413,6 @@ function ModelDetailContent() {
       }, 1000)
 
     } catch (error) {
-      console.error("Instagram 연동 오류:", error)
       setIsConnecting(false)
       alert('Instagram 연동 중 오류가 발생했습니다.')
     }
@@ -435,7 +428,6 @@ function ModelDetailContent() {
       })
       alert("Instagram 계정 연동이 해제되었습니다.")
     } catch (error) {
-      console.error("Instagram 연동 해제 오류:", error)
       alert("Instagram 연동 해제에 실패했습니다. 다시 시도해주세요.")
     }
   }
@@ -478,12 +470,10 @@ function ModelDetailContent() {
                 } : undefined
               })
             } catch (error) {
-              console.error('Instagram status error:', error)
               setInstagramStatus({ is_connected: false })
             }
           }
         } catch (error) {
-          console.error("Instagram 상태 확인 오류:", error)
           setInstagramStatus({ is_connected: false })
         }
       }
