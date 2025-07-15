@@ -9,7 +9,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { tokenUtils } from "@/lib/auth"
 import { ModelService } from "@/lib/services/model.service"
-import { streamingChatService } from "@/lib/services/streaming-chat.service"
+
 import {
   Send,
   Bot,
@@ -18,7 +18,6 @@ import {
   Loader2,
   ChevronDown,
   ChevronUp,
-  Zap,
 } from "lucide-react"
 
 interface Message {
@@ -26,6 +25,7 @@ interface Message {
   content: string
   sender: "user" | "bot"
   timestamp: Date
+  isStreaming?: boolean // 스트리밍 중인 메시지를 위한 속성
 }
 
 interface ChatModel {
@@ -47,8 +47,7 @@ export default function ChatPage() {
   const [isModelLoading, setIsModelLoading] = useState(true)
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('connecting')
   const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false)
-  const [useStreaming, setUseStreaming] = useState(false)
-  const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null)
+
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const timeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -102,11 +101,60 @@ export default function ChatPage() {
         timeoutRef.current = null;
       }
       
-      setIsLoading(false); // 응답 수신 시 로딩 상태 해제
       try {
         const data = JSON.parse(event.data);
-        if (data.error_code) {
-          // 에러 응답 처리
+        
+        if (data.type === "token") {
+          // 스트리밍 토큰 처리
+          setMessages(prev => {
+            const newMessages = [...prev];
+            const lastMessage = newMessages[newMessages.length - 1];
+            
+            if (lastMessage && lastMessage.sender === "bot" && lastMessage.isStreaming) {
+              // 기존 스트리밍 메시지에 토큰 추가 (중복 제거)
+              const newContent = data.content;
+              const currentContent = lastMessage.content;
+              
+              // 중복 제거: 새로운 토큰이 기존 내용의 끝과 중복되지 않는지 확인
+              if (!currentContent.endsWith(newContent)) {
+                lastMessage.content += newContent;
+              }
+            } else {
+              // 새로운 스트리밍 메시지 생성
+              newMessages.push({
+                id: Date.now().toString(),
+                content: data.content,
+                sender: "bot",
+                timestamp: new Date(),
+                isStreaming: true
+              });
+            }
+            
+            return newMessages;
+          });
+        } else if (data.type === "complete") {
+          // 스트리밍 완료
+          setIsLoading(false);
+          setMessages(prev => {
+            const newMessages = [...prev];
+            const lastMessage = newMessages[newMessages.length - 1];
+            if (lastMessage && lastMessage.isStreaming) {
+              lastMessage.isStreaming = false;
+            }
+            return newMessages;
+          });
+        } else if (data.type === "error") {
+          // 에러 처리
+          setIsLoading(false);
+          setMessages(prev => [...prev, {
+            id: Date.now().toString(),
+            content: `오류: ${data.message || '알 수 없는 오류가 발생했습니다.'}`,
+            sender: "bot",
+            timestamp: new Date(),
+          }]);
+        } else if (data.error_code) {
+          // 기존 에러 응답 처리 (하위 호환성)
+          setIsLoading(false);
           setMessages(prev => [...prev, {
             id: Date.now().toString(),
             content: `오류: ${data.message || '알 수 없는 오류가 발생했습니다.'}`,
@@ -114,7 +162,8 @@ export default function ChatPage() {
             timestamp: new Date(),
           }]);
         } else {
-          // 정상 응답 처리
+          // 기존 일반 응답 처리 (하위 호환성)
+          setIsLoading(false);
           setMessages(prev => [...prev, {
             id: Date.now().toString(),
             content: event.data,
@@ -123,7 +172,8 @@ export default function ChatPage() {
           }]);
         }
       } catch (e) {
-        // JSON 파싱 실패 시 일반 텍스트로 처리
+        // JSON 파싱 실패 시 일반 텍스트로 처리 (하위 호환성)
+        setIsLoading(false);
         setMessages(prev => [...prev, {
           id: Date.now().toString(),
           content: event.data,
@@ -180,24 +230,20 @@ export default function ChatPage() {
     setInputMessage("");
     setIsLoading(true);
     
-    if (useStreaming) {
-      // 스트리밍 모드
-      await sendStreamingMessage(currentMessage);
-    } else {
-      // WebSocket 모드
-      if (connectionStatus !== 'connected') {
-        setIsLoading(false);
-        setMessages(prev => [...prev, {
-          id: (Date.now() + 1).toString(),
-          content: "서버와의 연결이 끊어졌습니다. 재연결 버튼을 눌러주세요.",
-          sender: "bot",
-          timestamp: new Date(),
-        }]);
-        return;
-      }
-      
-      // 타임아웃 설정 (30초)
-      timeoutRef.current = setTimeout(() => {
+    // WebSocket 모드
+    if (connectionStatus !== 'connected') {
+      setIsLoading(false);
+      setMessages(prev => [...prev, {
+        id: (Date.now() + 1).toString(),
+        content: "서버와의 연결이 끊어졌습니다. 재연결 버튼을 눌러주세요.",
+        sender: "bot",
+        timestamp: new Date(),
+      }]);
+      return;
+    }
+    
+    // 타임아웃 설정 (30초)
+    timeoutRef.current = setTimeout(() => {
         setIsLoading(false);
         setMessages(prev => [...prev, {
           id: (Date.now() + 1).toString(),
@@ -205,108 +251,40 @@ export default function ChatPage() {
           sender: "bot",
           timestamp: new Date(),
         }]);
-      }, 30000);
-      
-      try {
-        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-          wsRef.current.send(currentMessage);
-        } else {
-          clearTimeout(timeoutRef.current);
-          setConnectionStatus('disconnected');
-          setMessages(prev => [...prev, {
-            id: (Date.now() + 1).toString(),
-            content: "서버와의 연결이 끊어졌습니다. 재연결 버튼을 눌러주세요.",
-            sender: "bot",
-            timestamp: new Date(),
-          }]);
-          setIsLoading(false);
-        }
-      } catch (error) {
-        clearTimeout(timeoutRef.current);
-        console.error("메시지 전송 오류:", error);
-        setMessages(prev => [...prev, {
-          id: (Date.now() + 1).toString(),
-          content: "메시지 전송 중 오류가 발생했습니다. 다시 시도해주세요.",
-          sender: "bot",
-          timestamp: new Date(),
-        }]);
-        setIsLoading(false);
-      }
-    }
-  };
-
-  // 스트리밍 메시지 전송
-  const sendStreamingMessage = async (message: string) => {
+    }, 30000);
+    
     try {
-      const botMessageId = Date.now().toString();
-      setStreamingMessageId(botMessageId);
-      
-      // 빈 봇 메시지 추가
-      setMessages(prev => [...prev, {
-        id: botMessageId,
-        content: "",
-        sender: "bot",
-        timestamp: new Date(),
-      }]);
-
-      await streamingChatService.sendMessageStream(
-        message,
-        model!.id,
-        undefined,
-        (token) => {
-          // 토큰을 받을 때마다 메시지 업데이트
-          setMessages(prev => prev.map(msg => 
-            msg.id === botMessageId 
-              ? { ...msg, content: msg.content + token }
-              : msg
-          ));
-        },
-        (startData) => {
-          console.log("스트리밍 시작:", startData);
-        },
-        (endData) => {
-          console.log("스트리밍 완료:", endData);
-          setIsLoading(false);
-          setStreamingMessageId(null);
-        },
-        (error) => {
-          console.error("스트리밍 오류:", error);
-          setMessages(prev => prev.map(msg => 
-            msg.id === botMessageId 
-              ? { ...msg, content: `오류: ${error}` }
-              : msg
-          ));
-          setIsLoading(false);
-          setStreamingMessageId(null);
-        }
-      );
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(currentMessage);
+      } else {
+        throw new Error("WebSocket이 연결되지 않았습니다.");
+      }
     } catch (error) {
-      console.error("스트리밍 메시지 전송 실패:", error);
+      console.error("메시지 전송 오류:", error);
       setIsLoading(false);
-      setStreamingMessageId(null);
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
       setMessages(prev => [...prev, {
-        id: Date.now().toString(),
-        content: "스트리밍 메시지 전송에 실패했습니다.",
+        id: (Date.now() + 1).toString(),
+        content: "메시지 전송에 실패했습니다. 다시 시도해주세요.",
         sender: "bot",
         timestamp: new Date(),
       }]);
     }
   };
 
-  // Enter 키로 메시지 전송, Shift+Enter로 줄바꿈
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      if (!isLoading && (useStreaming || connectionStatus === 'connected')) {
-        sendMessage()
-      }
+      e.preventDefault();
+      sendMessage();
     }
-  }
+  };
 
-  // 스크롤을 맨 아래로 이동
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-  }
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
 
   useEffect(() => {
     scrollToBottom()
@@ -316,6 +294,7 @@ export default function ChatPage() {
     loadModelData()
   }, [params.id])
 
+  // 로딩 상태 렌더링
   if (isModelLoading) {
     return (
       <div className="min-h-screen bg-gray-50 flex justify-center items-center">
@@ -327,6 +306,7 @@ export default function ChatPage() {
     )
   }
 
+  // 모델이 없는 경우 렌더링
   if (!model) {
     return (
       <div className="min-h-screen bg-gray-50 flex justify-center items-center">
@@ -337,6 +317,7 @@ export default function ChatPage() {
     )
   }
 
+  // 모델 학습 상태 체크
   if (model.learning_status !== 1) {
     return (
       <div className="min-h-screen bg-gray-50 flex justify-center items-center">
@@ -349,6 +330,7 @@ export default function ChatPage() {
     )
   }
 
+  // 메인 채팅 UI 렌더링
   return (
     <div className="h-screen bg-gray-50">
       <div className="h-full flex flex-col p-4 max-w-3xl mx-auto">
@@ -404,18 +386,8 @@ export default function ChatPage() {
                        connectionStatus === 'error' ? '연결 오류' : '연결 끊김'}
                     </span>
                   </div>
-                  {/* 스트리밍 토글 버튼 */}
-                  <Button
-                    onClick={() => setUseStreaming(!useStreaming)}
-                    size="sm"
-                    variant={useStreaming ? "default" : "outline"}
-                    className="flex-shrink-0"
-                  >
-                    <Zap className="h-3 w-3 mr-1" />
-                    {useStreaming ? '스트리밍 ON' : '스트리밍 OFF'}
-                  </Button>
                   {/* 재연결 버튼 */}
-                  {connectionStatus !== 'connected' && !useStreaming && (
+                  {connectionStatus !== 'connected' && (
                     <Button
                       onClick={reconnect}
                       size="sm"
@@ -461,9 +433,6 @@ export default function ChatPage() {
                       }`}>
                         <p className="text-sm whitespace-pre-wrap">
                           {message.content}
-                          {streamingMessageId === message.id && (
-                            <span className="inline-block w-2 h-4 bg-gray-500 ml-1 animate-pulse" />
-                          )}
                         </p>
                         <p className={`text-xs mt-1 ${
                           message.sender === "user" ? "text-blue-100" : "text-gray-500"
@@ -502,7 +471,7 @@ export default function ChatPage() {
 
             {/* 입력 영역 */}
             <div className="border-t p-4 flex-shrink-0">
-              {!useStreaming && connectionStatus !== 'connected' ? (
+              {connectionStatus !== 'connected' ? (
                 <div className="text-center py-4">
                   <p className="text-gray-500 text-sm">
                     {connectionStatus === 'connecting' ? '서버에 연결 중입니다...' :

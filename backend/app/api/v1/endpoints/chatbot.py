@@ -76,24 +76,49 @@ async def chatbot(websocket: WebSocket, lora_repo: str, group_id: int = Query(..
                 data = await websocket.receive_text()
                 logger.info(f"[WS] 메시지 수신: {data[:100]}...")
                 
-                # VLLM 서버에서 응답 생성
+                # VLLM 서버에서 스트리밍 응답 생성
                 try:
-                    result = await vllm_client.generate_response(
+                    vllm_client = await get_vllm_client()
+                    system_prompt = str(influencer.system_prompt) if influencer and influencer.system_prompt else "당신은 도움이 되는 AI 어시스턴트입니다."
+                    
+                    # 스트리밍 응답 생성
+                    token_count = 0
+                    async for token in vllm_client.generate_response_stream(
                         user_message=data,
-                        system_message=str(system_prompt),
+                        system_message=system_prompt,
                         influencer_name=str(influencer.influencer_name) if influencer else "한세나",
                         model_id=lora_repo_decoded,
                         max_new_tokens=512,
                         temperature=0.7
-                    )
+                    ):
+                        # 각 토큰을 실시간으로 클라이언트에 전송
+                        logger.debug(f"[WS] 토큰 전송: {repr(token)}")
+                        await websocket.send_text(json.dumps({
+                            "type": "token",
+                            "content": token
+                        }))
+                        token_count += 1
+                        
+                        # 너무 많은 토큰이 오면 중단 (무한 루프 방지)
+                        if token_count > 1000:
+                            logger.warning(f"[WS] 토큰 수가 너무 많아 중단: {token_count}")
+                            break
                     
-                    response = result.get("response", "죄송해요, 응답을 생성할 수 없어요.")
-                    logger.info(f"[WS] VLLM 응답 전송 완료")
-                    await websocket.send_text(response)
+                    # 스트리밍 완료 신호
+                    await websocket.send_text(json.dumps({
+                        "type": "complete",
+                        "content": ""
+                    }))
+                    
+                    logger.info(f"[WS] VLLM 스트리밍 응답 전송 완료 (토큰 수: {token_count})")
                     
                 except Exception as e:
-                    logger.error(f"[WS] VLLM 추론 중 오류: {e}")
-                    await websocket.send_text(json.dumps({"error_code": "VLLM_INFERENCE_ERROR", "message": str(e)}))
+                    logger.error(f"[WS] VLLM 스트리밍 추론 중 오류: {e}")
+                    await websocket.send_text(json.dumps({
+                        "type": "error",
+                        "error_code": "VLLM_INFERENCE_ERROR", 
+                        "message": str(e)
+                    }))
                     
             except WebSocketDisconnect:
                 logger.info(f"[WS] WebSocket 연결 종료: lora_repo={lora_repo_decoded}")
