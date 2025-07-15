@@ -661,35 +661,68 @@ async def create_board(
             }
         else:
             # 즉시 발행 또는 임시저장인 경우
-            insert_sql = text(
+            # board_status가 3(발행됨)인 경우 published_at 필드 포함
+            if board_dict.get("board_status") == 3:
+                insert_sql = text(
+                    """
+                    INSERT INTO BOARD (
+                        board_id, influencer_id, user_id, team_id, group_id, board_topic, 
+                        board_description, board_platform, board_hash_tag, 
+                        board_status, image_url, published_at, created_at, updated_at
+                    ) VALUES (
+                        :board_id, :influencer_id, :user_id, :team_id, :group_id, :board_topic,
+                        :board_description, :board_platform, :board_hash_tag,
+                        :board_status, :image_url, :published_at, :created_at, :updated_at
+                    )
                 """
-                INSERT INTO BOARD (
-                    board_id, influencer_id, user_id, team_id, group_id, board_topic, 
-                    board_description, board_platform, board_hash_tag, 
-                    board_status, image_url, created_at, updated_at
-                ) VALUES (
-                    :board_id, :influencer_id, :user_id, :team_id, :group_id, :board_topic,
-                    :board_description, :board_platform, :board_hash_tag,
-                    :board_status, :image_url, :created_at, :updated_at
                 )
-            """
-            )
 
-            insert_params = {
-                "board_id": board_id,
-                "influencer_id": board_dict["influencer_id"],
-                "user_id": user_id,
-                "team_id": board_dict["team_id"],
-                "group_id": board_dict["team_id"],
-                "board_topic": board_dict["board_topic"],
-                "board_description": board_dict.get("board_description"),
-                "board_platform": board_dict["board_platform"],
-                "board_hash_tag": board_dict.get("board_hash_tag"),
-                "board_status": board_dict.get("board_status", 1),
-                "image_url": board_dict["image_url"],
-                "created_at": current_kst_time,
-                "updated_at": current_kst_time,
-            }
+                insert_params = {
+                    "board_id": board_id,
+                    "influencer_id": board_dict["influencer_id"],
+                    "user_id": user_id,
+                    "team_id": board_dict["team_id"],
+                    "group_id": board_dict["team_id"],
+                    "board_topic": board_dict["board_topic"],
+                    "board_description": board_dict.get("board_description"),
+                    "board_platform": board_dict["board_platform"],
+                    "board_hash_tag": board_dict.get("board_hash_tag"),
+                    "board_status": board_dict.get("board_status", 1),
+                    "image_url": board_dict["image_url"],
+                    "published_at": current_kst_time,
+                    "created_at": current_kst_time,
+                    "updated_at": current_kst_time,
+                }
+            else:
+                insert_sql = text(
+                    """
+                    INSERT INTO BOARD (
+                        board_id, influencer_id, user_id, team_id, group_id, board_topic, 
+                        board_description, board_platform, board_hash_tag, 
+                        board_status, image_url, created_at, updated_at
+                    ) VALUES (
+                        :board_id, :influencer_id, :user_id, :team_id, :group_id, :board_topic,
+                        :board_description, :board_platform, :board_hash_tag,
+                        :board_status, :image_url, :created_at, :updated_at
+                    )
+                """
+                )
+
+                insert_params = {
+                    "board_id": board_id,
+                    "influencer_id": board_dict["influencer_id"],
+                    "user_id": user_id,
+                    "team_id": board_dict["team_id"],
+                    "group_id": board_dict["team_id"],
+                    "board_topic": board_dict["board_topic"],
+                    "board_description": board_dict.get("board_description"),
+                    "board_platform": board_dict["board_platform"],
+                    "board_hash_tag": board_dict.get("board_hash_tag"),
+                    "board_status": board_dict.get("board_status", 1),
+                    "image_url": board_dict["image_url"],
+                    "created_at": current_kst_time,
+                    "updated_at": current_kst_time,
+                }
 
         db.execute(insert_sql, insert_params)
 
@@ -1299,6 +1332,16 @@ async def delete_board(
             status_code=status.HTTP_404_NOT_FOUND, detail="Board not found"
         )
 
+    # 게시글 이미지 S3에서 삭제
+    try:
+        from app.services.s3_image_service import get_s3_image_service
+
+        s3_service = get_s3_image_service()
+        if s3_service.is_available():
+            await s3_service.delete_board_images(board_id)
+    except Exception as e:
+        logger.error(f"게시글 S3 이미지 삭제 실패: {e}")
+
     db.delete(board)
     db.commit()
 
@@ -1325,7 +1368,13 @@ async def publish_board(
         )
 
     # 게시글 상태를 발행됨으로 변경
-    stmt = update(Board).where(Board.board_id == board_id).values(board_status=2)
+    from app.utils.timezone_utils import get_current_kst
+
+    stmt = (
+        update(Board)
+        .where(Board.board_id == board_id)
+        .values(board_status=3, published_at=get_current_kst())  # 발행됨
+    )
     db.execute(stmt)
     db.commit()
 

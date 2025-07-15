@@ -3,7 +3,7 @@
 import { useState, Suspense, useEffect } from "react"
 import { AlertCircle } from "lucide-react"
 import React from "react"
-import { useParams, useSearchParams } from "next/navigation"
+import { useParams, useSearchParams, useRouter } from "next/navigation"
 import Link from "next/link"
 import { Navigation } from "@/components/navigation"
 import { Button } from "@/components/ui/button"
@@ -18,6 +18,8 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 
 import { tokenUtils } from "@/lib/auth"
 import { ModelService } from "@/lib/services/model.service"
+import { useToast } from "@/hooks/use-toast"
+import { Toaster } from "@/components/ui/toaster"
 import {
   ArrowLeft,
   Copy,
@@ -113,18 +115,24 @@ function PostImage({ url, alt, className }: { url: string; alt?: string; classNa
 function ModelDetailContent() {
   const params = useParams()
   const searchParams = useSearchParams()
+  const router = useRouter()
+  const { toast } = useToast()
   const [model, setModel] = useState<any>(null)
   const [isModelLoading, setIsModelLoading] = useState(true)
   const [posts, setPosts] = useState<ContentPost[]>([])
   const [isPostsLoading, setIsPostsLoading] = useState(true)
   const [selectedPost, setSelectedPost] = useState<ContentPost | null>(null)
   const [isPostDetailModalOpen, setIsPostDetailModalOpen] = useState(false)
-  const [isEditing, setIsEditing] = useState(false);
+  const [isEditing, setIsEditing] = useState(false)
+  const [isUploadingImage, setIsUploadingImage] = useState(false)
   const [editTitle, setEditTitle] = useState("");
   const [editContent, setEditContent] = useState("");
   const [editHashtags, setEditHashtags] = useState("");
   const [editScheduledAt, setEditScheduledAt] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const [imagePreview, setImagePreview] = useState<string | null>(null)
+  const [isDragOver, setIsDragOver] = useState(false)
+  const [uploadedImage, setUploadedImage] = useState<File | null>(null)
   const [showApiKey, setShowApiKey] = useState(false)
   const [isUpdating, setIsUpdating] = useState(false)
   const [isGeneratingApiKey, setIsGeneratingApiKey] = useState(false)
@@ -393,11 +401,29 @@ function ModelDetailContent() {
       const data = await ModelService.getInfluencer(params.id as string)
       console.log('✅ 모델 데이터 로드 성공:', data)
 
+      // 이미지 URL 처리: S3 키인 경우 URL로 변환
+      let processedImageUrl = data.image_url
+      if (data.image_url && !data.image_url.startsWith('http')) {
+        // S3 키인 경우 직접 URL 생성
+        processedImageUrl = `https://aimex-influencers.s3.ap-northeast-2.amazonaws.com/${data.image_url}`
+        console.log('🔍 S3 키를 URL로 변환:', {
+          original: data.image_url,
+          converted: processedImageUrl
+        })
+      } else if (data.image_url && data.image_url.startsWith('http')) {
+        // 이미 URL인 경우 그대로 사용
+        processedImageUrl = data.image_url
+        console.log('🔍 이미 URL 형태:', processedImageUrl)
+      } else {
+        console.log('🔍 이미지 URL 없음')
+      }
+
       setModel({
         ...data,
         id: data.influencer_id,
         name: data.influencer_name,
         description: data.influencer_description || '',
+        image_url: processedImageUrl, // 처리된 이미지 URL
         createdAt: data.created_at?.split('T')[0] || '',
         apiKey: sampleModel.apiKey, // API 키는 별도 조회
         trainingData: sampleModel.trainingData, // 훈련 데이터는 별도 조회
@@ -506,20 +532,176 @@ function ModelDetailContent() {
   })
 
 
+  // 이미지 파일 처리 공통 함수
+  const processImageFile = async (file: File) => {
+    // 이미지 파일 검증
+    if (!file.type.startsWith('image/')) {
+      toast({
+        title: "파일 형식 오류",
+        description: "이미지 파일만 업로드할 수 있습니다.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    // 파일 크기 제한 (5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      toast({
+        title: "파일 크기 오류",
+        description: "이미지 파일 크기는 5MB 이하여야 합니다.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    try {
+      setUploadedImage(file)
+
+      // 이미지 미리보기 생성
+      const reader = new FileReader()
+      reader.onload = (e) => {
+        setImagePreview(e.target?.result as string)
+      }
+      reader.readAsDataURL(file)
+    } catch (error) {
+      toast({
+        title: "이미지 처리 오류",
+        description: "이미지 처리 중 오류가 발생했습니다.",
+        variant: "destructive",
+      })
+      console.error('Image processing error:', error)
+    }
+  }
+
+  // 이미지 업로드 처리
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) {
+      await processImageFile(file)
+    }
+  }
+
+  // 드래그 앤 드롭 이벤트 처리
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragOver(true)
+  }
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragOver(false)
+  }
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragOver(false)
+
+    const files = e.dataTransfer.files
+    if (files && files[0]) {
+      await processImageFile(files[0])
+    }
+  }
+
+  // 이미지 제거
+  const removeImage = () => {
+    setUploadedImage(null)
+    setImagePreview(null)
+  }
+
   const handleUpdateModel = async () => {
     setIsUpdating(true)
     try {
-      const updatedData = await ModelService.updateInfluencer(params.id as string, {
+      let imageUrl = null
+
+      // 이미지가 업로드된 경우 S3에 업로드
+      if (uploadedImage) {
+        setIsUploadingImage(true)
+        try {
+          const formData = new FormData()
+          formData.append('file', uploadedImage)
+          formData.append('influencer_id', params.id?.toString() ?? '')
+
+          const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
+          const response = await fetch(`${backendUrl}/api/v1/influencers/upload-image`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+            },
+            body: formData
+          })
+
+          if (response.ok) {
+            const result = await response.json()
+            imageUrl = result.file_url
+            console.log('인플루언서 이미지 업로드 성공:', imageUrl)
+          } else {
+            console.warn('인플루언서 이미지 업로드 실패')
+          }
+        } catch (error) {
+          console.warn('인플루언서 이미지 업로드 중 오류:', error)
+        } finally {
+          setIsUploadingImage(false)
+        }
+      }
+
+      // 인플루언서 정보 업데이트
+      const updateData: any = {
         influencer_name: model.name,
-      })
+        influencer_description: model.description
+      }
+
+      // 이미지 URL이 있는 경우 추가
+      if (imageUrl) {
+        updateData.image_url = imageUrl
+      }
+
+      const updatedData = await ModelService.updateInfluencer(params.id?.toString() ?? '', updateData)
       setModel((prev: any) => ({
         ...prev,
         name: updatedData.influencer_name,
         description: updatedData.influencer_description || "",
+        image_url: updatedData.image_url || prev.image_url
       }))
-      alert("모델 정보가 성공적으로 업데이트되었습니다!")
+
+      // 이미지 업로드 후 상태 초기화
+      if (uploadedImage) {
+        setUploadedImage(null)
+        setImagePreview(null)
+      }
+
+      // 모델 데이터 다시 로드하여 변경사항 반영
+      await loadModelData()
+
+      // 성공 토스트 표시
+      toast({
+        title: "성공",
+        description: "모델 정보가 성공적으로 업데이트되었습니다!",
+        variant: "default",
+      })
+
+      // 페이지 새로고침 없이 UI 업데이트
+      setModel((prev: any) => ({
+        ...prev,
+        name: updatedData.influencer_name,
+        description: updatedData.influencer_description || "",
+        image_url: updatedData.image_url || prev.image_url
+      }))
+
+      // 현재 페이지로 리다이렉트 (새로고침)
+      let influencerId: string | undefined;
+      if (typeof params.id === 'string') {
+        influencerId = params.id;
+      } else if (Array.isArray(params.id)) {
+        influencerId = params.id[0];
+      }
+      router.replace(influencerId ? `/model/${influencerId}` : '/dashboard');
     } catch (error) {
-      alert("모델 정보 업데이트에 실패했습니다. 다시 시도해주세요.")
+      // 실패 토스트 표시
+      toast({
+        title: "오류",
+        description: "모델 정보 업데이트에 실패했습니다. 다시 시도해주세요.",
+        variant: "destructive",
+      })
     } finally {
       setIsUpdating(false)
     }
@@ -1943,25 +2125,108 @@ function ModelDetailContent() {
                     <div className="flex flex-col items-center space-y-4">
                       {/* 대형 프로필 이미지 */}
                       <div className="relative">
-                        <div className="w-36 h-36 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg">
-                          <div className="w-20 h-20 bg-orange-500 rounded-lg flex items-center justify-center">
-                            <Bot className="h-10 w-10 text-white" />
+                        {uploadedImage && imagePreview ? (
+                          // 업로드된 이미지 미리보기
+                          <div className="w-36 h-36 rounded-full overflow-hidden shadow-lg">
+                            <img
+                              src={imagePreview}
+                              alt="Uploaded"
+                              className="w-full h-full object-cover"
+                            />
                           </div>
-                        </div>
+                        ) : model?.image_url ? (
+                          // 기존 인플루언서 이미지
+                          <div className="w-36 h-36 rounded-full overflow-hidden shadow-lg">
+                            <img
+                              src={model.image_url}
+                              alt="Profile"
+                              className="w-full h-full object-cover"
+                              onError={(e) => {
+                                // 이미지 로드 실패 시 기본 아이콘 표시
+                                const target = e.target as HTMLImageElement;
+                                target.style.display = 'none';
+                                const parent = target.parentElement;
+                                if (parent) {
+                                  parent.innerHTML = `
+                                    <div class="w-36 h-36 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg">
+                                      <div class="w-20 h-20 bg-orange-500 rounded-lg flex items-center justify-center">
+                                        <svg class="h-10 w-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+                                        </svg>
+                                      </div>
+                                    </div>
+                                  `;
+                                }
+                              }}
+                            />
+                          </div>
+                        ) : (
+                          // 기본 아이콘
+                          <div className="w-36 h-36 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg">
+                            <div className="w-20 h-20 bg-orange-500 rounded-lg flex items-center justify-center">
+                              <Bot className="h-10 w-10 text-white" />
+                            </div>
+                          </div>
+                        )}
                       </div>
 
                       <div className="text-center space-y-3">
                         <p className="text-sm text-gray-500">권장 크기: 400x400px, 최대 5MB</p>
-                        <div className="flex flex-col space-y-2 w-full max-w-xs">
-                          <Button variant="outline" size="sm" className="w-full border-gray-300 text-gray-700 hover:bg-gray-50">
-                            <Upload className="h-4 w-4 mr-2" />
-                            이미지 업로드
-                          </Button>
-                          <Button variant="outline" size="sm" className="w-full text-red-600 border-red-200 hover:bg-red-50">
-                            <Trash2 className="h-4 w-4 mr-2" />
-                            제거
-                          </Button>
-                        </div>
+
+                        {/* 업로드된 이미지가 있을 때 */}
+                        {uploadedImage && imagePreview ? (
+                          <div className="space-y-3">
+                            <div className="relative">
+                              <img
+                                src={imagePreview}
+                                alt="Uploaded"
+                                className="w-32 h-32 object-cover rounded-lg border mx-auto"
+                              />
+                            </div>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={removeImage}
+                              className="w-full text-red-600 border-red-200 hover:bg-red-50"
+                            >
+                              <Trash2 className="h-4 w-4 mr-2" />
+                              제거
+                            </Button>
+                          </div>
+                        ) : (
+                          /* 이미지 업로드 영역 */
+                          <div
+                            className={`
+                              border-2 border-dashed rounded-lg p-6 transition-all duration-300 cursor-pointer
+                              ${isDragOver
+                                ? "border-blue-500 bg-blue-50"
+                                : "border-gray-300 hover:border-blue-400 hover:bg-blue-50"
+                              }
+                            `}
+                            onDragOver={handleDragOver}
+                            onDragLeave={handleDragLeave}
+                            onDrop={handleDrop}
+                          >
+                            <input
+                              id="influencer-image-upload"
+                              type="file"
+                              accept="image/*"
+                              onChange={handleImageUpload}
+                              className="hidden"
+                            />
+                            <label htmlFor="influencer-image-upload" className="cursor-pointer">
+                              <div className="text-center">
+                                <Upload className="h-8 w-8 mx-auto mb-2 text-gray-400" />
+                                <p className="text-sm text-gray-600 mb-1">
+                                  클릭하여 이미지 선택
+                                </p>
+                                <p className="text-xs text-gray-500">
+                                  또는 이미지를 여기로 드래그하세요
+                                </p>
+                              </div>
+                            </label>
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -1998,10 +2263,10 @@ function ModelDetailContent() {
                       </div>
                       <Button
                         onClick={handleUpdateModel}
-                        disabled={isUpdating || isModelLoading}
+                        disabled={isUpdating || isModelLoading || isUploadingImage}
                         className="w-full bg-gray-800 hover:bg-gray-900 text-white font-medium py-2.5"
                       >
-                        {isUpdating ? "업데이트 중..." : isModelLoading ? "로딩 중..." : "정보 저장"}
+                        {isUploadingImage ? "이미지 업로드 중..." : isUpdating ? "업데이트 중..." : isModelLoading ? "로딩 중..." : "정보 저장"}
                       </Button>
                     </div>
                   </div>
@@ -2252,6 +2517,9 @@ function ModelDetailContent() {
           </DialogContent>
         </Dialog>
       </div>
+
+      {/* 토스트 알림 컴포넌트 */}
+      <Toaster />
     </div>
   )
 }

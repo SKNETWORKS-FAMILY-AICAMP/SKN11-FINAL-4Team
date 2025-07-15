@@ -1,4 +1,13 @@
-from fastapi import APIRouter, Depends, Query, BackgroundTasks, HTTPException
+from fastapi import (
+    APIRouter,
+    Depends,
+    Query,
+    BackgroundTasks,
+    HTTPException,
+    UploadFile,
+    File,
+    Form,
+)
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import os
@@ -127,6 +136,103 @@ async def get_mbti_options(
     return get_mbti_list(db)
 
 
+@router.post("/upload-image")
+async def upload_influencer_image(
+    file: UploadFile = File(...),
+    influencer_id: str = Form(None, description="인플루언서 ID (선택사항)"),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """인플루언서 이미지 파일을 S3에 업로드하고 URL을 반환"""
+    try:
+        # 사용자 인증 확인
+        user_id = current_user.get("sub")
+        if not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User authentication required",
+            )
+
+        # S3 서비스 사용 가능한지 확인
+        from app.services.s3_image_service import get_s3_image_service
+
+        s3_service = get_s3_image_service()
+
+        if not s3_service.is_available():
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="S3 서비스를 사용할 수 없습니다. AWS 설정을 확인하세요.",
+            )
+
+        # influencer_id가 제공된 경우 기존 이미지 삭제
+        if influencer_id:
+            try:
+                # 기존 인플루언서 정보 조회
+                from app.services.influencers.crud import get_influencer_by_id
+
+                existing_influencer = get_influencer_by_id(db, user_id, influencer_id)
+
+                if existing_influencer and getattr(
+                    existing_influencer, "image_url", None
+                ):
+                    existing_image_url = getattr(existing_influencer, "image_url", None)
+                    # 기존 이미지가 S3 키 형태인지 확인
+                    if existing_image_url and not existing_image_url.startswith("http"):
+                        # S3 키인 경우 삭제
+                        delete_success = await s3_service.delete_image(
+                            existing_image_url
+                        )
+                        if delete_success:
+                            logger.info(
+                                f"기존 인플루언서 이미지 삭제 성공: {existing_image_url}"
+                            )
+                        else:
+                            logger.warning(
+                                f"기존 인플루언서 이미지 삭제 실패: {existing_image_url}"
+                            )
+                    elif existing_image_url and existing_image_url.startswith("http"):
+                        # URL인 경우 S3 키 추출 시도
+                        s3_key = existing_image_url.replace(
+                            f"https://{s3_service.bucket_name}.s3.{s3_service.region}.amazonaws.com/",
+                            "",
+                        )
+                        if s3_key != existing_image_url:
+                            delete_success = await s3_service.delete_image(s3_key)
+                            if delete_success:
+                                logger.info(
+                                    f"기존 인플루언서 이미지 삭제 성공: {s3_key}"
+                                )
+                            else:
+                                logger.warning(
+                                    f"기존 인플루언서 이미지 삭제 실패: {s3_key}"
+                                )
+            except Exception as e:
+                logger.warning(f"기존 이미지 삭제 중 오류 발생: {e}")
+                # 기존 이미지 삭제 실패해도 새 이미지 업로드는 계속 진행
+
+        # S3에 업로드
+        file_content = await file.read()
+
+        # influencer_id가 제공되지 않은 경우 임시 ID 사용
+        temp_influencer_id = influencer_id or f"temp_{user_id}_{uuid.uuid4().hex[:8]}"
+
+        # 인플루언서 이미지 업로드
+        s3_url = await s3_service.upload_influencer_image(
+            file_content, file.filename or "uploaded_image.png", temp_influencer_id
+        )
+
+        return {"file_url": s3_url}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"인플루언서 이미지 업로드 실패: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"인플루언서 이미지 업로드에 실패했습니다: {str(e)}",
+        )
+
+
 # 인플루언서 관련 API
 @router.get("", response_model=List[AIInfluencerSchema])
 async def get_influencers(
@@ -140,7 +246,33 @@ async def get_influencers(
     if not user_id:
         raise HTTPException(status_code=401, detail="User ID not found")
 
-    return get_influencers_list(db, user_id, skip, limit)
+    influencers = get_influencers_list(db, user_id, skip, limit)
+
+    # 각 인플루언서의 이미지 URL을 S3 presigned URL로 변환
+    for influencer in influencers:
+        if influencer.image_url:
+            if not influencer.image_url.startswith("http"):
+                # S3 키인 경우 presigned URL 생성
+                try:
+                    from app.services.s3_image_service import get_s3_image_service
+
+                    s3_service = get_s3_image_service()
+                    if s3_service.is_available():
+                        # presigned URL 생성 (1시간 유효)
+                        influencer.image_url = s3_service.generate_presigned_url(
+                            influencer.image_url, expiration=3600
+                        )
+                    else:
+                        # S3 서비스가 사용 불가능한 경우 직접 URL 생성
+                        influencer.image_url = f"https://aimex-influencers.s3.ap-northeast-2.amazonaws.com/{influencer.image_url}"
+                except Exception as e:
+                    logger.error(
+                        f"Failed to generate presigned URL for influencer {influencer.influencer_id}: {e}"
+                    )
+                    # 실패 시 직접 URL 생성
+                    influencer.image_url = f"https://aimex-influencers.s3.ap-northeast-2.amazonaws.com/{influencer.image_url}"
+
+    return influencers
 
 
 @router.get("/{influencer_id}", response_model=AIInfluencerWithDetails)
@@ -153,7 +285,33 @@ async def get_influencer(
     user_id = current_user.get("sub")
     if not user_id:
         raise HTTPException(status_code=401, detail="User ID not found")
-    return get_influencer_by_id(db, user_id, influencer_id)
+
+    influencer = get_influencer_by_id(db, user_id, influencer_id)
+
+    # 이미지 URL을 S3 presigned URL로 변환
+    if influencer.image_url:
+        if not influencer.image_url.startswith("http"):
+            # S3 키인 경우 presigned URL 생성
+            try:
+                from app.services.s3_image_service import get_s3_image_service
+
+                s3_service = get_s3_image_service()
+                if s3_service.is_available():
+                    # presigned URL 생성 (1시간 유효)
+                    influencer.image_url = s3_service.generate_presigned_url(
+                        influencer.image_url, expiration=3600
+                    )
+                else:
+                    # S3 서비스가 사용 불가능한 경우 직접 URL 생성
+                    influencer.image_url = f"https://aimex-influencers.s3.ap-northeast-2.amazonaws.com/{influencer.image_url}"
+            except Exception as e:
+                logger.error(
+                    f"Failed to generate presigned URL for influencer {influencer_id}: {e}"
+                )
+                # 실패 시 직접 URL 생성
+                influencer.image_url = f"https://aimex-influencers.s3.ap-northeast-2.amazonaws.com/{influencer.image_url}"
+
+    return influencer
 
 
 @router.post("", response_model=AIInfluencerSchema)

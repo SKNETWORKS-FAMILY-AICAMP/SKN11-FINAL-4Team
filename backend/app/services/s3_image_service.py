@@ -127,6 +127,28 @@ class S3ImageService:
 
         return s3_key
 
+    def _generate_influencer_s3_key(
+        self, influencer_id: str, filename: str, created_date: datetime = None
+    ) -> str:
+        """인플루언서 이미지용 S3 키 생성: images/influencers/{influencer_id}/{filename}"""
+        # created_date가 제공되면 해당 날짜 사용, 아니면 현재 날짜 사용
+        if created_date is None:
+            created_date = datetime.now()
+
+        # 파일 확장자 추출
+        file_extension = Path(filename).suffix.lower()
+        if not file_extension:
+            file_extension = ".png"  # 기본값
+
+        # 고유한 파일명 생성
+        file_id = str(uuid.uuid4())
+        new_filename = f"{file_id}{file_extension}"
+
+        # S3 키 생성 (인플루언서 전용 경로)
+        s3_key = f"images/influencers/{influencer_id}/{new_filename}"
+
+        return s3_key
+
     async def upload_image(
         self,
         image_data: bytes,
@@ -215,6 +237,60 @@ class S3ImageService:
     ) -> str:
         """게시글용 이미지 업로드 (기존 호환성을 위한 메서드)"""
         return await self.upload_image(image_data, filename, board_id)
+
+    async def upload_influencer_image(
+        self,
+        image_data: bytes,
+        filename: str,
+        influencer_id: str,
+        user_id: Optional[str] = None,
+        created_date: datetime = None,
+    ) -> str:
+        """인플루언서 이미지를 S3에 업로드하고 URL 반환"""
+        if not self.is_available():
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="S3 서비스를 사용할 수 없습니다.",
+            )
+
+        try:
+            # 인플루언서용 S3 키 생성
+            s3_key = self._generate_influencer_s3_key(
+                influencer_id, filename, created_date
+            )
+
+            # 파일 확장자 추출
+            file_extension = Path(filename).suffix.lower()
+            if not file_extension:
+                file_extension = ".png"  # 기본값
+
+            # S3에 업로드
+            if self.s3_client:
+                self.s3_client.put_object(
+                    Bucket=self.bucket_name,
+                    Key=s3_key,
+                    Body=image_data,
+                    ContentType=self._get_content_type(file_extension),
+                )
+
+                # S3 키만 반환 (Presigned URL은 필요할 때 생성)
+                logger.info(f"인플루언서 이미지 S3 업로드 성공: {s3_key}")
+                logger.info(
+                    f"업로드 정보: influencer_id={influencer_id}, user_id={user_id}"
+                )
+                return s3_key
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="S3 클라이언트가 초기화되지 않았습니다.",
+                )
+
+        except Exception as e:
+            logger.error(f"인플루언서 이미지 S3 업로드 실패: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"인플루언서 이미지 S3 업로드에 실패했습니다: {str(e)}",
+            )
 
     def _get_content_type(self, file_extension: str) -> str:
         """파일 확장자에 따른 Content-Type 반환"""
