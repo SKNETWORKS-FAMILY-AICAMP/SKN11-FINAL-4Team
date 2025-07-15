@@ -186,21 +186,22 @@ def create_influencer(db: Session, user_id: str, influencer_data: AIInfluencerCr
         influencer = AIInfluencer(**influencer_create_data)
         db.add(influencer)
         db.flush()  # ID 생성을 위해 flush
-        
+
         # API 키 자동 생성
         api_key = f"ai_inf_{uuid.uuid4().hex[:16]}"
         influencer_api = InfluencerAPI(
-            influencer_id=influencer.influencer_id,
-            api_value=api_key
+            influencer_id=influencer.influencer_id, api_value=api_key
         )
         db.add(influencer_api)
-        
+
         db.commit()
         db.refresh(influencer)
-        
-        logger.info(f"🎉 인플루언서 생성 완료 - ID: {influencer.influencer_id}, 이름: {influencer.influencer_name}")
+
+        logger.info(
+            f"🎉 인플루언서 생성 완료 - ID: {influencer.influencer_id}, 이름: {influencer.influencer_name}"
+        )
         logger.info(f"🔑 API 키 자동 생성 완료 - 키: {api_key}")
-        
+
     except IntegrityError as e:
         db.rollback()
         if "Duplicate entry" in str(e) and "influencer_name" in str(e):

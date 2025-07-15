@@ -275,6 +275,40 @@ export default function CreateModelPage() {
           createInfluencerData.mood = formData.mood;
         }
       }
+
+      // 이미지 업로드가 있는 경우 먼저 이미지를 업로드
+      let imageUrl = undefined;
+      if (formData.imageMethod === "upload" && files.imageSamples && files.imageSamples.length > 0) {
+        try {
+          // 첫 번째 이미지만 업로드 (인플루언서 프로필 이미지용)
+          const file = files.imageSamples[0];
+          const formDataForUpload = new FormData();
+          formDataForUpload.append('file', file);
+          // influencer_id는 제공하지 않음 (백엔드에서 임시 ID 생성)
+
+          // 인플루언서 이미지 업로드 API 사용
+          const uploadResponse = await fetch('/api/v1/influencers/upload-image', {
+            method: 'POST',
+            body: formDataForUpload,
+          });
+
+          if (uploadResponse.ok) {
+            const uploadResult = await uploadResponse.json();
+            imageUrl = uploadResult.file_url; // 업로드된 이미지 URL
+            console.log('인플루언서 이미지 업로드 성공:', imageUrl);
+          } else {
+            console.warn('인플루언서 이미지 업로드 실패, 기본 이미지 사용');
+          }
+        } catch (error) {
+          console.warn('인플루언서 이미지 업로드 중 오류:', error);
+        }
+      }
+
+      // 이미지 URL을 인플루언서 생성 데이터에 추가
+      if (imageUrl) {
+        createInfluencerData.image_url = imageUrl;
+      }
+
       // 실제 인플루언서 생성 API 호출
       const response = await ModelService.createInfluencer(createInfluencerData)
 
@@ -905,13 +939,13 @@ export default function CreateModelPage() {
                             <div className="absolute bottom-8 left-12 w-4 h-4 border-2 border-gray-400 rotate-45"></div>
                             <div className="absolute bottom-16 right-4 w-10 h-10 border-2 border-gray-400 rounded-lg"></div>
                           </div>
-                          
+
                           <div className="relative p-12 text-center">
                             {/* 아이콘 영역 */}
                             <div className="relative mx-auto mb-6 w-20 h-20 rounded-full flex items-center justify-center transition-all duration-300 bg-gray-100 group-hover:bg-blue-100 group-hover:shadow-lg group-hover:shadow-blue-200">
                               <Upload className="h-8 w-8 transition-all duration-300 text-gray-500 group-hover:text-blue-600 group-hover:scale-110" />
                             </div>
-                            
+
                             {/* 텍스트 영역 */}
                             <div className="space-y-3">
                               <h3 className="text-xl font-semibold transition-colors duration-300 text-gray-800 group-hover:text-blue-700">
@@ -924,7 +958,7 @@ export default function CreateModelPage() {
                                 지원 형식: JPG, PNG, WebP (여러 파일 선택 가능)
                               </p>
                             </div>
-                            
+
                             {/* 파일 선택 버튼 */}
                             <div className="mt-6">
                               <input
@@ -936,8 +970,8 @@ export default function CreateModelPage() {
                                 id="image-upload"
                               />
                               <label htmlFor="image-upload">
-                                <Button 
-                                  className="transition-all duration-300 cursor-pointer bg-white hover:bg-blue-50 text-gray-700 border-gray-300 hover:border-blue-400 hover:text-blue-700 shadow-sm hover:shadow-md" 
+                                <Button
+                                  className="transition-all duration-300 cursor-pointer bg-white hover:bg-blue-50 text-gray-700 border-gray-300 hover:border-blue-400 hover:text-blue-700 shadow-sm hover:shadow-md"
                                   asChild
                                 >
                                   <span className="flex items-center gap-2">
@@ -947,7 +981,7 @@ export default function CreateModelPage() {
                                 </Button>
                               </label>
                             </div>
-                            
+
                             {files.imageSamples && (
                               <p className="text-xs text-green-600 mt-2">{files.imageSamples.length}개 파일 선택됨</p>
                             )}

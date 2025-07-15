@@ -291,10 +291,20 @@ async def get_boards(
         # 인플루언서 정보를 미리 조회하여 캐시
         influencer_cache = {inf.influencer_id: inf for inf in influencers}
 
+        logger.info(f"인플루언서 캐시: {list(influencer_cache.keys())}")
+        logger.info(f"게시글 수: {len(boards)}")
+
         enhanced_boards = []
         for board in boards:
             # 인플루언서 정보 조회
             influencer = influencer_cache.get(board.influencer_id)
+
+            logger.info(
+                f"게시글 {board.board_id}의 인플루언서 ID: {board.influencer_id}"
+            )
+            logger.info(
+                f"인플루언서 정보: {influencer.influencer_name if influencer else 'None'}"
+            )
 
             # 이미지 URL을 S3 presigned URL로 변환
             image_url = board.image_url
@@ -651,35 +661,68 @@ async def create_board(
             }
         else:
             # 즉시 발행 또는 임시저장인 경우
-            insert_sql = text(
+            # board_status가 3(발행됨)인 경우 published_at 필드 포함
+            if board_dict.get("board_status") == 3:
+                insert_sql = text(
+                    """
+                    INSERT INTO BOARD (
+                        board_id, influencer_id, user_id, team_id, group_id, board_topic, 
+                        board_description, board_platform, board_hash_tag, 
+                        board_status, image_url, published_at, created_at, updated_at
+                    ) VALUES (
+                        :board_id, :influencer_id, :user_id, :team_id, :group_id, :board_topic,
+                        :board_description, :board_platform, :board_hash_tag,
+                        :board_status, :image_url, :published_at, :created_at, :updated_at
+                    )
                 """
-                INSERT INTO BOARD (
-                    board_id, influencer_id, user_id, team_id, group_id, board_topic, 
-                    board_description, board_platform, board_hash_tag, 
-                    board_status, image_url, created_at, updated_at
-                ) VALUES (
-                    :board_id, :influencer_id, :user_id, :team_id, :group_id, :board_topic,
-                    :board_description, :board_platform, :board_hash_tag,
-                    :board_status, :image_url, :created_at, :updated_at
                 )
-            """
-            )
 
-            insert_params = {
-                "board_id": board_id,
-                "influencer_id": board_dict["influencer_id"],
-                "user_id": user_id,
-                "team_id": board_dict["team_id"],
-                "group_id": board_dict["team_id"],
-                "board_topic": board_dict["board_topic"],
-                "board_description": board_dict.get("board_description"),
-                "board_platform": board_dict["board_platform"],
-                "board_hash_tag": board_dict.get("board_hash_tag"),
-                "board_status": board_dict.get("board_status", 1),
-                "image_url": board_dict["image_url"],
-                "created_at": current_kst_time,
-                "updated_at": current_kst_time,
-            }
+                insert_params = {
+                    "board_id": board_id,
+                    "influencer_id": board_dict["influencer_id"],
+                    "user_id": user_id,
+                    "team_id": board_dict["team_id"],
+                    "group_id": board_dict["team_id"],
+                    "board_topic": board_dict["board_topic"],
+                    "board_description": board_dict.get("board_description"),
+                    "board_platform": board_dict["board_platform"],
+                    "board_hash_tag": board_dict.get("board_hash_tag"),
+                    "board_status": board_dict.get("board_status", 1),
+                    "image_url": board_dict["image_url"],
+                    "published_at": current_kst_time,
+                    "created_at": current_kst_time,
+                    "updated_at": current_kst_time,
+                }
+            else:
+                insert_sql = text(
+                    """
+                    INSERT INTO BOARD (
+                        board_id, influencer_id, user_id, team_id, group_id, board_topic, 
+                        board_description, board_platform, board_hash_tag, 
+                        board_status, image_url, created_at, updated_at
+                    ) VALUES (
+                        :board_id, :influencer_id, :user_id, :team_id, :group_id, :board_topic,
+                        :board_description, :board_platform, :board_hash_tag,
+                        :board_status, :image_url, :created_at, :updated_at
+                    )
+                """
+                )
+
+                insert_params = {
+                    "board_id": board_id,
+                    "influencer_id": board_dict["influencer_id"],
+                    "user_id": user_id,
+                    "team_id": board_dict["team_id"],
+                    "group_id": board_dict["team_id"],
+                    "board_topic": board_dict["board_topic"],
+                    "board_description": board_dict.get("board_description"),
+                    "board_platform": board_dict["board_platform"],
+                    "board_hash_tag": board_dict.get("board_hash_tag"),
+                    "board_status": board_dict.get("board_status", 1),
+                    "image_url": board_dict["image_url"],
+                    "created_at": current_kst_time,
+                    "updated_at": current_kst_time,
+                }
 
         db.execute(insert_sql, insert_params)
 
@@ -987,7 +1030,10 @@ async def create_board_with_image(
 
         file_content = await file.read()
         s3_key = await s3_service.upload_image(
-            file_content, file.filename or "uploaded_image.png", board_id
+            file_content,
+            file.filename or "uploaded_image.png",
+            board_id,
+            created_date=current_kst_time,
         )
 
         # 3. 게시글에 이미지 URL 업데이트
@@ -1286,6 +1332,16 @@ async def delete_board(
             status_code=status.HTTP_404_NOT_FOUND, detail="Board not found"
         )
 
+    # 게시글 이미지 S3에서 삭제
+    try:
+        from app.services.s3_image_service import get_s3_image_service
+
+        s3_service = get_s3_image_service()
+        if s3_service.is_available():
+            await s3_service.delete_board_images(board_id)
+    except Exception as e:
+        logger.error(f"게시글 S3 이미지 삭제 실패: {e}")
+
     db.delete(board)
     db.commit()
 
@@ -1312,7 +1368,13 @@ async def publish_board(
         )
 
     # 게시글 상태를 발행됨으로 변경
-    stmt = update(Board).where(Board.board_id == board_id).values(board_status=2)
+    from app.utils.timezone_utils import get_current_kst
+
+    stmt = (
+        update(Board)
+        .where(Board.board_id == board_id)
+        .values(board_status=3, published_at=get_current_kst())  # 발행됨
+    )
     db.execute(stmt)
     db.commit()
 
@@ -2023,7 +2085,6 @@ async def full_enhance_content(
 
 class InfluencerStyleRequest(BaseModel):
     influencer_id: str
-    influencer_model_repo: str
     text: str
 
 
@@ -2059,37 +2120,22 @@ async def convert_influencer_style(
         raise HTTPException(
             status_code=403, detail="해당 인플루언서에 대한 접근 권한이 없습니다."
         )
-    # hf_manage_id 확인
-    if ai_influencer.hf_manage_id is None:
-        raise HTTPException(
-            status_code=400, detail="허깅페이스 토큰이 설정되지 않았습니다."
-        )
-    hf_token = (
-        db.query(HFTokenManage)
-        .filter(HFTokenManage.hf_manage_id == ai_influencer.hf_manage_id)
-        .first()
-    )
-    if not hf_token:
-        raise HTTPException(
-            status_code=400, detail="허깅페이스 토큰을 찾을 수 없습니다."
-        )
-    encrypted_token_value = getattr(hf_token, "hf_token_value", None)
-    if not encrypted_token_value:
-        raise HTTPException(status_code=400, detail="토큰 값이 없습니다.")
-    decrypted_token = decrypt_sensitive_data(encrypted_token_value)
+
     # 프롬프트 생성
     influencer_name = getattr(ai_influencer, "influencer_name", "이 인플루언서")
     influencer_desc = getattr(ai_influencer, "influencer_description", None)
     influencer_personality = getattr(ai_influencer, "influencer_personality", None)
-    # multi-chat 스타일 시스템 프롬프트
+
+    # 시스템 프롬프트 생성
     system_prompt = f"너는 {influencer_name}라는 AI 인플루언서야.\n"
     if influencer_desc and str(influencer_desc).strip() != "":
         system_prompt += f"설명: {influencer_desc}\n"
     if influencer_personality and str(influencer_personality).strip() != "":
         system_prompt += f"성격: {influencer_personality}\n"
     system_prompt += "한국어로만 대답해.\n"
-    # 사용자 프롬프트
-    prompt = f"""
+
+    # 사용자 프롬프트 생성
+    user_prompt = f"""
 아래 텍스트의 모든 문장과 단어를 빠짐없이, 순서와 의미를 바꾸지 말고 그대로 본문에 포함하되,
 {influencer_name}의 개성(말투, 사설, 스타일 등)이 자연스럽게 드러나도록 다시 써줘.
 정보는 절대 누락, 요약, 왜곡, 순서 변경 없이 모두 포함해야 하며,
@@ -2098,41 +2144,54 @@ async def convert_influencer_style(
 텍스트:
 {request.text}
 """
-    # 모델 로드 (간단화, 실제 운영시 캐싱 필요)
-    model_name = request.influencer_model_repo
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    tokenizer = AutoTokenizer.from_pretrained(
-        model_name, trust_remote_code=True, token=decrypted_token
-    )
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name,
-        trust_remote_code=True,
-        token=decrypted_token,
-        device_map="auto" if device == "cuda" else None,
-        torch_dtype=torch.float16 if device == "cuda" else torch.float32,
-    )
-    # 입력 생성
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": prompt},
-    ]
+
+    # vLLM 서버 호출
     try:
-        full_input = tokenizer.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True
+        from app.services.vllm_client import get_vllm_client
+
+        # VLLM 클라이언트 가져오기
+        vllm_client = await get_vllm_client()
+        logger.info(f"VLLM 클라이언트 생성 완료")
+
+        # 인플루언서의 어댑터 정보 확인
+        influencer_model_repo = getattr(ai_influencer, "influencer_model_repo", None)
+        if influencer_model_repo:
+            # 어댑터가 있으면 로드 시도
+            try:
+                await vllm_client.load_adapter(
+                    model_id=request.influencer_id,
+                    hf_repo_name=influencer_model_repo,
+                    hf_token=None,  # 토큰이 필요하면 추가
+                )
+                logger.info(f"어댑터 로드 성공: {request.influencer_id}")
+            except Exception as e:
+                logger.warning(f"어댑터 로드 실패, 기본 모델 사용: {e}")
+
+        # VLLM 서버에서 응답 생성
+        result = await vllm_client.generate_response(
+            user_message=user_prompt,
+            system_message=system_prompt,
+            influencer_name=influencer_name,
+            model_id=request.influencer_id,  # influencer_id를 model_id로 사용
+            max_new_tokens=1024,
+            temperature=0.7,
         )
-    except Exception:
-        full_input = system_prompt + "\n\n사용자: " + prompt + "\n\n어시스턴트: "
-    # 생성
-    input_ids = tokenizer(full_input, return_tensors="pt").input_ids.to(model.device)
-    gen_out = model.generate(
-        input_ids, max_new_tokens=1024, do_sample=True, temperature=0.7
-    )
-    output = tokenizer.decode(gen_out[0], skip_special_tokens=True)
-    # 후처리: 입력 프롬프트 부분 제거
-    answer = (
-        output.split("어시스턴트:")[-1].strip()
-        if "어시스턴트:" in output
-        else output.strip()
-    )
-    answer = re.sub(r"^\s+|\s+$", "", answer)
-    return InfluencerStyleResponse(converted_text=answer)
+
+        logger.info(f"VLLM 서버 응답 생성 성공")
+        return InfluencerStyleResponse(converted_text=result["response"])
+
+    except Exception as e:
+        logger.error(f"vLLM 서버 연결 실패: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail="vLLM 서버에 연결할 수 없습니다. 서버 상태를 확인해주세요.",
+        )
+    except Exception as e:
+        logger.error(f"스타일 변환 처리 실패: {e}")
+        logger.error(f"스타일 변환 처리 실패 상세: {type(e).__name__}: {str(e)}")
+        import traceback
+
+        logger.error(f"스타일 변환 처리 실패 스택트레이스: {traceback.format_exc()}")
+        raise HTTPException(
+            status_code=500, detail=f"스타일 변환 처리 중 오류가 발생했습니다: {str(e)}"
+        )

@@ -230,6 +230,7 @@ class SchedulerService:
                         logger.info(f"게시글 ID: {board_id}")
                         logger.info(f"인스타그램 ID: {influencer.instagram_id}")
                         logger.info(f"이미지 URL: {post.image_url}")
+                        logger.info(f"게시글 생성일: {post.created_at}")
                         logger.info(f"캡션 길이: {len(caption)}자")
                         logger.info(f"캡션 미리보기: {caption[:100]}...")
 
@@ -262,12 +263,25 @@ class SchedulerService:
                                 )
                             else:
                                 logger.warning("인스타그램 포스트 ID가 없습니다")
+
+                            # Instagram 업로드 성공 시에만 게시글 상태를 발행됨(3)으로 변경
+                            post.board_status = 3
+                            post.published_at = datetime.now()
+                            db.commit()
+                            logger.info(f"게시글 {board_id} 예약 발행 완료")
                         else:
                             logger.error(
                                 f"❌ 예약된 게시글 {board_id} Instagram 업로드 실패"
                             )
                             logger.error(
                                 f"실패 원인: {result.get('message', '알 수 없는 오류')}"
+                            )
+                            # Instagram 업로드 실패 시 게시글 상태를 임시저장(1)으로 변경
+                            post.board_status = 1
+                            post.reservation_at = None  # 예약 시간 초기화
+                            db.commit()
+                            logger.info(
+                                f"게시글 {board_id} Instagram 업로드 실패로 임시저장으로 변경"
                             )
 
                     else:
@@ -283,14 +297,27 @@ class SchedulerService:
                             logger.warning(f"인스타그램 ID: {influencer.instagram_id}")
                         logger.info(f"예약된 게시글 {board_id} Instagram 연동되지 않음")
 
+                        # Instagram 연동되지 않은 경우 게시글 상태를 임시저장(1)으로 변경
+                        post.board_status = 1
+                        post.reservation_at = None  # 예약 시간 초기화
+                        db.commit()
+                        logger.info(
+                            f"게시글 {board_id} Instagram 연동 없음으로 임시저장으로 변경"
+                        )
+
                 except Exception as instagram_error:
                     logger.error(
                         f"예약된 게시글 {board_id} Instagram 업로드 중 오류: {str(instagram_error)}"
                     )
-                    # Instagram 업로드 실패해도 게시글 발행은 성공으로 처리
+                    # Instagram 업로드 실패 시 게시글 상태를 임시저장(1)으로 변경
+                    post.board_status = 1
+                    post.reservation_at = None  # 예약 시간 초기화
+                    db.commit()
+                    logger.info(
+                        f"게시글 {board_id} Instagram 업로드 오류로 임시저장으로 변경"
+                    )
 
-                db.commit()
-                logger.info(f"게시글 {board_id} 예약 발행 완료")
+                logger.info(f"게시글 {board_id} 예약 발행 처리 완료")
 
             finally:
                 db.close()

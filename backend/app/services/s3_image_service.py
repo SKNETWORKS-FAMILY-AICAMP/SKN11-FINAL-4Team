@@ -20,29 +20,15 @@ class S3ImageService:
         self.region = settings.AWS_REGION
 
         # S3 클라이언트 초기화
-        if (
-            settings.S3_ENABLED
-            and settings.AWS_ACCESS_KEY_ID
-            and settings.AWS_SECRET_ACCESS_KEY
-        ):
-            try:
-                self.s3_client = boto3.client(
-                    "s3",
-                    aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-                    aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-                    region_name=settings.AWS_REGION,
-                )
-                logger.info(f"S3 클라이언트 초기화 성공: {self.bucket_name}")
-            except Exception as e:
-                logger.error(f"S3 클라이언트 초기화 실패: {e}")
-                self.s3_client = None
-        else:
-            logger.warning("S3 설정이 완료되지 않았습니다.")
+        self._initialize_client()
 
     def is_available(self) -> bool:
         """S3 서비스 사용 가능 여부 확인"""
         if self.s3_client is None:
-            return False
+            # 클라이언트가 None이면 재초기화 시도
+            self._initialize_client()
+            if self.s3_client is None:
+                return False
 
         # 실제 연결 테스트 및 버킷 존재 확인
         try:
@@ -55,7 +41,31 @@ class S3ImageService:
             return True
         except Exception as e:
             logger.warning(f"S3 연결 테스트 실패: {e}")
-            return False
+            # 연결 실패 시 클라이언트 재초기화 시도
+            self._initialize_client()
+            return self.s3_client is not None
+
+    def _initialize_client(self):
+        """S3 클라이언트 초기화"""
+        if (
+            settings.S3_ENABLED
+            and settings.AWS_ACCESS_KEY_ID
+            and settings.AWS_SECRET_ACCESS_KEY
+        ):
+            try:
+                self.s3_client = boto3.client(
+                    "s3",
+                    aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+                    aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+                    region_name=settings.AWS_REGION,
+                )
+                logger.info(f"S3 클라이언트 재초기화 성공: {self.bucket_name}")
+            except Exception as e:
+                logger.error(f"S3 클라이언트 재초기화 실패: {e}")
+                self.s3_client = None
+        else:
+            logger.warning("S3 설정이 완료되지 않았습니다.")
+            self.s3_client = None
 
     def check_bucket_exists(self) -> bool:
         """S3 버킷 존재 여부 확인"""
@@ -91,12 +101,17 @@ class S3ImageService:
             logger.error(f"버킷 생성 실패: {self.bucket_name} - {e}")
             return False
 
-    def _generate_s3_key(self, board_id: str, filename: str) -> str:
+    def _generate_s3_key(
+        self, board_id: str, filename: str, created_date: datetime = None
+    ) -> str:
         """S3 키 생성: images/posts/YYYY-MM-DD/{board_id}/{filename}"""
-        now = datetime.now()
-        year = now.year
-        month = now.month
-        day = now.day
+        # created_date가 제공되면 해당 날짜 사용, 아니면 현재 날짜 사용
+        if created_date is None:
+            created_date = datetime.now()
+
+        year = created_date.year
+        month = created_date.month
+        day = created_date.day
 
         # 파일 확장자 추출
         file_extension = Path(filename).suffix.lower()
@@ -112,12 +127,35 @@ class S3ImageService:
 
         return s3_key
 
+    def _generate_influencer_s3_key(
+        self, influencer_id: str, filename: str, created_date: datetime = None
+    ) -> str:
+        """인플루언서 이미지용 S3 키 생성: images/influencers/{influencer_id}/{filename}"""
+        # created_date가 제공되면 해당 날짜 사용, 아니면 현재 날짜 사용
+        if created_date is None:
+            created_date = datetime.now()
+
+        # 파일 확장자 추출
+        file_extension = Path(filename).suffix.lower()
+        if not file_extension:
+            file_extension = ".png"  # 기본값
+
+        # 고유한 파일명 생성
+        file_id = str(uuid.uuid4())
+        new_filename = f"{file_id}{file_extension}"
+
+        # S3 키 생성 (인플루언서 전용 경로)
+        s3_key = f"images/influencers/{influencer_id}/{new_filename}"
+
+        return s3_key
+
     async def upload_image(
         self,
         image_data: bytes,
         filename: str,
         board_id: str,
         user_id: Optional[str] = None,
+        created_date: datetime = None,
     ) -> str:
         """이미지를 S3에 업로드하고 URL 반환"""
         if not self.is_available():
@@ -128,7 +166,7 @@ class S3ImageService:
 
         try:
             # S3 키 생성
-            s3_key = self._generate_s3_key(board_id, filename)
+            s3_key = self._generate_s3_key(board_id, filename, created_date)
 
             # 파일 확장자 추출
             file_extension = Path(filename).suffix.lower()
@@ -200,6 +238,60 @@ class S3ImageService:
         """게시글용 이미지 업로드 (기존 호환성을 위한 메서드)"""
         return await self.upload_image(image_data, filename, board_id)
 
+    async def upload_influencer_image(
+        self,
+        image_data: bytes,
+        filename: str,
+        influencer_id: str,
+        user_id: Optional[str] = None,
+        created_date: datetime = None,
+    ) -> str:
+        """인플루언서 이미지를 S3에 업로드하고 URL 반환"""
+        if not self.is_available():
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="S3 서비스를 사용할 수 없습니다.",
+            )
+
+        try:
+            # 인플루언서용 S3 키 생성
+            s3_key = self._generate_influencer_s3_key(
+                influencer_id, filename, created_date
+            )
+
+            # 파일 확장자 추출
+            file_extension = Path(filename).suffix.lower()
+            if not file_extension:
+                file_extension = ".png"  # 기본값
+
+            # S3에 업로드
+            if self.s3_client:
+                self.s3_client.put_object(
+                    Bucket=self.bucket_name,
+                    Key=s3_key,
+                    Body=image_data,
+                    ContentType=self._get_content_type(file_extension),
+                )
+
+                # S3 키만 반환 (Presigned URL은 필요할 때 생성)
+                logger.info(f"인플루언서 이미지 S3 업로드 성공: {s3_key}")
+                logger.info(
+                    f"업로드 정보: influencer_id={influencer_id}, user_id={user_id}"
+                )
+                return s3_key
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="S3 클라이언트가 초기화되지 않았습니다.",
+                )
+
+        except Exception as e:
+            logger.error(f"인플루언서 이미지 S3 업로드 실패: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"인플루언서 이미지 S3 업로드에 실패했습니다: {str(e)}",
+            )
+
     def _get_content_type(self, file_extension: str) -> str:
         """파일 확장자에 따른 Content-Type 반환"""
         content_types = {
@@ -237,7 +329,14 @@ class S3ImageService:
 
     def generate_presigned_url(self, s3_key: str, expiration: int = 3600) -> str:
         """Presigned URL 생성 (기본 1시간 유효)"""
+        logger.info(f"Presigned URL 생성 시도: {s3_key}")
+        logger.info(f"S3 서비스 사용 가능: {self.is_available()}")
+        logger.info(f"S3 클라이언트 존재: {self.s3_client is not None}")
+        logger.info(f"버킷명: {self.bucket_name}")
+        logger.info(f"지역: {self.region}")
+
         if not self.is_available() or not self.s3_client:
+            logger.error("S3 서비스가 사용 불가능하거나 클라이언트가 없습니다")
             return ""
 
         try:
@@ -247,9 +346,12 @@ class S3ImageService:
                 ExpiresIn=expiration,
             )
             logger.info(f"Presigned URL 생성 성공: {s3_key}")
+            logger.info(f"생성된 URL: {url}")
             return url
         except Exception as e:
             logger.error(f"Presigned URL 생성 실패: {e}")
+            logger.error(f"오류 타입: {type(e)}")
+            logger.error(f"오류 상세: {str(e)}")
             return ""
 
     async def get_image_info(self, s3_key: str) -> Optional[Dict[str, Any]]:
