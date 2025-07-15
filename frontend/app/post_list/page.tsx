@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -26,7 +27,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import { Plus, Search, Edit, Trash2, Eye, Calendar, User, Filter, X, Copy, ExternalLink, Heart, MessageCircle, MoreHorizontal, UploadCloud, Instagram, Users, BarChart3, Bookmark } from "lucide-react"
+import { Plus, Search, Edit, Trash2, Eye, Calendar, User, Filter, X, Copy, ExternalLink, Heart, MessageCircle, MoreHorizontal, UploadCloud, Instagram, Users, BarChart3, Bookmark, Play } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import apiClient from "@/lib/api"
 import { useToast } from "@/hooks/use-toast"
@@ -56,7 +57,7 @@ function PostListContent() {
   // 게시글 상세 보기 모달 상태
   const [selectedPost, setSelectedPost] = useState<Post | null>(null)
   const [isViewModalOpen, setIsViewModalOpen] = useState(false)
-  const [editMode, setEditMode] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
   const [editTitle, setEditTitle] = useState("");
   const [editContent, setEditContent] = useState("");
   const [editHashtags, setEditHashtags] = useState("");
@@ -434,6 +435,11 @@ function PostListContent() {
   const handleViewPost = (post: Post) => {
     setSelectedPost(post)
     setIsViewModalOpen(true)
+    setIsEditing(false)
+    setEditTitle(post.title || post.board_topic || "")
+    setEditContent(post.content || post.board_description || "")
+    setEditHashtags((post.hashtags || []).join(" "))
+    setEditScheduledAt(post.scheduledAt || "")
   }
 
 
@@ -453,9 +459,143 @@ function PostListContent() {
     return getRelativeTime(dateString)
   }
 
+  // 플랫폼별 미리보기 렌더링 함수
+  const renderPlatformSpecificPost = (post: Post) => {
+    switch (post.platform) {
+      case "Instagram":
+        return (
+          <div className="bg-white border rounded-lg overflow-hidden max-w-md mx-auto">
+            {/* Instagram 헤더 */}
+            <div className="flex items-center justify-between p-3 border-b">
+              <div className="flex items-center space-x-3">
+                <Avatar className="h-8 w-8">
+                  <AvatarFallback className="bg-pink-500 text-white text-xs">AI</AvatarFallback>
+                </Avatar>
+                <div>
+                  <p className="font-semibold text-sm">{post.influencerName || 'AI 인플루언서'}</p>
+                  <p className="text-xs text-gray-500">패션 인플루언서</p>
+                </div>
+              </div>
+              <MoreHorizontal className="h-5 w-5 text-gray-600" />
+            </div>
+
+            {/* Instagram 이미지/캐러셀 */}
+            {post.media && (
+              <div className="relative">
+                {post.media.type === "carousel" ? (
+                  <div className="flex overflow-x-auto snap-x snap-mandatory">
+                    {post.media.urls.map((url, index) => (
+                      <img key={index} src={url || "/placeholder.svg"} alt={`Slide ${index + 1}`} className="w-full h-80 object-cover flex-shrink-0 snap-start" />
+                    ))}
+                  </div>
+                ) : (
+                  <img src={post.media.urls[0] || "/placeholder.svg"} alt="Post image" className="w-full h-80 object-cover" />
+                )}
+                {post.media.type === "carousel" && (
+                  <div className="absolute top-2 right-2 bg-black bg-opacity-50 text-white text-xs px-2 py-1 rounded">
+                    1/{post.media.urls.length}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Instagram 액션 버튼 */}
+            <div className="p-3">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center space-x-4">
+                  <Heart className="h-6 w-6" />
+                  <MessageCircle className="h-6 w-6" />
+                </div>
+                <Bookmark className="h-6 w-6" />
+              </div>
+
+              {/* 좋아요 수 */}
+              <p className="font-semibold text-sm mb-2">좋아요 {(post.engagement?.likes || 0).toLocaleString()}개</p>
+
+              {/* 캡션 */}
+              <div className="text-sm">
+                <span className="font-semibold">{post.influencerName || 'AI 인플루언서'}</span>{" "}
+                <span className="whitespace-pre-wrap">{post.content}</span>
+              </div>
+
+              {/* 해시태그 */}
+              <div className="mt-2">
+                {post.hashtags?.map((tag, index) => (
+                  <span key={index} className="text-blue-600 text-sm mr-1">
+                    {tag}
+                  </span>
+                ))}
+              </div>
+
+              {/* 댓글 보기 */}
+              <p className="text-gray-500 text-sm mt-2">댓글 {post.engagement?.comments || 0}개 모두 보기</p>
+              <p className="text-gray-400 text-xs mt-1">{formatDate(post.publishedAt || '')}</p>
+            </div>
+          </div>
+        )
+
+      case "Facebook":
+        return (
+          <div className="bg-white border rounded-lg p-4 max-w-lg mx-auto">
+            {/* Facebook 헤더 */}
+            <div className="flex items-center space-x-3 mb-3">
+              <Avatar className="h-10 w-10">
+                <AvatarFallback className="bg-blue-600 text-white">AI</AvatarFallback>
+              </Avatar>
+              <div className="flex-1">
+                <p className="font-semibold text-sm">{post.influencerName || 'AI 인플루언서'}</p>
+                <p className="text-xs text-gray-500">{formatDate(post.publishedAt || '')} · 🌍</p>
+              </div>
+            </div>
+
+            {/* Facebook 텍스트 */}
+            <div className="mb-3">
+              <p className="text-sm whitespace-pre-wrap">{post.content}</p>
+            </div>
+
+            {/* Facebook 이미지 */}
+            {post.media && (
+              <div className="mb-3">
+                <img src={post.media.urls[0] || "/placeholder.svg"} alt="Post image" className="w-full rounded-lg" />
+              </div>
+            )}
+
+            {/* Facebook 반응 */}
+            <div className="border-t pt-2">
+              <div className="flex items-center justify-between text-gray-500 text-sm mb-2">
+                <span>👍❤️😊 {post.engagement?.likes || 0}</span>
+                <span>
+                  댓글 {post.engagement?.comments || 0}개
+                </span>
+              </div>
+              <div className="flex items-center justify-around border-t pt-2">
+                <button className="flex items-center space-x-1 text-gray-600 hover:bg-gray-100 px-4 py-2 rounded">
+                  <Heart className="h-4 w-4" />
+                  <span className="text-sm">좋아요</span>
+                </button>
+                <button className="flex items-center space-x-1 text-gray-600 hover:bg-gray-100 px-4 py-2 rounded">
+                  <MessageCircle className="h-4 w-4" />
+                  <span className="text-sm">댓글</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+
+      default:
+        return (
+          <div className="bg-white border rounded-lg p-4 max-w-md mx-auto">
+            <div className="text-center text-gray-500">
+              <p className="text-sm">플랫폼 미리보기를 지원하지 않습니다</p>
+            </div>
+          </div>
+        )
+    }
+  }
+
   useEffect(() => {
     if (isViewModalOpen && selectedPost) {
-      setEditMode(false);
+      setIsEditing(false);
       setEditTitle(selectedPost.title || selectedPost.board_topic || "");
       setEditContent(selectedPost.content || selectedPost.board_description || "");
       setEditHashtags(selectedPost.hashtags ? selectedPost.hashtags.join(" ") : "");
@@ -481,7 +621,7 @@ function PostListContent() {
         description: "수정할 내용이 없습니다.",
         variant: "default",
       })
-      setEditMode(false)
+      setIsEditing(false)
       return
     }
 
@@ -522,7 +662,7 @@ function PostListContent() {
         if (updated) setSelectedPost(updated);
         return newPosts;
       });
-      setEditMode(false);
+      setIsEditing(false);
       setIsViewModalOpen(false); // 모달 닫기
 
       toast({
@@ -733,7 +873,7 @@ function PostListContent() {
               <CardContent className="p-6">
                 <div className="text-center">
                   <p className="text-3xl font-bold text-green-600">{posts.filter((p) => p.status === "published").length}</p>
-                  <p className="text-sm text-gray-600 mt-1">발행됨</p>
+                  <p className="text-sm text-gray-600 mt-1 whitespace-nowrap">발행됨</p>
                 </div>
               </CardContent>
             </Card>
@@ -744,7 +884,7 @@ function PostListContent() {
               <CardContent className="p-6">
                 <div className="text-center">
                   <p className="text-3xl font-bold text-blue-600">{posts.filter((p) => p.status === "scheduled").length}</p>
-                  <p className="text-sm text-gray-600 mt-1">예약됨</p>
+                  <p className="text-sm text-gray-600 mt-1 whitespace-nowrap">예약됨</p>
                 </div>
               </CardContent>
             </Card>
@@ -756,7 +896,7 @@ function PostListContent() {
             <p className="text-gray-500 text-lg">게시글을 불러오는 중...</p>
           </div>
         ) : (
-          <div className="grid gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {filteredPosts.map((post) => (
               <PostCard
                 key={post.id}
@@ -765,9 +905,9 @@ function PostListContent() {
                 onDelete={handleDeletePost}
                 onPublish={handlePublishPost}
                 onInstagramUpload={handleInstagramUpload}
-                showActions={true}
+                showActions={false}
                 showInfluencerInfo={false}
-                variant="list"
+                variant="content"
               />
             ))}
           </div>
@@ -788,80 +928,168 @@ function PostListContent() {
                 <Eye className="h-5 w-5" />
                 <span>게시글 상세 보기</span>
               </DialogTitle>
+              <div className="flex items-center space-x-2">
+                {(selectedPost?.status === 'draft' || selectedPost?.status === 'scheduled') && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setIsEditing(!isEditing)}
+                    className="flex items-center space-x-1"
+                  >
+                    {isEditing ? (
+                      <>
+                        <Eye className="h-4 w-4" />
+                        <span>보기 모드</span>
+                      </>
+                    ) : (
+                      <>
+                        <Edit className="h-4 w-4" />
+                        <span>수정 모드</span>
+                      </>
+                    )}
+                  </Button>
+                )}
+                {isEditing && (
+                  <Button
+                    onClick={handleEditSave}
+                    size="sm"
+                    className="bg-blue-600 hover:bg-blue-700 text-white"
+                  >
+                    저장
+                  </Button>
+                )}
+                {selectedPost?.instagram_link && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => window.open(selectedPost.instagram_link, '_blank')}
+                    className="flex items-center space-x-1"
+                  >
+                    <ExternalLink className="h-4 w-4" />
+                    <span>인스타그램 보기</span>
+                  </Button>
+                )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleDeletePost(selectedPost?.id || selectedPost?.board_id)}
+                  className="flex items-center space-x-1 text-red-600 hover:text-red-700 hover:bg-red-50"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  <span>삭제</span>
+                </Button>
+              </div>
             </DialogHeader>
 
             {selectedPost && (
               <div className="space-y-6">
                 {/* 게시글 기본 정보 */}
-                <div className="flex items-center space-x-3 pb-4 border-b">
+                <div className="flex justify-between items-start pb-4 border-b">
                   <div className="flex-1">
-                    <div className="flex items-center space-x-2">
-                      {editMode ? (
-                        <Input
-                          value={editTitle}
-                          onChange={e => setEditTitle(e.target.value)}
-                          className="font-semibold text-gray-900 text-lg"
-                        />
-                      ) : (
-                        <h3 className="font-semibold text-gray-900">{selectedPost.title || selectedPost.board_topic}</h3>
-                      )}
-                      <Badge className={
-                        selectedPost.status === "published" ? "bg-green-100 text-green-800" :
-                          selectedPost.status === "scheduled" ? "bg-blue-100 text-blue-800" :
-                            "bg-gray-100 text-gray-800"
-                      }>
-                        {selectedPost.status === "published" ? "발행됨" :
-                          selectedPost.status === "scheduled" ? "예약됨" : "임시저장"}
-                      </Badge>
-                      {selectedPost.platform && (
-                        <Badge className={
-                          selectedPost.platform === "Instagram" ? "bg-pink-100 text-pink-800" :
-                            selectedPost.platform === "Blog" ? "bg-orange-100 text-orange-800" :
-                              selectedPost.platform === "Facebook" ? "bg-blue-100 text-blue-800" :
-                                "bg-gray-100 text-gray-800"
-                        }>
-                          {selectedPost.platform}
-                        </Badge>
-                      )}
+                    <h3 className="font-semibold text-gray-900 mb-2">{selectedPost.title || selectedPost.board_topic}</h3>
+                    {/* 인플루언서 정보 */}
+                    <div className="flex items-center space-x-2 text-sm text-gray-500 mt-1">
+                      <div className="w-5 h-5 bg-gradient-to-br from-purple-500 to-pink-500 rounded-full flex items-center justify-center">
+                        <span className="text-white text-xs font-medium">AI</span>
+                      </div>
+                      <span className="font-medium text-gray-700">
+                        {selectedPost.influencerName || selectedPost.author || 'AI 인플루언서'}
+                      </span>
                     </div>
                     <div className="flex items-center space-x-2 text-sm text-gray-500 mt-1">
-                      <User className="h-4 w-4" />
-                      <span>{selectedPost.author || 'AI 인플루언서'}</span>
-                      <span>•</span>
                       <Calendar className="h-4 w-4" />
-                      <span>{formatFullDate(selectedPost.createdAt || selectedPost.created_at || "")}</span>
+                      {selectedPost.status === 'scheduled' && selectedPost.scheduledAt && selectedPost.scheduledAt.trim() !== '' ? (
+                        <span>예약 발행: {formatDate(selectedPost.scheduledAt || '')}</span>
+                      ) : selectedPost.status === 'published' && selectedPost.publishedAt && selectedPost.publishedAt.trim() !== '' ? (
+                        <span>발행: {formatDate(selectedPost.publishedAt || '')}</span>
+                      ) : selectedPost.status === 'published' ? (
+                        <span>발행됨 (날짜 정보 없음)</span>
+                      ) : selectedPost.status === 'scheduled' ? (
+                        <span>예약됨 (날짜 정보 없음)</span>
+                      ) : (
+                        <span>임시저장</span>
+                      )}
                     </div>
+                  </div>
+
+                  {/* 오른쪽 상단에 배지들 배치 */}
+                  <div className="flex flex-col items-end space-y-2 ml-4">
+                    {selectedPost.platform && (
+                      <Badge className={
+                        selectedPost.platform === "Instagram" ? "bg-pink-100 text-pink-800 whitespace-nowrap" :
+                          selectedPost.platform === "Blog" ? "bg-orange-100 text-orange-800 whitespace-nowrap" :
+                            selectedPost.platform === "Facebook" ? "bg-blue-100 text-blue-800 whitespace-nowrap" :
+                              "bg-gray-100 text-gray-800 whitespace-nowrap"
+                      }>
+                        {selectedPost.platform}
+                      </Badge>
+                    )}
+                    <Badge className={
+                      selectedPost.status === "published" ? "bg-green-100 text-green-800 whitespace-nowrap" :
+                        selectedPost.status === "scheduled" ? "bg-blue-100 text-blue-800 whitespace-nowrap" :
+                          "bg-gray-100 text-gray-800 whitespace-nowrap"
+                    }>
+                      {selectedPost.status === "published" ? "발행됨" :
+                        selectedPost.status === "scheduled" ? "예약됨" : "임시저장"}
+                    </Badge>
                   </div>
                 </div>
 
                 {/* 게시글 내용 */}
                 <div className="space-y-2">
                   <h4 className="text-sm font-medium text-gray-900">게시글 내용</h4>
-                  <div className="bg-gray-50 border rounded-lg p-4">
-                    {editMode ? (
-                      <textarea
-                        value={editContent}
-                        onChange={e => setEditContent(e.target.value)}
-                        className="w-full h-32 p-2 border rounded"
-                      />
-                    ) : (
+                  {isEditing && (selectedPost?.status === 'draft' || selectedPost?.status === 'scheduled') ? (
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">제목</label>
+                        <Input
+                          value={editTitle}
+                          onChange={(e) => setEditTitle(e.target.value)}
+                          placeholder="게시글 제목을 입력하세요"
+                          className="w-full"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">내용</label>
+                        <textarea
+                          value={editContent}
+                          onChange={(e) => setEditContent(e.target.value)}
+                          placeholder="게시글 내용을 입력하세요"
+                          className="w-full h-32 p-3 border border-gray-300 rounded-md resize-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">해시태그</label>
+                        <Input
+                          value={editHashtags}
+                          onChange={(e) => setEditHashtags(e.target.value)}
+                          placeholder="#해시태그1 #해시태그2"
+                          className="w-full"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">예약 시간</label>
+                        <Input
+                          type="datetime-local"
+                          value={editScheduledAt}
+                          onChange={(e) => setEditScheduledAt(e.target.value)}
+                          className="w-full"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="bg-gray-50 border rounded-lg p-4">
                       <div className="whitespace-pre-wrap text-gray-800 leading-relaxed">
                         {selectedPost.content || selectedPost.board_description}
                       </div>
-                    )}
-                  </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* 해시태그 */}
-                <div className="space-y-2">
-                  <h4 className="text-sm font-medium text-gray-900">해시태그</h4>
-                  {editMode ? (
-                    <Input
-                      value={editHashtags}
-                      onChange={e => setEditHashtags(e.target.value)}
-                      placeholder="#태그1 #태그2"
-                    />
-                  ) : (
+                {!isEditing && (
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-medium text-gray-900">해시태그</h4>
                     <div className="flex flex-wrap gap-2">
                       {(selectedPost.hashtags || []).map((tag, index) => (
                         <span key={index} className="text-sm text-blue-600 bg-blue-50 px-3 py-1 rounded-full">
@@ -869,26 +1097,10 @@ function PostListContent() {
                         </span>
                       ))}
                     </div>
-                  )}
-                </div>
+                  </div>
+                )}
 
-                {/* 예약 날짜 */}
-                <div className="space-y-2">
-                  <h4 className="text-sm font-medium text-gray-900">예약 날짜</h4>
-                  {editMode ? (
-                    <input
-                      type="datetime-local"
-                      value={editScheduledAt}
-                      onChange={e => setEditScheduledAt(e.target.value)}
-                      className="w-full p-2 border rounded"
-                      placeholder="예약 날짜 선택"
-                    />
-                  ) : (
-                    <div className="text-gray-800">
-                      {selectedPost.scheduledAt ? formatFullDate(selectedPost.scheduledAt) : "예약되지 않음"}
-                    </div>
-                  )}
-                </div>
+
 
                 {/* 미디어 정보 */}
                 {selectedPost.media && (
@@ -925,7 +1137,7 @@ function PostListContent() {
                   <div className="space-y-2">
                     <h4 className="text-sm font-medium text-gray-900">성과 지표</h4>
                     <div className="bg-gray-50 rounded-lg p-4">
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      <div className="grid grid-cols-2 gap-4">
                         <div className="text-center">
                           <div className="flex items-center justify-center space-x-2 mb-1">
                             <Heart className="h-5 w-5 text-red-500" />
@@ -944,99 +1156,19 @@ function PostListContent() {
                           </div>
                           <p className="text-sm text-gray-600">댓글</p>
                         </div>
-
-
-                        {/* Instagram 인사이트 추가 */}
-                        {selectedPost.platform === 'Instagram' && selectedPost.instagram_stats && (
-                          <>
-                            {selectedPost.instagram_stats.reach > 0 && (
-                              <div className="text-center">
-                                <div className="flex items-center justify-center space-x-2 mb-1">
-                                  <Users className="h-5 w-5 text-orange-500" />
-                                  <span className="text-lg font-bold text-gray-900">
-                                    {selectedPost.instagram_stats.reach.toLocaleString()}
-                                  </span>
-                                </div>
-                                <p className="text-sm text-gray-600">도달</p>
-                              </div>
-                            )}
-                            {selectedPost.instagram_stats.impressions > 0 && (
-                              <div className="text-center">
-                                <div className="flex items-center justify-center space-x-2 mb-1">
-                                  <BarChart3 className="h-5 w-5 text-teal-500" />
-                                  <span className="text-lg font-bold text-gray-900">
-                                    {selectedPost.instagram_stats.impressions.toLocaleString()}
-                                  </span>
-                                </div>
-                                <p className="text-sm text-gray-600">노출</p>
-                              </div>
-                            )}
-                            {selectedPost.instagram_stats.saved_count > 0 && (
-                              <div className="text-center">
-                                <div className="flex items-center justify-center space-x-2 mb-1">
-                                  <Bookmark className="h-5 w-5 text-yellow-500" />
-                                  <span className="text-lg font-bold text-gray-900">
-                                    {selectedPost.instagram_stats.saved_count.toLocaleString()}
-                                  </span>
-                                </div>
-                                <p className="text-sm text-gray-600">저장</p>
-                              </div>
-                            )}
-                          </>
-                        )}
                       </div>
-
-
                     </div>
                   </div>
                 )}
 
 
 
-                {/* 액션 버튼 */}
-                <div className="flex justify-end space-x-2 pt-4 border-t">
-                  {selectedPost.status !== "published" && (
-                    editMode ? (
-                      <>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={handleEditSave}
-                          disabled={isSaving}
-                        >
-                          {isSaving ? "저장 중..." : "저장"}
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={() => setEditMode(false)}>
-                          취소
-                        </Button>
-                      </>
-                    ) : (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setEditMode(true)}
-                      >
-                        <Edit className="h-4 w-4 mr-2" />
-                        수정
-                      </Button>
-                    )
-                  )}
-                  {selectedPost.status === "published" && selectedPost.instagram_link && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        // 백엔드에서 제공하는 인스타그램 링크로 이동
-                        if (selectedPost.instagram_link) {
-                          window.open(selectedPost.instagram_link, '_blank');
-                        }
-                      }}
-                      className="flex items-center space-x-2"
-                    >
-                      <ExternalLink className="h-4 w-4" />
-                      <span>게시글 링크로 이동</span>
-                    </Button>
-                  )}
+                {/* 플랫폼별 미리보기 */}
+                <div className="space-y-2">
+                  <h4 className="text-sm font-medium text-gray-900">플랫폼 미리보기</h4>
+                  <div className="bg-gray-50 border rounded-lg p-4">
+                    {renderPlatformSpecificPost(selectedPost)}
+                  </div>
                 </div>
               </div>
             )}

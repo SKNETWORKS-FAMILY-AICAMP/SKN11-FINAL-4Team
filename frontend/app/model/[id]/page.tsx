@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+
 import { tokenUtils } from "@/lib/auth"
 import { ModelService } from "@/lib/services/model.service"
 import {
@@ -44,6 +45,9 @@ import {
   Unlink,
   CheckCircle,
   Users,
+  Edit,
+  User,
+  Settings,
 } from "lucide-react"
 import type { AIModel } from "@/lib/types"
 import {
@@ -115,6 +119,12 @@ function ModelDetailContent() {
   const [isPostsLoading, setIsPostsLoading] = useState(true)
   const [selectedPost, setSelectedPost] = useState<ContentPost | null>(null)
   const [isPostDetailModalOpen, setIsPostDetailModalOpen] = useState(false)
+  const [isEditing, setIsEditing] = useState(false);
+  const [editTitle, setEditTitle] = useState("");
+  const [editContent, setEditContent] = useState("");
+  const [editHashtags, setEditHashtags] = useState("");
+  const [editScheduledAt, setEditScheduledAt] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false)
   const [isUpdating, setIsUpdating] = useState(false)
   const [isGeneratingApiKey, setIsGeneratingApiKey] = useState(false)
@@ -156,6 +166,47 @@ function ModelDetailContent() {
     totalComments: 0
   })
 
+  // 7일간 API 호출수 차트 데이터
+  const [weeklyChartData, setWeeklyChartData] = useState<Array<{
+    date: string;
+    calls: number;
+  }>>([])
+
+  // 7일간 API 호출수 데이터 로드
+  const loadWeeklyChartData = async () => {
+    try {
+      const apiUsageResponse = await apiClient.get(`/api/v1/analytics/api-calls/`) as any
+
+      // 특정 인플루언서의 API 호출 데이터 필터링
+      const influencerApiCalls = apiUsageResponse.filter((call: any) =>
+        call.influencer_id === params.id?.toString()
+      )
+
+      // 최근 7일간 데이터 생성
+      const last7Days = []
+      for (let i = 6; i >= 0; i--) {
+        const date = new Date()
+        date.setDate(date.getDate() - i)
+        const dateStr = date.toISOString().split('T')[0]
+
+        // 해당 날짜의 API 호출수 찾기
+        const dayCalls = influencerApiCalls
+          .filter((call: any) => call.created_at?.startsWith(dateStr))
+          .reduce((sum: number, call: any) => sum + (call.daily_call_count || 0), 0)
+
+        last7Days.push({
+          date: dateStr,
+          calls: dayCalls
+        })
+      }
+
+      setWeeklyChartData(last7Days)
+    } catch (error) {
+      console.error('7일간 차트 데이터 로드 실패:', error)
+      setWeeklyChartData([])
+    }
+  }
+
   // Instagram 상태 변경 시 처리
   React.useEffect(() => {
     // Instagram 상태 업데이트 처리
@@ -167,6 +218,8 @@ function ModelDetailContent() {
     try {
       // 특정 인플루언서의 게시글만 조회
       const boardData = await apiClient.get<any[]>(`/api/v1/boards?influencer_id=${params.id}`)
+
+      console.log('🔍 백엔드에서 받아온 게시글 데이터:', boardData)
 
       // 게시글 데이터 변환 (백엔드에서 제공하는 인플루언서 정보 사용)
       const transformedPosts: ContentPost[] = boardData.map((board: any) => {
@@ -194,7 +247,9 @@ function ModelDetailContent() {
           // 인플루언서 정보: 조회한 값 사용
           influencerId: board.influencer_id,
           influencerName: influencerName,
-          influencerDescription: influencerDescription
+          influencerDescription: influencerDescription,
+          // Instagram 링크 추가
+          instagram_link: board.instagram_link || undefined
         }
 
         // 인스타그램 통계 정보 추가
@@ -211,6 +266,8 @@ function ModelDetailContent() {
           }
         }
       })
+
+      console.log('✅ 변환된 게시글 데이터:', transformedPosts)
 
       setPosts(transformedPosts)
     } catch (error) {
@@ -249,9 +306,58 @@ function ModelDetailContent() {
     try {
       // 게시글 데이터가 로드된 후 분석 데이터 계산
       const publishedPosts = posts.filter((p) => p.status === "published")
+
+      // API 사용량 데이터 가져오기
+      let apiUsageData = {
+        totalApiCalls: 0,
+        todayApiCalls: 0
+      }
+
+      try {
+        // 올바른 analytics API 호출
+        const apiUsageResponse = await apiClient.get(`/api/v1/analytics/api-calls/`) as any
+
+        console.log('Analytics API 응답:', apiUsageResponse)
+
+        // 특정 인플루언서의 API 호출 데이터 필터링
+        const influencerApiCalls = apiUsageResponse.filter((call: any) =>
+          call.influencer_id === params.id?.toString()
+        )
+
+        console.log('필터링된 인플루언서 API 호출:', influencerApiCalls)
+
+        // 총 API 호출 수와 오늘 호출 수 계산
+        const totalCalls = influencerApiCalls.reduce((sum: number, call: any) =>
+          sum + (call.daily_call_count || 0), 0
+        )
+
+        // 오늘 날짜의 호출 수 계산
+        const today = new Date().toISOString().split('T')[0]
+        const todayCalls = influencerApiCalls
+          .filter((call: any) => call.created_at?.startsWith(today))
+          .reduce((sum: number, call: any) => sum + (call.daily_call_count || 0), 0)
+
+        apiUsageData = {
+          totalApiCalls: totalCalls,
+          todayApiCalls: todayCalls
+        }
+
+        console.log('Analytics 데이터 로드 성공:', {
+          totalCalls,
+          todayCalls,
+          influencerApiCalls: influencerApiCalls.length
+        })
+      } catch (error) {
+        console.log('API 사용량 데이터를 가져올 수 없습니다:', error)
+        // 오류 발생 시 기본값 사용
+        apiUsageData = {
+          totalApiCalls: 0,
+          todayApiCalls: 0
+        }
+      }
+
       setAnalyticsData({
-        totalApiCalls: 0, // API 호출 통계는 별도 엔드포인트 필요
-        todayApiCalls: 0,
+        ...apiUsageData,
         totalPosts: posts.length,
         publishedPosts: publishedPosts.length,
         totalLikes: publishedPosts.reduce((sum, p) => sum + (p.engagement?.likes || 0), 0),
@@ -274,6 +380,7 @@ function ModelDetailContent() {
   React.useEffect(() => {
     if (posts.length >= 0) { // 빈 배열도 포함하여 초기 로드 시에도 실행
       loadAnalyticsData()
+      loadWeeklyChartData() // 7일간 차트 데이터도 함께 로드
     }
   }, [posts])
 
@@ -282,10 +389,10 @@ function ModelDetailContent() {
     setIsModelLoading(true)
     try {
       console.log('🔍 모델 데이터 로드 시작 - influencer_id:', params.id)
-      
+
       const data = await ModelService.getInfluencer(params.id as string)
       console.log('✅ 모델 데이터 로드 성공:', data)
-      
+
       setModel({
         ...data,
         id: data.influencer_id,
@@ -301,7 +408,7 @@ function ModelDetailContent() {
         instagram_is_active: data.instagram_is_active,
         instagram_connected_at: data.instagram_connected_at,
       })
-      
+
       // API 키 정보 로드
       await loadApiKeyInfo()
     } catch (error) {
@@ -315,7 +422,7 @@ function ModelDetailContent() {
   // API 키 정보 로드
   const loadApiKeyInfo = async () => {
     console.log('🔍 API 키 정보 로드 시작 - influencer_id:', params.id)
-    
+
     // 현재 로그인한 사용자 정보 확인
     const token = localStorage.getItem('access_token')
     if (token) {
@@ -332,11 +439,11 @@ function ModelDetailContent() {
     } else {
       console.log('❌ 로그인 토큰이 없습니다')
     }
-    
+
     try {
       const apiKeyData = await ModelService.getApiKey(params.id as string)
       console.log('✅ API 키 조회 성공:', apiKeyData)
-      
+
       setApiKeyInfo({
         api_key: apiKeyData.api_key,
         created_at: apiKeyData.created_at,
@@ -356,14 +463,14 @@ function ModelDetailContent() {
         influencer_id: params.id,
         stack: error.stack
       })
-      
+
       // API 키가 없는 경우 (404)에만 자동 생성 시도
       if (error.status === 404 && error.data?.detail === "API key not found") {
         console.log('🔄 API 키가 없어서 자동 생성 시도...')
         try {
           const response = await ModelService.generateApiKey(params.id as string)
           console.log('✅ API 키 자동 생성 성공:', response)
-          
+
           setApiKeyInfo({
             api_key: response.api_key,
             created_at: new Date().toISOString(),
@@ -619,29 +726,97 @@ function ModelDetailContent() {
     }
   }, [isModelLoading, model, params.id])
 
-  // 예약된 게시글이 있을 때 주기적으로 상태 확인 (60초마다)
+  // 예약된 게시글이 있을 때 주기적으로 상태 확인 (30초마다)
   React.useEffect(() => {
     const hasScheduledPosts = posts.some(post => post.status === 'scheduled')
 
     if (hasScheduledPosts) {
-      const interval = setInterval(() => {
-        loadPostsData() // 예약된 게시글이 있으면 60초마다 새로고침
-      }, 60000) // 60초
+      const interval = setInterval(async () => {
+        console.log('🔄 예약된 게시글 상태 확인 중...')
+        await loadPostsData() // 예약된 게시글이 있으면 30초마다 새로고침
+
+        // 상태 변경 감지
+        const updatedPosts = await apiClient.get<any[]>(`/api/v1/boards?influencer_id=${params.id}`)
+        const transformedPosts: ContentPost[] = updatedPosts.map((board: any) => {
+          const influencerName = board.influencer_name || model?.name || 'AI 인플루언서'
+          const influencerDescription = board.influencer_description || model?.description || ''
+
+          const basePost = {
+            id: board.board_id,
+            title: board.board_topic || '제목 없음',
+            content: board.board_description || '',
+            platform: getPlatformName(board.board_platform),
+            status: getStatusName(board.board_status),
+            publishedAt: board.published_at || board.created_at || '',
+            scheduledAt: board.reservation_at || '',
+            hashtags: board.board_hash_tag ?
+              board.board_hash_tag.split(' ').filter((tag: string) => tag.trim()).map((tag: string) =>
+                tag.startsWith('#') ? tag : `#${tag}`
+              ) : [],
+            media: {
+              type: "image" as const,
+              urls: [board.image_url || "/placeholder.svg?height=400&width=400"],
+              thumbnailUrl: board.image_url || "/placeholder.svg?height=400&width=400"
+            },
+            influencerId: board.influencer_id,
+            influencerName: influencerName,
+            influencerDescription: influencerDescription,
+            instagram_link: board.instagram_link || undefined
+          }
+
+          const instagramStats = board.instagram_stats || {
+            like_count: 0,
+            comments_count: 0
+          }
+
+          return {
+            ...basePost,
+            engagement: {
+              likes: instagramStats.like_count || 0,
+              comments: instagramStats.comments_count || 0
+            }
+          }
+        })
+
+        // 상태 변경 감지 및 로그
+        const currentPostIds = new Set(posts.map(p => p.id))
+        const updatedPostIds = new Set(transformedPosts.map(p => p.id))
+
+        // 새로 발행된 게시글 감지
+        const newlyPublished = transformedPosts.filter(post =>
+          post.status === 'published' &&
+          posts.find(p => p.id === post.id)?.status === 'scheduled'
+        )
+
+        if (newlyPublished.length > 0) {
+          console.log('✅ 새로 발행된 게시글 감지:', newlyPublished.map(p => p.title))
+          setPosts(transformedPosts)
+          await loadAnalyticsData() // 분석 데이터도 갱신
+
+          // 사용자에게 알림 (선택사항)
+          if (newlyPublished.length === 1) {
+            console.log(`🎉 "${newlyPublished[0].title}" 게시글이 발행되었습니다!`)
+          } else {
+            console.log(`🎉 ${newlyPublished.length}개의 게시글이 발행되었습니다!`)
+          }
+        }
+
+      }, 30000) // 30초로 단축
 
       return () => clearInterval(interval)
     }
-  }, [posts])
+  }, [posts, params.id, model])
 
   const getStatusBadge = (status: ContentPost["status"]) => {
     switch (status) {
       case "published":
-        return <Badge className="bg-green-100 text-green-800">발행됨</Badge>
+        return <Badge className="bg-green-100 text-green-800 whitespace-nowrap">발행됨</Badge>
       case "scheduled":
-        return <Badge className="bg-blue-100 text-blue-800">예약됨</Badge>
+        return <Badge className="bg-blue-100 text-blue-800 whitespace-nowrap">예약됨</Badge>
       case "draft":
-        return <Badge className="bg-gray-100 text-gray-800">임시저장</Badge>
+        return <Badge className="bg-gray-100 text-gray-800 whitespace-nowrap">임시저장</Badge>
       default:
-        return <Badge variant="secondary">알 수 없음</Badge>
+        return <Badge variant="secondary" className="whitespace-nowrap">알 수 없음</Badge>
     }
   }
 
@@ -655,7 +830,7 @@ function ModelDetailContent() {
       Blog: "bg-orange-100 text-orange-800",
     }
 
-    return <Badge className={colors[platform] || "bg-gray-100 text-gray-800"}>{platform}</Badge>
+    return <Badge className={`${colors[platform] || "bg-gray-100 text-gray-800"} whitespace-nowrap`}>{platform}</Badge>
   }
 
   const formatDate = (dateString: string) => {
@@ -692,12 +867,108 @@ function ModelDetailContent() {
   const handleViewPostDetail = (post: ContentPost) => {
     setSelectedPost(post)
     setIsPostDetailModalOpen(true)
+    setIsEditing(false)
+    setEditTitle(post.title || "")
+    setEditContent(post.content || "")
+    setEditHashtags((post.hashtags || []).join(" "))
+    setEditScheduledAt(post.scheduledAt || "")
   }
 
   // 게시글 상세 모달 닫기
   const handleClosePostDetail = () => {
     setSelectedPost(null)
     setIsPostDetailModalOpen(false)
+  }
+
+  // 게시글 수정 저장
+  const handleEditSave = async () => {
+    if (!selectedPost || isSaving) return;
+
+    const originalTitle = selectedPost.title || "게시글"
+    const hasChanges = editTitle !== originalTitle ||
+      editContent !== (selectedPost.content || "") ||
+      editHashtags !== (selectedPost.hashtags?.join(" ") || "") ||
+      editScheduledAt !== (selectedPost.scheduledAt ? selectedPost.scheduledAt.slice(0, 16) : "")
+
+    if (!hasChanges) {
+      setIsEditing(false)
+      return
+    }
+
+    setIsSaving(true);
+    try {
+      // 백엔드 API 호출하여 게시글 수정
+      const boardId = selectedPost.id;
+      const updateData = {
+        board_topic: editTitle,
+        board_description: editContent,
+        board_hash_tag: editHashtags,
+        ...(editScheduledAt && { reservation_at: `${editScheduledAt}:00` })
+      };
+
+      await apiClient.put(`/api/v1/boards/${boardId}`, updateData);
+
+      // 성공 시 프론트엔드 상태 업데이트
+      setPosts(posts => {
+        const newPosts = posts.map(post => {
+          if (post.id !== selectedPost.id) return post;
+
+          return {
+            ...post,
+            title: editTitle,
+            content: editContent,
+            hashtags: editHashtags.split(" ").filter(tag => tag.startsWith("#")),
+            status: post.status,
+            scheduledAt: post.scheduledAt,
+          };
+        });
+        // 최신 selectedPost로 갱신
+        const updated = newPosts.find(p => p.id === selectedPost.id);
+        if (updated) setSelectedPost(updated);
+        return newPosts;
+      });
+
+      // 분석 데이터도 갱신
+      await loadAnalyticsData()
+
+      setIsEditing(false);
+      setIsPostDetailModalOpen(false);
+
+      console.log('게시글 수정 완료:', editTitle)
+
+    } catch (error) {
+      console.error('게시글 수정 실패:', error);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // 게시글 삭제
+  const handleDeletePost = async (postId: string | undefined) => {
+    if (!postId) return
+
+    const postToDelete = posts.find((post) => post.id === postId)
+    const postTitle = postToDelete?.title || "게시글"
+
+    try {
+      await apiClient.delete(`/api/v1/boards/${postId}`)
+
+      // 로컬 상태에서 게시글 제거
+      setPosts((prev) => prev.filter((post) => post.id !== postId))
+
+      // 모달 닫기
+      setIsPostDetailModalOpen(false)
+      setSelectedPost(null)
+
+      // 분석 데이터 다시 로드 (게시글 수 변경 반영)
+      await loadAnalyticsData()
+
+      console.log(`게시글 "${postTitle}" 삭제 완료`)
+
+    } catch (error) {
+      console.error('게시글 삭제 실패:', error);
+      alert('게시글 삭제에 실패했습니다. 다시 시도해주세요.');
+    }
   }
 
   // 플랫폼별 게시글 렌더링
@@ -1139,6 +1410,23 @@ function ModelDetailContent() {
 
           {/* 분석 탭 */}
           <TabsContent value="analytics">
+            <div className="flex justify-between items-center mb-6">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">인플루언서 분석</h3>
+                <p className="text-sm text-gray-600">{model?.name}의 성과와 통계를 확인하세요</p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={loadAnalyticsData}
+                disabled={isPostsLoading}
+                className="flex items-center space-x-2"
+              >
+                <RefreshCw className={`h-4 w-4 ${isPostsLoading ? 'animate-spin' : ''}`} />
+                <span>새로고침</span>
+              </Button>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
               <Card>
                 <CardContent className="p-6">
@@ -1188,8 +1476,37 @@ function ModelDetailContent() {
                 <CardDescription>최근 7일간의 API 사용량 추이입니다</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="h-64 flex items-center justify-center bg-gray-50 rounded-lg">
-                  <p className="text-gray-500">차트 영역 (실제 구현시 차트 라이브러리 사용)</p>
+                <div className="h-64">
+                  {weeklyChartData.length > 0 ? (
+                    <div className="h-full flex items-end justify-between space-x-2">
+                      {weeklyChartData.map((data, index) => (
+                        <div key={data.date} className="flex-1 flex flex-col items-center">
+                          <div
+                            className="w-full bg-blue-500 rounded-t"
+                            style={{
+                              height: `${Math.max((data.calls / Math.max(...weeklyChartData.map(d => d.calls))) * 200, 4)}px`
+                            }}
+                          />
+                          <div className="text-xs text-gray-500 mt-2 text-center">
+                            {new Date(data.date).toLocaleDateString('ko-KR', {
+                              month: 'short',
+                              day: 'numeric'
+                            })}
+                          </div>
+                          <div className="text-xs font-medium text-gray-700 mt-1">
+                            {data.calls}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="h-full flex items-center justify-center">
+                      <div className="text-center">
+                        <BarChart3 className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                        <p className="text-gray-500 mb-2">차트 데이터 로딩 중...</p>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -1231,10 +1548,9 @@ function ModelDetailContent() {
                     </div>
                   ))}
                 </div>
-
-
               </CardContent>
             </Card>
+
           </TabsContent>
 
           {/* 콘텐츠 탭 */}
@@ -1245,6 +1561,16 @@ function ModelDetailContent() {
                   <h3 className="text-lg font-semibold text-gray-900">최근 게시된 콘텐츠</h3>
                   <p className="text-sm text-gray-600">이 AI 모델이 생성한 게시글 목록입니다</p>
                 </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={loadPostsData}
+                  disabled={isPostsLoading}
+                  className="flex items-center space-x-2"
+                >
+                  <RefreshCw className={`h-4 w-4 ${isPostsLoading ? 'animate-spin' : ''}`} />
+                  <span>새로고침</span>
+                </Button>
               </div>
 
               {isPostsLoading ? (
@@ -1254,7 +1580,7 @@ function ModelDetailContent() {
                 </div>
               ) : (
                 <>
-                  <div className="grid gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     {posts.map((post) => (
                       <PostCard
                         key={post.id}
@@ -1694,18 +2020,65 @@ function ModelDetailContent() {
                 <Eye className="h-5 w-5" />
                 <span>게시글 상세 보기</span>
               </DialogTitle>
+              <div className="flex items-center space-x-2">
+                {(selectedPost?.status === 'draft' || selectedPost?.status === 'scheduled') && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setIsEditing(!isEditing)}
+                    className="flex items-center space-x-1"
+                  >
+                    {isEditing ? (
+                      <>
+                        <Eye className="h-4 w-4" />
+                        <span>보기 모드</span>
+                      </>
+                    ) : (
+                      <>
+                        <Edit className="h-4 w-4" />
+                        <span>수정 모드</span>
+                      </>
+                    )}
+                  </Button>
+                )}
+                {isEditing && (
+                  <Button
+                    onClick={handleEditSave}
+                    size="sm"
+                    className="bg-blue-600 hover:bg-blue-700 text-white"
+                  >
+                    저장
+                  </Button>
+                )}
+                {selectedPost?.instagram_link && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => window.open(selectedPost.instagram_link, '_blank')}
+                    className="flex items-center space-x-1"
+                  >
+                    <ExternalLink className="h-4 w-4" />
+                    <span>인스타그램 보기</span>
+                  </Button>
+                )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleDeletePost(selectedPost?.id)}
+                  className="flex items-center space-x-1 text-red-600 hover:text-red-700 hover:bg-red-50"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  <span>삭제</span>
+                </Button>
+              </div>
             </DialogHeader>
 
             {selectedPost && (
               <div className="space-y-6">
                 {/* 게시글 기본 정보 */}
-                <div className="flex items-center space-x-3 pb-4 border-b">
+                <div className="flex justify-between items-start pb-4 border-b">
                   <div className="flex-1">
-                    <div className="flex items-center space-x-2">
-                      <h3 className="font-semibold text-gray-900">{selectedPost.title}</h3>
-                      {getStatusBadge(selectedPost.status)}
-                      {getPlatformBadge(selectedPost.platform)}
-                    </div>
+                    <h3 className="font-semibold text-gray-900 mb-2">{selectedPost.title}</h3>
                     {/* 인플루언서 정보 */}
                     <div className="flex items-center space-x-2 text-sm text-gray-500 mt-1">
                       <div className="w-5 h-5 bg-gradient-to-br from-purple-500 to-pink-500 rounded-full flex items-center justify-center">
@@ -1723,7 +2096,7 @@ function ModelDetailContent() {
                     <div className="flex items-center space-x-2 text-sm text-gray-500 mt-1">
                       <Calendar className="h-4 w-4" />
                       {selectedPost.status === 'scheduled' && selectedPost.scheduledAt && selectedPost.scheduledAt.trim() !== '' ? (
-                        <span>예약: {formatDate(selectedPost.scheduledAt || '')}</span>
+                        <span>예약 발행: {formatDate(selectedPost.scheduledAt || '')}</span>
                       ) : selectedPost.status === 'published' && selectedPost.publishedAt && selectedPost.publishedAt.trim() !== '' ? (
                         <span>발행: {formatDate(selectedPost.publishedAt || '')}</span>
                       ) : selectedPost.status === 'published' ? (
@@ -1735,29 +2108,78 @@ function ModelDetailContent() {
                       )}
                     </div>
                   </div>
+
+                  {/* 오른쪽 상단에 배지들 배치 */}
+                  <div className="flex flex-col items-end space-y-2 ml-4">
+                    {getPlatformBadge(selectedPost.platform)}
+                    {getStatusBadge(selectedPost.status)}
+                  </div>
                 </div>
 
                 {/* 게시글 내용 */}
                 <div className="space-y-2">
                   <h4 className="text-sm font-medium text-gray-900">게시글 내용</h4>
-                  <div className="bg-gray-50 border rounded-lg p-4">
-                    <div className="whitespace-pre-wrap text-gray-800 leading-relaxed">
-                      {selectedPost.content}
+                  {isEditing && (selectedPost?.status === 'draft' || selectedPost?.status === 'scheduled') ? (
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">제목</label>
+                        <Input
+                          value={editTitle}
+                          onChange={(e) => setEditTitle(e.target.value)}
+                          placeholder="게시글 제목을 입력하세요"
+                          className="w-full"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">내용</label>
+                        <textarea
+                          value={editContent}
+                          onChange={(e) => setEditContent(e.target.value)}
+                          placeholder="게시글 내용을 입력하세요"
+                          className="w-full h-32 p-3 border border-gray-300 rounded-md resize-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">해시태그</label>
+                        <Input
+                          value={editHashtags}
+                          onChange={(e) => setEditHashtags(e.target.value)}
+                          placeholder="#해시태그1 #해시태그2"
+                          className="w-full"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">예약 시간</label>
+                        <Input
+                          type="datetime-local"
+                          value={editScheduledAt}
+                          onChange={(e) => setEditScheduledAt(e.target.value)}
+                          className="w-full"
+                        />
+                      </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="bg-gray-50 border rounded-lg p-4">
+                      <div className="whitespace-pre-wrap text-gray-800 leading-relaxed">
+                        {selectedPost.content}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* 해시태그 */}
-                <div className="space-y-2">
-                  <h4 className="text-sm font-medium text-gray-900">해시태그</h4>
-                  <div className="flex flex-wrap gap-2">
-                    {selectedPost.hashtags?.map((tag, index) => (
-                      <span key={index} className="text-sm text-blue-600 bg-blue-50 px-3 py-1 rounded-full">
-                        {tag}
-                      </span>
-                    ))}
+                {!isEditing && (
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-medium text-gray-900">해시태그</h4>
+                    <div className="flex flex-wrap gap-2">
+                      {selectedPost.hashtags?.map((tag, index) => (
+                        <span key={index} className="text-sm text-blue-600 bg-blue-50 px-3 py-1 rounded-full">
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
                   </div>
-                </div>
+                )}
 
                 {/* 미디어 정보 */}
                 {selectedPost.media && (

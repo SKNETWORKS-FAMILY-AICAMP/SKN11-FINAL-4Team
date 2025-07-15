@@ -93,13 +93,13 @@ export function PostCard({
   const getStatusBadge = (status: Post["status"]) => {
     switch (status) {
       case "published":
-        return <Badge className="bg-green-100 text-green-800">발행됨</Badge>
+        return <Badge className="bg-green-100 text-green-800 whitespace-nowrap">발행됨</Badge>
       case "scheduled":
-        return <Badge className="bg-blue-100 text-blue-800">예약됨</Badge>
+        return <Badge className="bg-blue-100 text-blue-800 whitespace-nowrap">예약됨</Badge>
       case "draft":
-        return <Badge className="bg-gray-100 text-gray-800">임시저장</Badge>
+        return <Badge className="bg-gray-100 text-gray-800 whitespace-nowrap">임시저장</Badge>
       default:
-        return <Badge className="bg-gray-100 text-gray-800">임시저장</Badge>
+        return <Badge className="bg-gray-100 text-gray-800 whitespace-nowrap">임시저장</Badge>
     }
   }
 
@@ -115,7 +115,7 @@ export function PostCard({
 
     const colorClass = platformColors[platform as keyof typeof platformColors] || 'bg-gray-100 text-gray-800'
 
-    return <Badge className={colorClass}>{platform}</Badge>
+    return <Badge className={`${colorClass} whitespace-nowrap`}>{platform}</Badge>
   }
 
   // 날짜 포맷팅
@@ -133,13 +133,21 @@ export function PostCard({
 
     const allHashtags = hashtags.length > 0 ? hashtags : boardHashtags
 
+    // content variant일 때는 최대 3개만 표시
+    const displayHashtags = variant === "content" ? allHashtags.slice(0, 3) : allHashtags
+
     return (
       <div className="flex flex-wrap gap-1 mb-3">
-        {allHashtags.map((tag, index) => (
+        {displayHashtags.map((tag, index) => (
           <span key={index} className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded">
             {tag}
           </span>
         ))}
+        {variant === "content" && allHashtags.length > 3 && (
+          <span className="text-xs text-gray-500 px-2 py-1">
+            +{allHashtags.length - 3}개 더
+          </span>
+        )}
       </div>
     )
   }
@@ -254,16 +262,13 @@ export function PostCard({
         }`}
       onClick={() => onView?.(post)}
     >
-      <CardContent className="p-6">
-        <div className="flex justify-between items-start mb-4">
+      <CardContent className="p-6 flex flex-col h-full">
+        {/* 상태와 플랫폼 배지를 오른쪽 상단에 고정 */}
+        <div className="flex justify-between items-start mb-4 flex-1">
           <div className="flex-1">
-            <div className="flex items-center space-x-3 mb-2">
-              <h4 className="text-lg font-semibold text-gray-900">
-                {post.title || post.board_topic}
-              </h4>
-              {getStatusBadge(post.status)}
-              {getPlatformBadge(post.platform || "")}
-            </div>
+            <h4 className="text-lg font-semibold text-gray-900 mb-2">
+              {post.title || post.board_topic}
+            </h4>
 
             {renderInfluencerInfo()}
 
@@ -275,35 +280,65 @@ export function PostCard({
 
             {renderHashtags()}
           </div>
+
+          {/* 오른쪽 상단에 배지들 배치 */}
+          <div className="flex flex-col items-end space-y-2 ml-4">
+            {getPlatformBadge(post.platform || "")}
+            {getStatusBadge(post.status)}
+          </div>
         </div>
 
-        <div className="flex justify-between items-center">
-          <div className="flex items-center space-x-4 text-sm text-gray-500">
-            <div className="flex items-center space-x-1">
-              <User className="h-4 w-4" />
-              <span>{post.influencerName || post.author || 'AI 인플루언서'}</span>
+        {/* 하단 정보 - 항상 하단에 고정 */}
+        <div className="mt-auto pt-4 border-t">
+          {variant === "content" ? (
+            <div className="flex items-center justify-between text-sm text-gray-500">
+              <div className="flex items-center space-x-1">
+                <User className="h-4 w-4" />
+                <span>{post.influencerName || post.author || 'AI 인플루언서'}</span>
+              </div>
+              <div className="flex items-center space-x-1">
+                <Calendar className="h-4 w-4" />
+                {post.status === 'scheduled' && post.scheduledAt ? (
+                  <span>예약 발행: {formatDate(post.scheduledAt)}</span>
+                ) : post.status === 'published' && post.publishedAt ? (
+                  <span>발행: {formatDate(post.publishedAt)}</span>
+                ) : (
+                  <span>생성: {formatDate(post.createdAt || post.created_at || "")}</span>
+                )}
+              </div>
             </div>
-          </div>
-          <div className="flex items-center space-x-1 text-sm text-gray-500">
-            <Calendar className="h-4 w-4" />
-            {post.status === 'scheduled' && post.scheduledAt ? (
-              <span>예약: {formatDate(post.scheduledAt)}</span>
-            ) : post.status === 'published' && post.publishedAt ? (
-              <span>발행: {formatDate(post.publishedAt)}</span>
-            ) : (
-              <span>생성: {formatDate(post.createdAt || post.created_at || "")}</span>
-            )}
-          </div>
-        </div>
+          ) : (
+            <div className="flex justify-between items-center">
+              <div className="flex items-center space-x-4 text-sm text-gray-500">
+                <div className="flex items-center space-x-1">
+                  <User className="h-4 w-4" />
+                  <span>{post.influencerName || post.author || 'AI 인플루언서'}</span>
+                </div>
+              </div>
+              <div className="flex items-center space-x-1 text-sm text-gray-500">
+                <Calendar className="h-4 w-4" />
+                {post.status === 'scheduled' && post.scheduledAt ? (
+                  <span>예약 발행: {formatDate(post.scheduledAt)}</span>
+                ) : post.status === 'published' && post.publishedAt ? (
+                  <span>발행: {formatDate(post.publishedAt)}</span>
+                ) : (
+                  <span>생성: {formatDate(post.createdAt || post.created_at || "")}</span>
+                )}
+              </div>
+            </div>
+          )}
 
-        {/* 성과지표와 액션 버튼들 */}
-        <div className="flex items-center justify-between pt-3 border-t mt-3">
-          <div className="flex-1">
-            {renderEngagement()}
-          </div>
-          <div className="flex items-center">
-            {renderActions()}
-          </div>
+          {/* 성과지표와 액션 버튼들 - content variant가 아닐 때만 표시 */}
+          {variant !== "content" && (
+            <div className="flex items-center justify-between pt-3 mt-3">
+              <div className="flex-1">
+                {renderEngagement()}
+              </div>
+              <div className="flex items-center">
+                {renderActions()}
+              </div>
+            </div>
+          )}
         </div>
       </CardContent>
     </Card>

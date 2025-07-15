@@ -87,6 +87,12 @@ export default function CreatePostPage() {
   const [converted, setConverted] = useState<string | null>(null)
   const [isConverting, setIsConverting] = useState(false)
   const [showFullPreview, setShowFullPreview] = useState(false)
+  const [imageInfo, setImageInfo] = useState<{
+    originalSize: { width: number; height: number } | null;
+    resizedSize: { width: number; height: number } | null;
+    isResized: boolean;
+  } | null>(null)
+
 
   // 발행 설정 상태
   const [publishType, setPublishType] = useState<'immediate' | 'scheduled'>('immediate')
@@ -122,11 +128,20 @@ export default function CreatePostPage() {
   }, [])
 
   // 폼 데이터 업데이트
-  const handleInputChange = (field: keyof CreatePostFormData, value: string | number | boolean | string[] | File | null) => {
+  const handleInputChange = async (field: keyof CreatePostFormData, value: string | number | boolean | string[] | File | null) => {
     setFormData(prev => ({
       ...prev,
       [field]: value
     }))
+
+    // 플랫폼이 Instagram으로 변경되고 이미지가 있는 경우 이미지 재처리
+    if (field === 'board_platform' && value === 0 && formData.uploaded_image) {
+      try {
+        await processImageFile(formData.uploaded_image)
+      } catch (error) {
+        console.error('Image reprocessing error:', error)
+      }
+    }
   }
 
   // 해시태그 추가
@@ -159,6 +174,8 @@ export default function CreatePostPage() {
     }
   }
 
+
+
   // 모든 필드 입력 여부 검증 (미리보기 버튼용)
   const isFormValid = () => {
     const hasImage = formData.uploaded_image !== null || imagePreview !== null
@@ -178,8 +195,83 @@ export default function CreatePostPage() {
     return basicFieldsValid
   }
 
+
+
+  // Instagram 비율에 맞게 이미지 패딩 처리 (픽셀 크기 조정 없음)
+  const padImageForInstagram = (file: File): Promise<{ file: File; originalSize: { width: number; height: number }; paddedSize: { width: number; height: number } }> => {
+    return new Promise((resolve, reject) => {
+      const canvas = document.createElement('canvas')
+      const ctx = canvas.getContext('2d')
+      const img = new Image()
+
+      img.onload = () => {
+        const { width, height } = img
+        const originalSize = { width, height }
+        const aspectRatio = width / height
+
+        // Instagram 요구사항에 맞는 비율 계산 (픽셀 크기는 조정하지 않음)
+        // 정사각형: 1:1 비율
+        // 세로형: 4:5 비율
+        // 가로형: 1.91:1 비율
+
+        let targetWidth = width
+        let targetHeight = height
+
+        if (aspectRatio > 1.91) {
+          // 가로형이 너무 긴 경우 - 높이를 늘려서 1.91:1 비율 맞춤
+          targetWidth = width
+          targetHeight = Math.round(width / 1.91)
+        } else if (aspectRatio < 0.8) {
+          // 세로형이 너무 긴 경우 - 너비를 늘려서 4:5 비율 맞춤
+          targetWidth = Math.round(height * 0.8)
+          targetHeight = height
+        } else if (aspectRatio > 1.2) {
+          // 가로형 - 높이를 늘려서 1.91:1 비율 맞춤
+          targetWidth = width
+          targetHeight = Math.round(width / 1.91)
+        } else if (aspectRatio < 0.8) {
+          // 세로형 - 너비를 늘려서 4:5 비율 맞춤
+          targetWidth = Math.round(height * 0.8)
+          targetHeight = height
+        }
+        // 정사각형은 그대로 사용
+
+        const paddedSize = { width: targetWidth, height: targetHeight }
+
+        canvas.width = targetWidth
+        canvas.height = targetHeight
+
+        // 배경을 검은색으로 설정
+        ctx!.fillStyle = '#000000'
+        ctx!.fillRect(0, 0, targetWidth, targetHeight)
+
+        // 이미지를 중앙에 배치하고 패딩 처리
+        const offsetX = (targetWidth - width) / 2
+        const offsetY = (targetHeight - height) / 2
+
+        ctx?.drawImage(img, offsetX, offsetY, width, height)
+
+        // Canvas를 Blob으로 변환
+        canvas.toBlob((blob) => {
+          if (blob) {
+            const paddedFile = new File([blob], file.name, {
+              type: file.type,
+              lastModified: Date.now()
+            })
+            resolve({ file: paddedFile, originalSize, paddedSize })
+          } else {
+            reject(new Error('이미지 패딩 처리에 실패했습니다.'))
+          }
+        }, file.type, 0.9) // 품질 90%
+      }
+
+      img.onerror = () => reject(new Error('이미지 로드에 실패했습니다.'))
+      img.src = URL.createObjectURL(file)
+    })
+  }
+
   // 이미지 파일 처리 공통 함수
-  const processImageFile = (file: File) => {
+  const processImageFile = async (file: File) => {
     // 이미지 파일 검증
     if (!file.type.startsWith('image/')) {
       setError('이미지 파일만 업로드할 수 있습니다.')
@@ -193,21 +285,56 @@ export default function CreatePostPage() {
     }
 
     setError(null) // 에러 초기화
-    handleInputChange('uploaded_image', file)
 
-    // 이미지 미리보기 생성
-    const reader = new FileReader()
-    reader.onload = (e) => {
-      setImagePreview(e.target?.result as string)
+    try {
+      let processedFile = file
+      let originalSize = null
+      let resizedSize = null
+      let isResized = false
+
+      // Instagram 플랫폼인 경우 비율에 맞게 패딩 처리
+      if (formData.board_platform === 0) { // Instagram
+        const result = await padImageForInstagram(file)
+        processedFile = result.file
+        originalSize = result.originalSize
+        resizedSize = result.paddedSize
+        isResized = true
+      } else {
+        // 다른 플랫폼은 원본 그대로 사용
+        const img = new Image()
+        img.onload = () => {
+          const originalSize = { width: img.width, height: img.height }
+          setImageInfo({ originalSize, resizedSize: null, isResized: false })
+        }
+        img.src = URL.createObjectURL(file)
+      }
+
+      handleInputChange('uploaded_image', processedFile)
+
+      // 이미지 미리보기 생성 (패딩 처리된 이미지 사용)
+      const reader = new FileReader()
+      reader.onload = (e) => {
+        setImagePreview(e.target?.result as string)
+      }
+      reader.readAsDataURL(processedFile)
+
+      // 이미지 정보 저장
+      if (isResized) {
+        setImageInfo({ originalSize, resizedSize, isResized })
+      } else {
+        setImageInfo({ originalSize, resizedSize: null, isResized: false })
+      }
+    } catch (error) {
+      setError('이미지 처리 중 오류가 발생했습니다.')
+      console.error('Image processing error:', error)
     }
-    reader.readAsDataURL(file)
   }
 
   // 이미지 업로드 처리
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (file) {
-      processImageFile(file)
+      await processImageFile(file)
     }
   }
 
@@ -222,13 +349,13 @@ export default function CreatePostPage() {
     setIsDragOver(false)
   }
 
-  const handleDrop = (e: React.DragEvent) => {
+  const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault()
     setIsDragOver(false)
 
     const files = e.dataTransfer.files
     if (files && files[0]) {
-      processImageFile(files[0])
+      await processImageFile(files[0])
     }
   }
 
@@ -236,6 +363,7 @@ export default function CreatePostPage() {
   const removeImage = () => {
     handleInputChange('uploaded_image', null)
     setImagePreview(null)
+    setImageInfo(null)
   }
 
   // S3 연결 상태 확인
@@ -302,19 +430,12 @@ export default function CreatePostPage() {
       return;
     }
 
-    const modelRepo = selectedInfluencer.influencer_model_repo;
-
     try {
-      const response = await apiClient.post('/api/v1/model-test/multi-chat', {
-        influencers: [
-          {
-            influencer_id: selectedInfluencer.influencer_id,
-            influencer_model_repo: modelRepo,
-          },
-        ],
-        message: generated.content,
+      const response = await apiClient.post('/api/v1/boards/influencer-style/convert', {
+        influencer_id: selectedInfluencer.influencer_id,
+        text: generated.content,
       });
-      setConverted((response as any).results?.[0]?.response || "");
+      setConverted((response as any).converted_text || "");
     } catch (err) {
       setError("인플루언서 말투 변환에 실패했습니다.");
     } finally {
@@ -755,6 +876,8 @@ export default function CreatePostPage() {
                 <CardDescription>이미지를 업로드하거나 AI로 생성하세요</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
+
+
                 {/* 이미지 업로드 영역 */}
                 <div>
                   <Label htmlFor="image_upload">이미지 파일 업로드</Label>
@@ -774,13 +897,54 @@ export default function CreatePostPage() {
                           제거
                         </Button>
                       </div>
-                      <div className="flex justify-center">
+                      <div className="flex justify-center relative">
                         <img
                           src={imagePreview}
                           alt="Uploaded"
-                          className="max-w-full max-h-64 object-contain rounded-lg border"
+                          className="max-w-full max-h-64 object-cover rounded-lg border"
                         />
+
+
                       </div>
+
+                      {/* 이미지 정보 표시 */}
+                      {imageInfo && (
+                        <div className="mt-3 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                          <div className="text-sm text-blue-900">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="font-medium">📏 이미지 정보:</span>
+                              {imageInfo.isResized && (
+                                <Badge variant="secondary" className="text-xs">
+                                  Instagram 최적화됨
+                                </Badge>
+                              )}
+                            </div>
+                            <div className="grid grid-cols-2 gap-4 text-xs">
+                              <div>
+                                <span className="font-medium">원본 크기:</span>
+                                <span className="ml-1 text-blue-700">
+                                  {imageInfo.originalSize?.width} × {imageInfo.originalSize?.height}px
+                                </span>
+                              </div>
+                              {imageInfo.isResized && imageInfo.resizedSize && (
+                                <div>
+                                  <span className="font-medium">최적화 크기:</span>
+                                  <span className="ml-1 text-blue-700">
+                                    {imageInfo.resizedSize.width} × {imageInfo.resizedSize.height}px
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                            {imageInfo.isResized && (
+                              <div className="mt-2 text-xs text-blue-600">
+                                💡 Instagram 요구사항에 맞게 자동으로 비율이 조정되었습니다.
+                                <br />
+                                🎯 중앙 기준 패딩 처리 (픽셀 크기 유지)
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ) : (
                     /* 업로드 영역 */
@@ -1056,9 +1220,28 @@ export default function CreatePostPage() {
                       <img
                         src={imagePreview}
                         alt="Preview"
-                        className="max-w-full max-h-64 object-contain rounded-lg border"
+                        className="max-w-full max-h-64 object-cover rounded-lg border"
                       />
                     </div>
+                    {/* 이미지 정보 표시 */}
+                    {imageInfo && (
+                      <div className="mt-2 text-xs text-gray-600 text-center">
+                        {imageInfo.isResized ? (
+                          <div className="space-y-1">
+                            <div>
+                              <span>원본: {imageInfo.originalSize?.width}×{imageInfo.originalSize?.height}</span>
+                              <span className="mx-2">→</span>
+                              <span className="text-blue-600 font-medium">패딩 처리: {imageInfo.resizedSize?.width}×{imageInfo.resizedSize?.height}</span>
+                            </div>
+                            <div className="text-blue-600">
+                              💡 Instagram 비율에 맞게 자동 패딩 처리됨
+                            </div>
+                          </div>
+                        ) : (
+                          <span>크기: {imageInfo.originalSize?.width}×{imageInfo.originalSize?.height}</span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
 

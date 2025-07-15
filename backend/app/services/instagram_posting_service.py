@@ -21,13 +21,8 @@ class InstagramPostingService:
         self.backend_url = settings.BACKEND_URL
 
     def _validate_image_url(self, image_url: str) -> bool:
-        """이미지 URL이 인스타그램 API 요구사항을 만족하는지 확인"""
+        """이미지 URL 기본 검증"""
         try:
-            # S3 URL 체크
-            if "s3.amazonaws.com" in image_url:
-                # S3 URL은 기본적으로 유효하다고 가정 (S3 서비스에서 이미 검증됨)
-                return True
-
             # 이미지 파일 확장자 확인
             if not any(
                 image_url.lower().endswith(ext)
@@ -36,27 +31,15 @@ class InstagramPostingService:
                 logger.warning(f"Unsupported image format: {image_url}")
                 return False
 
-            # Content-Type 확인
-            response = requests.head(image_url, timeout=10)
-            content_type = response.headers.get("content-type", "").lower()
-
-            if not content_type.startswith("image/"):
-                logger.warning(f"Invalid content-type: {content_type}")
-                return False
-
-            # 파일 크기 확인 (10MB 제한)
-            content_length = response.headers.get("content-length")
-            if content_length and int(content_length) > 10 * 1024 * 1024:
-                logger.warning(f"Image too large: {content_length} bytes")
-                return False
-
             return True
         except Exception as e:
             logger.error(f"Image validation failed: {e}")
             return False
 
     def _convert_to_public_url(self, image_url: str) -> Optional[str]:
-        """이미지 URL을 공개 URL로 변환 (S3 전용)"""
+        """이미지 URL을 공개 URL로 변환"""
+        logger.info(f"이미지 URL 변환 시작: {image_url}")
+
         if image_url.startswith("/uploads/"):
             # 로컬 uploads 경로는 더 이상 사용하지 않음
             logger.warning(
@@ -65,6 +48,7 @@ class InstagramPostingService:
             return None
         elif image_url.startswith("http"):
             # 이미 공개 URL인 경우 그대로 반환
+            logger.info(f"이미 공개 URL입니다: {image_url}")
             return image_url
         else:
             # S3 키인 경우 Presigned URL 생성
@@ -72,14 +56,22 @@ class InstagramPostingService:
                 from app.services.s3_image_service import get_s3_image_service
 
                 s3_service = get_s3_image_service()
+
+                # S3 서비스 사용 가능 여부 확인
+                if not s3_service.is_available():
+                    logger.error("S3 서비스가 사용 불가능합니다")
+                    return None
+
+                logger.info(f"S3 키를 Presigned URL로 변환 시도: {image_url}")
                 presigned_url = s3_service.generate_presigned_url(image_url)
-                if presigned_url:
+
+                if presigned_url and presigned_url.strip():
                     logger.info(
-                        f"S3 키를 Presigned URL로 변환: {image_url} -> {presigned_url}"
+                        f"S3 키를 Presigned URL로 변환 성공: {image_url} -> {presigned_url}"
                     )
                     return presigned_url
                 else:
-                    logger.error(f"Presigned URL 생성 실패: {image_url}")
+                    logger.error(f"Presigned URL 생성 실패 (빈 URL): {image_url}")
                     return None
             except Exception as e:
                 logger.error(f"S3 Presigned URL 생성 중 오류: {e}")
@@ -109,9 +101,10 @@ class InstagramPostingService:
 
                 # 변환 실패 체크
                 if not public_image_url:
+                    logger.error(f"이미지 URL 변환 실패: {image_url}")
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="이미지 URL을 공개 URL로 변환할 수 없습니다. S3 설정을 확인하세요.",
+                        detail=f"이미지 URL을 공개 URL로 변환할 수 없습니다. S3 설정을 확인하세요. 원본 URL: {image_url}",
                     )
 
                 # 로컬 URL인 경우 인스타그램 업로드 불가능
@@ -198,9 +191,23 @@ class InstagramPostingService:
                         logger.error(
                             f"Image upload failed: {response.status_code} - {response.text}"
                         )
+
+                        # Instagram API 오류 메시지 파싱
+                        error_message = "이미지 업로드에 실패했습니다"
+                        try:
+                            error_data = response.json()
+                            if "error" in error_data:
+                                error_detail = error_data["error"]
+                                if "error_user_msg" in error_detail:
+                                    error_message = error_detail["error_user_msg"]
+                                elif "message" in error_detail:
+                                    error_message = error_detail["message"]
+                        except:
+                            pass
+
                         raise HTTPException(
                             status_code=status.HTTP_400_BAD_REQUEST,
-                            detail=f"이미지 업로드에 실패했습니다: {response.text}",
+                            detail=f"{error_message}: {response.text}",
                         )
 
                     try:
@@ -365,6 +372,14 @@ class InstagramPostingService:
         try:
             logger.info(f"Starting Instagram post upload for account: {instagram_id}")
 
+            # Instagram 계정 상태 확인
+            logger.info("=== Instagram 계정 상태 확인 ===")
+            account_status = await self.verify_instagram_permissions(
+                access_token, instagram_id
+            )
+            if not account_status:
+                logger.warning("Instagram 계정 상태 확인 실패, 하지만 계속 진행합니다.")
+
             # 캡션 디버깅 로그 추가
             logger.info(f"=== Instagram Post Debug ===")
             logger.info(f"Caption parameter: {caption}")
@@ -460,7 +475,7 @@ class InstagramPostingService:
                     f"{self.base_url}/{instagram_id}",
                     params={
                         "access_token": access_token,
-                        "fields": "id,username,account_type,media_count",
+                        "fields": "id,username,account_type,media_count,account_status",
                     },
                 )
 
@@ -469,6 +484,9 @@ class InstagramPostingService:
                     logger.info(
                         f"Instagram permissions verified: {data.get('username')}"
                     )
+                    logger.info(f"Account type: {data.get('account_type')}")
+                    logger.info(f"Account status: {data.get('account_status')}")
+                    logger.info(f"Media count: {data.get('media_count')}")
 
                     # 2. 권한 확인 - 캡션 권한 체크
                     permissions_response = await client.get(
