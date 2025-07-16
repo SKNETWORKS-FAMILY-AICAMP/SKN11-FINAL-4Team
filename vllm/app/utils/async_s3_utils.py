@@ -5,6 +5,9 @@ from pathlib import Path
 import aioboto3
 from botocore.exceptions import ClientError, NoCredentialsError
 import aiofiles
+from dotenv import load_dotenv
+
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +21,7 @@ class AsyncS3Manager:
         aws_access_key_id: Optional[str] = None,
         aws_secret_access_key: Optional[str] = None
     ):
-        self.bucket_name = bucket_name or os.getenv("AWS_S3_BUCKET_NAME")
+        self.bucket_name = bucket_name or os.getenv("S3_BUCKET_NAME")
         self.region_name = region_name or os.getenv("AWS_REGION", "ap-northeast-2")
         self.aws_access_key_id = aws_access_key_id or os.getenv("AWS_ACCESS_KEY_ID")
         self.aws_secret_access_key = aws_secret_access_key or os.getenv("AWS_SECRET_ACCESS_KEY")
@@ -69,6 +72,9 @@ class AsyncS3Manager:
         Returns:
             업로드 결과 정보
         """
+        # 버킷 이름 검증
+        if not self.bucket_name:
+            raise ValueError("S3 bucket name is not configured. Please set AWS_S3_BUCKET_NAME environment variable or configure S3.")
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"파일을 찾을 수 없습니다: {file_path}")
         
@@ -94,9 +100,10 @@ class AsyncS3Manager:
             elif file_path.endswith('.mp3'):
                 extra_args['ContentType'] = 'audio/mpeg'
             
-            # Public read 권한 설정
-            if public_read:
-                extra_args['ACL'] = 'public-read'
+            # Public read 권한 설정 (ACL을 지원하는 버킷만)
+            # 최신 S3 버킷은 ACL을 지원하지 않을 수 있음
+            # if public_read:
+            #     extra_args['ACL'] = 'public-read'
             
             # 비동기 파일 업로드
             async with self.session.client('s3') as s3_client:
@@ -111,11 +118,11 @@ class AsyncS3Manager:
                     **extra_args
                 )
                 
-                # URL 생성
-                if public_read:
-                    url = f"https://{self.bucket_name}.s3.{self.region_name}.amazonaws.com/{object_name}"
-                else:
-                    url = await self.generate_presigned_url(object_name)
+                # URL 생성 - ACL 없이는 항상 presigned URL 사용
+                # if public_read:
+                #     url = f"https://{self.bucket_name}.s3.{self.region_name}.amazonaws.com/{object_name}"
+                # else:
+                url = await self.generate_presigned_url(object_name)
             
             logger.info(f"✅ S3 업로드 성공: {object_name}")
             
@@ -143,6 +150,9 @@ class AsyncS3Manager:
         """
         바이트 데이터를 S3에 비동기로 업로드
         """
+        # 버킷 이름 검증
+        if not self.bucket_name:
+            raise ValueError("S3 bucket name is not configured. Please set AWS_S3_BUCKET_NAME environment variable or configure S3.")
         # 폴더 prefix 추가
         if folder_prefix:
             object_name = f"{folder_prefix}/{object_name}"
@@ -157,9 +167,10 @@ class AsyncS3Manager:
             if metadata:
                 extra_args['Metadata'] = metadata
             
-            # Public read 권한 설정
-            if public_read:
-                extra_args['ACL'] = 'public-read'
+            # Public read 권한 설정 (ACL을 지원하는 버킷만)
+            # 최신 S3 버킷은 ACL을 지원하지 않을 수 있음
+            # if public_read:
+            #     extra_args['ACL'] = 'public-read'
             
             # 비동기 업로드
             async with self.session.client('s3') as s3_client:
@@ -170,11 +181,11 @@ class AsyncS3Manager:
                     **extra_args
                 )
                 
-                # URL 생성
-                if public_read:
-                    url = f"https://{self.bucket_name}.s3.{self.region_name}.amazonaws.com/{object_name}"
-                else:
-                    url = await self.generate_presigned_url(object_name)
+                # URL 생성 - ACL 없이는 항상 presigned URL 사용
+                # if public_read:
+                #     url = f"https://{self.bucket_name}.s3.{self.region_name}.amazonaws.com/{object_name}"
+                # else:
+                url = await self.generate_presigned_url(object_name)
             
             logger.info(f"✅ S3 업로드 성공: {object_name}")
             

@@ -9,9 +9,9 @@ import concurrent.futures
 
 import torch
 import torchaudio
-from fastapi import APIRouter, HTTPException, File, UploadFile, Form, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, validator
 import aiofiles
 
 from zonos.model import Zonos
@@ -32,17 +32,100 @@ task_status: Dict[str, Dict[str, Any]] = {}
 # ThreadPoolExecutor for CPU-bound tasks
 executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
+# 미리 정의된 감정 벡터
+PREDEFINED_EMOTIONS = {
+    "neutral": [0.3077, 0.0256, 0.0256, 0.0256, 0.0256, 0.0256, 0.2564, 0.3077],
+    "happy": [0.0256, 0.5897, 0.0256, 0.0256, 0.0256, 0.0256, 0.0256, 0.3077],
+    "sad": [0.0256, 0.0256, 0.5897, 0.0256, 0.0256, 0.0256, 0.0256, 0.3077],
+    "angry": [0.0256, 0.0256, 0.0256, 0.5897, 0.0256, 0.0256, 0.0256, 0.3077],
+    "fearful": [0.0256, 0.0256, 0.0256, 0.0256, 0.5897, 0.0256, 0.0256, 0.3077],
+    "disgusted": [0.0256, 0.0256, 0.0256, 0.0256, 0.0256, 0.5897, 0.0256, 0.3077],
+    "surprised": [0.0256, 0.0256, 0.0256, 0.0256, 0.0256, 0.0256, 0.5897, 0.3077],
+    "contempt": [0.0256, 0.0256, 0.0256, 0.0256, 0.0256, 0.0256, 0.0256, 0.8718]
+}
+
 class ZonosTTSRequest(BaseModel):
     text: str
     language: str = "ko"
     speaking_rate: float = 22.0
     pitch_std: float = 40.0
     cfg_scale: float = 4.0
+    emotion: list[float] = Field(default=[0.3077, 0.0256, 0.0256, 0.0256, 0.0256, 0.0256, 0.2564, 0.3077], description="8차원 감정 벡터")
+    emotion_name: Optional[str] = Field(default=None, description="미리 정의된 감정 이름 (neutral, happy, sad, angry, fearful, disgusted, surprised, contempt)")
     output_filename: Optional[str] = None
     upload_to_s3: bool = False
     s3_folder_prefix: str = "zonos-tts"
     s3_public_read: bool = False
     async_mode: bool = True  # 비동기 모드 플래그
+    
+    @validator('emotion')
+    def validate_emotion(cls, v):
+        if len(v) != 8:
+            raise ValueError("emotion은 8개의 float 값으로 구성되어야 합니다.")
+        if not all(0 <= x <= 1 for x in v):
+            raise ValueError("emotion 값은 0과 1 사이여야 합니다.")
+        return v
+    
+    @validator('emotion', pre=False, always=True)
+    def set_emotion_from_name(cls, v, values):
+        emotion_name = values.get('emotion_name')
+        if emotion_name and emotion_name in PREDEFINED_EMOTIONS:
+            return PREDEFINED_EMOTIONS[emotion_name]
+        return v
+
+class ZonosTTSWithVoiceRequest(BaseModel):
+    text: str
+    language: str = "ko"
+    speaking_rate: float = 22.0
+    pitch_std: float = 40.0
+    cfg_scale: float = 4.0
+    emotion: list[float] = Field(default=[0.3077, 0.0256, 0.0256, 0.0256, 0.0256, 0.0256, 0.2564, 0.3077], description="8차원 감정 벡터")
+    emotion_name: Optional[str] = Field(default=None, description="미리 정의된 감정 이름")
+    voice_data_base64: str  # Base64 인코딩된 음성 데이터
+    output_filename: Optional[str] = None
+    upload_to_s3: bool = False
+    s3_folder_prefix: str = "zonos-tts"
+    s3_public_read: bool = False
+    async_mode: bool = True
+    
+    @validator('emotion')
+    def validate_emotion(cls, v):
+        if len(v) != 8:
+            raise ValueError("emotion은 8개의 float 값으로 구성되어야 합니다.")
+        if not all(0 <= x <= 1 for x in v):
+            raise ValueError("emotion 값은 0과 1 사이여야 합니다.")
+        return v
+    
+    @validator('emotion', pre=False, always=True)
+    def set_emotion_from_name(cls, v, values):
+        emotion_name = values.get('emotion_name')
+        if emotion_name and emotion_name in PREDEFINED_EMOTIONS:
+            return PREDEFINED_EMOTIONS[emotion_name]
+        return v
+
+class SimpleTTSRequest(BaseModel):
+    text: str
+    language: str = "ko"
+    speaking_rate: float = 22.0
+    pitch_std: float = 40.0
+    cfg_scale: float = 4.0
+    emotion: list[float] = Field(default=[0.3077, 0.0256, 0.0256, 0.0256, 0.0256, 0.0256, 0.2564, 0.3077], description="8차원 감정 벡터")
+    emotion_name: Optional[str] = Field(default=None, description="미리 정의된 감정 이름")
+    
+    @validator('emotion')
+    def validate_emotion(cls, v):
+        if len(v) != 8:
+            raise ValueError("emotion은 8개의 float 값으로 구성되어야 합니다.")
+        if not all(0 <= x <= 1 for x in v):
+            raise ValueError("emotion 값은 0과 1 사이여야 합니다.")
+        return v
+    
+    @validator('emotion', pre=False, always=True)
+    def set_emotion_from_name(cls, v, values):
+        emotion_name = values.get('emotion_name')
+        if emotion_name and emotion_name in PREDEFINED_EMOTIONS:
+            return PREDEFINED_EMOTIONS[emotion_name]
+        return v
 
 class ZonosTTSResponse(BaseModel):
     task_id: str
@@ -87,7 +170,8 @@ def generate_tts_sync(
     language: str,
     speaking_rate: float,
     pitch_std: float,
-    cfg_scale: float
+    cfg_scale: float,
+    emotion: list[float] = [0.3077, 0.0256, 0.0256, 0.0256, 0.0256, 0.0256, 0.2564, 0.3077]
 ) -> torch.Tensor:
     """동기 TTS 생성 함수 (CPU-bound 작업)"""
     # 조건 딕셔너리 생성
@@ -96,6 +180,7 @@ def generate_tts_sync(
         speaker=speaker_embedding,
         language=language,
         speaking_rate=speaking_rate,
+        emotion = emotion,
         pitch_std=pitch_std
     )
     
@@ -117,10 +202,9 @@ def generate_tts_sync(
 
 async def process_tts_task(
     task_id: str,
-    request: ZonosTTSRequest,
-    voice_data: Optional[bytes] = None
+    request: ZonosTTSRequest
 ):
-    """백그라운드에서 TTS 작업 처리"""
+    """백그라운드에서 TTS 작업 처리 (JSON 전용)"""
     try:
         # 작업 상태 업데이트
         task_status[task_id]["status"] = "processing"
@@ -131,30 +215,8 @@ async def process_tts_task(
         temp_dir = Path("/tmp/zonos_tts")
         temp_dir.mkdir(exist_ok=True)
         
-        # 스피커 임베딩 생성
+        # 기본 스피커 임베딩 사용 (음성 클로닝 없음)
         speaker = None
-        if voice_data:
-            temp_voice_path = temp_dir / f"temp_voice_{task_id}.wav"
-            async with aiofiles.open(temp_voice_path, "wb") as f:
-                await f.write(voice_data)
-            
-            # 동기 작업을 비동기로 실행
-            loop = asyncio.get_event_loop()
-            wav, sampling_rate = await loop.run_in_executor(
-                executor,
-                torchaudio.load,
-                str(temp_voice_path)
-            )
-            wav = wav.to(device)
-            speaker = await loop.run_in_executor(
-                executor,
-                zonos_model.make_speaker_embedding,
-                wav,
-                sampling_rate
-            )
-            
-            # 임시 파일 삭제
-            temp_voice_path.unlink()
         
         task_status[task_id]["progress"] = 30
         task_status[task_id]["updated_at"] = datetime.utcnow().isoformat()
@@ -169,7 +231,8 @@ async def process_tts_task(
             request.language,
             request.speaking_rate,
             request.pitch_std,
-            request.cfg_scale
+            request.cfg_scale,
+            request.emotion
         )
         
         task_status[task_id]["progress"] = 70
@@ -201,19 +264,25 @@ async def process_tts_task(
         if request.upload_to_s3:
             try:
                 s3_manager = get_async_s3_manager()
+                if not s3_manager.bucket_name:
+                    logger.error("S3 bucket name is not configured")
+                    raise ValueError("S3 bucket name is not configured")
                 
                 # 메타데이터 생성
+                # S3 메타데이터는 ASCII만 지원하므로 non-ASCII 텍스트는 제외하거나 인코딩
                 metadata = {
-                    "text": request.text[:100],
+                    "text_length": str(len(request.text)),
                     "language": request.language,
                     "speaking_rate": str(request.speaking_rate),
                     "pitch_std": str(request.pitch_std),
+                    "cfg_scale": str(request.cfg_scale),
+                    "emotion": str(request.emotion),
                     "generated_by": "zonos-tts-async",
                     "task_id": task_id
                 }
                 
                 # S3에 비동기 업로드
-                async with aiofiles.open(output_path, 'rb') as f:
+                async with aiofiles.open(str(output_path), 'rb') as f:
                     file_data = await f.read()
                 
                 s3_info = await s3_manager.upload_file_from_bytes(
@@ -226,6 +295,13 @@ async def process_tts_task(
                 
                 logger.info(f"✅ S3 업로드 완료: {s3_info['key']}")
                 
+                # S3 업로드 성공 시 로컬 파일 삭제
+                try:
+                    output_path.unlink()
+                    logger.info(f"🗑️ 로컬 파일 삭제 완료: {output_path}")
+                except Exception as e:
+                    logger.warning(f"로컬 파일 삭제 실패: {e}")
+                
             except Exception as e:
                 logger.error(f"⚠️ S3 업로드 실패 (로컬 파일은 생성됨): {e}")
         
@@ -233,10 +309,18 @@ async def process_tts_task(
         task_status[task_id]["status"] = "completed"
         task_status[task_id]["progress"] = 100
         task_status[task_id]["message"] = "TTS 생성이 완료되었습니다."
-        task_status[task_id]["result"] = {
-            "audio_path": str(output_path),
-            "s3_info": s3_info
-        }
+        
+        # S3 업로드 성공 시 로컬 경로 제외
+        if s3_info:
+            task_status[task_id]["result"] = {
+                "audio_path": None,  # S3에 업로드되어 로컬 파일 삭제됨
+                "s3_info": s3_info
+            }
+        else:
+            task_status[task_id]["result"] = {
+                "audio_path": str(output_path),
+                "s3_info": None
+            }
         task_status[task_id]["updated_at"] = datetime.utcnow().isoformat()
         
     except Exception as e:
@@ -248,20 +332,14 @@ async def process_tts_task(
 @router.post("/generate_tts", response_model=ZonosTTSResponse)
 async def generate_tts_async(
     background_tasks: BackgroundTasks,
-    request: ZonosTTSRequest,
-    voice_file: Optional[UploadFile] = File(None)
+    request: ZonosTTSRequest
 ):
-    """비동기 음성 클로닝을 사용한 TTS 생성"""
+    """비동기 TTS 생성 (JSON 전용)"""
     if zonos_model is None:
         raise HTTPException(status_code=500, detail="Zonos 모델이 초기화되지 않았습니다.")
     
     # 작업 ID 생성
     task_id = str(uuid.uuid4())
-    
-    # 음성 파일 데이터 읽기
-    voice_data = None
-    if voice_file:
-        voice_data = await voice_file.read()
     
     # 작업 상태 초기화
     task_status[task_id] = {
@@ -278,8 +356,7 @@ async def generate_tts_async(
         background_tasks.add_task(
             process_tts_task,
             task_id,
-            request,
-            voice_data
+            request
         )
         
         return ZonosTTSResponse(
@@ -289,7 +366,7 @@ async def generate_tts_async(
         )
     else:
         # 동기 모드 (즉시 처리)
-        await process_tts_task(task_id, request, voice_data)
+        await process_tts_task(task_id, request)
         result = task_status[task_id]["result"]
         
         return ZonosTTSResponse(
@@ -388,14 +465,247 @@ async def download_tts(filename: str):
         filename=filename
     )
 
-@router.post("/generate_tts_simple")
+@router.post("/generate_tts_with_voice", response_model=ZonosTTSResponse)
+async def generate_tts_with_voice_async(
+    background_tasks: BackgroundTasks,
+    request: ZonosTTSWithVoiceRequest
+):
+    """음성 클로닝을 사용한 비동기 TTS 생성 (Base64 인코딩된 음성 데이터 사용)"""
+    if zonos_model is None:
+        raise HTTPException(status_code=500, detail="Zonos 모델이 초기화되지 않았습니다.")
+    
+    # 작업 ID 생성
+    task_id = str(uuid.uuid4())
+    
+    # 작업 상태 초기화
+    task_status[task_id] = {
+        "status": "pending",
+        "progress": 0,
+        "message": "음성 클로닝 TTS 생성 작업이 대기 중입니다.",
+        "created_at": datetime.utcnow().isoformat(),
+        "updated_at": datetime.utcnow().isoformat(),
+        "request": request.dict()
+    }
+    
+    if request.async_mode:
+        # 백그라운드 작업으로 처리
+        background_tasks.add_task(
+            process_tts_with_voice_task,
+            task_id,
+            request
+        )
+        
+        return ZonosTTSResponse(
+            task_id=task_id,
+            status="pending",
+            message="음성 클로닝 TTS 생성 작업이 시작되었습니다. /task_status/{task_id}로 진행 상황을 확인하세요."
+        )
+    else:
+        # 동기 모드 (즉시 처리)
+        await process_tts_with_voice_task(task_id, request)
+        result = task_status[task_id]["result"]
+        
+        return ZonosTTSResponse(
+            task_id=task_id,
+            status="completed",
+            message="음성 클로닝 TTS 생성이 완료되었습니다.",
+            audio_path=result["audio_path"],
+            s3_info=result["s3_info"]
+        )
+
+async def process_tts_with_voice_task(task_id: str, request: ZonosTTSWithVoiceRequest):
+    """음성 클로닝 TTS 작업 처리 (백그라운드)"""
+    try:
+        import base64
+        
+        # 상태 업데이트
+        task_status[task_id]["status"] = "processing"
+        task_status[task_id]["progress"] = 10
+        task_status[task_id]["message"] = "음성 파일 처리 중..."
+        
+        # 임시 디렉토리 생성
+        temp_dir = Path("/tmp/zonos_tts")
+        temp_dir.mkdir(exist_ok=True)
+        
+        # Base64 디코딩하여 음성 파일 생성
+        voice_data = base64.b64decode(request.voice_data_base64)
+        temp_voice_path = temp_dir / f"temp_voice_{uuid.uuid4()}.wav"
+        
+        async with aiofiles.open(temp_voice_path, "wb") as f:
+            await f.write(voice_data)
+        
+        # ThreadPoolExecutor에서 실행
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            executor,
+            _generate_tts_with_voice_sync,
+            str(temp_voice_path),
+            request.text,
+            request.language,
+            request.speaking_rate,
+            request.pitch_std,
+            request.cfg_scale,
+            request.emotion,
+            request.output_filename
+        )
+        
+        # 임시 파일 삭제
+        temp_voice_path.unlink()
+        
+        output_path = result["output_path"]
+        
+        # S3 업로드 처리
+        s3_info = None
+        if request.upload_to_s3:
+            try:
+                s3_manager = get_async_s3_manager()
+                if not s3_manager.bucket_name:
+                    logger.error("S3 bucket name is not configured")
+                    raise ValueError("S3 bucket name is not configured")
+                
+                # 메타데이터 생성
+                # S3 메타데이터는 ASCII만 지원하므로 non-ASCII 텍스트는 제외하거나 인코딩
+                metadata = {
+                    "text_length": str(len(request.text)),
+                    "language": request.language,
+                    "speaking_rate": str(request.speaking_rate),
+                    "pitch_std": str(request.pitch_std),
+                    "generated_by": "zonos-tts-with-voice-async"
+                }
+                
+                # S3에 업로드
+                s3_info = await s3_manager.upload_file(
+                    file_path=str(output_path),
+                    object_name=str(Path(output_path).name),
+                    folder_prefix=request.s3_folder_prefix,
+                    metadata=metadata,
+                    public_read=request.s3_public_read
+                )
+                
+                logger.info(f"✅ S3 업로드 완료: {s3_info['key']}")
+                
+                # S3 업로드 성공 시 로컬 파일 삭제
+                try:
+                    output_path.unlink()
+                    logger.info(f"🗑️ 로컬 파일 삭제 완료: {output_path}")
+                except Exception as e:
+                    logger.warning(f"로컬 파일 삭제 실패: {e}")
+                
+            except Exception as e:
+                logger.error(f"⚠️ S3 업로드 실패 (로컬 파일은 생성됨): {e}")
+        
+        # 작업 완료
+        task_status[task_id]["status"] = "completed"
+        task_status[task_id]["progress"] = 100
+        task_status[task_id]["message"] = "음성 클로닝 TTS 생성이 완료되었습니다."
+        
+        # S3 업로드 성공 시 로컬 경로 제외
+        if s3_info:
+            task_status[task_id]["result"] = {
+                "audio_path": None,  # S3에 업로드되어 로컬 파일 삭제됨
+                "s3_info": s3_info
+            }
+        else:
+            task_status[task_id]["result"] = {
+                "audio_path": output_path,
+                "s3_info": None
+            }
+        task_status[task_id]["updated_at"] = datetime.utcnow().isoformat()
+        
+    except Exception as e:
+        logger.error(f"❌ 음성 클로닝 TTS 작업 실패 (task_id: {task_id}): {e}")
+        task_status[task_id]["status"] = "failed"
+        task_status[task_id]["error"] = str(e)
+        task_status[task_id]["updated_at"] = datetime.utcnow().isoformat()
+
+def _generate_tts_with_voice_sync(
+    voice_path: str,
+    text: str,
+    language: str,
+    speaking_rate: float,
+    pitch_std: float,
+    cfg_scale: float,
+    emotion: list[float],
+    output_filename: Optional[str]
+) -> dict:
+    """음성 클로닝 TTS 생성 (동기 함수)"""
+    # 스피커 임베딩 생성
+    wav, sampling_rate = torchaudio.load(voice_path)
+    wav = wav.to(device)
+    speaker = zonos_model.make_speaker_embedding(wav, sampling_rate)
+    
+    # 조건 딕셔너리 생성
+    cond_dict = make_cond_dict(
+        text=text,
+        speaker=speaker,
+        language=language,
+        speaking_rate=speaking_rate,
+        emotion=emotion,
+        pitch_std=pitch_std
+    )
+    
+    # 조건 준비
+    conditioning = zonos_model.prepare_conditioning(cond_dict)
+    
+    # 코드 생성
+    codes = zonos_model.generate(
+        conditioning,
+        cfg_scale=cfg_scale,
+        disable_torch_compile=True,
+        progress_bar=False
+    )
+    
+    # 오디오 디코드
+    wavs = zonos_model.autoencoder.decode(codes)
+    
+    # 출력 파일명 설정
+    if not output_filename:
+        output_filename = f"zonos_tts_voice_{uuid.uuid4()}.wav"
+    
+    output_path = f"/tmp/zonos_tts/{output_filename}"
+    
+    # 오디오 저장
+    torchaudio.save(
+        output_path,
+        wavs[0].cpu(),
+        zonos_model.autoencoder.sampling_rate
+    )
+    
+    return {"output_path": output_path}
+
+@router.post("/generate_tts_simple", response_model=ZonosTTSResponse)
 async def generate_tts_simple(
     background_tasks: BackgroundTasks,
-    text: str = Form(...)
+    request: SimpleTTSRequest
 ):
-    """간단한 TTS 생성 (기본 설정 사용)"""
-    request = ZonosTTSRequest(text=text)
-    return await generate_tts_async(background_tasks, request, None)
+    """간단한 TTS 생성 (JSON 요청, 기본 설정 사용)"""
+    full_request = ZonosTTSRequest(
+        text=request.text,
+        language=request.language,
+        speaking_rate=request.speaking_rate,
+        pitch_std=request.pitch_std,
+        cfg_scale=request.cfg_scale,
+        emotion=request.emotion
+    )
+    return await generate_tts_async(background_tasks, full_request)
+
+@router.get("/emotions")
+async def get_available_emotions():
+    """사용 가능한 감정 목록 및 벡터 값 조회"""
+    return {
+        "emotions": PREDEFINED_EMOTIONS,
+        "description": {
+            "neutral": "중립적인 감정",
+            "happy": "행복한 감정",
+            "sad": "슬픈 감정",
+            "angry": "화난 감정",
+            "fearful": "두려운 감정",
+            "disgusted": "역겨운 감정",
+            "surprised": "놀란 감정",
+            "contempt": "경멸하는 감정"
+        },
+        "vector_info": "각 감정은 8차원 벡터로 표현됩니다. [neutral, happy, sad, angry, fearful, disgusted, surprised, contempt]"
+    }
 
 @router.get("/zonos_status")
 async def get_zonos_status():
