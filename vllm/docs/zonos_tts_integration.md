@@ -23,13 +23,30 @@ Zonos는 Zyphra에서 개발한 고품질 한국어 TTS 모델입니다. 이 통
 POST /zonos/generate_tts_simple
 ```
 
-**Parameters:**
+**Request Body (JSON):**
 - `text` (string, required): 변환할 텍스트
+- `language` (string, default: "ko"): 언어 코드
+- `speaking_rate` (float, default: 22.0): 발화 속도
+- `pitch_std` (float, default: 40.0): 피치 표준편차
+- `cfg_scale` (float, default: 4.0): CFG 스케일
 
 **Example:**
 ```bash
+# 모든 파라미터 지정
 curl -X POST "http://localhost:8000/zonos/generate_tts_simple" \
-  -F "text=안녕하세요. 테스트입니다."
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "안녕하세요. 테스트입니다.",
+    "language": "ko",
+    "speaking_rate": 22.0,
+    "pitch_std": 40.0,
+    "cfg_scale": 4.0
+  }'
+
+# 최소 파라미터만 사용 (나머지는 기본값)
+curl -X POST "http://localhost:8000/zonos/generate_tts_simple" \
+  -H "Content-Type: application/json" \
+  -d '{"text": "안녕하세요. 테스트입니다."}'
 ```
 
 ### 2. 고급 TTS 생성 (비동기)
@@ -49,7 +66,7 @@ POST /zonos/generate_tts
   "async_mode": true,
   "upload_to_s3": true,
   "s3_folder_prefix": "zonos-tts",
-  "s3_public_read": false
+  "s3_public_read": true
 }
 ```
 
@@ -164,10 +181,16 @@ pip install flash-attn mamba-ssm causal-conv1d
 ```python
 import requests
 
-# 간단한 TTS 생성
+# 간단한 TTS 생성 (JSON 요청)
 response = requests.post(
     "http://localhost:8000/zonos/generate_tts_simple",
-    data={"text": "안녕하세요. Zonos TTS입니다."}
+    json={
+        "text": "안녕하세요. Zonos TTS입니다.",
+        "language": "ko",
+        "speaking_rate": 22.0,
+        "pitch_std": 40.0,
+        "cfg_scale": 4.0
+    }
 )
 result = response.json()
 print(f"생성된 오디오: {result['audio_path']}")

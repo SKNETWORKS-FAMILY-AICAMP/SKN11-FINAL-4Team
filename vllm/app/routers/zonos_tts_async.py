@@ -103,7 +103,12 @@ def generate_tts_sync(
     conditioning = zonos_model.prepare_conditioning(cond_dict)
     
     # 코드 생성
-    codes = zonos_model.generate(conditioning, cfg_scale=cfg_scale)
+    codes = zonos_model.generate(
+        conditioning, 
+        cfg_scale=cfg_scale,
+        disable_torch_compile=True,
+        progress_bar=False
+    )
     
     # 오디오 디코드
     wavs = zonos_model.autoencoder.decode(codes)
@@ -227,6 +232,7 @@ async def process_tts_task(
         # 작업 완료
         task_status[task_id]["status"] = "completed"
         task_status[task_id]["progress"] = 100
+        task_status[task_id]["message"] = "TTS 생성이 완료되었습니다."
         task_status[task_id]["result"] = {
             "audio_path": str(output_path),
             "s3_info": s3_info
@@ -297,10 +303,14 @@ async def generate_tts_async(
 @router.get("/task_status/{task_id}", response_model=TaskStatusResponse)
 async def get_task_status(task_id: str):
     """작업 상태 조회"""
-    if task_id not in task_status:
+    task = []
+    for task_id_history, task in task_status.items():
+        if task_id == task_id_history:
+            task=task_status[task_id_history]
+    if task == []:
         raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다.")
     
-    task = task_status[task_id]
+    
     return TaskStatusResponse(
         task_id=task_id,
         status=task["status"],
@@ -339,10 +349,12 @@ async def list_tasks(
 @router.delete("/task/{task_id}")
 async def delete_task(task_id: str):
     """작업 삭제"""
-    if task_id not in task_status:
+    task = []
+    for task_id_history, task in task_status.items():
+        if task_id == task_id_history:
+            task=task_status[task_id_history]
+    if task == []:
         raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다.")
-    
-    task = task_status[task_id]
     
     # 완료된 작업만 삭제 가능
     if task["status"] not in ["completed", "failed"]:
@@ -392,6 +404,7 @@ async def get_zonos_status():
     pending_tasks = sum(1 for task in task_status.values() if task["status"] == "pending")
     
     return {
+        
         "model_loaded": zonos_model is not None,
         "device": str(device) if device else None,
         "cuda_available": torch.cuda.is_available(),
