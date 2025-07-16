@@ -133,6 +133,66 @@ class VLLMClient:
             logger.error(f"❌ 응답 생성 실패: {e}")
             raise VLLMClientError(f"응답 생성 실패: {e}")
     
+    async def generate_response_stream(self, user_message: str, system_message: str = None,
+                                     influencer_name: str = "어시스턴트", model_id: str = None,
+                                     max_new_tokens: int = 150, temperature: float = 0.7) -> AsyncIterator[str]:
+        """스트리밍 응답 생성"""
+        try:
+            payload = {
+                "user_message": user_message,
+                "system_message": system_message or "당신은 도움이 되는 AI 어시스턴트입니다.",
+                "influencer_name": influencer_name,
+                "max_new_tokens": max_new_tokens,
+                "temperature": temperature,
+                "do_sample": True,
+                "use_chat_template": True
+            }
+            if model_id:
+                payload["model_id"] = model_id
+            
+            logger.debug(f"🔄 vLLM 서버 스트리밍 요청: {payload}")
+            
+            # 타임아웃을 늘려서 스트리밍 응답을 완전히 받을 수 있도록 함
+            async with httpx.AsyncClient(timeout=httpx.Timeout(300.0)) as client:
+                async with client.stream("POST", f"{self.config.base_url}/generate/stream", json=payload) as response:
+                    response.raise_for_status()
+                    
+                    async for line in response.aiter_lines():
+                        if line.startswith("data: "):
+                            try:
+                                data = json.loads(line[6:])  # "data: " 제거
+                                if "text" in data:
+                                    logger.debug(f"🔄 VLLM 토큰 수신: {repr(data['text'])}")
+                                    yield data["text"]
+                                elif "error" in data:
+                                    logger.error(f"❌ VLLM 스트리밍 오류: {data['error']}")
+                                    yield f"오류: {data['error']}"
+                                    break
+                                elif "done" in data:
+                                    break  # 스트리밍 완료
+                            except json.JSONDecodeError:
+                                logger.warning(f"⚠️ JSON 파싱 실패: {line}")
+                                continue
+                    
+        except httpx.HTTPStatusError as e:
+            error_detail = ""
+            try:
+                error_detail = e.response.text if e.response else "No response"
+            except:
+                error_detail = "Cannot read response"
+            
+            logger.error(f"❌ vLLM 서버 HTTP 오류: {e.response.status_code} - {error_detail}")
+            yield f"응답 생성 실패: {e.response.status_code} - {error_detail}"
+        except httpx.ReadTimeout:
+            logger.error(f"❌ vLLM 서버 스트리밍 타임아웃")
+            yield "응답 생성 시간이 초과되었습니다. 다시 시도해주세요."
+        except httpx.ConnectError:
+            logger.error(f"❌ vLLM 서버 연결 실패")
+            yield "VLLM 서버에 연결할 수 없습니다. 서버 상태를 확인해주세요."
+        except Exception as e:
+            logger.error(f"❌ 스트리밍 응답 생성 실패: {e}")
+            yield f"응답 생성 실패: {e}"
+    
     async def list_adapters(self) -> Dict[str, Any]:
         """로드된 어댑터 목록 조회"""
         try:

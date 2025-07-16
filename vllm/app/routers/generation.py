@@ -1,8 +1,11 @@
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from vllm import SamplingParams
 from vllm.lora.request import LoRARequest
 import uuid
 import logging
+import json
+import asyncio
 
 from app.models import GenerateRequest, GenerateResponse
 from app import core
@@ -105,3 +108,90 @@ async def generate_response_endpoint(request: GenerateRequest):
         import traceback
         logger.error(f"❌ 전체 스택 트레이스: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"응답 생성 실패: {str(e)}")
+
+@router.post("/generate/stream")
+async def generate_response_stream_endpoint(request: GenerateRequest):
+    """인플루언서 스트리밍 응답 생성"""
+    logger.info(f"🔄 스트리밍 응답 생성 엔드포인트 호출됨")
+    logger.info(f"📋 요청 데이터: {request.dict()}")
+    
+    if core.engine is None:
+        logger.error("❌ 엔진이 초기화되지 않았습니다.")
+        raise HTTPException(status_code=500, detail="엔진이 초기화되지 않았습니다.")
+    
+    async def generate_stream():
+        try:
+            # 프롬프트 생성
+            formatted_prompt = create_chat_prompt(
+                request.user_message, 
+                request.system_message, 
+                request.influencer_name
+            )
+            
+            # 샘플링 파라미터 설정
+            sampling_params = SamplingParams(
+                temperature=request.temperature,
+                max_tokens=request.max_new_tokens,
+                top_p=0.9,
+                top_k=50,
+                stop=["[|Human|", "[|System|", "<|im_end|", "</s>", "<|eot_id|>"],
+                repetition_penalty=1.1
+            )
+            
+            # LoRA 요청 설정
+            lora_request = None
+            
+            if request.model_id:
+                if request.model_id not in core.loaded_adapters:
+                    yield f"data: {json.dumps({'error': f'어댑터 {request.model_id}가 로드되지 않았습니다.'})}\n\n"
+                    return
+                
+                adapter_info = core.loaded_adapters[request.model_id]
+                lora_request = LoRARequest(
+                    lora_name=request.model_id,
+                    lora_int_id=adapter_info["lora_int_id"],
+                    lora_path=adapter_info["hf_repo_name"]
+                )
+            
+            # 고유 request_id 생성
+            request_id = str(uuid.uuid4())
+            
+            # 스트리밍 생성
+            previous_text = ""
+            token_count = 0     
+            
+            async for output in core.engine.generate(
+                formatted_prompt,
+                sampling_params,
+                request_id=request_id,
+                lora_request=lora_request
+            ):
+                if output.outputs:
+                    current_text = output.outputs[0].text
+
+                    if len(current_text) > len(previous_text):
+                        new_tokens = current_text[len(previous_text):]
+                        
+                        if new_tokens:
+                            new_tokens = new_tokens.replace('[|endofturn|]', '').replace('[|endoftext|]', '').replace('<|im_end|>', '')
+                            if new_tokens.strip():
+                                yield f"data: {json.dumps({'text': new_tokens})}\n\n"
+                                previous_text = current_text
+                                token_count += len(new_tokens)
+            
+            # 스트리밍 완료 신호
+            yield f"data: {json.dumps({'done': True})}\n\n"
+            
+        except Exception as e:
+            logger.error(f"❌ 스트리밍 생성 중 오류: {str(e)}")
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+    
+    return StreamingResponse(
+        generate_stream(),
+        media_type="text/plain",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Content-Type": "text/event-stream"
+        }
+    )

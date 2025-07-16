@@ -5,7 +5,6 @@ from typing import List
 from datetime import datetime
 import logging
 from pydantic import BaseModel
-
 from app.database import get_db
 from app.models.influencer import (
     ChatMessage,
@@ -95,13 +94,44 @@ async def chatbot_chat(
                 )
 
                 # VLLM 서버에서 응답 생성
+                # chatbot.py와 동일한 방식으로 처리
+                if influencer.influencer_model_repo:
+                    model_id = str(influencer.influencer_model_repo)
+                    
+                    # HF 토큰 가져오기 (chatbot.py와 동일한 방식)
+                    from app.models.user import HFTokenManage
+                    from app.core.encryption import decrypt_sensitive_data
+                    
+                    hf_token = None
+                    if hasattr(influencer, 'group_id') and influencer.group_id:
+                        hf_token_manage = db.query(HFTokenManage).filter(
+                            HFTokenManage.group_id == influencer.group_id
+                        ).order_by(HFTokenManage.created_at.desc()).first()
+                        
+                        if hf_token_manage:
+                            hf_token = decrypt_sensitive_data(str(hf_token_manage.hf_token_value))
+                    
+                    # VLLM 클라이언트 가져오기
+                    from app.services.vllm_client import get_vllm_client
+                    vllm_client = await get_vllm_client()
+                    
+                    # 어댑터 로드 (chatbot.py와 동일한 방식)
+                    try:
+                        await vllm_client.load_adapter(model_id, model_id, hf_token)
+                        logger.info(f"✅ VLLM 어댑터 로드 완료: {model_id}")
+                    except Exception as e:
+                        logger.warning(f"⚠️ 어댑터 로드 실패, 기본 모델 사용: {e}")
+                        # 어댑터 로드 실패 시 기본 모델 사용
+                        model_id = str(influencer.influencer_id)
+                else:
+                    model_id = str(influencer.influencer_id)
+                
                 response_text = await vllm_generate_response(
                     user_message=request.message,
                     system_message=system_message,
                     influencer_name=str(influencer.influencer_name),
-                    model_id=str(
-                        influencer.influencer_id
-                    ),  # 인플루언서 ID를 모델 ID로 사용
+
+                    model_id=model_id,
                     max_new_tokens=200,
                     temperature=0.7,
                 )
@@ -127,6 +157,7 @@ async def chatbot_chat(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Chatbot error: {str(e)}",
         )
+
 
 
 async def track_api_usage(db: Session, influencer_id: str):

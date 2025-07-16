@@ -25,7 +25,7 @@ from fastapi import (
     Form,
     BackgroundTasks,
 )
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse
 from fastapi.security import HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, Field
