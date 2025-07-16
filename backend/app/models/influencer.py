@@ -16,6 +16,7 @@ from sqlalchemy.orm import relationship
 from app.models.base import Base, TimestampMixin
 from app.models.board import Board
 import uuid
+from typing import Optional
 
 
 class ModelMBTI(Base):
@@ -59,12 +60,24 @@ class StylePreset(Base, TimestampMixin):
     influencer_style = Column(
         String(255), nullable=False, comment="인플루언서 전체 스타일(힙함, 청순 등)"
     )
-    influencer_personality = Column(Text, nullable=False, comment="인플루언서 성격")
-    influencer_speech = Column(Text, nullable=False, comment="인플루언서 말투")
+    influencer_personality = Column(
+        Text, nullable=False, comment="인플루언서 성격"
+    )
+    influencer_speech = Column(
+        Text, nullable=False, comment="인플루언서 말투"
+    )
+    mbti_id = Column(
+        Integer, nullable=True, comment="MBTI 성격 고유 식별자"
+    )
+    system_prompt = Column(
+        Text, nullable=False, comment="인플루언서 시스템 프롬프트"
+    )
+    influencer_description = Column(
+        Text, nullable=False, comment="인플루언서 설명"
+    )
 
     # 관계
     ai_influencers = relationship("AIInfluencer", back_populates="style_preset")
-
 
 class AIInfluencer(Base, TimestampMixin):
     """AI 인플루언서 모델"""

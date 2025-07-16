@@ -24,6 +24,7 @@ from app.schemas.influencer import (
     AIInfluencerUpdate,
     StylePreset as StylePresetSchema,
     StylePresetCreate,
+    StylePresetWithMBTI,
     ModelMBTI as ModelMBTISchema,
     FinetuningWebhookRequest,
     ToneGenerationRequest,
@@ -154,22 +155,74 @@ async def verify_api_key(
 
 
 # 스타일 프리셋 관련 API (구체적인 경로를 먼저 정의)
-@router.get("/style-presets", response_model=List[StylePresetSchema])
+@router.get("/style-presets", response_model=List[StylePresetWithMBTI])
 async def get_style_presets_list(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=100),
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    """스타일 프리셋 목록 조회"""
+    """스타일 프리셋 목록 조회 (MBTI 정보 포함)"""
     logger.info(f"🎯 스타일 프리셋 목록 조회 API 호출됨 - skip: {skip}, limit: {limit}")
     try:
-        # StylePreset 모델만 직접 사용하여 순환 참조 문제 회피
-        from app.models.influencer import StylePreset
-
+        # StylePreset과 ModelMBTI를 조인하여 조회
+        from app.models.influencer import StylePreset, ModelMBTI, AIInfluencer
+        
+        # 프리셋과 MBTI 정보를 함께 조회
+        presets_with_mbti = []
         presets = db.query(StylePreset).offset(skip).limit(limit).all()
-        logger.info(f"✅ 프리셋 조회 성공 - 개수: {len(presets)}")
-        return presets
+        
+        for preset in presets:
+            # 해당 프리셋을 사용하는 인플루언서들의 MBTI 정보 수집
+            # 가장 많이 사용되는 MBTI를 찾기 위해 서브쿼리 사용
+            from sqlalchemy import func
+            
+            mbti_counts = db.query(
+                ModelMBTI.mbti_id,
+                ModelMBTI.mbti_name,
+                ModelMBTI.mbti_traits,
+                ModelMBTI.mbti_speech,
+                func.count(AIInfluencer.influencer_id).label('count')
+            ).join(
+                AIInfluencer, 
+                ModelMBTI.mbti_id == AIInfluencer.mbti_id
+            ).filter(
+                AIInfluencer.style_preset_id == preset.style_preset_id,
+                AIInfluencer.mbti_id.isnot(None)
+            ).group_by(
+                ModelMBTI.mbti_id,
+                ModelMBTI.mbti_name,
+                ModelMBTI.mbti_traits,
+                ModelMBTI.mbti_speech
+            ).order_by(
+                func.count(AIInfluencer.influencer_id).desc()
+            ).first()
+            
+            # MBTI 정보가 있으면 가장 많이 사용되는 것을 사용, 없으면 None
+            mbti_info = mbti_counts if mbti_counts else None
+            
+            # 프리셋 데이터를 딕셔너리로 변환
+            preset_dict = {
+                "style_preset_id": preset.style_preset_id,
+                "style_preset_name": preset.style_preset_name,
+                "influencer_type": preset.influencer_type,
+                "influencer_gender": preset.influencer_gender,
+                "influencer_age_group": preset.influencer_age_group,
+                "influencer_hairstyle": preset.influencer_hairstyle,
+                "influencer_style": preset.influencer_style,
+                "influencer_personality": preset.influencer_personality,
+                "influencer_speech": preset.influencer_speech,
+                "created_at": preset.created_at,
+                "updated_at": preset.updated_at,
+                "mbti_name": mbti_info.mbti_name if mbti_info else None,
+                "mbti_traits": mbti_info.mbti_traits if mbti_info else None,
+                "mbti_speech": mbti_info.mbti_speech if mbti_info else None,
+            }
+            
+            presets_with_mbti.append(StylePresetWithMBTI(**preset_dict))
+        
+        logger.info(f"✅ 프리셋 조회 성공 - 개수: {len(presets_with_mbti)}")
+        return presets_with_mbti
     except Exception as e:
         logger.error(f"❌ 프리셋 조회 실패: {str(e)}")
         raise HTTPException(
