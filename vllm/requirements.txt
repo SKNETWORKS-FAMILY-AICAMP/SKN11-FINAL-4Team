@@ -18,3 +18,16 @@ python-multipart>=0.0.6
 langchain>=0.1.0
 langchain-openai>=0.1.0
 langchain-core>=0.1.0
+
+# Zonos TTS dependencies
+inflect>=7.5.0
+kanjize>=1.5.0
+numpy>=2.2.2
+phonemizer>=3.3.0
+sudachidict-full>=20241021
+sudachipy>=0.6.10
+torchaudio>=2.5.1
+soundfile>=0.13.1
+
+# S3 integration
+boto3==1.39.1

@@ -489,7 +489,7 @@ async def generate_ai_response(message_text: str, influencer: AIInfluencer, send
                 
                 adapter_loaded = await vllm_load_adapter_if_needed(
                     model_id=model_id,
-                    hf_repo_name=model_id,
+                    hf_repo_name=influencer.influencer_model_repo,
                     hf_token=hf_token
                 )
                 
