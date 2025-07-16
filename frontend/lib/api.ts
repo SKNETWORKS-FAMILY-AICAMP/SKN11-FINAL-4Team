@@ -37,6 +37,7 @@ class APIClient {
     } = options
 
     const url = `${this.baseURL}${endpoint}`
+    console.log('🌐 API 요청:', { method: fetchOptions.method || 'GET', url, requireAuth })
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -47,9 +48,11 @@ class APIClient {
     if (requireAuth) {
       const token = tokenUtils.getToken()
       if (!token) {
+        console.error('❌ 인증 토큰이 없습니다')
         throw new APIError('No authentication token found', 401)
       }
       headers.Authorization = `Bearer ${token}`
+      console.log('🔑 인증 토큰 추가됨')
     }
 
     // 타임아웃 설정
@@ -74,12 +77,37 @@ class APIClient {
         data = await response.text()
       }
 
+      console.log('📡 API 응답:', { 
+        status: response.status, 
+        ok: response.ok, 
+        contentType: response.headers.get('content-type'),
+        data: data 
+      })
+
       if (!response.ok) {
-        throw new APIError(
-          data?.detail || data?.message || `HTTP ${response.status}`,
-          response.status,
-          data
-        )
+        console.error('❌ API 오류 응답:', { 
+          status: response.status, 
+          statusText: response.statusText,
+          contentType: response.headers.get('content-type'),
+          data: data,
+          url: response.url
+        })
+        
+        // 오류 메시지 추출
+        let errorMessage = `HTTP ${response.status}`
+        if (data) {
+          if (typeof data === 'string') {
+            errorMessage = data
+          } else if (data.detail) {
+            errorMessage = data.detail
+          } else if (data.message) {
+            errorMessage = data.message
+          } else {
+            errorMessage = JSON.stringify(data)
+          }
+        }
+        
+        throw new APIError(errorMessage, response.status, data)
       }
 
       return data

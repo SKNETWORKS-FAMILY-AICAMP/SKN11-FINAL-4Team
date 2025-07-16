@@ -3,7 +3,7 @@
 import { useState, Suspense, useEffect } from "react"
 import { AlertCircle } from "lucide-react"
 import React from "react"
-import { useParams, useSearchParams } from "next/navigation"
+import { useParams, useSearchParams, useRouter } from "next/navigation"
 import Link from "next/link"
 import { Navigation } from "@/components/navigation"
 import { Button } from "@/components/ui/button"
@@ -15,8 +15,11 @@ import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+
 import { tokenUtils } from "@/lib/auth"
 import { ModelService } from "@/lib/services/model.service"
+import { useToast } from "@/hooks/use-toast"
+import { Toaster } from "@/components/ui/toaster"
 import {
   ArrowLeft,
   Copy,
@@ -31,7 +34,6 @@ import {
   Calendar,
   Heart,
   MessageCircle,
-  Share2,
   Play,
   MoreHorizontal,
   Bookmark,
@@ -45,6 +47,9 @@ import {
   Unlink,
   CheckCircle,
   Users,
+  Edit,
+  User,
+  Settings,
 } from "lucide-react"
 import type { AIModel } from "@/lib/types"
 import {
@@ -59,6 +64,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import { apiClient } from "@/lib/api"
+import { PostCard, Post } from "@/components/ui/post-card"
 
 // 샘플 모델 데이터
 const sampleModel: AIModel = {
@@ -74,112 +80,8 @@ const sampleModel: AIModel = {
 }
 
 // 샘플 콘텐츠 데이터
-interface ContentPost {
-  id: string
-  title: string
-  content: string
-  platform: string
-  status: "published" | "scheduled" | "draft"
-  publishedAt: string
-  scheduledAt?: string
-  engagement: {
-    likes: number
-    comments: number
-    shares: number
-    views?: number
-  }
-  hashtags: string[]
-  media?: {
-    type: "image" | "video" | "carousel"
-    urls: string[]
-    thumbnailUrl?: string
-  }
-}
+type ContentPost = Post
 
-const samplePosts: ContentPost[] = [
-  {
-    id: "1",
-    title: "겨울 패션 트렌드 2024",
-    content:
-      "안녕하세요 여러분! 🌟 오늘은 겨울 패션 트렌드에 대해 이야기해보려고 해요!\n\n요즘 정말 핫한 트렌드인데, 저도 직접 체험해보니까 정말 만족스러웠어요! 특히 컬러감이나 디자인이 너무 예뻐서 여러분께도 꼭 추천하고 싶어요 💕\n\n겨울철 필수 아이템들:\n✨ 롱 코트 - 클래식하면서도 우아한 느낌\n✨ 니트 스웨터 - 따뜻하고 포근한 감성\n✨ 부츠 - 스타일리시하면서도 실용적\n\n여러분은 어떤 겨울 아이템을 가장 좋아하시나요? 댓글로 의견 남겨주세요!",
-    platform: "Instagram",
-    status: "published",
-    publishedAt: "2024-01-20T14:30:00",
-    engagement: { likes: 1247, comments: 89, shares: 34 },
-    hashtags: ["#겨울패션", "#트렌드", "#스타일", "#OOTD", "#패션인플루언서"],
-    media: {
-      type: "carousel",
-      urls: [
-        "/placeholder.svg?height=400&width=400",
-        "/placeholder.svg?height=400&width=400",
-        "/placeholder.svg?height=400&width=400",
-      ],
-    },
-  },
-  {
-    id: "2",
-    title: "신년 스타일링 팁",
-    content:
-      "새해 맞이 스타일링 팁을 공유해드릴게요! ✨\n\n새로운 한 해, 새로운 스타일로 시작해보는 건 어떨까요? 작은 변화부터 시작해서 완전히 새로운 나를 발견할 수 있어요!\n\n💡 2024 스타일링 팁:\n1. 기본기가 가장 중요해요 - 베이직 아이템을 잘 활용하세요\n2. 컬러 매칭에 신경써보세요 - 올해는 대담한 컬러 조합에 도전!\n3. 액세서리로 포인트를 주세요 - 작은 디테일이 큰 차이를 만들어요\n4. 자신감이 최고의 액세서리예요!\n\n여러분만의 특별한 스타일을 찾아보시고 후기 공유해주세요! 함께 성장하는 패션 커뮤니티를 만들어가요 💪",
-    platform: "Facebook",
-    status: "published",
-    publishedAt: "2024-01-18T10:15:00",
-    engagement: { likes: 892, comments: 56, shares: 23 },
-    hashtags: ["#신년", "#스타일링", "#팁", "#패션", "#2024트렌드"],
-    media: {
-      type: "image",
-      urls: ["/placeholder.svg?height=300&width=500"],
-    },
-  },
-  {
-    id: "3",
-    title: "봄 시즌 미리보기",
-    content:
-      "곧 다가올 봄 시즌을 위한 준비! 🌸 파스텔 톤과 플로럴 패턴이 대세가 될 것 같아요. 미리 준비해서 트렌드를 선도해보세요!",
-    platform: "Twitter",
-    status: "scheduled",
-    publishedAt: "",
-    scheduledAt: "2024-01-25T16:00:00",
-    engagement: { likes: 0, comments: 0, shares: 0 },
-    hashtags: ["#봄패션", "#파스텔", "#플로럴", "#미리보기", "#2024SS"],
-    media: {
-      type: "image",
-      urls: ["/placeholder.svg?height=200&width=400"],
-    },
-  },
-  {
-    id: "4",
-    title: "겨울 아우터 추천",
-    content:
-      "추운 겨울, 따뜻하면서도 스타일리시한 아우터 추천드려요! 🧥 롱 울 코트부터 패딩까지, 다양한 스타일을 소개해드릴게요.",
-    platform: "TikTok",
-    status: "draft",
-    publishedAt: "",
-    engagement: { likes: 0, comments: 0, shares: 0, views: 0 },
-    hashtags: ["#겨울아우터", "#코트", "#패딩", "#추천"],
-    media: {
-      type: "video",
-      urls: ["/placeholder.svg?height=600&width=400"],
-      thumbnailUrl: "/placeholder.svg?height=600&width=400",
-    },
-  },
-  {
-    id: "5",
-    title: "2024 패션 트렌드 완벽 가이드",
-    content:
-      "안녕하세요! 오늘은 2024년 패션 트렌드에 대해 자세히 알아보는 시간을 가져보려고 합니다.\n\n이번 영상에서는 올해 가장 주목받을 패션 트렌드들을 소개하고, 각 트렌드를 어떻게 일상에서 활용할 수 있는지 실용적인 팁들을 공유해드릴 예정입니다.\n\n📌 영상 목차:\n00:00 인트로\n01:30 2024 컬러 트렌드\n03:45 실루엣 변화\n06:20 액세서리 트렌드\n08:10 스타일링 팁\n10:30 마무리\n\n구독과 좋아요는 큰 힘이 됩니다! 💕",
-    platform: "YouTube",
-    status: "published",
-    publishedAt: "2024-01-22T18:00:00",
-    engagement: { likes: 2341, comments: 156, shares: 78, views: 15420 },
-    hashtags: ["#패션트렌드", "#2024패션", "#스타일링", "#패션가이드"],
-    media: {
-      type: "video",
-      urls: ["/placeholder.svg?height=315&width=560"],
-      thumbnailUrl: "/placeholder.svg?height=315&width=560",
-    },
-  },
-]
 
 // 게시글 상세 이미지 apiClient 방식 컴포넌트
 function PostImage({ url, alt, className }: { url: string; alt?: string; className?: string }) {
@@ -190,12 +92,20 @@ function PostImage({ url, alt, className }: { url: string; alt?: string; classNa
       setImageUrl(url);
       return;
     }
-    apiClient.get(url, { responseType: "blob", requireAuth: false }).then((res) => {
-      const blobUrl = URL.createObjectURL(res.data);
-      setImageUrl(blobUrl);
+    apiClient.get(url, { requireAuth: false }).then((res: any) => {
+      if (res.data instanceof Blob) {
+        const blobUrl = URL.createObjectURL(res.data);
+        setImageUrl(blobUrl);
+      } else {
+        setImageUrl(url);
+      }
+    }).catch(() => {
+      setImageUrl(url);
     });
     return () => {
-      if (imageUrl) URL.revokeObjectURL(imageUrl);
+      if (imageUrl && imageUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(imageUrl);
+      }
     };
   }, [url]);
   if (!imageUrl) return <div className="bg-gray-100 w-full h-80 flex items-center justify-center text-gray-400">이미지 불러오는 중...</div>;
@@ -205,12 +115,35 @@ function PostImage({ url, alt, className }: { url: string; alt?: string; classNa
 function ModelDetailContent() {
   const params = useParams()
   const searchParams = useSearchParams()
-  const [model, setModel] = useState<any>(sampleModel)
+  const router = useRouter()
+  const { toast } = useToast()
+  const [model, setModel] = useState<any>(null)
   const [isModelLoading, setIsModelLoading] = useState(true)
-  const [posts] = useState<ContentPost[]>(samplePosts)
+  const [posts, setPosts] = useState<ContentPost[]>([])
+  const [isPostsLoading, setIsPostsLoading] = useState(true)
   const [selectedPost, setSelectedPost] = useState<ContentPost | null>(null)
+  const [isPostDetailModalOpen, setIsPostDetailModalOpen] = useState(false)
+  const [isEditing, setIsEditing] = useState(false)
+  const [isUploadingImage, setIsUploadingImage] = useState(false)
+  const [editTitle, setEditTitle] = useState("");
+  const [editContent, setEditContent] = useState("");
+  const [editHashtags, setEditHashtags] = useState("");
+  const [editScheduledAt, setEditScheduledAt] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const [imagePreview, setImagePreview] = useState<string | null>(null)
+  const [isDragOver, setIsDragOver] = useState(false)
+  const [uploadedImage, setUploadedImage] = useState<File | null>(null)
   const [showApiKey, setShowApiKey] = useState(false)
   const [isUpdating, setIsUpdating] = useState(false)
+  const [isGeneratingApiKey, setIsGeneratingApiKey] = useState(false)
+  const [apiKeyInfo, setApiKeyInfo] = useState<{
+    api_key: string
+    created_at: string
+    updated_at: string
+  } | null>(null)
+  const [testMessage, setTestMessage] = useState("")
+  const [testResponse, setTestResponse] = useState("")
+  const [isTestingChatbot, setIsTestingChatbot] = useState(false)
   const [instagramStatus, setInstagramStatus] = useState<{
     is_connected: boolean
     connected_at?: string
@@ -232,22 +165,265 @@ function ModelDetailContent() {
     is_connected: false
   })
   const [isConnecting, setIsConnecting] = useState(false)
+  const [analyticsData, setAnalyticsData] = useState({
+    totalApiCalls: 0,
+    todayApiCalls: 0,
+    totalPosts: 0,
+    publishedPosts: 0,
+    totalLikes: 0,
+    totalComments: 0
+  })
+
+  // 7일간 API 호출수 차트 데이터
+  const [weeklyChartData, setWeeklyChartData] = useState<Array<{
+    date: string;
+    calls: number;
+  }>>([])
+
+  // 7일간 API 호출수 데이터 로드
+  const loadWeeklyChartData = async () => {
+    try {
+      const apiUsageResponse = await apiClient.get(`/api/v1/analytics/api-calls/`) as any
+
+      // 특정 인플루언서의 API 호출 데이터 필터링
+      const influencerApiCalls = apiUsageResponse.filter((call: any) =>
+        call.influencer_id === params.id?.toString()
+      )
+
+      // 최근 7일간 데이터 생성
+      const last7Days = []
+      for (let i = 6; i >= 0; i--) {
+        const date = new Date()
+        date.setDate(date.getDate() - i)
+        const dateStr = date.toISOString().split('T')[0]
+
+        // 해당 날짜의 API 호출수 찾기
+        const dayCalls = influencerApiCalls
+          .filter((call: any) => call.created_at?.startsWith(dateStr))
+          .reduce((sum: number, call: any) => sum + (call.daily_call_count || 0), 0)
+
+        last7Days.push({
+          date: dateStr,
+          calls: dayCalls
+        })
+      }
+
+      setWeeklyChartData(last7Days)
+    } catch (error) {
+      console.error('7일간 차트 데이터 로드 실패:', error)
+      setWeeklyChartData([])
+    }
+  }
 
   // Instagram 상태 변경 시 처리
   React.useEffect(() => {
     // Instagram 상태 업데이트 처리
   }, [instagramStatus])
 
+  // 게시글 데이터 로드
+  const loadPostsData = async () => {
+    setIsPostsLoading(true)
+    try {
+      // 특정 인플루언서의 게시글만 조회
+      const boardData = await apiClient.get<any[]>(`/api/v1/boards?influencer_id=${params.id}`)
+
+      console.log('🔍 백엔드에서 받아온 게시글 데이터:', boardData)
+
+      // 게시글 데이터 변환 (백엔드에서 제공하는 인플루언서 정보 사용)
+      const transformedPosts: ContentPost[] = boardData.map((board: any) => {
+        // 백엔드에서 이미 제공하는 인플루언서 정보 사용
+        const influencerName = board.influencer_name || model?.name || 'AI 인플루언서'
+        const influencerDescription = board.influencer_description || model?.description || ''
+
+        const basePost = {
+          id: board.board_id,
+          title: board.board_topic || '제목 없음',
+          content: board.board_description || '',
+          platform: getPlatformName(board.board_platform),
+          status: getStatusName(board.board_status),
+          publishedAt: board.published_at || board.created_at || '',
+          scheduledAt: board.reservation_at || '',
+          hashtags: board.board_hash_tag ?
+            board.board_hash_tag.split(' ').filter((tag: string) => tag.trim()).map((tag: string) =>
+              tag.startsWith('#') ? tag : `#${tag}`
+            ) : [],
+          media: {
+            type: "image" as const,
+            urls: [board.image_url || "/placeholder.svg?height=400&width=400"],
+            thumbnailUrl: board.image_url || "/placeholder.svg?height=400&width=400"
+          },
+          // 인플루언서 정보: 조회한 값 사용
+          influencerId: board.influencer_id,
+          influencerName: influencerName,
+          influencerDescription: influencerDescription,
+          // Instagram 링크 추가
+          instagram_link: board.instagram_link || undefined
+        }
+
+        // 인스타그램 통계 정보 추가
+        const instagramStats = board.instagram_stats || {
+          like_count: 0,
+          comments_count: 0
+        }
+
+        return {
+          ...basePost,
+          engagement: {
+            likes: instagramStats.like_count || 0,
+            comments: instagramStats.comments_count || 0
+          }
+        }
+      })
+
+      console.log('✅ 변환된 게시글 데이터:', transformedPosts)
+
+      setPosts(transformedPosts)
+    } catch (error) {
+      // 에러 시 빈 배열로 설정
+      setPosts([])
+    } finally {
+      setIsPostsLoading(false)
+    }
+  }
+
+  // 플랫폼 번호를 이름으로 변환
+  const getPlatformName = (platformNumber: number) => {
+    switch (platformNumber) {
+      case 0: return 'Instagram'
+      case 1: return 'Blog'
+      case 2: return 'Facebook'
+      case 3: return 'Twitter'
+      case 4: return 'TikTok'
+      case 5: return 'YouTube'
+      default: return 'Instagram'
+    }
+  }
+
+  // 상태 번호를 이름으로 변환
+  const getStatusName = (statusNumber: number) => {
+    switch (statusNumber) {
+      case 1: return 'draft' as const     // 임시저장
+      case 2: return 'scheduled' as const // 예약됨
+      case 3: return 'published' as const // 발행됨
+      default: return 'draft' as const
+    }
+  }
+
+  // 분석 데이터 로드 - 게시글 데이터 기반으로 계산
+  const loadAnalyticsData = async () => {
+    try {
+      // 게시글 데이터가 로드된 후 분석 데이터 계산
+      const publishedPosts = posts.filter((p) => p.status === "published")
+
+      // API 사용량 데이터 가져오기
+      let apiUsageData = {
+        totalApiCalls: 0,
+        todayApiCalls: 0
+      }
+
+      try {
+        // 올바른 analytics API 호출
+        const apiUsageResponse = await apiClient.get(`/api/v1/analytics/api-calls/`) as any
+
+        console.log('Analytics API 응답:', apiUsageResponse)
+
+        // 특정 인플루언서의 API 호출 데이터 필터링
+        const influencerApiCalls = apiUsageResponse.filter((call: any) =>
+          call.influencer_id === params.id?.toString()
+        )
+
+        console.log('필터링된 인플루언서 API 호출:', influencerApiCalls)
+
+        // 총 API 호출 수와 오늘 호출 수 계산
+        const totalCalls = influencerApiCalls.reduce((sum: number, call: any) =>
+          sum + (call.daily_call_count || 0), 0
+        )
+
+        // 오늘 날짜의 호출 수 계산
+        const today = new Date().toISOString().split('T')[0]
+        const todayCalls = influencerApiCalls
+          .filter((call: any) => call.created_at?.startsWith(today))
+          .reduce((sum: number, call: any) => sum + (call.daily_call_count || 0), 0)
+
+        apiUsageData = {
+          totalApiCalls: totalCalls,
+          todayApiCalls: todayCalls
+        }
+
+        console.log('Analytics 데이터 로드 성공:', {
+          totalCalls,
+          todayCalls,
+          influencerApiCalls: influencerApiCalls.length
+        })
+      } catch (error) {
+        console.log('API 사용량 데이터를 가져올 수 없습니다:', error)
+        // 오류 발생 시 기본값 사용
+        apiUsageData = {
+          totalApiCalls: 0,
+          todayApiCalls: 0
+        }
+      }
+
+      setAnalyticsData({
+        ...apiUsageData,
+        totalPosts: posts.length,
+        publishedPosts: publishedPosts.length,
+        totalLikes: publishedPosts.reduce((sum, p) => sum + (p.engagement?.likes || 0), 0),
+        totalComments: publishedPosts.reduce((sum, p) => sum + (p.engagement?.comments || 0), 0)
+      })
+    } catch (error) {
+      // 기본값 설정
+      setAnalyticsData({
+        totalApiCalls: 0,
+        todayApiCalls: 0,
+        totalPosts: 0,
+        publishedPosts: 0,
+        totalLikes: 0,
+        totalComments: 0
+      })
+    }
+  }
+
+  // 게시글 데이터가 로드된 후 분석 데이터 업데이트
+  React.useEffect(() => {
+    if (posts.length >= 0) { // 빈 배열도 포함하여 초기 로드 시에도 실행
+      loadAnalyticsData()
+      loadWeeklyChartData() // 7일간 차트 데이터도 함께 로드
+    }
+  }, [posts])
+
   // 모델 데이터 로드
   const loadModelData = async () => {
     setIsModelLoading(true)
     try {
+      console.log('🔍 모델 데이터 로드 시작 - influencer_id:', params.id)
+
       const data = await ModelService.getInfluencer(params.id as string)
+      console.log('✅ 모델 데이터 로드 성공:', data)
+
+      // 이미지 URL 처리: S3 키인 경우 URL로 변환
+      let processedImageUrl = data.image_url
+      if (data.image_url && !data.image_url.startsWith('http')) {
+        // S3 키인 경우 직접 URL 생성
+        processedImageUrl = `https://aimex-influencers.s3.ap-northeast-2.amazonaws.com/${data.image_url}`
+        console.log('🔍 S3 키를 URL로 변환:', {
+          original: data.image_url,
+          converted: processedImageUrl
+        })
+      } else if (data.image_url && data.image_url.startsWith('http')) {
+        // 이미 URL인 경우 그대로 사용
+        processedImageUrl = data.image_url
+        console.log('🔍 이미 URL 형태:', processedImageUrl)
+      } else {
+        console.log('🔍 이미지 URL 없음')
+      }
+
       setModel({
         ...data,
         id: data.influencer_id,
         name: data.influencer_name,
         description: data.influencer_description || '',
+        image_url: processedImageUrl, // 처리된 이미지 URL
         createdAt: data.created_at?.split('T')[0] || '',
         apiKey: sampleModel.apiKey, // API 키는 별도 조회
         trainingData: sampleModel.trainingData, // 훈련 데이터는 별도 조회
@@ -258,33 +434,274 @@ function ModelDetailContent() {
         instagram_is_active: data.instagram_is_active,
         instagram_connected_at: data.instagram_connected_at,
       })
+
+      // API 키 정보 로드
+      await loadApiKeyInfo()
     } catch (error) {
-      console.error('Error loading model data:', error)
+      // 에러 처리
+      console.error('❌ 모델 데이터 로드 실패:', error)
     } finally {
       setIsModelLoading(false)
     }
   }
+
+  // API 키 정보 로드
+  const loadApiKeyInfo = async () => {
+    console.log('🔍 API 키 정보 로드 시작 - influencer_id:', params.id)
+
+    // 현재 로그인한 사용자 정보 확인
+    const token = localStorage.getItem('access_token')
+    if (token) {
+      try {
+        const payload = JSON.parse(atob(token.split('.')[1]))
+        console.log('👤 현재 로그인한 사용자:', {
+          user_id: payload.sub,
+          email: payload.email,
+          name: payload.name
+        })
+      } catch (e) {
+        console.log('❌ 토큰 파싱 실패:', e)
+      }
+    } else {
+      console.log('❌ 로그인 토큰이 없습니다')
+    }
+
+    try {
+      const apiKeyData = await ModelService.getApiKey(params.id as string)
+      console.log('✅ API 키 조회 성공:', apiKeyData)
+
+      setApiKeyInfo({
+        api_key: apiKeyData.api_key,
+        created_at: apiKeyData.created_at,
+        updated_at: apiKeyData.updated_at
+      })
+      // 모델 상태에 API 키 업데이트
+      setModel((prev: any) => ({
+        ...prev,
+        apiKey: apiKeyData.api_key
+      }))
+    } catch (error: any) {
+      console.error('❌ API 키 조회 실패:', {
+        error: error,
+        status: error.status,
+        detail: error.data?.detail,
+        message: error.message,
+        influencer_id: params.id,
+        stack: error.stack
+      })
+
+      // API 키가 없는 경우 (404)에만 자동 생성 시도
+      if (error.status === 404 && error.data?.detail === "API key not found") {
+        console.log('🔄 API 키가 없어서 자동 생성 시도...')
+        try {
+          const response = await ModelService.generateApiKey(params.id as string)
+          console.log('✅ API 키 자동 생성 성공:', response)
+
+          setApiKeyInfo({
+            api_key: response.api_key,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          })
+          // 모델 상태에 API 키 업데이트
+          setModel((prev: any) => ({
+            ...prev,
+            apiKey: response.api_key
+          }))
+          console.log('API 키가 자동으로 생성되었습니다.')
+        } catch (generateError: any) {
+          console.error('❌ API 키 자동 생성 실패:', {
+            error: generateError,
+            status: generateError.status,
+            detail: generateError.data?.detail,
+            message: generateError.message,
+            stack: generateError.stack
+          })
+          setApiKeyInfo(null)
+        }
+      } else {
+        // 다른 오류 (인플루언서를 찾을 수 없음 등)는 그대로 표시
+        console.error('API 키 조회 실패:', error.response?.data?.detail || error.message)
+        setApiKeyInfo(null)
+      }
+    }
+  }
+
   const [activeTab, setActiveTab] = useState(() => {
     // URL 파라미터에서 탭 정보 읽기
     return searchParams.get('tab') || 'analytics'
   })
-  
+
+
+  // 이미지 파일 처리 공통 함수
+  const processImageFile = async (file: File) => {
+    // 이미지 파일 검증
+    if (!file.type.startsWith('image/')) {
+      toast({
+        title: "파일 형식 오류",
+        description: "이미지 파일만 업로드할 수 있습니다.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    // 파일 크기 제한 (5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      toast({
+        title: "파일 크기 오류",
+        description: "이미지 파일 크기는 5MB 이하여야 합니다.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    try {
+      setUploadedImage(file)
+
+      // 이미지 미리보기 생성
+      const reader = new FileReader()
+      reader.onload = (e) => {
+        setImagePreview(e.target?.result as string)
+      }
+      reader.readAsDataURL(file)
+    } catch (error) {
+      toast({
+        title: "이미지 처리 오류",
+        description: "이미지 처리 중 오류가 발생했습니다.",
+        variant: "destructive",
+      })
+      console.error('Image processing error:', error)
+    }
+  }
+
+  // 이미지 업로드 처리
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) {
+      await processImageFile(file)
+    }
+  }
+
+  // 드래그 앤 드롭 이벤트 처리
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragOver(true)
+  }
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragOver(false)
+  }
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragOver(false)
+
+    const files = e.dataTransfer.files
+    if (files && files[0]) {
+      await processImageFile(files[0])
+    }
+  }
+
+  // 이미지 제거
+  const removeImage = () => {
+    setUploadedImage(null)
+    setImagePreview(null)
+  }
 
   const handleUpdateModel = async () => {
     setIsUpdating(true)
     try {
-      const updatedData = await ModelService.updateInfluencer(params.id as string, {
+      let imageUrl = null
+
+      // 이미지가 업로드된 경우 S3에 업로드
+      if (uploadedImage) {
+        setIsUploadingImage(true)
+        try {
+          const formData = new FormData()
+          formData.append('file', uploadedImage)
+          formData.append('influencer_id', params.id?.toString() ?? '')
+
+          const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
+          const response = await fetch(`${backendUrl}/api/v1/influencers/upload-image`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+            },
+            body: formData
+          })
+
+          if (response.ok) {
+            const result = await response.json()
+            imageUrl = result.file_url
+            console.log('인플루언서 이미지 업로드 성공:', imageUrl)
+          } else {
+            console.warn('인플루언서 이미지 업로드 실패')
+          }
+        } catch (error) {
+          console.warn('인플루언서 이미지 업로드 중 오류:', error)
+        } finally {
+          setIsUploadingImage(false)
+        }
+      }
+
+      // 인플루언서 정보 업데이트
+      const updateData: any = {
         influencer_name: model.name,
-      })
+        influencer_description: model.description
+      }
+
+      // 이미지 URL이 있는 경우 추가
+      if (imageUrl) {
+        updateData.image_url = imageUrl
+      }
+
+      const updatedData = await ModelService.updateInfluencer(params.id?.toString() ?? '', updateData)
       setModel((prev: any) => ({
         ...prev,
         name: updatedData.influencer_name,
         description: updatedData.influencer_description || "",
+        image_url: updatedData.image_url || prev.image_url
       }))
-      alert("모델 정보가 성공적으로 업데이트되었습니다!")
+
+      // 이미지 업로드 후 상태 초기화
+      if (uploadedImage) {
+        setUploadedImage(null)
+        setImagePreview(null)
+      }
+
+      // 모델 데이터 다시 로드하여 변경사항 반영
+      await loadModelData()
+
+      // 성공 토스트 표시
+      toast({
+        title: "성공",
+        description: "모델 정보가 성공적으로 업데이트되었습니다!",
+        variant: "default",
+      })
+
+      // 페이지 새로고침 없이 UI 업데이트
+      setModel((prev: any) => ({
+        ...prev,
+        name: updatedData.influencer_name,
+        description: updatedData.influencer_description || "",
+        image_url: updatedData.image_url || prev.image_url
+      }))
+
+      // 현재 페이지로 리다이렉트 (새로고침)
+      let influencerId: string | undefined;
+      if (typeof params.id === 'string') {
+        influencerId = params.id;
+      } else if (Array.isArray(params.id)) {
+        influencerId = params.id[0];
+      }
+      router.replace(influencerId ? `/model/${influencerId}` : '/dashboard');
     } catch (error) {
-      console.error("Model update error:", error)
-      alert("모델 정보 업데이트에 실패했습니다. 다시 시도해주세요.")
+      // 실패 토스트 표시
+      toast({
+        title: "오류",
+        description: "모델 정보 업데이트에 실패했습니다. 다시 시도해주세요.",
+        variant: "destructive",
+      })
     } finally {
       setIsUpdating(false)
     }
@@ -304,46 +721,81 @@ function ModelDetailContent() {
     }
   }
 
-  const generateNewApiKey = () => {
-    const newKey = "ai_inf_" + Math.random().toString(36).substring(2, 18)
-    setModel((prev: any) => ({ ...prev, apiKey: newKey }))
+  const generateNewApiKey = async () => {
+    setIsGeneratingApiKey(true)
+    try {
+      const response = await ModelService.generateApiKey(params.id as string)
+      setApiKeyInfo({
+        api_key: response.api_key,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      // 모델 상태에 API 키 업데이트
+      setModel((prev: any) => ({ ...prev, apiKey: response.api_key }))
+      alert("새로운 API 키가 성공적으로 생성되었습니다!")
+    } catch (error) {
+      console.error("API key generation error:", error)
+      alert("API 키 생성에 실패했습니다. 다시 시도해주세요.")
+    } finally {
+      setIsGeneratingApiKey(false)
+    }
+  }
+
+  const testChatbot = async () => {
+    if (!testMessage.trim() || !model.apiKey) {
+      alert("메시지를 입력하고 API 키가 있어야 합니다.")
+      return
+    }
+
+    setIsTestingChatbot(true)
+    try {
+      const response = await ModelService.callChatbot(model.apiKey, {
+        message: testMessage
+      })
+      setTestResponse(response.response)
+    } catch (error: any) {
+      console.error("Chatbot test error:", error)
+      setTestResponse(`오류: ${error.response?.data?.detail || error.message || '알 수 없는 오류'}`)
+    } finally {
+      setIsTestingChatbot(false)
+    }
   }
 
   // Instagram 연동 관련 함수들
   const handleInstagramConnect = async () => {
     setIsConnecting(true)
-    
+
     try {
       // Instagram API with Instagram Login OAuth URL 생성
       const instagramAppId = process.env.NEXT_PUBLIC_INSTAGRAM_APP_ID
       const redirectUri = `${window.location.origin}/auth/instagram/callback`
       // Instagram API with Instagram Login 스코프 설정
       const scope = "instagram_business_basic,instagram_business_manage_messages,instagram_business_manage_comments,instagram_business_content_publish"
-      
+
       const authUrl = `https://api.instagram.com/oauth/authorize` +
         `?client_id=${instagramAppId}` +
         `&redirect_uri=${encodeURIComponent(redirectUri)}` +
         `&scope=${scope}` +
         `&response_type=code` +
         `&state=${params.id}` // 모델 ID를 state로 전달
-      
+
       // 팝업 창으로 Instagram OAuth 페이지 열기
       const popup = window.open(
         authUrl,
         'instagram-auth',
         'width=600,height=700,scrollbars=yes,resizable=yes'
       )
-      
+
       // 팝업에서 메시지를 기다림
       const handleMessage = async (event: MessageEvent) => {
         if (event.origin !== window.location.origin) return
-        
+
         const { type, code, error, state } = event.data
-        
+
         if (type === 'INSTAGRAM_AUTH_SUCCESS' && code && state === params.id) {
           popup?.close()
           window.removeEventListener('message', handleMessage)
-          
+
           try {
             // 백엔드에 code 전송하여 토큰 교환 및 계정 연동
             const data = await ModelService.connectInstagram(params.id as string, {
@@ -363,10 +815,9 @@ function ModelDetailContent() {
             })
             alert('Instagram 비즈니스 계정이 성공적으로 연동되었습니다!')
           } catch (error: any) {
-            console.error('Instagram 연동 오류:', error)
             alert('Instagram 연동에 실패했습니다. 다시 시도해주세요.')
           }
-          
+
           setIsConnecting(false)
         } else if (type === 'INSTAGRAM_AUTH_ERROR' || error) {
           popup?.close()
@@ -375,9 +826,9 @@ function ModelDetailContent() {
           alert('Instagram 연동이 취소되었거나 오류가 발생했습니다.')
         }
       }
-      
+
       window.addEventListener('message', handleMessage)
-      
+
       // 팝업이 닫힌 경우 처리
       const checkClosed = setInterval(() => {
         if (popup?.closed) {
@@ -386,9 +837,8 @@ function ModelDetailContent() {
           setIsConnecting(false)
         }
       }, 1000)
-      
+
     } catch (error) {
-      console.error("Instagram 연동 오류:", error)
       setIsConnecting(false)
       alert('Instagram 연동 중 오류가 발생했습니다.')
     }
@@ -398,20 +848,23 @@ function ModelDetailContent() {
     try {
       // API 호출하여 Instagram 연동 해제
       await ModelService.disconnectInstagram(params.id as string)
-      
+
       setInstagramStatus({
         is_connected: false
       })
       alert("Instagram 계정 연동이 해제되었습니다.")
     } catch (error) {
-      console.error("Instagram 연동 해제 오류:", error)
       alert("Instagram 연동 해제에 실패했습니다. 다시 시도해주세요.")
     }
   }
 
   // 컴포넌트 마운트 시 모델 데이터 로드
   React.useEffect(() => {
-    loadModelData()
+    const loadData = async () => {
+      await loadModelData()
+      await loadPostsData()
+    }
+    loadData()
   }, [params.id])
 
   // 모델 데이터 로드 후 Instagram 상태 확인
@@ -443,12 +896,10 @@ function ModelDetailContent() {
                 } : undefined
               })
             } catch (error) {
-              console.error('Instagram status error:', error)
               setInstagramStatus({ is_connected: false })
             }
           }
         } catch (error) {
-          console.error("Instagram 상태 확인 오류:", error)
           setInstagramStatus({ is_connected: false })
         }
       }
@@ -457,16 +908,97 @@ function ModelDetailContent() {
     }
   }, [isModelLoading, model, params.id])
 
+  // 예약된 게시글이 있을 때 주기적으로 상태 확인 (30초마다)
+  React.useEffect(() => {
+    const hasScheduledPosts = posts.some(post => post.status === 'scheduled')
+
+    if (hasScheduledPosts) {
+      const interval = setInterval(async () => {
+        console.log('🔄 예약된 게시글 상태 확인 중...')
+        await loadPostsData() // 예약된 게시글이 있으면 30초마다 새로고침
+
+        // 상태 변경 감지
+        const updatedPosts = await apiClient.get<any[]>(`/api/v1/boards?influencer_id=${params.id}`)
+        const transformedPosts: ContentPost[] = updatedPosts.map((board: any) => {
+          const influencerName = board.influencer_name || model?.name || 'AI 인플루언서'
+          const influencerDescription = board.influencer_description || model?.description || ''
+
+          const basePost = {
+            id: board.board_id,
+            title: board.board_topic || '제목 없음',
+            content: board.board_description || '',
+            platform: getPlatformName(board.board_platform),
+            status: getStatusName(board.board_status),
+            publishedAt: board.published_at || board.created_at || '',
+            scheduledAt: board.reservation_at || '',
+            hashtags: board.board_hash_tag ?
+              board.board_hash_tag.split(' ').filter((tag: string) => tag.trim()).map((tag: string) =>
+                tag.startsWith('#') ? tag : `#${tag}`
+              ) : [],
+            media: {
+              type: "image" as const,
+              urls: [board.image_url || "/placeholder.svg?height=400&width=400"],
+              thumbnailUrl: board.image_url || "/placeholder.svg?height=400&width=400"
+            },
+            influencerId: board.influencer_id,
+            influencerName: influencerName,
+            influencerDescription: influencerDescription,
+            instagram_link: board.instagram_link || undefined
+          }
+
+          const instagramStats = board.instagram_stats || {
+            like_count: 0,
+            comments_count: 0
+          }
+
+          return {
+            ...basePost,
+            engagement: {
+              likes: instagramStats.like_count || 0,
+              comments: instagramStats.comments_count || 0
+            }
+          }
+        })
+
+        // 상태 변경 감지 및 로그
+        const currentPostIds = new Set(posts.map(p => p.id))
+        const updatedPostIds = new Set(transformedPosts.map(p => p.id))
+
+        // 새로 발행된 게시글 감지
+        const newlyPublished = transformedPosts.filter(post =>
+          post.status === 'published' &&
+          posts.find(p => p.id === post.id)?.status === 'scheduled'
+        )
+
+        if (newlyPublished.length > 0) {
+          console.log('✅ 새로 발행된 게시글 감지:', newlyPublished.map(p => p.title))
+          setPosts(transformedPosts)
+          await loadAnalyticsData() // 분석 데이터도 갱신
+
+          // 사용자에게 알림 (선택사항)
+          if (newlyPublished.length === 1) {
+            console.log(`🎉 "${newlyPublished[0].title}" 게시글이 발행되었습니다!`)
+          } else {
+            console.log(`🎉 ${newlyPublished.length}개의 게시글이 발행되었습니다!`)
+          }
+        }
+
+      }, 30000) // 30초로 단축
+
+      return () => clearInterval(interval)
+    }
+  }, [posts, params.id, model])
+
   const getStatusBadge = (status: ContentPost["status"]) => {
     switch (status) {
       case "published":
-        return <Badge className="bg-green-100 text-green-800">발행됨</Badge>
+        return <Badge className="bg-green-100 text-green-800 whitespace-nowrap">발행됨</Badge>
       case "scheduled":
-        return <Badge className="bg-blue-100 text-blue-800">예약됨</Badge>
+        return <Badge className="bg-blue-100 text-blue-800 whitespace-nowrap">예약됨</Badge>
       case "draft":
-        return <Badge className="bg-gray-100 text-gray-800">임시저장</Badge>
+        return <Badge className="bg-gray-100 text-gray-800 whitespace-nowrap">임시저장</Badge>
       default:
-        return <Badge variant="secondary">알 수 없음</Badge>
+        return <Badge variant="secondary" className="whitespace-nowrap">알 수 없음</Badge>
     }
   }
 
@@ -477,9 +1009,10 @@ function ModelDetailContent() {
       Twitter: "bg-sky-100 text-sky-800",
       TikTok: "bg-purple-100 text-purple-800",
       YouTube: "bg-red-100 text-red-800",
+      Blog: "bg-orange-100 text-orange-800",
     }
 
-    return <Badge className={colors[platform] || "bg-gray-100 text-gray-800"}>{platform}</Badge>
+    return <Badge className={`${colors[platform] || "bg-gray-100 text-gray-800"} whitespace-nowrap`}>{platform}</Badge>
   }
 
   const formatDate = (dateString: string) => {
@@ -495,14 +1028,129 @@ function ModelDetailContent() {
 
   const formatFullDate = (dateString: string) => {
     if (!dateString) return ""
-    return new Date(dateString).toLocaleDateString("ko-KR", {
+    const date = new Date(dateString)
+    // 유효한 날짜인지 확인
+    if (isNaN(date.getTime())) return ""
+
+    // 한국 시간으로 변환 (UTC + 9시간)
+    const koreanTime = new Date(date.getTime() + (9 * 60 * 60 * 1000))
+
+    return koreanTime.toLocaleString("ko-KR", {
       year: "numeric",
       month: "long",
       day: "numeric",
       weekday: "long",
       hour: "2-digit",
-      minute: "2-digit",
+      minute: "2-digit"
     })
+  }
+
+  // 게시글 상세 보기 핸들러
+  const handleViewPostDetail = (post: ContentPost) => {
+    setSelectedPost(post)
+    setIsPostDetailModalOpen(true)
+    setIsEditing(false)
+    setEditTitle(post.title || "")
+    setEditContent(post.content || "")
+    setEditHashtags((post.hashtags || []).join(" "))
+    setEditScheduledAt(post.scheduledAt || "")
+  }
+
+  // 게시글 상세 모달 닫기
+  const handleClosePostDetail = () => {
+    setSelectedPost(null)
+    setIsPostDetailModalOpen(false)
+  }
+
+  // 게시글 수정 저장
+  const handleEditSave = async () => {
+    if (!selectedPost || isSaving) return;
+
+    const originalTitle = selectedPost.title || "게시글"
+    const hasChanges = editTitle !== originalTitle ||
+      editContent !== (selectedPost.content || "") ||
+      editHashtags !== (selectedPost.hashtags?.join(" ") || "") ||
+      editScheduledAt !== (selectedPost.scheduledAt ? selectedPost.scheduledAt.slice(0, 16) : "")
+
+    if (!hasChanges) {
+      setIsEditing(false)
+      return
+    }
+
+    setIsSaving(true);
+    try {
+      // 백엔드 API 호출하여 게시글 수정
+      const boardId = selectedPost.id;
+      const updateData = {
+        board_topic: editTitle,
+        board_description: editContent,
+        board_hash_tag: editHashtags,
+        ...(editScheduledAt && { reservation_at: `${editScheduledAt}:00` })
+      };
+
+      await apiClient.put(`/api/v1/boards/${boardId}`, updateData);
+
+      // 성공 시 프론트엔드 상태 업데이트
+      setPosts(posts => {
+        const newPosts = posts.map(post => {
+          if (post.id !== selectedPost.id) return post;
+
+          return {
+            ...post,
+            title: editTitle,
+            content: editContent,
+            hashtags: editHashtags.split(" ").filter(tag => tag.startsWith("#")),
+            status: post.status,
+            scheduledAt: post.scheduledAt,
+          };
+        });
+        // 최신 selectedPost로 갱신
+        const updated = newPosts.find(p => p.id === selectedPost.id);
+        if (updated) setSelectedPost(updated);
+        return newPosts;
+      });
+
+      // 분석 데이터도 갱신
+      await loadAnalyticsData()
+
+      setIsEditing(false);
+      setIsPostDetailModalOpen(false);
+
+      console.log('게시글 수정 완료:', editTitle)
+
+    } catch (error) {
+      console.error('게시글 수정 실패:', error);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // 게시글 삭제
+  const handleDeletePost = async (postId: string | undefined) => {
+    if (!postId) return
+
+    const postToDelete = posts.find((post) => post.id === postId)
+    const postTitle = postToDelete?.title || "게시글"
+
+    try {
+      await apiClient.delete(`/api/v1/boards/${postId}`)
+
+      // 로컬 상태에서 게시글 제거
+      setPosts((prev) => prev.filter((post) => post.id !== postId))
+
+      // 모달 닫기
+      setIsPostDetailModalOpen(false)
+      setSelectedPost(null)
+
+      // 분석 데이터 다시 로드 (게시글 수 변경 반영)
+      await loadAnalyticsData()
+
+      console.log(`게시글 "${postTitle}" 삭제 완료`)
+
+    } catch (error) {
+      console.error('게시글 삭제 실패:', error);
+      alert('게시글 삭제에 실패했습니다. 다시 시도해주세요.');
+    }
   }
 
   // 플랫폼별 게시글 렌더링
@@ -551,13 +1199,12 @@ function ModelDetailContent() {
                 <div className="flex items-center space-x-4">
                   <Heart className="h-6 w-6" />
                   <MessageCircle className="h-6 w-6" />
-                  <Share2 className="h-6 w-6" />
                 </div>
                 <Bookmark className="h-6 w-6" />
               </div>
 
               {/* 좋아요 수 */}
-              <p className="font-semibold text-sm mb-2">좋아요 {post.engagement.likes.toLocaleString()}개</p>
+              <p className="font-semibold text-sm mb-2">좋아요 {(post.engagement?.likes || 0).toLocaleString()}개</p>
 
               {/* 캡션 */}
               <div className="text-sm">
@@ -567,7 +1214,7 @@ function ModelDetailContent() {
 
               {/* 해시태그 */}
               <div className="mt-2">
-                {post.hashtags.map((tag, index) => (
+                {post.hashtags?.map((tag, index) => (
                   <span key={index} className="text-blue-600 text-sm mr-1">
                     {tag}
                   </span>
@@ -575,8 +1222,8 @@ function ModelDetailContent() {
               </div>
 
               {/* 댓글 보기 */}
-              <p className="text-gray-500 text-sm mt-2">댓글 {post.engagement.comments}개 모두 보기</p>
-              <p className="text-gray-400 text-xs mt-1">{formatDate(post.publishedAt)}</p>
+              <p className="text-gray-500 text-sm mt-2">댓글 {post.engagement?.comments || 0}개 모두 보기</p>
+              <p className="text-gray-400 text-xs mt-1">{formatDate(post.publishedAt || '')}</p>
             </div>
           </div>
         )
@@ -591,7 +1238,7 @@ function ModelDetailContent() {
               </Avatar>
               <div className="flex-1">
                 <p className="font-semibold text-sm">{model.name}</p>
-                <p className="text-xs text-gray-500">{formatDate(post.publishedAt)} · 🌍</p>
+                <p className="text-xs text-gray-500">{formatDate(post.publishedAt || '')} · 🌍</p>
               </div>
             </div>
 
@@ -610,9 +1257,9 @@ function ModelDetailContent() {
             {/* Facebook 반응 */}
             <div className="border-t pt-2">
               <div className="flex items-center justify-between text-gray-500 text-sm mb-2">
-                <span>👍❤️😊 {post.engagement.likes}</span>
+                <span>👍❤️😊 {post.engagement?.likes || 0}</span>
                 <span>
-                  댓글 {post.engagement.comments}개 · 공유 {post.engagement.shares}개
+                  댓글 {post.engagement?.comments || 0}개
                 </span>
               </div>
               <div className="flex items-center justify-around border-t pt-2">
@@ -624,10 +1271,7 @@ function ModelDetailContent() {
                   <MessageCircle className="h-4 w-4" />
                   <span className="text-sm">댓글</span>
                 </button>
-                <button className="flex items-center space-x-1 text-gray-600 hover:bg-gray-100 px-4 py-2 rounded">
-                  <Share2 className="h-4 w-4" />
-                  <span className="text-sm">공유</span>
-                </button>
+
               </div>
             </div>
           </div>
@@ -647,7 +1291,7 @@ function ModelDetailContent() {
                   <span className="text-blue-500">✓</span>
                   <p className="text-gray-500 text-sm">@{model.name.replace(/\s+/g, "").toLowerCase()}</p>
                   <span className="text-gray-500">·</span>
-                  <p className="text-gray-500 text-sm">{formatDate(post.publishedAt)}</p>
+                  <p className="text-gray-500 text-sm">{formatDate(post.publishedAt || '')}</p>
                 </div>
 
                 {/* Twitter 텍스트 */}
@@ -666,15 +1310,11 @@ function ModelDetailContent() {
                 <div className="flex items-center justify-between mt-3 max-w-md">
                   <button className="flex items-center space-x-1 text-gray-500 hover:text-blue-500">
                     <MessageCircle className="h-4 w-4" />
-                    <span className="text-sm">{post.engagement.comments}</span>
-                  </button>
-                  <button className="flex items-center space-x-1 text-gray-500 hover:text-green-500">
-                    <Share2 className="h-4 w-4" />
-                    <span className="text-sm">{post.engagement.shares}</span>
+                    <span className="text-sm">{post.engagement?.comments || 0}</span>
                   </button>
                   <button className="flex items-center space-x-1 text-gray-500 hover:text-red-500">
                     <Heart className="h-4 w-4" />
-                    <span className="text-sm">{post.engagement.likes}</span>
+                    <span className="text-sm">{post.engagement?.likes || 0}</span>
                   </button>
                   <button className="flex items-center space-x-1 text-gray-500 hover:text-blue-500">
                     <ExternalLink className="h-4 w-4" />
@@ -707,20 +1347,15 @@ function ModelDetailContent() {
                   <div className="w-12 h-12 bg-gray-800 rounded-full flex items-center justify-center mb-1">
                     <Heart className="h-6 w-6 text-white" />
                   </div>
-                  <span className="text-white text-xs">{post.engagement.likes}</span>
+                  <span className="text-white text-xs">{post.engagement?.likes || 0}</span>
                 </div>
                 <div className="text-center">
                   <div className="w-12 h-12 bg-gray-800 rounded-full flex items-center justify-center mb-1">
                     <MessageCircle className="h-6 w-6 text-white" />
                   </div>
-                  <span className="text-white text-xs">{post.engagement.comments}</span>
+                  <span className="text-white text-xs">{post.engagement?.comments || 0}</span>
                 </div>
-                <div className="text-center">
-                  <div className="w-12 h-12 bg-gray-800 rounded-full flex items-center justify-center mb-1">
-                    <Share2 className="h-6 w-6 text-white" />
-                  </div>
-                  <span className="text-white text-xs">{post.engagement.shares}</span>
-                </div>
+
               </div>
 
               {/* TikTok 하단 정보 */}
@@ -728,7 +1363,7 @@ function ModelDetailContent() {
                 <p className="font-semibold text-sm mb-1">@{model.name.replace(/\s+/g, "").toLowerCase()}</p>
                 <p className="text-sm mb-2">{post.content}</p>
                 <div className="flex flex-wrap gap-1">
-                  {post.hashtags.slice(0, 3).map((tag, index) => (
+                  {post.hashtags?.slice(0, 3).map((tag, index) => (
                     <span key={index} className="text-xs">
                       {tag}
                     </span>
@@ -766,9 +1401,7 @@ function ModelDetailContent() {
                 <span className="text-red-600 text-xs">✓</span>
               </div>
               <div className="flex items-center space-x-2 text-xs text-gray-500">
-                <span>조회수 {post.engagement.views?.toLocaleString()}회</span>
-                <span>·</span>
-                <span>{formatDate(post.publishedAt)}</span>
+                <span>{formatDate(post.publishedAt || '')}</span>
               </div>
               <p className="text-sm text-gray-600 mt-2 line-clamp-2">{post.content}</p>
             </div>
@@ -786,27 +1419,39 @@ function ModelDetailContent() {
 
   // 플랫폼별 성과 계산 함수 추가
   const calculatePlatformStats = () => {
+    // 모든 플랫폼을 기본으로 설정
+    const allPlatforms = ['Instagram', 'Facebook', 'Twitter', 'TikTok', 'YouTube', 'Blog']
     const platformStats: Record<
       string,
       {
         name: string
         posts: number
         totalLikes: number
-        totalViews: number
         totalComments: number
         avgEngagement: number
         color: string
       }
     > = {}
 
+    // 모든 플랫폼을 0으로 초기화
+    allPlatforms.forEach((platform) => {
+      platformStats[platform] = {
+        name: platform,
+        posts: 0,
+        totalLikes: 0,
+        totalComments: 0,
+        avgEngagement: 0,
+        color: "",
+      }
+    })
+
     posts.forEach((post) => {
-      if (post.status === "published") {
+      if (post.status === "published" && post.platform) {
         if (!platformStats[post.platform]) {
           platformStats[post.platform] = {
             name: post.platform,
             posts: 0,
             totalLikes: 0,
-            totalViews: 0,
             totalComments: 0,
             avgEngagement: 0,
             color: "",
@@ -815,9 +1460,8 @@ function ModelDetailContent() {
 
         const stats = platformStats[post.platform]
         stats.posts += 1
-        stats.totalLikes += post.engagement.likes
-        stats.totalViews += post.engagement.views || 0
-        stats.totalComments += post.engagement.comments
+        stats.totalLikes += post.engagement?.likes || 0
+        stats.totalComments += post.engagement?.comments || 0
       }
     })
 
@@ -834,6 +1478,7 @@ function ModelDetailContent() {
         Twitter: "bg-sky-500",
         TikTok: "bg-purple-600",
         YouTube: "bg-red-600",
+        Blog: "bg-orange-500",
       }
       stats.color = colors[platform] || "bg-gray-500"
     })
@@ -842,6 +1487,13 @@ function ModelDetailContent() {
   }
 
   const platformStats = calculatePlatformStats()
+
+  // model이 null이거나 로딩 중이면 로딩 메시지 표시
+  if (isModelLoading || !model) {
+    return (
+      <div className="flex items-center justify-center min-h-[300px] text-gray-500 text-lg">로딩 중...</div>
+    )
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -858,22 +1510,22 @@ function ModelDetailContent() {
               <h1 className="text-3xl font-bold text-gray-900">{model.name}</h1>
               <p className="text-gray-600 mt-2">{model.description}</p>
               <div className="flex items-center space-x-4 mt-4">
-                                <Badge className={
-                  model.learning_status === 1 ? "bg-green-100 text-green-800" : 
-                  model.learning_status === 0 ? "bg-yellow-100 text-yellow-800" : 
-                  "bg-red-100 text-red-800"
+                <Badge className={
+                  model.learning_status === 1 ? "bg-green-100 text-green-800" :
+                    model.learning_status === 0 ? "bg-yellow-100 text-yellow-800" :
+                      "bg-red-100 text-red-800"
                 }>
-                  {model.learning_status === 1 ? "사용 가능" : 
-                   model.learning_status === 0 ? "생성 중" : 
-                   "오류"}
+                  {model.learning_status === 1 ? "사용 가능" :
+                    model.learning_status === 0 ? "생성 중" :
+                      "오류"}
                 </Badge>
                 <span className="text-sm text-gray-500">생성일: {model.createdAt}</span>
               </div>
             </div>
             <div className="flex space-x-2">
               {model.learning_status === 1 && (
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   size="sm"
                   onClick={() => window.open(`/chat/${model.id}`, '_blank')}
                 >
@@ -888,28 +1540,28 @@ function ModelDetailContent() {
                     모델 삭제
                   </Button>
                 </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>모델 삭제 확인</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    "{model.name}" 모델을 완전히 삭제하시겠습니까?
-                    <br />
-                    <br />
-                    <strong>이 작업은 되돌릴 수 없으며, 다음 데이터가 모두 삭제됩니다:</strong>
-                    <br />• 모든 게시글 및 콘텐츠
-                    <br />• API 키 및 설정
-                    <br />• 학습 데이터 및 모델 정보
-                    <br />• 분석 데이터 및 통계
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>취소</AlertDialogCancel>
-                  <AlertDialogAction onClick={handleDeleteModel} className="bg-red-600 hover:bg-red-700">
-                    영구 삭제
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>모델 삭제 확인</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      "{model.name}" 모델을 완전히 삭제하시겠습니까?
+                      <br />
+                      <br />
+                      <strong>이 작업은 되돌릴 수 없으며, 다음 데이터가 모두 삭제됩니다:</strong>
+                      <br />• 모든 게시글 및 콘텐츠
+                      <br />• API 키 및 설정
+                      <br />• 학습 데이터 및 모델 정보
+                      <br />• 분석 데이터 및 통계
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>취소</AlertDialogCancel>
+                    <AlertDialogAction onClick={handleDeleteModel} className="bg-red-600 hover:bg-red-700">
+                      영구 삭제
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </div>
           </div>
         </div>
@@ -940,11 +1592,30 @@ function ModelDetailContent() {
 
           {/* 분석 탭 */}
           <TabsContent value="analytics">
+            <div className="flex justify-between items-center mb-6">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">인플루언서 분석</h3>
+                <p className="text-sm text-gray-600">{model?.name}의 성과와 통계를 확인하세요</p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={loadAnalyticsData}
+                disabled={isPostsLoading}
+                className="flex items-center space-x-2"
+              >
+                <RefreshCw className={`h-4 w-4 ${isPostsLoading ? 'animate-spin' : ''}`} />
+                <span>새로고침</span>
+              </Button>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
               <Card>
                 <CardContent className="p-6">
                   <div className="text-center">
-                    <p className="text-2xl font-bold text-blue-600">1,234</p>
+                    <p className="text-2xl font-bold text-blue-600">
+                      {analyticsData.totalApiCalls.toLocaleString()}
+                    </p>
                     <p className="text-sm text-gray-600">총 API 호출</p>
                   </div>
                 </CardContent>
@@ -952,7 +1623,9 @@ function ModelDetailContent() {
               <Card>
                 <CardContent className="p-6">
                   <div className="text-center">
-                    <p className="text-2xl font-bold text-orange-600">89</p>
+                    <p className="text-2xl font-bold text-orange-600">
+                      {analyticsData.todayApiCalls.toLocaleString()}
+                    </p>
                     <p className="text-sm text-gray-600">오늘 호출</p>
                   </div>
                 </CardContent>
@@ -961,7 +1634,7 @@ function ModelDetailContent() {
                 <CardContent className="p-6">
                   <div className="text-center">
                     <p className="text-2xl font-bold text-green-600">
-                      {posts.filter((p) => p.status === "published").length}
+                      {analyticsData.publishedPosts.toLocaleString()}
                     </p>
                     <p className="text-sm text-gray-600">발행된 게시글</p>
                   </div>
@@ -971,10 +1644,7 @@ function ModelDetailContent() {
                 <CardContent className="p-6">
                   <div className="text-center">
                     <p className="text-2xl font-bold text-purple-600">
-                      {posts
-                        .filter((p) => p.status === "published")
-                        .reduce((sum, p) => sum + p.engagement.likes, 0)
-                        .toLocaleString()}
+                      {analyticsData.totalLikes.toLocaleString()}
                     </p>
                     <p className="text-sm text-gray-600">총 좋아요</p>
                   </div>
@@ -988,8 +1658,37 @@ function ModelDetailContent() {
                 <CardDescription>최근 7일간의 API 사용량 추이입니다</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="h-64 flex items-center justify-center bg-gray-50 rounded-lg">
-                  <p className="text-gray-500">차트 영역 (실제 구현시 차트 라이브러리 사용)</p>
+                <div className="h-64">
+                  {weeklyChartData.length > 0 ? (
+                    <div className="h-full flex items-end justify-between space-x-2">
+                      {weeklyChartData.map((data, index) => (
+                        <div key={data.date} className="flex-1 flex flex-col items-center">
+                          <div
+                            className="w-full bg-blue-500 rounded-t"
+                            style={{
+                              height: `${Math.max((data.calls / Math.max(...weeklyChartData.map(d => d.calls))) * 200, 4)}px`
+                            }}
+                          />
+                          <div className="text-xs text-gray-500 mt-2 text-center">
+                            {new Date(data.date).toLocaleDateString('ko-KR', {
+                              month: 'short',
+                              day: 'numeric'
+                            })}
+                          </div>
+                          <div className="text-xs font-medium text-gray-700 mt-1">
+                            {data.calls}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="h-full flex items-center justify-center">
+                      <div className="text-center">
+                        <BarChart3 className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                        <p className="text-gray-500 mb-2">차트 데이터 로딩 중...</p>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -1022,12 +1721,7 @@ function ModelDetailContent() {
                           <span className="text-sm text-gray-600">총 댓글</span>
                           <span className="font-medium">{stats.totalComments.toLocaleString()}</span>
                         </div>
-                        {stats.totalViews > 0 && (
-                          <div className="flex justify-between">
-                            <span className="text-sm text-gray-600">총 조회수</span>
-                            <span className="font-medium">{stats.totalViews.toLocaleString()}</span>
-                          </div>
-                        )}
+
                         <div className="flex justify-between border-t pt-2">
                           <span className="text-sm text-gray-600">평균 참여</span>
                           <span className="font-semibold text-blue-600">{stats.avgEngagement.toLocaleString()}</span>
@@ -1036,15 +1730,9 @@ function ModelDetailContent() {
                     </div>
                   ))}
                 </div>
-
-                {Object.keys(platformStats).length === 0 && (
-                  <div className="text-center py-8">
-                    <p className="text-gray-500">아직 발행된 게시글이 없습니다</p>
-                    <p className="text-sm text-gray-400 mt-1">게시글을 발행하면 플랫폼별 성과를 확인할 수 있습니다</p>
-                  </div>
-                )}
               </CardContent>
             </Card>
+
           </TabsContent>
 
           {/* 콘텐츠 탭 */}
@@ -1055,84 +1743,52 @@ function ModelDetailContent() {
                   <h3 className="text-lg font-semibold text-gray-900">최근 게시된 콘텐츠</h3>
                   <p className="text-sm text-gray-600">이 AI 모델이 생성한 게시글 목록입니다</p>
                 </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={loadPostsData}
+                  disabled={isPostsLoading}
+                  className="flex items-center space-x-2"
+                >
+                  <RefreshCw className={`h-4 w-4 ${isPostsLoading ? 'animate-spin' : ''}`} />
+                  <span>새로고침</span>
+                </Button>
               </div>
 
-              <div className="grid gap-4">
-                {posts.map((post) => (
-                  <Card key={post.id} className="hover:shadow-md transition-shadow">
-                    <CardContent className="p-6">
-                      <div className="flex justify-between items-start mb-4">
-                        <div className="flex-1">
-                          <div className="flex items-center space-x-3 mb-2">
-                            <h4 className="text-lg font-semibold text-gray-900">{post.title}</h4>
-                            {getStatusBadge(post.status)}
-                            {getPlatformBadge(post.platform)}
-                          </div>
-                          <p className="text-gray-600 text-sm line-clamp-3 mb-3">
-                            {post.content.length > 150 ? `${post.content.substring(0, 150)}...` : post.content}
-                          </p>
-                          <div className="flex flex-wrap gap-1 mb-3">
-                            {post.hashtags.map((tag, index) => (
-                              <span key={index} className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded">
-                                {tag}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="flex justify-between items-center">
-                        <div className="flex items-center space-x-4 text-sm text-gray-500">
-                          <div className="flex items-center space-x-1">
-                            <Calendar className="h-4 w-4" />
-                            <span>
-                              {post.status === "published" && formatDate(post.publishedAt)}
-                              {post.status === "scheduled" && `예약: ${formatDate(post.scheduledAt || "")}`}
-                              {post.status === "draft" && "임시저장"}
-                            </span>
-                          </div>
-                        </div>
-
-                        {post.status === "published" && (
-                          <div className="flex items-center space-x-4 text-sm text-gray-600">
-                            <div className="flex items-center space-x-1">
-                              <Heart className="h-4 w-4 text-red-500" />
-                              <span>{post.engagement.likes.toLocaleString()}</span>
-                            </div>
-                            <div className="flex items-center space-x-1">
-                              <MessageCircle className="h-4 w-4 text-blue-500" />
-                              <span>{post.engagement.comments}</span>
-                            </div>
-                            <div className="flex items-center space-x-1">
-                              <Share2 className="h-4 w-4 text-green-500" />
-                              <span>{post.engagement.shares}</span>
-                            </div>
-                            {post.engagement.views && (
-                              <div className="flex items-center space-x-1">
-                                <Eye className="h-4 w-4 text-purple-500" />
-                                <span>{post.engagement.views.toLocaleString()}</span>
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-
-              {posts.length === 0 && (
+              {isPostsLoading ? (
                 <div className="text-center py-12">
-                  <FileText className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-                  <p className="text-gray-500 text-lg">아직 생성된 콘텐츠가 없습니다</p>
-                  <p className="text-gray-400 mt-2">첫 번째 게시글을 작성해보세요!</p>
-                  <Link href="/create-post">
-                    <Button className="mt-4">
-                      <FileText className="h-4 w-4 mr-2" />
-                      게시글 작성하기
-                    </Button>
-                  </Link>
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                  <p className="text-gray-500 text-lg">게시글을 불러오는 중...</p>
                 </div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {posts.map((post) => (
+                      <PostCard
+                        key={post.id}
+                        post={post}
+                        onView={handleViewPostDetail}
+                        showActions={false}
+                        showInfluencerInfo={false}
+                        variant="content"
+                      />
+                    ))}
+                  </div>
+
+                  {posts.length === 0 && (
+                    <div className="text-center py-12">
+                      <FileText className="h-12 w-12 mx-auto mb-4 text-gray-300" />
+                      <p className="text-gray-500 text-lg">아직 생성된 콘텐츠가 없습니다</p>
+                      <p className="text-gray-400 mt-2">첫 번째 게시글을 작성해보세요!</p>
+                      <Link href="/create-post">
+                        <Button className="mt-4">
+                          <FileText className="h-4 w-4 mr-2" />
+                          게시글 작성하기
+                        </Button>
+                      </Link>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </TabsContent>
@@ -1155,6 +1811,7 @@ function ModelDetailContent() {
                         value={model.apiKey || ""}
                         readOnly
                         className="font-mono"
+                        placeholder={isGeneratingApiKey ? "생성 중..." : "API 키를 불러오는 중..."}
                       />
                       <Button variant="outline" size="icon" onClick={() => setShowApiKey(!showApiKey)}>
                         {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -1163,10 +1820,28 @@ function ModelDetailContent() {
                         <Copy className="h-4 w-4" />
                       </Button>
                     </div>
+                    {apiKeyInfo && (
+                      <div className="mt-2 text-xs text-gray-500 space-y-1">
+                        <div>생성일: {new Date(apiKeyInfo.created_at).toLocaleDateString('ko-KR')}</div>
+                        {apiKeyInfo.updated_at !== apiKeyInfo.created_at && (
+                          <div>수정일: {new Date(apiKeyInfo.updated_at).toLocaleDateString('ko-KR')}</div>
+                        )}
+                      </div>
+                    )}
                   </div>
                   <div className="flex space-x-2">
-                    <Button variant="outline" onClick={generateNewApiKey}>
-                      <RefreshCw className="h-4 w-4 mr-2" />새 키 생성
+                    <Button variant="outline" onClick={generateNewApiKey} disabled={isGeneratingApiKey}>
+                      {isGeneratingApiKey ? (
+                        <>
+                          <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                          생성 중...
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="h-4 w-4 mr-2" />
+                          새 키 생성
+                        </>
+                      )}
                     </Button>
                   </div>
                 </CardContent>
@@ -1182,18 +1857,17 @@ function ModelDetailContent() {
                     <div>
                       <Label>엔드포인트</Label>
                       <div className="bg-gray-100 p-3 rounded-md font-mono text-sm">
-                        POST https://api.aiinfluencer.com/v1/chat
+                        POST https://api.aiinfluencer.com/v1/chat/chatbot
                       </div>
                     </div>
                     <div>
                       <Label>요청 예시</Label>
                       <pre className="bg-gray-100 p-3 rounded-md text-sm overflow-x-auto">
-                        {`curl -X POST https://api.aiinfluencer.com/v1/chat \\
+                        {`curl -X POST https://api.aiinfluencer.com/v1/chat/chatbot \\
     -H "Authorization: Bearer ${model.apiKey}" \\
     -H "Content-Type: application/json" \\
     -d '{
-      "message": "안녕하세요! 오늘 패션 추천 부탁드려요",
-      "model_id": "${model.id}"
+      "message": "안녕하세요! 오늘 패션 추천 부탁드려요"
     }'`}
                       </pre>
                     </div>
@@ -1225,11 +1899,10 @@ function ModelDetailContent() {
                   {instagramStatus.is_connected ? (
                     <div className="space-y-6">
                       {/* 연동된 계정 정보 */}
-                      <div className={`flex items-start space-x-4 p-4 rounded-lg border-2 ${
-                        instagramStatus.token_expired 
-                          ? 'bg-yellow-50 border-yellow-200' 
-                          : 'bg-green-50 border-green-200'
-                      }`}>
+                      <div className={`flex items-start space-x-4 p-4 rounded-lg border-2 ${instagramStatus.token_expired
+                        ? 'bg-yellow-50 border-yellow-200'
+                        : 'bg-green-50 border-green-200'
+                        }`}>
                         <div className="w-12 h-12 bg-gradient-to-br from-pink-500 to-purple-600 rounded-full flex items-center justify-center shadow-sm">
                           {instagramStatus.instagram_info?.profile_picture_url ? (
                             <PostImage url={instagramStatus.instagram_info.profile_picture_url} alt="Profile" className="w-12 h-12 rounded-full object-cover" />
@@ -1244,21 +1917,18 @@ function ModelDetailContent() {
                             ) : (
                               <CheckCircle className="h-4 w-4 text-green-600" />
                             )}
-                            <p className={`font-medium ${
-                              instagramStatus.token_expired ? 'text-yellow-900' : 'text-green-900'
-                            }`}>
+                            <p className={`font-medium ${instagramStatus.token_expired ? 'text-yellow-900' : 'text-green-900'
+                              }`}>
                               {instagramStatus.token_expired ? 'Instagram 계정 재연동 필요' : 'Instagram 계정 연동됨'}
                             </p>
                           </div>
-                          <p className={`text-sm ${
-                            instagramStatus.token_expired ? 'text-yellow-700' : 'text-green-700'
-                          }`}>
+                          <p className={`text-sm ${instagramStatus.token_expired ? 'text-yellow-700' : 'text-green-700'
+                            }`}>
                             @{instagramStatus.instagram_info?.username || 'Unknown'} • {instagramStatus.instagram_info?.account_type || 'Unknown'} 계정
                           </p>
                           {instagramStatus.connected_at && (
-                            <p className={`text-xs mt-1 ${
-                              instagramStatus.token_expired ? 'text-yellow-600' : 'text-green-600'
-                            }`}>
+                            <p className={`text-xs mt-1 ${instagramStatus.token_expired ? 'text-yellow-600' : 'text-green-600'
+                              }`}>
                               연동일: {new Date(instagramStatus.connected_at).toLocaleDateString('ko-KR')}
                             </p>
                           )}
@@ -1299,7 +1969,7 @@ function ModelDetailContent() {
                                   <p className="text-sm font-medium text-gray-900">{instagramStatus.instagram_info.name}</p>
                                 </div>
                               )}
-                              
+
                               {instagramStatus.instagram_info.biography && (
                                 <div>
                                   <p className="text-xs text-gray-500 mb-1">소개</p>
@@ -1308,13 +1978,13 @@ function ModelDetailContent() {
                                   </p>
                                 </div>
                               )}
-                              
+
                               {instagramStatus.instagram_info.website && (
                                 <div>
                                   <p className="text-xs text-gray-500 mb-1">웹사이트</p>
-                                  <a 
-                                    href={instagramStatus.instagram_info.website} 
-                                    target="_blank" 
+                                  <a
+                                    href={instagramStatus.instagram_info.website}
+                                    target="_blank"
                                     rel="noopener noreferrer"
                                     className="text-sm text-blue-600 hover:text-blue-800 underline"
                                   >
@@ -1327,13 +1997,14 @@ function ModelDetailContent() {
                         </div>
                       )}
 
+
                       {/* 활성화된 기능들 */}
                       <div className="space-y-3">
                         <div className="flex items-center space-x-3">
                           <CheckCircle className="h-5 w-5 text-green-500 flex-shrink-0" />
                           <span className="text-sm font-medium text-gray-900">AI 생성 콘텐츠 자동 포스팅</span>
                         </div>
-                        
+
                         <div className="flex items-center space-x-3">
                           <CheckCircle className="h-5 w-5 text-green-500 flex-shrink-0" />
                           <span className="text-sm font-medium text-gray-900">인사이트 및 분석 데이터 수집</span>
@@ -1352,10 +2023,11 @@ function ModelDetailContent() {
                         )}
                       </div>
 
+
                       {/* 재연동/연동 해제 버튼 */}
                       <div className="pt-2 space-y-3">
                         {instagramStatus.token_expired && (
-                          <Button 
+                          <Button
                             onClick={handleInstagramConnect}
                             disabled={isConnecting}
                             className="w-full bg-yellow-500 hover:bg-yellow-600 text-white font-medium py-2.5"
@@ -1373,8 +2045,8 @@ function ModelDetailContent() {
                             )}
                           </Button>
                         )}
-                        <Button 
-                          variant="outline" 
+                        <Button
+                          variant="outline"
                           onClick={handleInstagramDisconnect}
                           className="w-full text-red-600 border-red-200 hover:bg-red-50 font-medium py-2.5"
                         >
@@ -1385,13 +2057,14 @@ function ModelDetailContent() {
                     </div>
                   ) : (
                     <div className="space-y-6">
+
                       {/* 기능 리스트 */}
                       <div className="space-y-3">
                         <div className="flex items-center space-x-3">
                           <CheckCircle className="h-5 w-5 text-green-500 flex-shrink-0" />
                           <span className="text-sm font-medium text-gray-900">AI 생성 콘텐츠 자동 포스팅</span>
                         </div>
-                        
+
                         <div className="flex items-center space-x-3">
                           <CheckCircle className="h-5 w-5 text-green-500 flex-shrink-0" />
                           <span className="text-sm font-medium text-gray-900">인사이트 및 분석 데이터 수집</span>
@@ -1403,8 +2076,9 @@ function ModelDetailContent() {
                         </div>
                       </div>
 
+
                       {/* 연동 버튼 */}
-                      <Button 
+                      <Button
                         onClick={handleInstagramConnect}
                         disabled={isConnecting}
                         className="w-full bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white font-medium py-3 text-base"
@@ -1451,25 +2125,108 @@ function ModelDetailContent() {
                     <div className="flex flex-col items-center space-y-4">
                       {/* 대형 프로필 이미지 */}
                       <div className="relative">
-                        <div className="w-36 h-36 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg">
-                          <div className="w-20 h-20 bg-orange-500 rounded-lg flex items-center justify-center">
-                            <Bot className="h-10 w-10 text-white" />
+                        {uploadedImage && imagePreview ? (
+                          // 업로드된 이미지 미리보기
+                          <div className="w-36 h-36 rounded-full overflow-hidden shadow-lg">
+                            <img
+                              src={imagePreview}
+                              alt="Uploaded"
+                              className="w-full h-full object-cover"
+                            />
                           </div>
-                        </div>
+                        ) : model?.image_url ? (
+                          // 기존 인플루언서 이미지
+                          <div className="w-36 h-36 rounded-full overflow-hidden shadow-lg">
+                            <img
+                              src={model.image_url}
+                              alt="Profile"
+                              className="w-full h-full object-cover"
+                              onError={(e) => {
+                                // 이미지 로드 실패 시 기본 아이콘 표시
+                                const target = e.target as HTMLImageElement;
+                                target.style.display = 'none';
+                                const parent = target.parentElement;
+                                if (parent) {
+                                  parent.innerHTML = `
+                                    <div class="w-36 h-36 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg">
+                                      <div class="w-20 h-20 bg-orange-500 rounded-lg flex items-center justify-center">
+                                        <svg class="h-10 w-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+                                        </svg>
+                                      </div>
+                                    </div>
+                                  `;
+                                }
+                              }}
+                            />
+                          </div>
+                        ) : (
+                          // 기본 아이콘
+                          <div className="w-36 h-36 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg">
+                            <div className="w-20 h-20 bg-orange-500 rounded-lg flex items-center justify-center">
+                              <Bot className="h-10 w-10 text-white" />
+                            </div>
+                          </div>
+                        )}
                       </div>
-                      
+
                       <div className="text-center space-y-3">
                         <p className="text-sm text-gray-500">권장 크기: 400x400px, 최대 5MB</p>
-                        <div className="flex flex-col space-y-2 w-full max-w-xs">
-                          <Button variant="outline" size="sm" className="w-full border-gray-300 text-gray-700 hover:bg-gray-50">
-                            <Upload className="h-4 w-4 mr-2" />
-                            이미지 업로드
-                          </Button>
-                          <Button variant="outline" size="sm" className="w-full text-red-600 border-red-200 hover:bg-red-50">
-                            <Trash2 className="h-4 w-4 mr-2" />
-                            제거
-                          </Button>
-                        </div>
+
+                        {/* 업로드된 이미지가 있을 때 */}
+                        {uploadedImage && imagePreview ? (
+                          <div className="space-y-3">
+                            <div className="relative">
+                              <img
+                                src={imagePreview}
+                                alt="Uploaded"
+                                className="w-32 h-32 object-cover rounded-lg border mx-auto"
+                              />
+                            </div>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={removeImage}
+                              className="w-full text-red-600 border-red-200 hover:bg-red-50"
+                            >
+                              <Trash2 className="h-4 w-4 mr-2" />
+                              제거
+                            </Button>
+                          </div>
+                        ) : (
+                          /* 이미지 업로드 영역 */
+                          <div
+                            className={`
+                              border-2 border-dashed rounded-lg p-6 transition-all duration-300 cursor-pointer
+                              ${isDragOver
+                                ? "border-blue-500 bg-blue-50"
+                                : "border-gray-300 hover:border-blue-400 hover:bg-blue-50"
+                              }
+                            `}
+                            onDragOver={handleDragOver}
+                            onDragLeave={handleDragLeave}
+                            onDrop={handleDrop}
+                          >
+                            <input
+                              id="influencer-image-upload"
+                              type="file"
+                              accept="image/*"
+                              onChange={handleImageUpload}
+                              className="hidden"
+                            />
+                            <label htmlFor="influencer-image-upload" className="cursor-pointer">
+                              <div className="text-center">
+                                <Upload className="h-8 w-8 mx-auto mb-2 text-gray-400" />
+                                <p className="text-sm text-gray-600 mb-1">
+                                  클릭하여 이미지 선택
+                                </p>
+                                <p className="text-xs text-gray-500">
+                                  또는 이미지를 여기로 드래그하세요
+                                </p>
+                              </div>
+                            </label>
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -1504,12 +2261,12 @@ function ModelDetailContent() {
                           />
                         </div>
                       </div>
-                      <Button 
-                        onClick={handleUpdateModel} 
-                        disabled={isUpdating || isModelLoading} 
+                      <Button
+                        onClick={handleUpdateModel}
+                        disabled={isUpdating || isModelLoading || isUploadingImage}
                         className="w-full bg-gray-800 hover:bg-gray-900 text-white font-medium py-2.5"
                       >
-                        {isUpdating ? "업데이트 중..." : isModelLoading ? "로딩 중..." : "정보 저장"}
+                        {isUploadingImage ? "이미지 업로드 중..." : isUpdating ? "업데이트 중..." : isModelLoading ? "로딩 중..." : "정보 저장"}
                       </Button>
                     </div>
                   </div>
@@ -1519,7 +2276,250 @@ function ModelDetailContent() {
             </div>
           </TabsContent>
         </Tabs>
+
+        {/* 게시글 상세 보기 모달 */}
+        <Dialog open={isPostDetailModalOpen} onOpenChange={setIsPostDetailModalOpen}>
+          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center space-x-2">
+                <Eye className="h-5 w-5" />
+                <span>게시글 상세 보기</span>
+              </DialogTitle>
+              <div className="flex items-center space-x-2">
+                {(selectedPost?.status === 'draft' || selectedPost?.status === 'scheduled') && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setIsEditing(!isEditing)}
+                    className="flex items-center space-x-1"
+                  >
+                    {isEditing ? (
+                      <>
+                        <Eye className="h-4 w-4" />
+                        <span>보기 모드</span>
+                      </>
+                    ) : (
+                      <>
+                        <Edit className="h-4 w-4" />
+                        <span>수정 모드</span>
+                      </>
+                    )}
+                  </Button>
+                )}
+                {isEditing && (
+                  <Button
+                    onClick={handleEditSave}
+                    size="sm"
+                    className="bg-blue-600 hover:bg-blue-700 text-white"
+                  >
+                    저장
+                  </Button>
+                )}
+                {selectedPost?.instagram_link && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => window.open(selectedPost.instagram_link, '_blank')}
+                    className="flex items-center space-x-1"
+                  >
+                    <ExternalLink className="h-4 w-4" />
+                    <span>인스타그램 보기</span>
+                  </Button>
+                )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleDeletePost(selectedPost?.id)}
+                  className="flex items-center space-x-1 text-red-600 hover:text-red-700 hover:bg-red-50"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  <span>삭제</span>
+                </Button>
+              </div>
+            </DialogHeader>
+
+            {selectedPost && (
+              <div className="space-y-6">
+                {/* 게시글 기본 정보 */}
+                <div className="flex justify-between items-start pb-4 border-b">
+                  <div className="flex-1">
+                    <h3 className="font-semibold text-gray-900 mb-2">{selectedPost.title}</h3>
+                    {/* 인플루언서 정보 */}
+                    <div className="flex items-center space-x-2 text-sm text-gray-500 mt-1">
+                      <div className="w-5 h-5 bg-gradient-to-br from-purple-500 to-pink-500 rounded-full flex items-center justify-center">
+                        <span className="text-white text-xs font-medium">AI</span>
+                      </div>
+                      <span className="font-medium text-gray-700">
+                        {selectedPost.influencerName || (model?.name || 'AI 인플루언서')}
+                      </span>
+                      {selectedPost.influencerDescription && (
+                        <span className="text-gray-500">
+                          • {selectedPost.influencerDescription}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center space-x-2 text-sm text-gray-500 mt-1">
+                      <Calendar className="h-4 w-4" />
+                      {selectedPost.status === 'scheduled' && selectedPost.scheduledAt && selectedPost.scheduledAt.trim() !== '' ? (
+                        <span>예약 발행: {formatDate(selectedPost.scheduledAt || '')}</span>
+                      ) : selectedPost.status === 'published' && selectedPost.publishedAt && selectedPost.publishedAt.trim() !== '' ? (
+                        <span>발행: {formatDate(selectedPost.publishedAt || '')}</span>
+                      ) : selectedPost.status === 'published' ? (
+                        <span>발행됨 (날짜 정보 없음)</span>
+                      ) : selectedPost.status === 'scheduled' ? (
+                        <span>예약됨 (날짜 정보 없음)</span>
+                      ) : (
+                        <span>임시저장</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* 오른쪽 상단에 배지들 배치 */}
+                  <div className="flex flex-col items-end space-y-2 ml-4">
+                    {getPlatformBadge(selectedPost.platform)}
+                    {getStatusBadge(selectedPost.status)}
+                  </div>
+                </div>
+
+                {/* 게시글 내용 */}
+                <div className="space-y-2">
+                  <h4 className="text-sm font-medium text-gray-900">게시글 내용</h4>
+                  {isEditing && (selectedPost?.status === 'draft' || selectedPost?.status === 'scheduled') ? (
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">제목</label>
+                        <Input
+                          value={editTitle}
+                          onChange={(e) => setEditTitle(e.target.value)}
+                          placeholder="게시글 제목을 입력하세요"
+                          className="w-full"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">내용</label>
+                        <textarea
+                          value={editContent}
+                          onChange={(e) => setEditContent(e.target.value)}
+                          placeholder="게시글 내용을 입력하세요"
+                          className="w-full h-32 p-3 border border-gray-300 rounded-md resize-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">해시태그</label>
+                        <Input
+                          value={editHashtags}
+                          onChange={(e) => setEditHashtags(e.target.value)}
+                          placeholder="#해시태그1 #해시태그2"
+                          className="w-full"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">예약 시간</label>
+                        <Input
+                          type="datetime-local"
+                          value={editScheduledAt}
+                          onChange={(e) => setEditScheduledAt(e.target.value)}
+                          className="w-full"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="bg-gray-50 border rounded-lg p-4">
+                      <div className="whitespace-pre-wrap text-gray-800 leading-relaxed">
+                        {selectedPost.content}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* 해시태그 */}
+                {!isEditing && (
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-medium text-gray-900">해시태그</h4>
+                    <div className="flex flex-wrap gap-2">
+                      {selectedPost.hashtags?.map((tag, index) => (
+                        <span key={index} className="text-sm text-blue-600 bg-blue-50 px-3 py-1 rounded-full">
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* 미디어 정보 */}
+                {selectedPost.media && (
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-medium text-gray-900">미디어</h4>
+                    <div className="bg-gray-50 border rounded-lg p-4">
+                      <div className="flex items-center space-x-2 mb-2">
+                        <span className="text-sm font-medium text-gray-700">
+                          {selectedPost.media.type === "image" && "이미지"}
+                          {selectedPost.media.type === "video" && "비디오"}
+                          {selectedPost.media.type === "carousel" && "캐러셀"}
+                        </span>
+                        {selectedPost.media.type === "carousel" && (
+                          <Badge variant="outline" className="text-xs">
+                            {selectedPost.media.urls.length}개 파일
+                          </Badge>
+                        )}
+                      </div>
+                      {selectedPost.media.thumbnailUrl && (
+                        <div className="mt-2">
+                          <img
+                            src={selectedPost.media.thumbnailUrl}
+                            alt="미디어 썸네일"
+                            className="w-32 h-32 object-cover rounded-lg border"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* 성과 지표 */}
+                {selectedPost.status === "published" && selectedPost.engagement && (
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-medium text-gray-900">성과 지표</h4>
+                    <div className="bg-gray-50 rounded-lg p-4">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="text-center">
+                          <div className="flex items-center justify-center space-x-2 mb-1">
+                            <Heart className="h-5 w-5 text-red-500" />
+                            <span className="text-lg font-bold text-gray-900">
+                              {selectedPost.engagement.likes.toLocaleString()}
+                            </span>
+                          </div>
+                          <p className="text-sm text-gray-600">좋아요</p>
+                        </div>
+                        <div className="text-center">
+                          <div className="flex items-center justify-center space-x-2 mb-1">
+                            <MessageCircle className="h-5 w-5 text-blue-500" />
+                            <span className="text-lg font-bold text-gray-900">
+                              {selectedPost.engagement.comments.toLocaleString()}
+                            </span>
+                          </div>
+                          <p className="text-sm text-gray-600">댓글</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* 플랫폼별 미리보기 */}
+                <div className="space-y-2">
+                  <h4 className="text-sm font-medium text-gray-900">플랫폼 미리보기</h4>
+                  <div className="bg-gray-50 border rounded-lg p-4">
+                    {renderPlatformSpecificPost(selectedPost)}
+                  </div>
+                </div>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
       </div>
+
+      {/* 토스트 알림 컴포넌트 */}
+      <Toaster />
     </div>
   )
 }
@@ -1548,3 +2548,4 @@ export default function ModelDetailPage() {
     </Suspense>
   )
 }
+

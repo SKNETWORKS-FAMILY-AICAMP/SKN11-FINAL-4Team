@@ -135,6 +135,30 @@ export interface HuggingFaceToken {
   updated_at?: string
 }
 
+export interface APIKeyResponse {
+  influencer_id: string
+  api_key: string
+  message: string
+}
+
+export interface APIKeyInfo {
+  influencer_id: string
+  api_key: string
+  created_at: string
+  updated_at: string
+}
+
+export interface ChatbotRequest {
+  message: string
+  session_id?: string
+}
+
+export interface ChatbotResponse {
+  response: string
+  session_id: string
+  influencer_name: string
+}
+
 
 export class ModelService {
   /**
@@ -270,6 +294,54 @@ export class ModelService {
     return await apiClient.post<ToneGenerationResponse>('/api/v1/influencers/regenerate-tones', request, {
       timeout: 90000 // 1분 타임아웃
     })
+  }
+
+  /**
+   * API 키 생성 또는 업데이트
+   */
+  static async generateApiKey(influencerId: string): Promise<APIKeyResponse> {
+    console.log('🔧 ModelService.generateApiKey 호출:', influencerId)
+    try {
+      const result = await apiClient.post<APIKeyResponse>(`/api/v1/influencers/${influencerId}/api-key/generate`)
+      console.log('✅ ModelService.generateApiKey 성공:', result)
+      return result
+    } catch (error) {
+      console.error('❌ ModelService.generateApiKey 실패:', error)
+      throw error
+    }
+  }
+
+  /**
+   * API 키 조회
+   */
+  static async getApiKey(influencerId: string): Promise<APIKeyInfo> {
+    console.log('🔍 ModelService.getApiKey 호출:', influencerId)
+    try {
+      const result = await apiClient.get<APIKeyInfo>(`/api/v1/influencers/${influencerId}/api-key`)
+      console.log('✅ ModelService.getApiKey 성공:', result)
+      return result
+    } catch (error) {
+      console.error('❌ ModelService.getApiKey 실패:', error)
+      throw error
+    }
+  }
+
+  /**
+   * API 키로 챗봇 호출
+   */
+  static async callChatbot(
+    apiKey: string, 
+    request: ChatbotRequest
+  ): Promise<ChatbotResponse> {
+    return await apiClient.post<ChatbotResponse>(
+      '/api/v1/chat/chatbot',
+      request,
+      {
+        headers: {
+          'Authorization': `Bearer ${apiKey}`
+        }
+      }
+    )
   }
 
 }

@@ -20,7 +20,11 @@ import {
   Sparkles,
   AlertCircle,
   Loader2,
-  User
+  User,
+  Upload,
+  Instagram,
+  BookOpen,
+  Facebook
 } from "lucide-react"
 import { usePermission } from "@/hooks/use-auth"
 import { ModelService, type AIInfluencer } from "@/lib/services/model.service"
@@ -40,13 +44,13 @@ interface PlatformOption {
   value: number
   label: string
   description: string
-  icon: string
+  icon: React.ComponentType<{ className?: string }>
 }
 
 const PLATFORM_OPTIONS: PlatformOption[] = [
-  { value: 0, label: "Instagram", description: "이미지 중심의 소셜 미디어", icon: "/icons/instagram.png" },
-  { value: 1, label: "Blog", description: "긴 글 형태의 블로그 포스트", icon: "/icons/blog.png" },
-  { value: 2, label: "Facebook", description: "다양한 형태의 소셜 미디어", icon: "/icons/facebook.png" }
+  { value: 0, label: "Instagram", description: "이미지 중심의 소셜 미디어", icon: Instagram },
+  { value: 1, label: "Blog", description: "긴 글 형태의 블로그 포스트", icon: BookOpen },
+  { value: 2, label: "Facebook", description: "다양한 형태의 소셜 미디어", icon: Facebook }
 ]
 
 // 기본 해시태그 목록
@@ -83,6 +87,12 @@ export default function CreatePostPage() {
   const [converted, setConverted] = useState<string | null>(null)
   const [isConverting, setIsConverting] = useState(false)
   const [showFullPreview, setShowFullPreview] = useState(false)
+  const [imageInfo, setImageInfo] = useState<{
+    originalSize: { width: number; height: number } | null;
+    resizedSize: { width: number; height: number } | null;
+    isResized: boolean;
+  } | null>(null)
+
 
   // 발행 설정 상태
   const [publishType, setPublishType] = useState<'immediate' | 'scheduled'>('immediate')
@@ -118,11 +128,20 @@ export default function CreatePostPage() {
   }, [])
 
   // 폼 데이터 업데이트
-  const handleInputChange = (field: keyof CreatePostFormData, value: string | number | boolean | string[] | File | null) => {
+  const handleInputChange = async (field: keyof CreatePostFormData, value: string | number | boolean | string[] | File | null) => {
     setFormData(prev => ({
       ...prev,
       [field]: value
     }))
+
+    // 플랫폼이 Instagram으로 변경되고 이미지가 있는 경우 이미지 재처리
+    if (field === 'board_platform' && value === 0 && formData.uploaded_image) {
+      try {
+        await processImageFile(formData.uploaded_image)
+      } catch (error) {
+        console.error('Image reprocessing error:', error)
+      }
+    }
   }
 
   // 해시태그 추가
@@ -155,6 +174,8 @@ export default function CreatePostPage() {
     }
   }
 
+
+
   // 모든 필드 입력 여부 검증 (미리보기 버튼용)
   const isFormValid = () => {
     const hasImage = formData.uploaded_image !== null || imagePreview !== null
@@ -174,8 +195,83 @@ export default function CreatePostPage() {
     return basicFieldsValid
   }
 
+
+
+  // Instagram 비율에 맞게 이미지 패딩 처리 (픽셀 크기 조정 없음)
+  const padImageForInstagram = (file: File): Promise<{ file: File; originalSize: { width: number; height: number }; paddedSize: { width: number; height: number } }> => {
+    return new Promise((resolve, reject) => {
+      const canvas = document.createElement('canvas')
+      const ctx = canvas.getContext('2d')
+      const img = new Image()
+
+      img.onload = () => {
+        const { width, height } = img
+        const originalSize = { width, height }
+        const aspectRatio = width / height
+
+        // Instagram 요구사항에 맞는 비율 계산 (픽셀 크기는 조정하지 않음)
+        // 정사각형: 1:1 비율
+        // 세로형: 4:5 비율
+        // 가로형: 1.91:1 비율
+
+        let targetWidth = width
+        let targetHeight = height
+
+        if (aspectRatio > 1.91) {
+          // 가로형이 너무 긴 경우 - 높이를 늘려서 1.91:1 비율 맞춤
+          targetWidth = width
+          targetHeight = Math.round(width / 1.91)
+        } else if (aspectRatio < 0.8) {
+          // 세로형이 너무 긴 경우 - 너비를 늘려서 4:5 비율 맞춤
+          targetWidth = Math.round(height * 0.8)
+          targetHeight = height
+        } else if (aspectRatio > 1.2) {
+          // 가로형 - 높이를 늘려서 1.91:1 비율 맞춤
+          targetWidth = width
+          targetHeight = Math.round(width / 1.91)
+        } else if (aspectRatio < 0.8) {
+          // 세로형 - 너비를 늘려서 4:5 비율 맞춤
+          targetWidth = Math.round(height * 0.8)
+          targetHeight = height
+        }
+        // 정사각형은 그대로 사용
+
+        const paddedSize = { width: targetWidth, height: targetHeight }
+
+        canvas.width = targetWidth
+        canvas.height = targetHeight
+
+        // 배경을 검은색으로 설정
+        ctx!.fillStyle = '#000000'
+        ctx!.fillRect(0, 0, targetWidth, targetHeight)
+
+        // 이미지를 중앙에 배치하고 패딩 처리
+        const offsetX = (targetWidth - width) / 2
+        const offsetY = (targetHeight - height) / 2
+
+        ctx?.drawImage(img, offsetX, offsetY, width, height)
+
+        // Canvas를 Blob으로 변환
+        canvas.toBlob((blob) => {
+          if (blob) {
+            const paddedFile = new File([blob], file.name, {
+              type: file.type,
+              lastModified: Date.now()
+            })
+            resolve({ file: paddedFile, originalSize, paddedSize })
+          } else {
+            reject(new Error('이미지 패딩 처리에 실패했습니다.'))
+          }
+        }, file.type, 0.9) // 품질 90%
+      }
+
+      img.onerror = () => reject(new Error('이미지 로드에 실패했습니다.'))
+      img.src = URL.createObjectURL(file)
+    })
+  }
+
   // 이미지 파일 처리 공통 함수
-  const processImageFile = (file: File) => {
+  const processImageFile = async (file: File) => {
     // 이미지 파일 검증
     if (!file.type.startsWith('image/')) {
       setError('이미지 파일만 업로드할 수 있습니다.')
@@ -189,21 +285,56 @@ export default function CreatePostPage() {
     }
 
     setError(null) // 에러 초기화
-    handleInputChange('uploaded_image', file)
 
-    // 이미지 미리보기 생성
-    const reader = new FileReader()
-    reader.onload = (e) => {
-      setImagePreview(e.target?.result as string)
+    try {
+      let processedFile = file
+      let originalSize = null
+      let resizedSize = null
+      let isResized = false
+
+      // Instagram 플랫폼인 경우 비율에 맞게 패딩 처리
+      if (formData.board_platform === 0) { // Instagram
+        const result = await padImageForInstagram(file)
+        processedFile = result.file
+        originalSize = result.originalSize
+        resizedSize = result.paddedSize
+        isResized = true
+      } else {
+        // 다른 플랫폼은 원본 그대로 사용
+        const img = new Image()
+        img.onload = () => {
+          const originalSize = { width: img.width, height: img.height }
+          setImageInfo({ originalSize, resizedSize: null, isResized: false })
+        }
+        img.src = URL.createObjectURL(file)
+      }
+
+      handleInputChange('uploaded_image', processedFile)
+
+      // 이미지 미리보기 생성 (패딩 처리된 이미지 사용)
+      const reader = new FileReader()
+      reader.onload = (e) => {
+        setImagePreview(e.target?.result as string)
+      }
+      reader.readAsDataURL(processedFile)
+
+      // 이미지 정보 저장
+      if (isResized) {
+        setImageInfo({ originalSize, resizedSize, isResized })
+      } else {
+        setImageInfo({ originalSize, resizedSize: null, isResized: false })
+      }
+    } catch (error) {
+      setError('이미지 처리 중 오류가 발생했습니다.')
+      console.error('Image processing error:', error)
     }
-    reader.readAsDataURL(file)
   }
 
   // 이미지 업로드 처리
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (file) {
-      processImageFile(file)
+      await processImageFile(file)
     }
   }
 
@@ -218,13 +349,13 @@ export default function CreatePostPage() {
     setIsDragOver(false)
   }
 
-  const handleDrop = (e: React.DragEvent) => {
+  const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault()
     setIsDragOver(false)
 
     const files = e.dataTransfer.files
     if (files && files[0]) {
-      processImageFile(files[0])
+      await processImageFile(files[0])
     }
   }
 
@@ -232,7 +363,13 @@ export default function CreatePostPage() {
   const removeImage = () => {
     handleInputChange('uploaded_image', null)
     setImagePreview(null)
+    setImageInfo(null)
   }
+
+  // S3 연결 상태 확인
+
+
+
 
   // 게시글 설명 향상
   const isGenerateEnabled = !!formData.influencer_id && !!formData.board_topic && !!formData.board_description.trim();
@@ -293,19 +430,12 @@ export default function CreatePostPage() {
       return;
     }
 
-    const modelRepo = selectedInfluencer.influencer_model_repo;
-
     try {
-      const response = await apiClient.post('/api/v1/model-test/multi-chat', {
-        influencers: [
-          {
-            influencer_id: selectedInfluencer.influencer_id,
-            influencer_model_repo: modelRepo,
-          },
-        ],
-        message: generated.content,
+      const response = await apiClient.post('/api/v1/boards/influencer-style/convert', {
+        influencer_id: selectedInfluencer.influencer_id,
+        text: generated.content,
       });
-      setConverted((response as any).results?.[0]?.response || "");
+      setConverted((response as any).converted_text || "");
     } catch (err) {
       setError("인플루언서 말투 변환에 실패했습니다.");
     } finally {
@@ -373,56 +503,7 @@ export default function CreatePostPage() {
 
     try {
       // 백엔드 URL 가져오기
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://localhost:8000';
-      console.log('Backend URL:', backendUrl);
-
-      // 먼저 GET 테스트
-      console.log('Testing GET connection...');
-      const getTestResponse = await fetch(`${backendUrl}/api/v1/boards/upload-test-get`, {
-        method: 'GET'
-      });
-      console.log('GET test result:', await getTestResponse.json());
-
-      // POST 테스트
-      console.log('Testing POST connection...');
-      const testResponse = await fetch(`${backendUrl}/api/v1/boards/upload-test`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({})
-      });
-      console.log('POST test result:', await testResponse.json());
-
-      // 인증 토큰 확인
-      const token = localStorage.getItem('access_token');
-      console.log('Token exists:', !!token);
-      console.log('Token preview:', token ? token.substring(0, 20) + '...' : 'null');
-
-      // 이미지 업로드
-      const imageFormData = new FormData()
-      imageFormData.append('file', formData.uploaded_image)  // 단일 파일로 변경
-
-      console.log('Uploading image...', formData.uploaded_image);
-      console.log('FormData entries:', Array.from(imageFormData.entries()));
-
-      const imageResponse = await fetch(`${backendUrl}/api/v1/boards/upload-image-simple`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`
-          // Content-Type을 명시적으로 설정하지 않음 (브라우저가 자동으로 boundary 설정)
-        },
-        body: imageFormData
-      })
-
-      if (!imageResponse.ok) {
-        const errorText = await imageResponse.text();
-        console.error('Image upload error:', errorText);
-        throw new Error(`이미지 업로드에 실패했습니다: ${imageResponse.status} - ${errorText}`);
-      }
-
-      const imageData = await imageResponse.json()
-      const imageUrl = imageData.file_url // 백엔드에서 반환된 실제 파일 URL 사용
+      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
 
       // 발행 상태 결정
       let boardStatus = 1; // 기본값: 임시저장
@@ -440,7 +521,6 @@ export default function CreatePostPage() {
         board_platform: formData.board_platform,
         board_hash_tag: formData.board_hashtag.join(' '),
         team_id: user?.teams?.[0]?.group_id || 1,
-        image_url: imageUrl,
         board_status: boardStatus,
         // 예약 발행 시 스케줄 정보 추가
         ...(publishType === 'scheduled' && {
@@ -448,23 +528,34 @@ export default function CreatePostPage() {
         })
       };
 
-      // 게시글 생성
-      const response = await fetch(`${backendUrl}/api/v1/boards`, {
+      // 통합 API 사용: 게시글과 이미지를 함께 생성
+      const formDataToSend = new FormData()
+      formDataToSend.append('board_data', JSON.stringify(boardData))
+      formDataToSend.append('file', formData.uploaded_image)
+
+      const response = await fetch(`${backendUrl}/api/v1/boards/create-with-image`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
           'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+          // Content-Type을 명시적으로 설정하지 않음 (브라우저가 자동으로 boundary 설정)
         },
-        body: JSON.stringify(boardData)
+        body: formDataToSend
       })
 
       if (!response.ok) {
-        throw new Error('게시글 생성에 실패했습니다.')
+        const errorData = await response.json().catch(() => ({}));
+        const errorMessage = errorData.detail || errorData.message || '게시글 생성에 실패했습니다.';
+
+        // 인스타그램 업로드 관련 에러인 경우 특별 처리
+        if (errorMessage.includes('로컬 이미지 URL') || errorMessage.includes('인스타그램 API')) {
+          throw new Error('인스타그램 업로드에 실패했습니다. 로컬 이미지는 인스타그램에서 접근할 수 없습니다. S3 등의 클라우드 스토리지를 사용하거나 공개 URL을 사용하세요.');
+        }
+
+        throw new Error(errorMessage);
       }
 
       router.push('/post_list')
     } catch (err) {
-      console.error('Failed to create post:', err)
       setError(err instanceof Error ? err.message : '게시글 생성에 실패했습니다.')
     } finally {
       setSubmitting(false)
@@ -573,17 +664,20 @@ export default function CreatePostPage() {
                         <SelectValue placeholder="플랫폼을 선택하세요" />
                       </SelectTrigger>
                       <SelectContent>
-                        {PLATFORM_OPTIONS.map((platform) => (
-                          <SelectItem key={platform.value} value={platform.value.toString()}>
-                            <div className="flex items-center space-x-2">
-                              <img src={platform.icon} alt={platform.label} className="w-5 h-5 rounded" />
-                              <div>
-                                <div className="font-medium">{platform.label}</div>
-                                <div className="text-xs text-gray-500">{platform.description}</div>
+                        {PLATFORM_OPTIONS.map((platform) => {
+                          const IconComponent = platform.icon;
+                          return (
+                            <SelectItem key={platform.value} value={platform.value.toString()}>
+                              <div className="flex items-center space-x-2">
+                                <IconComponent className="w-5 h-5 text-gray-600" />
+                                <div>
+                                  <div className="font-medium">{platform.label}</div>
+                                  <div className="text-xs text-gray-500">{platform.description}</div>
+                                </div>
                               </div>
-                            </div>
-                          </SelectItem>
-                        ))}
+                            </SelectItem>
+                          );
+                        })}
                       </SelectContent>
                     </Select>
                   </div>
@@ -782,6 +876,8 @@ export default function CreatePostPage() {
                 <CardDescription>이미지를 업로드하거나 AI로 생성하세요</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
+
+
                 {/* 이미지 업로드 영역 */}
                 <div>
                   <Label htmlFor="image_upload">이미지 파일 업로드</Label>
@@ -801,48 +897,150 @@ export default function CreatePostPage() {
                           제거
                         </Button>
                       </div>
-                      <div className="flex justify-center">
+                      <div className="flex justify-center relative">
                         <img
                           src={imagePreview}
                           alt="Uploaded"
-                          className="max-w-full max-h-64 object-contain rounded-lg border"
+                          className="max-w-full max-h-64 object-cover rounded-lg border"
                         />
+
+
                       </div>
+
+                      {/* 이미지 정보 표시 */}
+                      {imageInfo && (
+                        <div className="mt-3 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                          <div className="text-sm text-blue-900">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="font-medium">📏 이미지 정보:</span>
+                              {imageInfo.isResized && (
+                                <Badge variant="secondary" className="text-xs">
+                                  Instagram 최적화됨
+                                </Badge>
+                              )}
+                            </div>
+                            <div className="grid grid-cols-2 gap-4 text-xs">
+                              <div>
+                                <span className="font-medium">원본 크기:</span>
+                                <span className="ml-1 text-blue-700">
+                                  {imageInfo.originalSize?.width} × {imageInfo.originalSize?.height}px
+                                </span>
+                              </div>
+                              {imageInfo.isResized && imageInfo.resizedSize && (
+                                <div>
+                                  <span className="font-medium">최적화 크기:</span>
+                                  <span className="ml-1 text-blue-700">
+                                    {imageInfo.resizedSize.width} × {imageInfo.resizedSize.height}px
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                            {imageInfo.isResized && (
+                              <div className="mt-2 text-xs text-blue-600">
+                                💡 Instagram 요구사항에 맞게 자동으로 비율이 조정되었습니다.
+                                <br />
+                                🎯 중앙 기준 패딩 처리 (픽셀 크기 유지)
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ) : (
                     /* 업로드 영역 */
                     <div
-                      className={`mt-2 border-2 border-dashed rounded-lg p-6 transition-colors ${isDragOver
-                        ? 'border-blue-500 bg-blue-50'
-                        : 'border-gray-300 hover:border-gray-400'
+                      className={`relative group transition-all duration-300 ${isDragOver
+                        ? "scale-105"
+                        : "hover:scale-[1.02]"
                         }`}
                       onDragOver={handleDragOver}
                       onDragLeave={handleDragLeave}
                       onDrop={handleDrop}
                     >
-                      <input
-                        id="image_upload"
-                        type="file"
-                        accept="image/*"
-                        onChange={handleImageUpload}
-                        className="hidden"
-                      />
-                      <div className="text-center">
-                        <ImageIcon className="h-12 w-12 mx-auto text-gray-400 mb-4" />
-                        <p className="text-gray-600 mb-2">
-                          이미지를 드래그 앤 드롭하거나 클릭하여 선택하세요
-                        </p>
-                        <p className="text-xs text-gray-400 mb-4">
-                          JPG, PNG, GIF 파일 (최대 5MB)
-                        </p>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() => document.getElementById('image_upload')?.click()}
-                        >
-                          <ImageIcon className="h-4 w-4 mr-2" />
-                          파일 선택
-                        </Button>
+                      <div className={`
+                        relative overflow-hidden rounded-xl border-2 border-dashed transition-all duration-300
+                        ${isDragOver
+                          ? "border-blue-500 bg-gradient-to-br from-blue-50 to-indigo-50 shadow-lg shadow-blue-100"
+                          : "border-gray-300 bg-gradient-to-br from-gray-50 to-white hover:border-blue-400 hover:bg-gradient-to-br hover:from-blue-50 hover:to-indigo-50"
+                        }
+                      `}>
+                        {/* 배경 패턴 */}
+                        <div className="absolute inset-0 opacity-5">
+                          <div className="absolute top-4 left-4 w-8 h-8 border-2 border-gray-400 rounded-lg"></div>
+                          <div className="absolute top-12 right-8 w-6 h-6 border-2 border-gray-400 rounded-full"></div>
+                          <div className="absolute bottom-8 left-12 w-4 h-4 border-2 border-gray-400 rotate-45"></div>
+                          <div className="absolute bottom-16 right-4 w-10 h-10 border-2 border-gray-400 rounded-lg"></div>
+                        </div>
+
+                        <div className="relative p-12 text-center">
+                          {/* 아이콘 영역 */}
+                          <div className={`
+                            relative mx-auto mb-6 w-20 h-20 rounded-full flex items-center justify-center transition-all duration-300
+                            ${isDragOver
+                              ? "bg-blue-100 shadow-lg shadow-blue-200"
+                              : "bg-gray-100 group-hover:bg-blue-100 group-hover:shadow-lg group-hover:shadow-blue-200"
+                            }
+                          `}>
+                            <Upload className={`
+                              h-8 w-8 transition-all duration-300
+                              ${isDragOver
+                                ? "text-blue-600 scale-110"
+                                : "text-gray-500 group-hover:text-blue-600 group-hover:scale-110"
+                              }
+                            `} />
+                            {/* 애니메이션 효과 */}
+                            {isDragOver && (
+                              <div className="absolute inset-0 rounded-full border-2 border-blue-300 animate-ping"></div>
+                            )}
+                          </div>
+
+                          {/* 텍스트 영역 */}
+                          <div className="space-y-3">
+                            <h3 className={`
+                              text-xl font-semibold transition-colors duration-300
+                              ${isDragOver ? "text-blue-700" : "text-gray-800 group-hover:text-blue-700"}
+                            `}>
+                              {isDragOver ? "여기에 놓으세요!" : "이미지 업로드"}
+                            </h3>
+                            <p className={`
+                              text-sm transition-colors duration-300 max-w-md mx-auto
+                              ${isDragOver ? "text-blue-600" : "text-gray-600 group-hover:text-blue-600"}
+                            `}>
+                              게시글에 사용할 이미지를 드래그하여 놓거나 클릭하여 선택하세요
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              지원 형식: JPG, PNG, GIF, WebP (최대 5MB)
+                            </p>
+                          </div>
+
+                          {/* 파일 선택 버튼 */}
+                          <div className="mt-6">
+                            <input
+                              id="image_upload"
+                              type="file"
+                              accept="image/*"
+                              onChange={handleImageUpload}
+                              className="hidden"
+                            />
+                            <label htmlFor="image_upload">
+                              <Button
+                                className={`
+                                  transition-all duration-300 cursor-pointer
+                                  ${isDragOver
+                                    ? "bg-blue-600 hover:bg-blue-700 text-white shadow-lg"
+                                    : "bg-white hover:bg-blue-50 text-gray-700 border-gray-300 hover:border-blue-400 hover:text-blue-700 shadow-sm hover:shadow-md"
+                                  }
+                                `}
+                                asChild
+                              >
+                                <span className="flex items-center gap-2">
+                                  <Upload className="h-4 w-4" />
+                                  파일 선택
+                                </span>
+                              </Button>
+                            </label>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   )}
@@ -1022,9 +1220,28 @@ export default function CreatePostPage() {
                       <img
                         src={imagePreview}
                         alt="Preview"
-                        className="max-w-full max-h-64 object-contain rounded-lg border"
+                        className="max-w-full max-h-64 object-cover rounded-lg border"
                       />
                     </div>
+                    {/* 이미지 정보 표시 */}
+                    {imageInfo && (
+                      <div className="mt-2 text-xs text-gray-600 text-center">
+                        {imageInfo.isResized ? (
+                          <div className="space-y-1">
+                            <div>
+                              <span>원본: {imageInfo.originalSize?.width}×{imageInfo.originalSize?.height}</span>
+                              <span className="mx-2">→</span>
+                              <span className="text-blue-600 font-medium">패딩 처리: {imageInfo.resizedSize?.width}×{imageInfo.resizedSize?.height}</span>
+                            </div>
+                            <div className="text-blue-600">
+                              💡 Instagram 비율에 맞게 자동 패딩 처리됨
+                            </div>
+                          </div>
+                        ) : (
+                          <span>크기: {imageInfo.originalSize?.width}×{imageInfo.originalSize?.height}</span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
 
