@@ -38,6 +38,13 @@ class ZonosTTSResponse(BaseModel):
     message: str
     s3_info: Optional[Dict[str, Any]] = None
 
+class SimpleTTSRequest(BaseModel):
+    text: str
+    language: str = "ko"
+    speaking_rate: float = 22.0
+    pitch_std: float = 40.0
+    cfg_scale: float = 4.0
+
 def initialize_zonos_model():
     """Zonos 모델 초기화"""
     global zonos_model, device
@@ -99,12 +106,20 @@ async def generate_tts_with_voice_clone(
         )
         
         # 조건 준비
+        logger.info(f"Preparing conditioning with cfg_scale={request.cfg_scale}")
         conditioning = zonos_model.prepare_conditioning(cond_dict)
         
         # 코드 생성
-        codes = zonos_model.generate(conditioning, cfg_scale=request.cfg_scale)
+        logger.info("Generating audio codes...")
+        codes = zonos_model.generate(
+            conditioning, 
+            cfg_scale=request.cfg_scale, 
+            disable_torch_compile=True,
+            progress_bar=False  # 서버 환경에서는 progress bar 비활성화
+        )
         
         # 오디오 디코드
+        logger.info("Decoding audio...")
         wavs = zonos_model.autoencoder.decode(codes)
         
         # 출력 파일명 설정
@@ -161,8 +176,23 @@ async def generate_tts_with_voice_clone(
         )
         
     except Exception as e:
-        logger.error(f"❌ TTS 생성 실패: {e}")
-        raise HTTPException(status_code=500, detail=f"TTS 생성 실패: {str(e)}")
+        import traceback
+        error_detail = traceback.format_exc()
+        logger.error(f"❌ TTS 생성 실패: {e}\n{error_detail}")
+        
+        # 더 구체적인 에러 메시지 제공
+        if "cfg_scale" in str(e):
+            raise HTTPException(
+                status_code=400, 
+                detail="cfg_scale은 1.0이 될 수 없습니다. 1.0보다 크거나 작은 값을 사용하세요. (권장: 2.0 ~ 5.0)"
+            )
+        elif "CUDA" in str(e) or "cuda" in str(e):
+            raise HTTPException(
+                status_code=500, 
+                detail=f"CUDA 관련 오류가 발생했습니다. GPU 메모리나 드라이버를 확인하세요: {str(e)}"
+            )
+        else:
+            raise HTTPException(status_code=500, detail=f"TTS 생성 실패: {str(e)}")
 
 @router.get("/download_tts/{filename}")
 async def download_tts(filename: str):
@@ -178,11 +208,18 @@ async def download_tts(filename: str):
         filename=filename
     )
 
-@router.post("/generate_tts_simple")
-async def generate_tts_simple(text: str = Form(...)):
-    """간단한 TTS 생성 (기본 설정 사용)"""
-    request = ZonosTTSRequest(text=text)
-    return await generate_tts_with_voice_clone(request, None)
+@router.post("/generate_tts_simple", response_model=ZonosTTSResponse)
+async def generate_tts_simple(request: SimpleTTSRequest):
+    """간단한 TTS 생성 (JSON 요청, 기본 설정 사용)"""
+    # SimpleTTSRequest를 ZonosTTSRequest로 변환
+    full_request = ZonosTTSRequest(
+        text=request.text,
+        language=request.language,
+        speaking_rate=request.speaking_rate,
+        pitch_std=request.pitch_std,
+        cfg_scale=request.cfg_scale
+    )
+    return await generate_tts_with_voice_clone(full_request, None)
 
 @router.get("/zonos_status")
 async def get_zonos_status():

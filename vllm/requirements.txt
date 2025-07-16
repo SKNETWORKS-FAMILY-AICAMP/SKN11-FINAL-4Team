@@ -30,6 +30,4 @@ torchaudio>=2.5.1
 soundfile>=0.13.1
 
 # S3 integration
-boto3
-aioboto3
-aiofiles
+boto3==1.39.1

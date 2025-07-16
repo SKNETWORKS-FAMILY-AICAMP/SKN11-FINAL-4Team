@@ -18,12 +18,21 @@ AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
 AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
 
 def test_simple_tts():
-    """간단한 TTS 생성 테스트"""
-    print("=== 간단한 TTS 생성 테스트 ===")
+    """간단한 TTS 생성 테스트 (JSON 요청)"""
+    print("=== 간단한 TTS 생성 테스트 (JSON) ===")
+    
+    # JSON 요청 데이터
+    request_data = {
+        "text": "안녕하세요. 저는 Zonos TTS 시스템입니다.",
+        "language": "ko",
+        "speaking_rate": 22.0,
+        "pitch_std": 40.0,
+        "cfg_scale": 4.0
+    }
     
     response = requests.post(
         f"{BASE_URL}/zonos/generate_tts_simple",
-        data={"text": "안녕하세요. 저는 Zonos TTS 시스템입니다."}
+        json=request_data  # json 파라미터 사용
     )
     
     if response.status_code == 200:
