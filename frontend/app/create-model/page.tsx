@@ -75,24 +75,12 @@ export default function CreateModelPage() {
     // 실제 API에서 프리셋 데이터 가져오기
     const fetchStylePresets = async () => {
       setLoadingPresets(true);
-      
+
       try {
         const presets = await ModelService.getStylePresets();
         setStylePresets(presets);
       } catch (error) {
-        console.error('❌ 프리셋 데이터 로드 실패:', error);
-        console.error('오류 상세 정보:', {
-          name: error instanceof Error ? error.name : 'Unknown',
-          message: error instanceof Error ? error.message : String(error),
-          stack: error instanceof Error ? error.stack : 'No stack trace'
-        });
-        
-        // 사용자에게 에러 알림
-        const errorMessage = error instanceof Error ? error.message : '알 수 없는 오류';
-        alert(`프리셋 데이터를 불러오는데 실패했습니다.\n\n오류: ${errorMessage}`);
-        
-        // 에러 발생 시 빈 배열로 설정
-        setStylePresets([]);
+        // 프리셋 데이터 로드 실패 처리
       } finally {
         setLoadingPresets(false);
       }
@@ -105,24 +93,12 @@ export default function CreateModelPage() {
       }
 
       setLoadingTokens(true);
-      
+
       try {
         const tokens = await ModelService.getHuggingFaceTokens(user.teams[0].group_id);
         setHuggingFaceTokens(tokens);
       } catch (error) {
-        console.error('❌ 허깅페이스 토큰 데이터 로드 실패:', error);
-        console.error('오류 상세 정보:', {
-          name: error instanceof Error ? error.name : 'Unknown',
-          message: error instanceof Error ? error.message : String(error),
-          stack: error instanceof Error ? error.stack : 'No stack trace'
-        });
-        
-        // 사용자에게 에러 알림
-        const errorMessage = error instanceof Error ? error.message : '알 수 없는 오류';
-        alert(`허깅페이스 토큰 데이터를 불러오는데 실패했습니다.\n\n오류: ${errorMessage}`);
-        
-        // 에러 발생 시 빈 배열로 설정
-        setHuggingFaceTokens([]);
+        // 허깅페이스 토큰 데이터 로드 실패 처리
       } finally {
         setLoadingTokens(false);
       }
@@ -209,7 +185,7 @@ export default function CreateModelPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    
+
     // 프리셋 모드 검증
     if (formData.selectedPresetId && formData.selectedPresetId !== "manual") {
       if (!formData.selectedPresetId) {
@@ -230,19 +206,19 @@ export default function CreateModelPage() {
         alert("말투를 선택하거나 직접 입력해주세요.");
         return;
       }
-      
+
       // 이미지 검증
       const hasImageUpload = files.imageSamples && files.imageSamples.length > 0;
-      const hasImagePrompt = formData.imageMethod === "prompt" && 
-                            formData.hairStyle.trim() !== "" && 
-                            formData.mood.trim() !== "";
-      
+      const hasImagePrompt = formData.imageMethod === "prompt" &&
+        formData.hairStyle.trim() !== "" &&
+        formData.mood.trim() !== "";
+
       if (!hasImageUpload && !hasImagePrompt) {
         alert("이미지를 업로드하거나 이미지 생성 프롬프트를 입력해주세요.");
         return;
       }
     }
-    
+
     setIsLoading(true)
 
     try {
@@ -292,19 +268,53 @@ export default function CreateModelPage() {
         createInfluencerData.mbti = formData.mbti !== "none" ? formData.mbti : undefined;
         createInfluencerData.gender = formData.gender !== "none" ? formData.gender : undefined;
         createInfluencerData.age = formData.age;
-        
+
         // 이미지 생성 방법에 따른 데이터 추가
         if (formData.imageMethod === "prompt") {
           createInfluencerData.hair_style = formData.hairStyle;
           createInfluencerData.mood = formData.mood;
         }
       }
+
+      // 이미지 업로드가 있는 경우 먼저 이미지를 업로드
+      let imageUrl = undefined;
+      if (formData.imageMethod === "upload" && files.imageSamples && files.imageSamples.length > 0) {
+        try {
+          // 첫 번째 이미지만 업로드 (인플루언서 프로필 이미지용)
+          const file = files.imageSamples[0];
+          const formDataForUpload = new FormData();
+          formDataForUpload.append('file', file);
+          // influencer_id는 제공하지 않음 (백엔드에서 임시 ID 생성)
+
+          // 인플루언서 이미지 업로드 API 사용
+          const uploadResponse = await fetch('/api/v1/influencers/upload-image', {
+            method: 'POST',
+            body: formDataForUpload,
+          });
+
+          if (uploadResponse.ok) {
+            const uploadResult = await uploadResponse.json();
+            imageUrl = uploadResult.file_url; // 업로드된 이미지 URL
+            console.log('인플루언서 이미지 업로드 성공:', imageUrl);
+          } else {
+            console.warn('인플루언서 이미지 업로드 실패, 기본 이미지 사용');
+          }
+        } catch (error) {
+          console.warn('인플루언서 이미지 업로드 중 오류:', error);
+        }
+      }
+
+      // 이미지 URL을 인플루언서 생성 데이터에 추가
+      if (imageUrl) {
+        createInfluencerData.image_url = imageUrl;
+      }
+
       // 실제 인플루언서 생성 API 호출
       const response = await ModelService.createInfluencer(createInfluencerData)
-      
+
       // 성공 알림 표시
       let successMessage = `🎉 AI 인플루언서 "${formData.name}"가 생성되었습니다!\n\n`
-      
+
       if (formData.selectedPresetId !== "manual") {
         const selectedPreset = stylePresets.find(p => p.style_preset_id === formData.selectedPresetId)
         successMessage += `• 프리셋 기반으로 생성: ${selectedPreset?.style_preset_name}\n`
@@ -315,27 +325,27 @@ export default function CreateModelPage() {
         successMessage += `• 성격: ${formData.personality}\n`
         successMessage += `• 말투: ${formData.tone || formData.customTones[0] || "사용자 정의"}\n`
         successMessage += `• 모델 유형: ${formData.modelType === "character" ? "캐릭터형" : formData.modelType === "human" ? "사람형" : "사물형"}\n`
-        
+
         if (formData.imageMethod === "prompt") {
           successMessage += `• 이미지: 프롬프트 생성 (${formData.hairStyle}, ${formData.mood})\n`
         } else {
           successMessage += `• 이미지: 파일 업로드\n`
         }
       }
-      
+
       successMessage += `\n다음 작업이 백그라운드에서 자동으로 진행됩니다:\n• 2,000개 QA 쌍 생성\n• S3에 데이터 업로드\n• QLoRA 4비트 양자화 파인튜닝\n• Hugging Face에 모델 업로드\n\n완료 시 이메일과 웹 알림을 받으실 수 있습니다.`
-      
+
       alert(successMessage)
-      
+
       setIsLoading(false)
       router.push("/dashboard")
-      
+
     } catch (error) {
       console.error('인플루언서 생성 실패:', error)
       setIsLoading(false)
-      
+
       // 에러 알림 표시
-      alert(`❌ 인플루언서 생성에 실패했습니다.\n\n오류: ${error instanceof Error ? error.message : '알 수 없는 오류'}\n\n다시 시도해주세요.`) 
+      alert(`❌ 인플루언서 생성에 실패했습니다.\n\n오류: ${error instanceof Error ? error.message : '알 수 없는 오류'}\n\n다시 시도해주세요.`)
     }
   }
 
@@ -355,7 +365,7 @@ export default function CreateModelPage() {
     }
 
     setGeneratingTones(true)
-    
+
     try {
       const request: ToneGenerationRequest = {
         personality: personality,
@@ -366,13 +376,13 @@ export default function CreateModelPage() {
         age: formData.age || undefined
       }
 
-      const response = isRegeneration 
+      const response = isRegeneration
         ? await ModelService.regenerateTones(request)
         : await ModelService.generateTones(request)
-      
+
       setGeneratedTones(response.conversation_examples)
       setShowToneExamples(true)
-      
+
     } catch (error) {
       console.error('말투 생성 실패:', error)
       alert('말투 생성에 실패했습니다. 다시 시도해주세요.')
@@ -387,7 +397,7 @@ export default function CreateModelPage() {
     const personalityLower = (personality || '').toLowerCase()
 
     // 성격 키워드에 따른 대화 예시
-    const conversationMap: Record<string, Array<{title: string, example: string, tone: string, hashtags?: string, system_prompt?: string}>> = {
+    const conversationMap: Record<string, Array<{ title: string, example: string, tone: string, hashtags?: string, system_prompt?: string }>> = {
       친근: [
         {
           title: "친근하고 다정한",
@@ -506,7 +516,7 @@ export default function CreateModelPage() {
     }
 
     // 성격에서 키워드 찾기
-    const matchedConversations: Array<{title: string, example: string, tone: string, hashtags?: string, system_prompt?: string}> = []
+    const matchedConversations: Array<{ title: string, example: string, tone: string, hashtags?: string, system_prompt?: string }> = []
     Object.keys(conversationMap).forEach((key) => {
       if (personalityLower.includes(key)) {
         matchedConversations.push(...conversationMap[key])
@@ -541,7 +551,7 @@ export default function CreateModelPage() {
     }
 
     // 중복 제거하고 최대 3개까지
-    const uniqueConversations = matchedConversations.filter((item, index, self) => 
+    const uniqueConversations = matchedConversations.filter((item, index, self) =>
       index === self.findIndex(t => t.title === item.title)
     )
     return uniqueConversations.slice(0, 3)
@@ -643,8 +653,8 @@ export default function CreateModelPage() {
                 >
                   <SelectTrigger className="w-full">
                     <SelectValue placeholder={
-                      loadingPresets 
-                        ? "프리셋 로딩 중..." 
+                      loadingPresets
+                        ? "프리셋 로딩 중..."
                         : "프리셋을 선택하면 아래 입력란이 자동으로 채워집니다"
                     } />
                   </SelectTrigger>
@@ -779,7 +789,7 @@ export default function CreateModelPage() {
                       >
                         {generatingTones ? '생성 중...' : '말투 생성'}
                       </Button>
-                      
+
                       {showToneExamples && (
                         <Button
                           variant="outline"
@@ -863,9 +873,9 @@ export default function CreateModelPage() {
                           generatedTones.map((tone, idx) => (
                             <li key={idx} className="flex items-center gap-2 bg-gray-50 rounded px-3 py-2">
                               <span className="flex-1 text-sm">{tone.title} - {tone.tone}</span>
-                              <Button 
-                                type="button" 
-                                size="sm" 
+                              <Button
+                                type="button"
+                                size="sm"
                                 variant="outline"
                                 onClick={() => {
                                   setFormData(prev => ({
@@ -897,15 +907,15 @@ export default function CreateModelPage() {
               </div>
             </CardContent>
           </Card>
-          
+
           {/* 이미지 업로드/생성 카드 */}
           <Card>
             <CardHeader>
               <CardTitle>이미지 설정</CardTitle>
               <CardDescription>
-                AI 인플루언서의 이미지를 설정하세요.<br/>
+                AI 인플루언서의 이미지를 설정하세요.<br />
                 설정하지 않으면 기본 이미지가 자동으로 생성됩니다.
-                </CardDescription>
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
               {/* 이미지 생성 방법 탭 */}
@@ -916,7 +926,7 @@ export default function CreateModelPage() {
                     <TabsTrigger value="upload">이미지 업로드</TabsTrigger>
                     <TabsTrigger value="prompt">이미지 생성</TabsTrigger>
                   </TabsList>
-                  
+
                   <TabsContent value="upload" className="mt-4">
                     <div>
                       <Label className="text-base font-medium mb-3 block">이미지 파일 업로드</Label>
@@ -929,13 +939,13 @@ export default function CreateModelPage() {
                             <div className="absolute bottom-8 left-12 w-4 h-4 border-2 border-gray-400 rotate-45"></div>
                             <div className="absolute bottom-16 right-4 w-10 h-10 border-2 border-gray-400 rounded-lg"></div>
                           </div>
-                          
+
                           <div className="relative p-12 text-center">
                             {/* 아이콘 영역 */}
                             <div className="relative mx-auto mb-6 w-20 h-20 rounded-full flex items-center justify-center transition-all duration-300 bg-gray-100 group-hover:bg-blue-100 group-hover:shadow-lg group-hover:shadow-blue-200">
                               <Upload className="h-8 w-8 transition-all duration-300 text-gray-500 group-hover:text-blue-600 group-hover:scale-110" />
                             </div>
-                            
+
                             {/* 텍스트 영역 */}
                             <div className="space-y-3">
                               <h3 className="text-xl font-semibold transition-colors duration-300 text-gray-800 group-hover:text-blue-700">
@@ -948,7 +958,7 @@ export default function CreateModelPage() {
                                 지원 형식: JPG, PNG, WebP (여러 파일 선택 가능)
                               </p>
                             </div>
-                            
+
                             {/* 파일 선택 버튼 */}
                             <div className="mt-6">
                               <input
@@ -960,8 +970,8 @@ export default function CreateModelPage() {
                                 id="image-upload"
                               />
                               <label htmlFor="image-upload">
-                                <Button 
-                                  className="transition-all duration-300 cursor-pointer bg-white hover:bg-blue-50 text-gray-700 border-gray-300 hover:border-blue-400 hover:text-blue-700 shadow-sm hover:shadow-md" 
+                                <Button
+                                  className="transition-all duration-300 cursor-pointer bg-white hover:bg-blue-50 text-gray-700 border-gray-300 hover:border-blue-400 hover:text-blue-700 shadow-sm hover:shadow-md"
                                   asChild
                                 >
                                   <span className="flex items-center gap-2">
@@ -971,7 +981,7 @@ export default function CreateModelPage() {
                                 </Button>
                               </label>
                             </div>
-                            
+
                             {files.imageSamples && (
                               <p className="text-xs text-green-600 mt-2">{files.imageSamples.length}개 파일 선택됨</p>
                             )}
@@ -1025,9 +1035,9 @@ export default function CreateModelPage() {
           </Card>
 
           <div className="flex justify-end gap-4">
-            <Button 
-              type="button" 
-              variant="outline" 
+            <Button
+              type="button"
+              variant="outline"
               onClick={() => router.push("/dashboard")}
               disabled={isLoading}
             >

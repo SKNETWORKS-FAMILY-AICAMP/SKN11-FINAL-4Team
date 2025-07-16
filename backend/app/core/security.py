@@ -82,6 +82,7 @@ def verify_token(token: str) -> Optional[dict]:
         payload = jwt.decode(
             token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
         )
+        
         logger.info(f"Token verification successful for user: {payload.get('sub', 'unknown')}")
         return payload
     except JWTError as e:
@@ -98,8 +99,9 @@ async def get_current_user(
 ) -> Dict:
     """현재 인증된 사용자 정보 반환 (전체 JWT 페이로드 포함)"""
     token = credentials.credentials
+    print("token", token)
     payload = verify_token(token)
-
+    print("payload", payload)
     if payload is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -238,7 +240,7 @@ def generate_jwt_payload(user_info: Dict, provider: str) -> Dict:
         "permissions": [
             "post:read", "post:write", "model:read", "model:write", 
             "insights:read", "business:manage"
-        ] if is_business else ["post:read", "model:read"],
+        ],
     }
     
     if provider == "instagram":

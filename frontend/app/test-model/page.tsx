@@ -75,11 +75,11 @@ export default function TestModelPage() {
         }),
         message,
       }
-      
+
       // 디버깅을 위한 로그 추가
-      
+
       const data = await ModelService.multiChat(request)
-      
+
       // 응답 로그 추가
       const aiMessages: ChatMessage[] = data.results.map((result, index) => ({
         id: (Date.now() + index + 1).toString(),
@@ -164,7 +164,7 @@ export default function TestModelPage() {
                 {modelsLoading ? (
                   <div className="text-center py-8 flex-1 flex items-center justify-center">
                     <div>
-                                              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
                       <p className="text-sm text-gray-600 mt-2">인플루언서를 불러오는 중...</p>
                     </div>
                   </div>
@@ -276,8 +276,8 @@ export default function TestModelPage() {
                       disabled={isLoading}
                       className="flex-1 "
                     />
-                    <Button 
-                      onClick={handleSendMessage} 
+                    <Button
+                      onClick={handleSendMessage}
                       disabled={isLoading || !message.trim() || selectedModels.length === 0}
                       className="self-end bg-blue-500 hover:bg-blue-600"
                     >

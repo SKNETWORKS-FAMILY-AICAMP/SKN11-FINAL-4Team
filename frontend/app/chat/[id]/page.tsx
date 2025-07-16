@@ -34,7 +34,7 @@ interface ChatModel {
   description: string
   learning_status: number
   chatbot_option: boolean
-  influencer_model_repo: string
+  influencer_model_repo: string // 백엔드에서 자동으로 설정됨
   group_id: string
 }
 
@@ -77,15 +77,15 @@ export default function ChatPage() {
   useEffect(() => {
     if (!model) return;
     if (!model.id) return;
-    
+
     const accessToken = tokenUtils.getToken();
     const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'ws://localhost:8000';
-    
-    // lora_repo를 base64로 인코딩
-    const loraRepoEncoded = btoa(model.influencer_model_repo);
-    
+
+    // influencer_id를 base64로 인코딩 (model_repo 대신 influencer_id 사용)
+    const influencerIdEncoded = btoa(model.id);
+
     const ws = new WebSocket(
-      `${apiBaseUrl}/api/v1/chatbot/chatbot/${loraRepoEncoded}?group_id=${model.group_id}&influencer_id=${model.id}&token=${accessToken}`
+      `${apiBaseUrl}/api/v1/chatbot/chatbot/${influencerIdEncoded}?group_id=${model.group_id}&influencer_id=${model.id}&token=${accessToken}`
     );
     wsRef.current = ws;
 
@@ -100,7 +100,8 @@ export default function ChatPage() {
         clearTimeout(timeoutRef.current);
         timeoutRef.current = null;
       }
-      
+
+      setIsLoading(false); // 응답 수신 시 로딩 상태 해제
       try {
         const data = JSON.parse(event.data);
         
@@ -217,8 +218,9 @@ export default function ChatPage() {
 
   // 메시지 전송
   const sendMessage = async () => {
-    if (!inputMessage.trim() || isLoading) return;
-    
+
+    if (!inputMessage.trim() || isLoading || connectionStatus !== 'connected') return;
+
     const userMessage: Message = {
       id: Date.now().toString(),
       content: inputMessage,
@@ -232,6 +234,7 @@ export default function ChatPage() {
     
     // WebSocket 모드
     if (connectionStatus !== 'connected') {
+
       setIsLoading(false);
       setMessages(prev => [...prev, {
         id: (Date.now() + 1).toString(),
@@ -239,6 +242,7 @@ export default function ChatPage() {
         sender: "bot",
         timestamp: new Date(),
       }]);
+
       return;
     }
     
@@ -375,15 +379,14 @@ export default function ChatPage() {
                 <div className="flex items-center space-x-2 flex-shrink-0 ml-4">
                   {/* 연결 상태 표시 */}
                   <div className="flex items-center space-x-1">
-                    <div className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                      connectionStatus === 'connected' ? 'bg-green-500' :
+                    <div className={`w-2 h-2 rounded-full flex-shrink-0 ${connectionStatus === 'connected' ? 'bg-green-500' :
                       connectionStatus === 'connecting' ? 'bg-yellow-500' :
-                      connectionStatus === 'error' ? 'bg-red-500' : 'bg-gray-400'
-                    }`} />
+                        connectionStatus === 'error' ? 'bg-red-500' : 'bg-gray-400'
+                      }`} />
                     <span className="text-xs text-gray-600 whitespace-nowrap">
                       {connectionStatus === 'connected' ? '연결됨' :
-                       connectionStatus === 'connecting' ? '연결 중' :
-                       connectionStatus === 'error' ? '연결 오류' : '연결 끊김'}
+                        connectionStatus === 'connecting' ? '연결 중' :
+                          connectionStatus === 'error' ? '연결 오류' : '연결 끊김'}
                     </span>
                   </div>
                   {/* 재연결 버튼 */}
@@ -405,7 +408,7 @@ export default function ChatPage() {
                 </div>
               </div>
             </div>
-            
+
             {/* 메시지 영역 */}
             <div className="flex-1 overflow-y-auto p-6 space-y-4 min-h-0">
               {messages.length === 0 ? (
@@ -426,20 +429,18 @@ export default function ChatPage() {
                           {message.sender === "user" ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
                         </AvatarFallback>
                       </Avatar>
-                      <div className={`rounded-lg px-4 py-2 ${
-                        message.sender === "user" 
-                          ? "bg-blue-500 text-white" 
-                          : "bg-gray-100 text-gray-900"
-                      }`}>
-                        <p className="text-sm whitespace-pre-wrap">
-                          {message.content}
-                        </p>
-                        <p className={`text-xs mt-1 ${
-                          message.sender === "user" ? "text-blue-100" : "text-gray-500"
+
+                      <div className={`rounded-lg px-4 py-2 ${message.sender === "user"
+                        ? "bg-blue-500 text-white"
+                        : "bg-gray-100 text-gray-900"
+
                         }`}>
-                          {message.timestamp.toLocaleTimeString('ko-KR', { 
-                            hour: '2-digit', 
-                            minute: '2-digit' 
+                        <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                        <p className={`text-xs mt-1 ${message.sender === "user" ? "text-blue-100" : "text-gray-500"
+                          }`}>
+                          {message.timestamp.toLocaleTimeString('ko-KR', {
+                            hour: '2-digit',
+                            minute: '2-digit'
                           })}
                         </p>
                       </div>
@@ -447,7 +448,7 @@ export default function ChatPage() {
                   </div>
                 ))
               )}
-              
+
               {isLoading && (
                 <div className="flex justify-start">
                   <div className="flex items-start space-x-3 max-w-[70%]">
@@ -465,7 +466,7 @@ export default function ChatPage() {
                   </div>
                 </div>
               )}
-              
+
               <div ref={messagesEndRef} />
             </div>
 
@@ -475,8 +476,8 @@ export default function ChatPage() {
                 <div className="text-center py-4">
                   <p className="text-gray-500 text-sm">
                     {connectionStatus === 'connecting' ? '서버에 연결 중입니다...' :
-                     connectionStatus === 'error' ? '연결에 실패했습니다. 재연결 버튼을 눌러주세요.' :
-                     '연결이 끊어졌습니다. 재연결 버튼을 눌러주세요.'}
+                      connectionStatus === 'error' ? '연결에 실패했습니다. 재연결 버튼을 눌러주세요.' :
+                        '연결이 끊어졌습니다. 재연결 버튼을 눌러주세요.'}
                   </p>
                 </div>
               ) : (
@@ -488,15 +489,15 @@ export default function ChatPage() {
                       onKeyPress={handleKeyPress}
                       placeholder={
                         connectionStatus === 'connected' ? "메시지를 입력하세요..." :
-                        connectionStatus === 'connecting' ? "연결 중입니다..." :
-                        "연결이 필요합니다..."
+                          connectionStatus === 'connecting' ? "연결 중입니다..." :
+                            "연결이 필요합니다..."
                       }
                       className="flex-1 resize-none"
                       rows={1}
                       disabled={isLoading || connectionStatus !== 'connected'}
                     />
-                    <Button 
-                      onClick={sendMessage} 
+                    <Button
+                      onClick={sendMessage}
                       disabled={!inputMessage.trim() || isLoading || connectionStatus !== 'connected'}
                       size="sm"
                       className="self-end"
