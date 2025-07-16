@@ -70,7 +70,7 @@ async def process_single_influencer(
             )
         
         # 모델 ID 생성 (어댑터 이름)
-        model_id = adapter_repo.split('/')[-1] if '/' in adapter_repo else adapter_repo
+        model_id = influencer_info.influencer_id
         
         # 어댑터 로드 (필요시)
         logger.info(f"Loading adapter if needed: {model_id} from {adapter_repo}")
