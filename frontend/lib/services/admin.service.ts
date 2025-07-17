@@ -7,6 +7,11 @@ export interface AdminUser {
   provider: string
   user_name: string
   email: string
+  teams?: {
+    group_id: number
+    group_name: string
+    group_description?: string
+  }[]
   created_at?: string
   updated_at?: string
 }
@@ -88,13 +93,13 @@ export class AdminService {
     limit?: number
   }): Promise<AdminTeam[]> {
     const searchParams = new URLSearchParams()
-    
+
     if (params?.skip) searchParams.set('skip', params.skip.toString())
     if (params?.limit) searchParams.set('limit', params.limit.toString())
 
     const query = searchParams.toString()
     const endpoint = `/api/v1/teams${query ? `?${query}` : ''}`
-    
+
     return await apiClient.get<AdminTeam[]>(endpoint)
   }
 
@@ -147,12 +152,7 @@ export class AdminService {
     })
   }
 
-  /**
-   * 팀에서 사용자 제거 (관리자만)
-   */
-  static async removeUserFromTeam(groupId: number, userId: string): Promise<void> {
-    await apiClient.delete(`/api/v1/teams/${groupId}/users/${userId}`)
-  }
+
 
   /**
    * 팀에서 여러 사용자 일괄 제거 (관리자만)
@@ -176,32 +176,78 @@ export class AdminService {
     limit?: number
   }): Promise<AdminUser[]> {
     const searchParams = new URLSearchParams()
-    
+
     if (params?.skip) searchParams.set('skip', params.skip.toString())
     if (params?.limit) searchParams.set('limit', params.limit.toString())
 
     const query = searchParams.toString()
     const endpoint = `/api/v1/teams/${groupId}/users${query ? `?${query}` : ''}`
-    
+
     return await apiClient.get<AdminUser[]>(endpoint)
   }
 
   /**
-   * 모든 사용자 목록 조회
+   * 모든 사용자 목록 조회 (관리자만)
    */
   static async getUsers(params?: {
     skip?: number
     limit?: number
   }): Promise<AdminUser[]> {
     const searchParams = new URLSearchParams()
-    
+
     if (params?.skip) searchParams.set('skip', params.skip.toString())
     if (params?.limit) searchParams.set('limit', params.limit.toString())
 
     const query = searchParams.toString()
-    const endpoint = `/api/v1/users${query ? `?${query}` : ''}`
-    
+    const endpoint = `/api/v1/admin/users${query ? `?${query}` : ''}`
+
     return await apiClient.get<AdminUser[]>(endpoint)
+  }
+
+  /**
+   * 사용자를 기본 접속자 그룹에 할당
+   */
+  static async assignUserToDefaultGroup(userId: string): Promise<{
+    message: string
+    user_id: string
+    team_id: number
+    team_name: string
+  }> {
+    return await apiClient.post(`/api/v1/admin/users/${userId}/assign-default-group`)
+  }
+
+  /**
+   * 사용자를 특정 팀에 할당
+   */
+  static async assignUserToTeam(userId: string, teamId: number): Promise<{
+    message: string
+    user_id: string
+    team_id: number
+    team_name: string
+  }> {
+    return await apiClient.post(`/api/v1/admin/users/${userId}/assign-team/${teamId}`)
+  }
+
+  /**
+   * 사용자를 특정 팀에서 제거
+   */
+  static async removeUserFromTeam(userId: string, teamId: number): Promise<{
+    message: string
+    user_id: string
+    team_id: number
+    team_name: string
+  }> {
+    return await apiClient.delete(`/api/v1/admin/users/${userId}/remove-team/${teamId}`)
+  }
+
+  /**
+   * 사용자 삭제
+   */
+  static async deleteUser(userId: string): Promise<{
+    message: string
+    user_id: string
+  }> {
+    return await apiClient.delete(`/api/v1/admin/users/${userId}`)
   }
 
   /**
@@ -209,13 +255,6 @@ export class AdminService {
    */
   static async getUser(userId: string): Promise<AdminUser> {
     return await apiClient.get<AdminUser>(`/api/v1/users/${userId}`)
-  }
-
-  /**
-   * 사용자 삭제 (관리자만)
-   */
-  static async deleteUser(userId: string): Promise<void> {
-    await apiClient.delete(`/api/v1/users/${userId}`)
   }
 
   /**
@@ -257,7 +296,7 @@ export class AdminService {
     limit?: number
   }): Promise<AdminHFToken[]> {
     const searchParams = new URLSearchParams()
-    
+
     if (params?.include_assigned !== undefined) {
       searchParams.set('include_assigned', params.include_assigned.toString())
     }
@@ -267,7 +306,7 @@ export class AdminService {
 
     const query = searchParams.toString()
     const endpoint = `/api/v1/admin/hf-tokens${query ? `?${query}` : ''}`
-    
+
     return await apiClient.get<AdminHFToken[]>(endpoint)
   }
 

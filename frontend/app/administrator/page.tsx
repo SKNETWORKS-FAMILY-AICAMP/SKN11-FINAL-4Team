@@ -25,9 +25,11 @@ export default function AdministratorPage() {
   const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null)
   const [newGroupName, setNewGroupName] = useState("")
   const [isModalOpen, setIsModalOpen] = useState(false)
-  const [dragUserId, setDragUserId] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState("")
-  const [dragOverBox, setDragOverBox] = useState<string | null>(null)
+
+  // 드래그 앤 드롭 관련 상태
+  const [draggedUser, setDraggedUser] = useState<AdminUser | null>(null)
+  const [dragOverTeam, setDragOverTeam] = useState<number | null>(null)
 
   // HF Token 관련 상태들
   const [hfTokens, setHfTokens] = useState<AdminHFToken[]>([])
@@ -37,8 +39,7 @@ export default function AdministratorPage() {
   const [inputUsername, setInputUsername] = useState("")
   const [selectedTeamForToken, setSelectedTeamForToken] = useState<number | null>(null)
   const [creatingToken, setCreatingToken] = useState(false)
-  const [dragTokenId, setDragTokenId] = useState<string | null>(null)
-  const [dragOverTokenBox, setDragOverTokenBox] = useState<string | null>(null)
+
   const [selectedTokenDetail, setSelectedTokenDetail] = useState<AdminHFToken | null>(null)
   const [isTokenDetailOpen, setIsTokenDetailOpen] = useState(false)
 
@@ -56,7 +57,6 @@ export default function AdministratorPage() {
   const [loadingDocuments, setLoadingDocuments] = useState(false)
   const [uploadingDocument, setUploadingDocument] = useState(false)
   const [selectedFiles, setSelectedFiles] = useState<File[]>([])
-  const [dragActive, setDragActive] = useState(false)
 
   // API에서 데이터 로드
   useEffect(() => {
@@ -220,133 +220,7 @@ export default function AdministratorPage() {
     setSelectedGroupId(null)
   }
 
-  // 드래그앤드롭 로직
-  const handleDragStart = (userId: string) => {
-    setDragUserId(userId)
-    // 드래그 중에도 스크롤 가능하도록 설정
-    document.body.style.overflow = 'auto'
-    document.body.style.userSelect = 'none'
 
-    // 드래그 중 스크롤을 방해하지 않도록 설정
-    const handleDrag = (e: DragEvent) => {
-      e.preventDefault()
-      // 드래그 중에도 스크롤 허용
-      document.body.style.overflow = 'auto'
-    }
-
-    document.addEventListener('drag', handleDrag)
-
-    // 드래그 종료 시 이벤트 리스너 제거
-    const cleanup = () => {
-      document.removeEventListener('drag', handleDrag)
-      document.body.style.overflow = ''
-      document.body.style.userSelect = ''
-    }
-
-    // 드래그 종료 시 정리
-    document.addEventListener('dragend', cleanup, { once: true })
-  }
-
-  const handleDropToGroup = async () => {
-    if (dragUserId && selectedGroupId) {
-      try {
-        // 현재 사용자가 속한 팀들 찾기
-        const currentTeams = teams.filter(t =>
-          t.users.some(u => u.user_id === dragUserId)
-        )
-
-        // 이미 해당 팀에 속해있는지 확인
-        const alreadyInTargetTeam = currentTeams.some(t => t.group_id === selectedGroupId)
-
-        if (!alreadyInTargetTeam) {
-          const draggedUser = allUsers.find(u => u.user_id === dragUserId)
-          const targetTeam = teams.find(t => t.group_id === selectedGroupId)
-
-          // 다른 팀들에서 제거
-          for (const team of currentTeams) {
-            await AdminService.removeUserFromTeam(team.group_id, dragUserId)
-          }
-
-          // 새 팀에 추가
-          await AdminService.addUserToTeam(selectedGroupId, dragUserId)
-
-          // 상태 업데이트
-          const [updatedTeams, updatedUsers] = await Promise.all([
-            AdminService.getTeams(),
-            AdminService.getUsers()
-          ])
-          setTeams(updatedTeams)
-          setAllUsers(updatedUsers)
-
-          toast({
-            title: "팀 할당 완료",
-            description: `'${draggedUser?.user_name || '사용자'}'이(가) '${targetTeam?.group_name || '팀'}'에 성공적으로 할당되었습니다.`,
-            variant: "default",
-          })
-        } else {
-          toast({
-            title: "이미 할당됨",
-            description: "해당 사용자는 이미 이 팀에 할당되어 있습니다.",
-            variant: "default",
-          })
-        }
-      } catch (err: any) {
-        console.error('Failed to move user:', err)
-        setError('사용자 이동에 실패했습니다.')
-        toast({
-          title: "팀 할당 실패",
-          description: "사용자 팀 할당 중 오류가 발생했습니다.",
-          variant: "destructive",
-        })
-      }
-    }
-    setDragUserId(null);
-    setSelectedGroupId(null);
-  }
-
-  const handleDropToAll = async () => {
-    if (dragUserId) {
-      try {
-        const draggedUser = allUsers.find(u => u.user_id === dragUserId)
-        // 사용자가 속한 모든 팀에서 제거
-        const userTeams = teams.filter(t =>
-          t.users?.some(u => u.user_id === dragUserId)
-        )
-
-        for (const team of userTeams) {
-          await AdminService.removeUserFromTeam(team.group_id, dragUserId)
-        }
-
-        // 상태 업데이트
-        const [updatedTeams] = await Promise.all([AdminService.getTeams()])
-        setTeams(updatedTeams)
-
-        toast({
-          title: "팀에서 제거 완료",
-          description: `'${draggedUser?.user_name || '사용자'}'이(가) 모든 팀에서 성공적으로 제거되었습니다.`,
-          variant: "default",
-        })
-      } catch (err: any) {
-        console.error('Failed to remove user from teams:', err)
-        setError('사용자 제거에 실패했습니다.')
-        toast({
-          title: "팀에서 제거 실패",
-          description: "사용자 팀 제거 중 오류가 발생했습니다.",
-          variant: "destructive",
-        })
-      }
-    }
-    setDragUserId(null)
-    setSelectedGroupId(null)
-  }
-
-  const handleDragEnd = () => {
-    setDragUserId(null)
-    setDragOverBox(null)
-    setDragOverTokenBox(null)
-    document.body.style.overflow = ''
-    document.body.style.userSelect = ''
-  }
 
   // 사용자 관리 함수들
   const handleUserDetail = (user: AdminUser) => {
@@ -429,7 +303,7 @@ export default function AdministratorPage() {
       const team = teams.find(t => t.group_id === teamId)
       const user = allUsers.find(u => u.user_id === userId)
 
-      await AdminService.removeUserFromTeam(teamId, userId)
+      await AdminService.removeUserFromTeam(userId, teamId)
 
       // 데이터 새로고침
       const [teamsData, usersData] = await Promise.all([
@@ -483,6 +357,80 @@ export default function AdministratorPage() {
     }
   }
 
+  // 드래그 시작 핸들러
+  const handleDragStart = (e: React.DragEvent, user: AdminUser) => {
+    setDraggedUser(user)
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', user.user_id)
+  }
+
+  // 드래그 오버 핸들러 (팀 섹션에서만)
+  const handleDragOver = (e: React.DragEvent, teamId: number) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    setDragOverTeam(teamId)
+  }
+
+  // 드래그 리브 핸들러
+  const handleDragLeave = (e: React.DragEvent) => {
+    setDragOverTeam(null)
+  }
+
+  // 드롭 핸들러 (전체 사용자에서 팀으로만)
+  const handleDrop = async (e: React.DragEvent, teamId: number) => {
+    e.preventDefault()
+    setDragOverTeam(null)
+
+    if (!draggedUser) return
+
+    // 이미 해당 팀에 존재하는지 확인
+    const targetTeam = teams.find(team => team.group_id === teamId)
+    const isAlreadyInTeam = targetTeam?.users?.some(user => user.user_id === draggedUser.user_id)
+
+    if (isAlreadyInTeam) {
+      toast({
+        title: "팀 할당 실패",
+        description: `'${draggedUser.user_name}'은(는) 이미 해당 팀에 존재합니다.`,
+        variant: "destructive",
+      })
+      setDraggedUser(null)
+      return
+    }
+
+    try {
+      await AdminService.addUserToTeam(teamId, draggedUser.user_id)
+
+      // 데이터 새로고침
+      const [teamsData, usersData] = await Promise.all([
+        AdminService.getTeams(),
+        AdminService.getUsers()
+      ])
+      setTeams(teamsData)
+      setAllUsers(usersData)
+
+      toast({
+        title: "팀 할당 완료",
+        description: `'${draggedUser.user_name}'이(가) 팀에 성공적으로 할당되었습니다.`,
+        variant: "default",
+      })
+    } catch (err: any) {
+      console.error('Failed to assign user to team:', err)
+      toast({
+        title: "팀 할당 실패",
+        description: "팀 할당 중 오류가 발생했습니다.",
+        variant: "destructive",
+      })
+    } finally {
+      setDraggedUser(null)
+    }
+  }
+
+  // 드래그 종료 핸들러
+  const handleDragEnd = () => {
+    setDraggedUser(null)
+    setDragOverTeam(null)
+  }
+
   // 그룹/사용자 정보
   const selectedTeam = teams.find(t => t.group_id === selectedGroupId)
   const teamUsers = selectedTeam?.users || []
@@ -501,14 +449,10 @@ export default function AdministratorPage() {
 
   return (
     <RequireAdmin>
-      <div className="min-h-screen bg-gray-50" style={{
-        overflow: 'auto',
-        overscrollBehavior: 'contain',
-        scrollBehavior: 'smooth'
-      }}>
+      <div className="min-h-screen bg-gray-50">
         <Navigation />
 
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <div className="mb-8">
             <h1 className="text-3xl font-bold text-gray-900">관리자 설정</h1>
             <p className="text-gray-600 mt-2">시스템 설정을 관리하세요</p>
@@ -586,29 +530,10 @@ export default function AdministratorPage() {
                           <div className="text-xs text-red-600 mt-1">이미 사용 중인 그룹 이름입니다.</div>
                         )}
                       </div>
-                      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                      <div className="grid grid-cols-1 lg:grid-cols-8 gap-6">
                         {/* 전체 사용자 목록 */}
-                        <Card
-                          className={`shadow-sm transition-all ${dragOverBox === 'all' ? 'bg-green-50 border-green-300 shadow-md' : ''
-                            }`}
-                          onDragOver={e => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            setDragOverBox('all');
-                          }}
-                          onDragLeave={(e) => {
-                            if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-                              setDragOverBox(null);
-                            }
-                          }}
-                          onDrop={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            handleDropToAll();
-                            setDragOverBox(null);
-                          }}
-                        >
-                          <CardHeader className="pb-3">
+                        <Card style={{ height: '800px', display: 'flex', flexDirection: 'column' }} className="lg:col-span-3">
+                          <CardHeader className="pb-3" style={{ flexShrink: 0 }}>
                             <CardTitle className="text-base font-semibold flex items-center gap-2">
                               <Users className="h-4 w-4" />
                               전체 사용자
@@ -616,10 +541,7 @@ export default function AdministratorPage() {
                           </CardHeader>
                           <CardContent
                             className={`transition-colors`}
-                            style={{
-                              minHeight: '300px',
-                              position: 'relative'
-                            }}
+                            style={{ flex: 1, overflow: 'hidden' }}
                           >
                             <Input
                               placeholder="이름 또는 이메일로 검색"
@@ -627,73 +549,75 @@ export default function AdministratorPage() {
                               value={searchTerm}
                               onChange={e => setSearchTerm(e.target.value)}
                             />
-                            <div className="space-y-2 overflow-y-auto" style={{ scrollBehavior: 'smooth', overscrollBehavior: 'contain' }}>
-                              {otherUsers
+                            <div className="space-y-4 h-full overflow-y-auto custom-scrollbar border border-gray-200 rounded-lg shadow-inner px-4 py-2" style={{ height: 'calc(100% - 40px)' }}>
+                              {allUsers
                                 .filter(user =>
                                   user.user_name.includes(searchTerm) || user.email.includes(searchTerm)
                                 )
-                                .map(user => (
-                                  <div
-                                    key={user.user_id}
-                                    className={`flex items-center gap-3 p-4 rounded-lg transition-all w-full min-h-[70px] ${dragUserId === user.user_id
-                                      ? 'opacity-50 transform scale-95 bg-blue-100'
-                                      : 'hover:bg-gray-50 hover:shadow-sm'
-                                      }`}
-                                    draggable
-                                    onDragStart={() => handleDragStart(user.user_id)}
-                                    onDragEnd={handleDragEnd}
-                                    onDrag={(e) => {
-                                      // 드래그 중에도 스크롤 허용
-                                      e.preventDefault()
-                                      document.body.style.overflow = 'auto'
-                                    }}
-                                    style={{
-                                      cursor: dragUserId === user.user_id ? 'grabbing' : 'grab',
-                                      touchAction: 'pan-y',
-                                      userSelect: 'none',
-                                      WebkitUserSelect: 'none',
-                                      MozUserSelect: 'none',
-                                      msUserSelect: 'none',
-                                      pointerEvents: 'auto'
-                                    }}
-                                  >
-                                    <Avatar className="h-8 w-8 flex-shrink-0">
-                                      <AvatarFallback className="bg-gray-200 text-gray-600 text-xs">
-                                        {user.user_name.charAt(0)}
-                                      </AvatarFallback>
-                                    </Avatar>
-                                    <div className="flex-1 min-w-0 flex flex-col justify-center">
-                                      <p className="font-medium text-sm truncate">{user.user_name}</p>
-                                      <p className="text-xs text-gray-500 truncate">{user.email}</p>
-                                    </div>
-                                    <div className="flex items-center gap-1 flex-shrink-0">
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={(e) => {
-                                          e.stopPropagation()
-                                          handleUserDetail(user)
-                                        }}
-                                        className="h-6 w-6 p-0"
-                                      >
-                                        <Eye className="h-3 w-3" />
-                                      </Button>
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={(e) => {
-                                          e.stopPropagation()
-                                          handleUserTeamAssignment(user)
-                                        }}
-                                        className="h-6 w-6 p-0"
-                                      >
-                                        <Users className="h-3 w-3" />
-                                      </Button>
+                                .sort((a, b) => {
+                                  // 팀에 속하지 않는 사용자를 최상단으로 정렬
+                                  const aInTeam = teams.some(team => team.users?.some(u => u.user_id === a.user_id))
+                                  const bInTeam = teams.some(team => team.users?.some(u => u.user_id === b.user_id))
 
+                                  if (!aInTeam && bInTeam) return -1
+                                  if (aInTeam && !bInTeam) return 1
+                                  return 0
+                                })
+                                .map(user => {
+                                  // 팀에 속하지 않는 사용자인지 확인
+                                  const isNotInTeam = !teams.some(team => team.users?.some(u => u.user_id === user.user_id))
+
+                                  return (
+                                    <div
+                                      key={user.user_id}
+                                      draggable
+                                      onDragStart={(e) => handleDragStart(e, user)}
+                                      onDragEnd={handleDragEnd}
+                                      className="flex items-center gap-3 p-4 rounded-lg transition-all w-full min-h-[70px] hover:bg-blue-50 hover:shadow-md hover:scale-[1.02] border border-transparent hover:border-blue-200"
+                                    >
+                                      <Avatar className="h-8 w-8 flex-shrink-0">
+                                        <AvatarFallback className="bg-gray-200 text-gray-600 text-xs">
+                                          {user.user_name.charAt(0)}
+                                        </AvatarFallback>
+                                      </Avatar>
+                                      <div className="flex-1 min-w-0 flex flex-col justify-center">
+                                        <p className={`font-medium text-sm truncate ${isNotInTeam ? 'text-orange-600' : ''}`} title={user.user_name}>
+                                          {user.user_name}
+                                        </p>
+                                        <p className="text-xs text-gray-500 truncate">{user.email}</p>
+                                        {isNotInTeam && (
+                                          <p className="text-xs text-orange-500 font-medium">팀 미소속</p>
+                                        )}
+                                      </div>
+                                      <div className="flex items-center gap-1 flex-shrink-0">
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={(e) => {
+                                            e.stopPropagation()
+                                            handleUserDetail(user)
+                                          }}
+                                          className="h-6 w-6 p-0"
+                                        >
+                                          <Eye className="h-3 w-3" />
+                                        </Button>
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={(e) => {
+                                            e.stopPropagation()
+                                            handleUserTeamAssignment(user)
+                                          }}
+                                          className="h-6 w-6 p-0"
+                                        >
+                                          <Users className="h-3 w-3" />
+                                        </Button>
+
+                                      </div>
                                     </div>
-                                  </div>
-                                ))}
-                              {otherUsers
+                                  )
+                                })}
+                              {allUsers
                                 .filter(user =>
                                   user.user_name.includes(searchTerm) || user.email.includes(searchTerm)
                                 ).length === 0 && (
@@ -707,22 +631,14 @@ export default function AdministratorPage() {
                         </Card>
 
                         {/* 권한 그룹들 */}
-                        <div className="lg:col-span-2 space-y-4">
+                        <div className="lg:col-span-5 space-y-4">
                           {teams.map(team => (
                             <Card
                               key={team.group_id}
-                              className={`shadow-sm transition-all ${dragOverBox === `group-${team.group_id}` ? 'bg-green-50 border-green-300 shadow-md' : ''
-                                }`}
-                              onDragOver={e => {
-                                e.preventDefault();
-                                setDragOverBox(`group-${team.group_id}`);
-                                setSelectedGroupId(team.group_id);
-                              }}
-                              onDragLeave={() => setDragOverBox(null)}
-                              onDrop={() => {
-                                handleDropToGroup();
-                                setDragOverBox(null);
-                              }}
+                              onDragOver={(e) => handleDragOver(e, team.group_id)}
+                              onDragLeave={handleDragLeave}
+                              onDrop={(e) => handleDrop(e, team.group_id)}
+                              className={`transition-all duration-300 ${dragOverTeam === team.group_id ? 'ring-4 ring-blue-500 bg-blue-100 scale-105 shadow-xl' : ''}`}
                             >
                               <CardHeader className="pb-3">
                                 <div className="flex items-center justify-between">
@@ -783,33 +699,12 @@ export default function AdministratorPage() {
                               <CardContent
                                 className={`min-h-[120px] transition-colors`}
                               >
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-64 overflow-y-auto">
                                   {(team.users || []).map(user => (
                                     <div
                                       key={user.user_id}
-                                      className={`flex items-center gap-2 p-3 rounded-lg transition-all w-full h-full min-h-[50px] ${dragUserId === user.user_id
-                                        ? 'opacity-50 transform scale-95 bg-blue-100'
-                                        : 'hover:bg-white hover:shadow-sm border border-gray-100'
-                                        }`}
-                                      draggable
-                                      onDragStart={() => {
-                                        handleDragStart(user.user_id);
-                                        setSelectedGroupId(team.group_id);
-                                      }}
-                                      onDragEnd={handleDragEnd}
-                                      onDrag={(e) => {
-                                        e.preventDefault()
-                                        document.body.style.overflow = 'auto'
-                                      }}
-                                      style={{
-                                        cursor: dragUserId === user.user_id ? 'grabbing' : 'grab',
-                                        touchAction: 'pan-y',
-                                        userSelect: 'none',
-                                        WebkitUserSelect: 'none',
-                                        MozUserSelect: 'none',
-                                        msUserSelect: 'none',
-                                        pointerEvents: 'auto'
-                                      }}
+                                      className="flex items-center gap-2 p-3 rounded-lg transition-all w-full h-full min-h-[50px] hover:bg-white hover:shadow-sm border border-gray-100"
+                                      style={{ userSelect: 'none' }}
                                     >
                                       <Avatar className="h-6 w-6 flex-shrink-0">
                                         <AvatarFallback className="bg-blue-100 text-blue-600 text-xs">
@@ -878,7 +773,7 @@ export default function AdministratorPage() {
                                   ))}
                                   {(!team.users || team.users.length === 0) && (
                                     <div className="col-span-2 text-center py-4 text-gray-400 border-2 border-dashed border-gray-200 rounded-lg">
-                                      <p className="text-sm">사용자를 여기에 드래그하세요</p>
+                                      <p className="text-sm">사용자가 없습니다</p>
                                     </div>
                                   )}
                                 </div>
@@ -994,7 +889,7 @@ export default function AdministratorPage() {
                       ) : (
                         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                           {/* 할당되지 않은 토큰들 */}
-                          <Card className={`shadow-sm transition-all ${dragOverTokenBox === 'unassigned-tokens' ? 'bg-green-50 border-green-300 shadow-md' : ''}`}>
+                          <Card className="shadow-sm transition-all">
                             <CardHeader className="pb-3">
                               <CardTitle className="text-base font-semibold flex items-center gap-2">
                                 <Key className="h-4 w-4 text-yellow-600" />
@@ -1005,7 +900,7 @@ export default function AdministratorPage() {
                               <div className="text-xs text-gray-500 mb-2">
                                 토큰을 <span className="font-semibold text-blue-600">클릭</span>하여 상세 정보를 확인하세요.
                               </div>
-                              <div className="space-y-2 overflow-y-auto mt-4">
+                              <div className="space-y-2 mt-4">
                                 {hfTokens
                                   .filter(token => !token.group_id)
                                   .map((token) => (
@@ -1017,11 +912,13 @@ export default function AdministratorPage() {
                                         setIsTokenDetailOpen(true);
                                       }}
                                     >
-                                      <div className="flex-1">
-                                        <div className="font-medium text-yellow-800">{token.hf_token_nickname}</div>
-                                        <div className="text-xs text-gray-500">사용자: {token.hf_user_name}</div>
-                                        {token.hf_token_masked && (
-                                          <div className="text-xs text-gray-400">{token.hf_token_masked}</div>
+                                      <div className="flex-1 min-w-0">
+                                        <div className="font-medium text-yellow-800 truncate">{token.hf_token_nickname}</div>
+                                        <div className="text-xs text-gray-500 truncate">사용자: {token.hf_user_name}</div>
+                                        {token.created_at && (
+                                          <div className="text-xs text-gray-400">
+                                            생성일: {new Date(token.created_at).toLocaleDateString('ko-KR')}
+                                          </div>
                                         )}
                                       </div>
                                     </div>
@@ -1061,9 +958,14 @@ export default function AdministratorPage() {
                                             setIsTokenDetailOpen(true);
                                           }}
                                         >
-                                          <div className="flex-1">
-                                            <div className="font-medium text-blue-800 text-sm">{token.hf_token_nickname}</div>
-                                            <div className="text-xs text-gray-500">{token.hf_user_name}</div>
+                                          <div className="flex-1 min-w-0">
+                                            <div className="font-medium text-blue-800 text-sm truncate">{token.hf_token_nickname}</div>
+                                            <div className="text-xs text-gray-500 truncate">사용자: {token.hf_user_name}</div>
+                                            {token.created_at && (
+                                              <div className="text-xs text-gray-400">
+                                                생성일: {new Date(token.created_at).toLocaleDateString('ko-KR')}
+                                              </div>
+                                            )}
                                           </div>
                                         </div>
                                       ))}
@@ -1085,7 +987,7 @@ export default function AdministratorPage() {
                     </CardContent>
                   </Card>
                 </TabsContent>
-                
+
                 {/* 문서 관리 탭 */}
                 <TabsContent value="documents">
                   <Card>
@@ -1102,41 +1004,15 @@ export default function AdministratorPage() {
                       {/* 문서 업로드 섹션 */}
                       <div className="mb-6 pb-6 border-b">
                         <h4 className="font-medium text-gray-900 mb-4">문서 업로드</h4>
-                        
+
                         {/* 드래그 앤 드롭 영역 */}
-                        <div 
-                          className={`relative group transition-all duration-300 ${
-                            dragActive 
-                              ? "scale-105" 
-                              : "hover:scale-[1.02]"
-                          }`}
-                          onDragEnter={(e) => {
-                            e.preventDefault()
-                            e.stopPropagation()
-                            setDragActive(true)
-                          }}
-                          onDragLeave={(e) => {
-                            e.preventDefault()
-                            e.stopPropagation()
-                            setDragActive(false)
-                          }}
-                          onDragOver={(e) => {
-                            e.preventDefault()
-                            e.stopPropagation()
-                          }}
-                          onDrop={(e) => {
-                            e.preventDefault()
-                            e.stopPropagation()
-                            setDragActive(false)
-                            
-                            const files = Array.from(e.dataTransfer.files)
-                            setSelectedFiles(prev => [...prev, ...files])
-                          }}
+                        <div
+                          className={`relative group transition-all duration-300`}
                         >
                           <div className={`
                             relative overflow-hidden rounded-xl border-2 border-dashed transition-all duration-300
-                            ${dragActive 
-                              ? "border-blue-500 bg-gradient-to-br from-blue-50 to-indigo-50 shadow-lg shadow-blue-100" 
+                            ${selectedFiles.length > 0
+                              ? "border-blue-500 bg-gradient-to-br from-blue-50 to-indigo-50 shadow-lg shadow-blue-100"
                               : "border-gray-300 bg-gradient-to-br from-gray-50 to-white hover:border-blue-400 hover:bg-gradient-to-br hover:from-blue-50 hover:to-indigo-50"
                             }
                           `}>
@@ -1147,78 +1023,78 @@ export default function AdministratorPage() {
                               <div className="absolute bottom-8 left-12 w-4 h-4 border-2 border-gray-400 rotate-45"></div>
                               <div className="absolute bottom-16 right-4 w-10 h-10 border-2 border-gray-400 rounded-lg"></div>
                             </div>
-                            
+
                             <div className="relative p-12 text-center">
                               {/* 아이콘 영역 */}
                               <div className={`
                                 relative mx-auto mb-6 w-20 h-20 rounded-full flex items-center justify-center transition-all duration-300
-                                ${dragActive 
-                                  ? "bg-blue-100 shadow-lg shadow-blue-200" 
+                                ${selectedFiles.length > 0
+                                  ? "bg-blue-100 shadow-lg shadow-blue-200"
                                   : "bg-gray-100 group-hover:bg-blue-100 group-hover:shadow-lg group-hover:shadow-blue-200"
                                 }
                               `}>
                                 <Upload className={`
                                   h-8 w-8 transition-all duration-300
-                                  ${dragActive 
-                                    ? "text-blue-600 scale-110" 
+                                  ${selectedFiles.length > 0
+                                    ? "text-blue-600 scale-110"
                                     : "text-gray-500 group-hover:text-blue-600 group-hover:scale-110"
                                   }
                                 `} />
                                 {/* 애니메이션 효과 */}
-                                {dragActive && (
+                                {selectedFiles.length > 0 && (
                                   <div className="absolute inset-0 rounded-full border-2 border-blue-300 animate-ping"></div>
                                 )}
                               </div>
-                              
+
                               {/* 텍스트 영역 */}
                               <div className="space-y-3">
                                 <h3 className={`
                                   text-xl font-semibold transition-colors duration-300
-                                  ${dragActive ? "text-blue-700" : "text-gray-800 group-hover:text-blue-700"}
+                                  ${selectedFiles.length > 0 ? "text-blue-700" : "text-gray-800 group-hover:text-blue-700"}
                                 `}>
-                                  {dragActive ? "여기에 놓으세요!" : "문서 업로드"}
+                                  {selectedFiles.length > 0 ? "여기에 놓으세요!" : "문서 업로드"}
                                 </h3>
                                 <p className={`
                                   text-sm transition-colors duration-300 max-w-md mx-auto
-                                  ${dragActive ? "text-blue-600" : "text-gray-600 group-hover:text-blue-600"}
+                                  ${selectedFiles.length > 0 ? "text-blue-600" : "text-gray-600 group-hover:text-blue-600"}
                                 `}>
                                   RAG 챗봇 학습용 문서들을 드래그하여 놓거나 클릭하여 선택하세요
-                          </p>
+                                </p>
                                 <p className="text-xs text-gray-500">
                                   지원 형식: PDF, DOCX, TXT (여러 파일 선택 가능)
                                 </p>
                               </div>
-                              
+
                               {/* 파일 선택 버튼 */}
                               <div className="mt-6">
-                          <input
-                            type="file"
-                            accept=".pdf,.docx,.txt"
-                            multiple
-                            onChange={(e) => {
-                              const files = Array.from(e.target.files || [])
-                              setSelectedFiles(prev => [...prev, ...files])
-                            }}
-                            className="hidden"
-                            id="document-upload"
-                          />
-                          <label htmlFor="document-upload">
-                                  <Button 
+                                <input
+                                  type="file"
+                                  accept=".pdf,.docx,.txt"
+                                  multiple
+                                  onChange={(e) => {
+                                    const files = Array.from(e.target.files || [])
+                                    setSelectedFiles(prev => [...prev, ...files])
+                                  }}
+                                  className="hidden"
+                                  id="document-upload"
+                                />
+                                <label htmlFor="document-upload">
+                                  <Button
                                     className={`
                                       transition-all duration-300 cursor-pointer
-                                      ${dragActive 
-                                        ? "bg-blue-600 hover:bg-blue-700 text-white shadow-lg" 
+                                      ${selectedFiles.length > 0
+                                        ? "bg-blue-600 hover:bg-blue-700 text-white shadow-lg"
                                         : "bg-white hover:bg-blue-50 text-gray-700 border-gray-300 hover:border-blue-400 hover:text-blue-700 shadow-sm hover:shadow-md"
                                       }
-                                    `} 
+                                    `}
                                     asChild
                                   >
                                     <span className="flex items-center gap-2">
                                       <Upload className="h-4 w-4" />
-                                파일 선택
-                              </span>
-                            </Button>
-                          </label>
+                                      파일 선택
+                                    </span>
+                                  </Button>
+                                </label>
                               </div>
                             </div>
                           </div>
@@ -1345,7 +1221,7 @@ export default function AdministratorPage() {
                                   </div>
                                 </div>
                                 <div className="flex items-center gap-2">
-                                  <Badge 
+                                  <Badge
                                     variant={doc.status === 'processed' ? 'default' : 'secondary'}
                                     className="text-xs"
                                   >
@@ -1414,9 +1290,6 @@ export default function AdministratorPage() {
                       <CardContent
                         className="pt-0"
                         style={{ minHeight: 280 }}
-                        onDragOver={e => { e.preventDefault(); setDragOverBox('all'); }}
-                        onDragLeave={() => setDragOverBox(null)}
-                        onDrop={handleDropToAll}
                       >
                         <Input
                           placeholder="이름 또는 이메일로 검색"
@@ -1424,30 +1297,13 @@ export default function AdministratorPage() {
                           value={searchTerm}
                           onChange={e => setSearchTerm(e.target.value)}
                         />
-                        <ul className="divide-y max-h-60 overflow-y-auto rounded">
-                          {otherUsers.filter(user =>
+                        <ul className="divide-y rounded">
+                          {allUsers.filter(user =>
                             user.user_name.includes(searchTerm) || user.email.includes(searchTerm)
                           ).map(user => (
                             <li
                               key={user.user_id}
-                              className={`flex items-center gap-3 py-3 px-3 rounded transition-shadow bg-white w-full h-full min-h-[50px] hover:bg-gray-50`}
-                              draggable
-                              onDragStart={() => handleDragStart(user.user_id)}
-                              onDragEnd={handleDragEnd}
-                              onDrag={(e) => {
-                                // 드래그 중에도 스크롤 허용
-                                e.preventDefault()
-                                document.body.style.overflow = 'auto'
-                              }}
-                              style={{
-                                cursor: dragUserId === user.user_id ? 'grabbing' : 'grab',
-                                touchAction: 'pan-y',
-                                userSelect: 'none',
-                                WebkitUserSelect: 'none',
-                                MozUserSelect: 'none',
-                                msUserSelect: 'none',
-                                pointerEvents: 'auto'
-                              }}
+                              className="flex items-center gap-3 py-3 px-3 rounded transition-shadow bg-white w-full h-full min-h-[50px] hover:bg-gray-50"
                             >
                               <User className="h-4 w-4 text-gray-500 flex-shrink-0" />
                               <div className="flex-1 min-w-0 flex flex-col justify-center">
@@ -1456,7 +1312,7 @@ export default function AdministratorPage() {
                               </div>
                             </li>
                           ))}
-                          {otherUsers.filter(user =>
+                          {allUsers.filter(user =>
                             user.user_name.includes(searchTerm) || user.email.includes(searchTerm)
                           ).length === 0 && (
                               <li className="text-sm text-gray-400 py-4 text-center">추가 가능한 사용자가 없습니다.</li>
@@ -1472,32 +1328,12 @@ export default function AdministratorPage() {
                       <CardContent
                         className="pt-0"
                         style={{ minHeight: 280 }}
-                        onDragOver={e => { e.preventDefault(); setDragOverBox('group'); }}
-                        onDragLeave={() => setDragOverBox(null)}
-                        onDrop={handleDropToGroup}
                       >
-                        <ul className="divide-y max-h-60 overflow-y-auto rounded">
+                        <ul className="divide-y rounded">
                           {teamUsers.map(user => (
                             <li
                               key={user.user_id}
-                              className={`flex items-center gap-3 py-3 px-3 rounded transition-shadow bg-white w-full h-full min-h-[50px] hover:bg-gray-50`}
-                              draggable
-                              onDragStart={() => handleDragStart(user.user_id)}
-                              onDragEnd={handleDragEnd}
-                              onDrag={(e) => {
-                                // 드래그 중에도 스크롤 허용
-                                e.preventDefault()
-                                document.body.style.overflow = 'auto'
-                              }}
-                              style={{
-                                cursor: dragUserId === user.user_id ? 'grabbing' : 'grab',
-                                touchAction: 'pan-y',
-                                userSelect: 'none',
-                                WebkitUserSelect: 'none',
-                                MozUserSelect: 'none',
-                                msUserSelect: 'none',
-                                pointerEvents: 'auto'
-                              }}
+                              className="flex items-center gap-3 py-3 px-3 rounded transition-shadow bg-white w-full h-full min-h-[50px] hover:bg-gray-50"
                             >
                               <User className="h-4 w-4 text-gray-500 flex-shrink-0" />
                               <div className="flex-1 min-w-0 flex flex-col justify-center">
@@ -1864,15 +1700,6 @@ export default function AdministratorPage() {
                       </div>
 
                       <div className="flex justify-end gap-2 pt-4">
-                        <Button
-                          variant="outline"
-                          onClick={() => {
-                            setIsUserDetailOpen(false)
-                            handleUserTeamAssignment(selectedUserDetail)
-                          }}
-                        >
-                          팀 할당
-                        </Button>
                         <AlertDialog>
                           <AlertDialogTrigger asChild>
                             <Button variant="destructive">사용자 삭제</Button>
