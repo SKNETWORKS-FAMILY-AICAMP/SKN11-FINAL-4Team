@@ -66,8 +66,10 @@ from app.services.finetuning_service import (
     get_finetuning_service,
     InfluencerFineTuningService,
 )
+from app.services.s3_service import S3Service, get_s3_service
 from datetime import datetime
 from app.models.influencer import StylePreset, BatchKey, AIInfluencer, InfluencerAPI
+from app.models.voice import VoiceBase, GeneratedVoice
 from fastapi import HTTPException
 from typing import Dict, Any
 from openai import OpenAI
@@ -1741,4 +1743,203 @@ async def track_api_usage(db: Session, influencer_id: str):
     except Exception as e:
         logger.error(f"❌ API 사용량 추적 실패 - influencer_id: {influencer_id}, error: {str(e)}")
         db.rollback()
+
+
+# 음성 관련 API 엔드포인트
+@router.post("/{influencer_id}/voice/base")
+async def upload_base_voice(
+    influencer_id: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+    s3_service: S3Service = Depends(get_s3_service),
+):
+    """AI 인플루언서의 베이스 음성 업로드"""
+    user_id = current_user.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User ID not found")
+    
+    # 인플루언서 존재 확인
+    influencer = get_influencer_by_id(db, user_id, influencer_id)
+    if not influencer:
+        raise HTTPException(status_code=404, detail="인플루언서를 찾을 수 없습니다")
+    
+    # 파일 검증
+    if not file.content_type.startswith('audio/'):
+        raise HTTPException(status_code=400, detail="오디오 파일만 업로드 가능합니다")
+    
+    # 파일 크기 검증 (10MB)
+    file_size = 0
+    contents = await file.read()
+    file_size = len(contents)
+    
+    if file_size > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="파일 크기는 10MB 이하여야 합니다")
+    
+    # 파일 확장자 추출
+    file_extension = file.filename.split('.')[-1].lower()
+    if file_extension not in ['mp3', 'wav', 'm4a', 'ogg', 'flac']:
+        raise HTTPException(status_code=400, detail="지원하지 않는 오디오 형식입니다")
+    
+    # S3 키 생성 (audio_base/influencer_id/base.extension)
+    s3_key = f"audio_base/{influencer_id}/base.{file_extension}"
+    
+    # 임시 파일로 저장
+    import tempfile
+    with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_extension}") as tmp_file:
+        tmp_file.write(contents)
+        tmp_file_path = tmp_file.name
+    
+    try:
+        # S3에 업로드
+        s3_url = s3_service.upload_file(tmp_file_path, s3_key, content_type=file.content_type)
+        if not s3_url:
+            raise HTTPException(status_code=500, detail="S3 업로드 실패")
+        
+        # 기존 베이스 음성이 있는지 확인
+        existing_voice = db.query(VoiceBase).filter(
+            VoiceBase.influencer_id == influencer.id
+        ).first()
+        
+        if existing_voice:
+            # 기존 음성 업데이트
+            existing_voice.file_name = file.filename
+            existing_voice.file_size = file_size
+            existing_voice.file_type = file.content_type
+            existing_voice.s3_url = s3_url
+            existing_voice.s3_key = s3_key
+            existing_voice.updated_at = datetime.utcnow()
+        else:
+            # 새로운 베이스 음성 생성
+            new_voice = VoiceBase(
+                influencer_id=influencer.id,
+                file_name=file.filename,
+                file_size=file_size,
+                file_type=file.content_type,
+                s3_url=s3_url,
+                s3_key=s3_key
+            )
+            db.add(new_voice)
+        
+        db.commit()
+        
+        return {
+            "message": "베이스 음성이 성공적으로 업로드되었습니다",
+            "s3_url": s3_url,
+            "file_name": file.filename,
+            "file_size": file_size
+        }
+        
+    except Exception as e:
+        logger.error(f"베이스 음성 업로드 실패: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        # 임시 파일 삭제
+        if os.path.exists(tmp_file_path):
+            os.unlink(tmp_file_path)
+
+
+@router.get("/{influencer_id}/voice/base")
+async def get_base_voice(
+    influencer_id: str,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """AI 인플루언서의 베이스 음성 조회"""
+    user_id = current_user.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User ID not found")
+    
+    # 인플루언서 존재 확인
+    influencer = get_influencer_by_id(db, user_id, influencer_id)
+    if not influencer:
+        raise HTTPException(status_code=404, detail="인플루언서를 찾을 수 없습니다")
+    
+    # 베이스 음성 조회
+    base_voice = db.query(VoiceBase).filter(
+        VoiceBase.influencer_id == influencer.id
+    ).first()
+    
+    if not base_voice:
+        raise HTTPException(status_code=404, detail="베이스 음성이 설정되지 않았습니다")
+    
+    return {
+        "base_voice_url": base_voice.s3_url,
+        "file_name": base_voice.file_name,
+        "file_size": base_voice.file_size,
+        "created_at": base_voice.created_at.isoformat(),
+        "updated_at": base_voice.updated_at.isoformat()
+    }
+
+
+@router.get("/{influencer_id}/voices")
+async def get_generated_voices(
+    influencer_id: str,
+    skip: int = 0,
+    limit: int = 20,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """AI 인플루언서의 생성된 음성 목록 조회"""
+    user_id = current_user.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User ID not found")
+    
+    # 인플루언서 존재 확인
+    influencer = get_influencer_by_id(db, user_id, influencer_id)
+    if not influencer:
+        raise HTTPException(status_code=404, detail="인플루언서를 찾을 수 없습니다")
+    
+    # 생성된 음성 목록 조회 (삭제되지 않은 것만)
+    voices = db.query(GeneratedVoice).filter(
+        GeneratedVoice.influencer_id == influencer.id,
+        GeneratedVoice.is_deleted == False
+    ).order_by(GeneratedVoice.created_at.desc()).offset(skip).limit(limit).all()
+    
+    return [
+        {
+            "id": str(voice.id),
+            "text": voice.text,
+            "s3_url": voice.s3_url,
+            "duration": voice.duration,
+            "file_size": voice.file_size,
+            "created_at": voice.created_at.isoformat()
+        }
+        for voice in voices
+    ]
+
+
+@router.delete("/voices/{voice_id}")
+async def delete_generated_voice(
+    voice_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """생성된 음성 삭제 (소프트 삭제)"""
+    user_id = current_user.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User ID not found")
+    
+    # 음성 조회
+    voice = db.query(GeneratedVoice).filter(
+        GeneratedVoice.id == voice_id
+    ).first()
+    
+    if not voice:
+        raise HTTPException(status_code=404, detail="음성을 찾을 수 없습니다")
+    
+    # 소유자 확인
+    influencer = db.query(AIInfluencer).filter(
+        AIInfluencer.id == voice.influencer_id,
+        AIInfluencer.user_id == user_id
+    ).first()
+    
+    if not influencer:
+        raise HTTPException(status_code=403, detail="권한이 없습니다")
+    
+    # 소프트 삭제
+    voice.is_deleted = True
+    db.commit()
+    
+    return {"message": "음성이 삭제되었습니다"}
 

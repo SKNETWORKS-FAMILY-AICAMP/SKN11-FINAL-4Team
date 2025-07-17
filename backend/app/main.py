@@ -276,7 +276,6 @@ async def test_logs():
 
 # API 라우터 등록
 app.include_router(api_router, prefix=settings.API_V1_STR)
-
 # S3 전용 이미지 서빙 (로컬 uploads 디렉토리 제거)
 # app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 

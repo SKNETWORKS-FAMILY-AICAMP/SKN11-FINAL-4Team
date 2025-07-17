@@ -6,6 +6,7 @@ FastAPI 백엔드에서 VLLM 서버로 요청을 라우팅하는 클라이언트
 import asyncio
 import json
 import logging
+from re import A
 import httpx
 import websockets
 from typing import Optional, Dict, List, Any, AsyncIterator
@@ -275,6 +276,25 @@ class VLLMClient:
             logger.error(f"파인튜닝 작업 목록 조회 실패: {e}")
             raise VLLMClientError(f"파인튜닝 작업 목록 조회 실패: {e}")
     
+    async def generate_voice(self, text: str, base_voice_url: str = None, influencer_id: str = None) -> Dict[str, Any]:
+        """음성 생성"""
+        try:
+            payload = {
+                "text": text,
+                "upload_to_s3": True,
+                "s3_folder_prefix": f"tts/{influencer_id}" if influencer_id else "tts",
+                "base_voice_url": base_voice_url
+            }
+
+            response = await self.client.post("/zonos/generate_tts", json=payload)
+            response.raise_for_status()
+            
+            result = response.json()
+            return result
+        except Exception as e:
+            logger.error(f"음성 생성 실패: {e}")
+            raise VLLMClientError(f"음성 생성 실패: {e}")
+
     async def generate_qa_for_character(self, character_data: Dict[str, Any]) -> Dict[str, Any]:
         """캐릭터에 대한 QA 생성 (vLLM 서버의 /speech/generate_qa 엔드포인트 사용)"""
         try:
@@ -429,3 +449,8 @@ async def vllm_generate_qa_for_character(character_data: Dict[str, Any]) -> Dict
     """vLLM에서 캐릭터 QA 생성 (편의 함수)"""
     async with VLLMClient(_vllm_config) as client:
         return await client.generate_qa_for_character(character_data)
+
+async def vllm_generate_voice(text: str, base_voice_url: str = None, influencer_id: str = None) -> Dict[str, Any]:
+    """vLLM에서 음성 생성 (편의 함수)"""
+    async with VLLMClient(_vllm_config) as client:
+        return await client.generate_voice(text, base_voice_url, influencer_id)

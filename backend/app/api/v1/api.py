@@ -17,6 +17,7 @@ from app.api.v1.endpoints import (
     admin,
     chatbot,  # 챗봇 활성화
     comfyui,
+    tts,
 )
 from app.api.v1 import images
 from app.api.v1.endpoints.public import mbti as public_mbti
@@ -111,3 +112,6 @@ api_router.include_router(workflow_only_router, prefix="/workflows", tags=["Work
 
 # 이미지 관리 API
 api_router.include_router(images.router, prefix="/images", tags=["Images"])
+
+# TTS API
+api_router.include_router(tts.router, prefix="/tts", tags=["TTS"])

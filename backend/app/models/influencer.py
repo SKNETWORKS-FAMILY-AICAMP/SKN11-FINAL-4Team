@@ -172,6 +172,8 @@ class AIInfluencer(Base, TimestampMixin):
     influencer_apis = relationship("InfluencerAPI", back_populates="influencer")
     boards = relationship("Board", back_populates="influencer")
     generated_tones = relationship("GeneratedTone", back_populates="influencer")
+    voice_base = relationship("VoiceBase", back_populates="influencer", uselist=False, foreign_keys="VoiceBase.influencer_id")
+    generated_voices = relationship("GeneratedVoice", back_populates="influencer", foreign_keys="GeneratedVoice.influencer_id")
 
     influencer_personality = Column(Text, comment="AI 인플루언서 성격")
     influencer_tone = Column(Text, comment="AI 인플루언서 말투/톤")
