@@ -1696,7 +1696,13 @@ function ModelDetailContent() {
 
     setIsGeneratingVoice(true)
     try {
-      const response = await apiClient.post('/api/v1/tts/generate_voice', {
+      const response = await apiClient.post<{
+        status?: string;
+        task_id?: string;
+        audio_url?: string;
+        s3_url?: string;
+        duration?: number;
+      }>('/api/v1/tts/generate_voice', {
         text: voiceText,
         influencer_id: params.id,
         base_voice_url: baseVoiceUrl
@@ -1795,9 +1801,9 @@ function ModelDetailContent() {
         }))
         
         setVoiceHistory(voiceHistory)
-      } else if (response?.data && Array.isArray(response.data)) {
+      } else if ((response as any)?.data && Array.isArray((response as any).data)) {
         // response.data가 배열인 경우
-        const voiceHistory = response.data.map((voice: any) => ({
+        const voiceHistory = (response as any).data.map((voice: any) => ({
           id: voice.id,
           text: voice.text,
           url: voice.s3_url,
@@ -3089,7 +3095,7 @@ function ModelDetailContent() {
 
                   {/* 오른쪽 상단에 배지들 배치 */}
                   <div className="flex flex-col items-end space-y-2 ml-4">
-                    {getPlatformBadge(selectedPost.platform)}
+                    {selectedPost.platform && getPlatformBadge(selectedPost.platform)}
                     {getStatusBadge(selectedPost.status)}
                   </div>
                 </div>
