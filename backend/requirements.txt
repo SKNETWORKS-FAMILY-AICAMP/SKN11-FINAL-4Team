@@ -120,3 +120,9 @@ websockets==15.0.1
 xxhash==3.5.0
 yarl==1.20.1
 yt-dlp==2025.6.9
+
+# MCP (Model Context Protocol) 관련 의존성
+mcp>=1.9.1
+langchain-mcp-adapters>=0.1.9
+langgraph>=0.2.0
+langchain>=0.2.0
