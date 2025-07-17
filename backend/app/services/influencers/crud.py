@@ -2,6 +2,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from app.models.influencer import AIInfluencer, ModelMBTI, StylePreset, InfluencerAPI
 from app.schemas.influencer import AIInfluencerCreate, AIInfluencerUpdate
+from app.utils.data_mapping import DataMapper
 from fastapi import HTTPException, status
 import uuid
 import logging
@@ -70,8 +71,6 @@ def create_influencer(db: Session, user_id: str, influencer_data: AIInfluencerCr
         # 성격과 말투가 모두 제공된 경우에만 새로운 StylePreset을 생성
         if influencer_data.personality and influencer_data.tone:
             logger.info("📝 프리셋이 선택되지 않아 직접 입력된 정보로 자동 생성합니다")
-
-            from app.utils.data_mapping import DataMapper
 
             # 데이터 매핑 유틸리티 사용
             age_group = DataMapper.map_age_to_group(influencer_data.age)

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, Suspense, useEffect } from "react"
+import { useState, Suspense, useEffect, useRef } from "react"
 import { AlertCircle } from "lucide-react"
 import React from "react"
 import { useParams, useSearchParams, useRouter } from "next/navigation"
@@ -50,6 +50,11 @@ import {
   Edit,
   User,
   Settings,
+  Mic,
+  Volume2,
+  PlayCircle,
+  PauseCircle,
+  Loader2,
 } from "lucide-react"
 import type { AIModel } from "@/lib/types"
 import {
@@ -144,6 +149,26 @@ function ModelDetailContent() {
   const [testMessage, setTestMessage] = useState("")
   const [testResponse, setTestResponse] = useState("")
   const [isTestingChatbot, setIsTestingChatbot] = useState(false)
+  
+  // 음성 관련 상태
+  const [voiceText, setVoiceText] = useState("")
+  const [isGeneratingVoice, setIsGeneratingVoice] = useState(false)
+  const [voiceHistory, setVoiceHistory] = useState<Array<{
+    id: string
+    text: string
+    url: string
+    duration?: number
+    createdAt: string
+    status?: string  // pending, completed, failed
+  }>>([])
+  const [isLoadingVoiceHistory, setIsLoadingVoiceHistory] = useState(false)
+  const previousVoiceStatusRef = useRef<Map<string, string>>(new Map())
+  const [playingVoiceUrl, setPlayingVoiceUrl] = useState<string | null>(null)
+  const [baseVoiceFile, setBaseVoiceFile] = useState<File | null>(null)
+  const [baseVoiceUrl, setBaseVoiceUrl] = useState<string | null>(null)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const [isUploadingBaseVoice, setIsUploadingBaseVoice] = useState(false)
+  const [hasBaseVoice, setHasBaseVoice] = useState(false)
   const [instagramStatus, setInstagramStatus] = useState<{
     is_connected: boolean
     connected_at?: string
@@ -868,8 +893,21 @@ function ModelDetailContent() {
   }, [params.id])
 
   // 모델 데이터 로드 후 Instagram 상태 확인
+  // 컴포넌트 언마운트 시 오디오 정리
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause()
+        audioRef.current = null
+      }
+    }
+  }, [])
+
   React.useEffect(() => {
     if (!isModelLoading && model) {
+      // 베이스 음성 확인
+      checkBaseVoice()
+      
       const checkInstagramStatus = async () => {
         try {
           // 모델 데이터에서 Instagram 정보 확인
@@ -909,6 +947,83 @@ function ModelDetailContent() {
   }, [isModelLoading, model, params.id])
 
   // 예약된 게시글이 있을 때 주기적으로 상태 확인 (30초마다)
+  // 음성 탭이 선택되었을 때 음성 히스토리 로드
+  React.useEffect(() => {
+    if (activeTab === 'voice' && !isLoadingVoiceHistory) {
+      loadVoiceHistory()
+    }
+  }, [activeTab])
+
+  // pending 상태의 음성이 있을 때 주기적으로 상태 확인 (3초마다)
+  React.useEffect(() => {
+    // 현재 상태를 ref에 저장
+    voiceHistory.forEach(voice => {
+      if (voice.id && voice.status) {
+        previousVoiceStatusRef.current.set(voice.id, voice.status)
+      }
+    })
+    
+    const hasPendingVoices = voiceHistory.some(voice => voice.status === 'pending')
+    
+    if (hasPendingVoices && activeTab === 'voice') {
+      const interval = setInterval(async () => {
+        console.log('🔄 pending 음성 상태 확인 중...')
+        
+        // 음성 목록 다시 로드
+        const response = await apiClient.get<any[]>(`/api/v1/influencers/${params.id}/voices`)
+        
+        if (Array.isArray(response)) {
+          const updatedVoices = response.map((voice: any) => ({
+            id: voice.id,
+            text: voice.text,
+            url: voice.s3_url,
+            duration: voice.duration,
+            createdAt: voice.created_at,
+            status: voice.status || 'completed'
+          }))
+          
+          // 새로 완료된 음성 찾기
+          const newlyCompletedVoices = updatedVoices.filter(voice => {
+            const previousStatus = previousVoiceStatusRef.current.get(voice.id)
+            return previousStatus === 'pending' && voice.status === 'completed'
+          })
+          
+          // 새로 실패한 음성 찾기
+          const newlyFailedVoices = updatedVoices.filter(voice => {
+            const previousStatus = previousVoiceStatusRef.current.get(voice.id)
+            return previousStatus === 'pending' && voice.status === 'failed'
+          })
+          
+          // 상태 업데이트
+          setVoiceHistory(updatedVoices)
+          
+          // 알림 표시
+          if (newlyCompletedVoices.length > 0) {
+            toast({
+              title: "음성 생성 완료",
+              description: `${newlyCompletedVoices.length}개의 음성이 성공적으로 생성되었습니다.`,
+            })
+            
+            // 첫 번째 완료된 음성 자동 재생 (선택사항)
+            if (newlyCompletedVoices[0]?.url) {
+              handlePlayVoice(newlyCompletedVoices[0].url)
+            }
+          }
+          
+          if (newlyFailedVoices.length > 0) {
+            toast({
+              title: "음성 생성 실패",
+              description: `${newlyFailedVoices.length}개의 음성 생성에 실패했습니다.`,
+              variant: "destructive",
+            })
+          }
+        }
+      }, 3000) // 3초마다 확인
+      
+      return () => clearInterval(interval)
+    }
+  }, [voiceHistory, activeTab, params.id])
+
   React.useEffect(() => {
     const hasScheduledPosts = posts.some(post => post.status === 'scheduled')
 
@@ -1488,6 +1603,318 @@ function ModelDetailContent() {
 
   const platformStats = calculatePlatformStats()
 
+  // 음성 관련 함수들
+  const handleBaseVoiceFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    // 파일 크기 체크 (10MB)
+    if (file.size > 10 * 1024 * 1024) {
+      toast({
+        title: "파일 크기 초과",
+        description: "음성 파일은 10MB 이하여야 합니다.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    // 오디오 파일 타입 체크
+    if (!file.type.startsWith('audio/')) {
+      toast({
+        title: "파일 형식 오류",
+        description: "오디오 파일만 업로드할 수 있습니다.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    setBaseVoiceFile(file)
+  }
+
+  const handleUploadBaseVoice = async () => {
+    if (!baseVoiceFile) return
+
+    setIsUploadingBaseVoice(true)
+    try {
+      // 파일을 Base64로 변환
+      const reader = new FileReader()
+      const fileData = await new Promise<string>((resolve, reject) => {
+        reader.onload = () => {
+          const base64 = reader.result as string
+          // data:audio/mp3;base64, 부분을 제거하고 base64 데이터만 추출
+          const base64Data = base64.split(',')[1]
+          resolve(base64Data)
+        }
+        reader.onerror = reject
+        reader.readAsDataURL(baseVoiceFile)
+      })
+
+      // JSON으로 전송
+      const requestData = {
+        file_data: fileData,
+        file_name: baseVoiceFile.name,
+        file_type: baseVoiceFile.type
+      }
+
+      // 베이스 음성 업로드 API 호출
+      const response = await apiClient.post<{s3_url: string, file_name: string, file_size: number, message: string}>(`/api/v1/influencers/${params.id}/voice/base`, requestData)
+      
+      console.log('Upload response:', response)
+
+      if (response?.s3_url) {
+        setBaseVoiceUrl(response.s3_url)
+        setHasBaseVoice(true)
+        setBaseVoiceFile(null)
+        
+        toast({
+          title: "업로드 완료",
+          description: "베이스 음성이 성공적으로 업로드되었습니다.",
+        })
+      } else {
+        throw new Error('응답에 s3_url이 없습니다')
+      }
+    } catch (error: any) {
+      console.error('베이스 음성 업로드 실패:', error)
+      toast({
+        title: "업로드 실패",
+        description: error.response?.data?.detail || "베이스 음성 업로드 중 오류가 발생했습니다.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsUploadingBaseVoice(false)
+    }
+  }
+
+  const handleChangeBaseVoice = () => {
+    setHasBaseVoice(false)
+    setBaseVoiceUrl(null)
+    setBaseVoiceFile(null)
+  }
+
+  const handleGenerateVoice = async () => {
+    if (!voiceText.trim() || isGeneratingVoice || !hasBaseVoice) return
+
+    setIsGeneratingVoice(true)
+    try {
+      const response = await apiClient.post('/api/v1/tts/generate_voice', {
+        text: voiceText,
+        influencer_id: params.id,
+        base_voice_url: baseVoiceUrl
+      })
+
+      if (response) {
+        if (response.status === 'pending' && response.task_id) {
+          // 비동기 작업인 경우
+          toast({
+            title: "음성 생성 시작",
+            description: "음성 생성 작업이 시작되었습니다. 잠시 후 목록에 표시됩니다.",
+          })
+          
+          // 입력 필드 초기화
+          setVoiceText("")
+          
+          // 잠시 후 음성 목록 새로고침
+          setTimeout(() => {
+            loadVoiceHistory()
+          }, 5000)
+        } else if (response.s3_url) {
+          // 동기 작업인 경우 (즉시 완료)
+          const newVoice = {
+            id: Date.now().toString(),
+            text: voiceText,
+            url: response.s3_url,
+            duration: response.duration,
+            createdAt: new Date().toISOString()
+          }
+          setVoiceHistory(prev => [newVoice, ...prev])
+          
+          // 입력 필드 초기화
+          setVoiceText("")
+          
+          toast({
+            title: "음성 생성 완료",
+            description: "음성이 성공적으로 생성되었습니다.",
+          })
+
+          // 자동 재생 (선택사항)
+          handlePlayVoice(response.s3_url)
+        }
+      }
+    } catch (error: any) {
+      console.error('음성 생성 실패:', error)
+      toast({
+        title: "음성 생성 실패",
+        description: error.response?.data?.detail || "음성 생성 중 오류가 발생했습니다.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsGeneratingVoice(false)
+    }
+  }
+
+  const checkBaseVoice = async () => {
+    try {
+      // 베이스 음성 확인 API 호출
+      const response = await apiClient.get<{
+        base_voice_url: string | null,
+        has_voice: boolean,
+        message?: string
+      }>(`/api/v1/influencers/${params.id}/voice/base`)
+      
+      if (response && response.has_voice && response.base_voice_url) {
+        setBaseVoiceUrl(response.base_voice_url)
+        setHasBaseVoice(true)
+      } else {
+        // 음성이 없는 경우
+        console.log(response?.message || '베이스 음성이 아직 설정되지 않았습니다.')
+        setHasBaseVoice(false)
+        setBaseVoiceUrl(null)
+      }
+    } catch (error: any) {
+      console.error('베이스 음성 확인 중 오류:', error)
+      setHasBaseVoice(false)
+      setBaseVoiceUrl(null)
+    }
+  }
+
+  const loadVoiceHistory = async () => {
+    setIsLoadingVoiceHistory(true)
+    try {
+      const response = await apiClient.get<any[]>(`/api/v1/influencers/${params.id}/voices`)
+      
+      // response가 배열인지 확인 (apiClient는 데이터를 직접 반환)
+      if (Array.isArray(response)) {
+        // 응답 데이터를 프론트엔드 형식에 맞게 변환
+        const voiceHistory = response.map((voice: any) => ({
+          id: voice.id,
+          text: voice.text,
+          url: voice.s3_url,
+          duration: voice.duration,
+          createdAt: voice.created_at,
+          status: voice.status || 'completed'
+        }))
+        
+        setVoiceHistory(voiceHistory)
+      } else if (response?.data && Array.isArray(response.data)) {
+        // response.data가 배열인 경우
+        const voiceHistory = response.data.map((voice: any) => ({
+          id: voice.id,
+          text: voice.text,
+          url: voice.s3_url,
+          duration: voice.duration,
+          createdAt: voice.created_at,
+          status: voice.status || 'completed'
+        }))
+        
+        setVoiceHistory(voiceHistory)
+      } else {
+        // 빈 배열로 설정
+        setVoiceHistory([])
+      }
+    } catch (error) {
+      console.error('음성 목록 로드 실패:', error)
+      // 에러가 발생한 경우에만 실패 메시지 표시
+      toast({
+        title: "로드 실패",
+        description: "음성 목록을 불러오는데 실패했습니다.",
+        variant: "destructive",
+      })
+      setVoiceHistory([])
+    } finally {
+      setIsLoadingVoiceHistory(false)
+    }
+  }
+
+  const handlePlayVoice = (url: string) => {
+    if (!url) return
+
+    if (playingVoiceUrl === url && audioRef.current) {
+      // 이미 재생 중이면 정지
+      audioRef.current.pause()
+      setPlayingVoiceUrl(null)
+    } else {
+      // 이전 오디오가 재생 중이면 정지
+      if (audioRef.current) {
+        audioRef.current.pause()
+      }
+
+      // 새로운 오디오 재생
+      const audio = new Audio(url)
+      audioRef.current = audio
+      
+      audio.play().then(() => {
+        setPlayingVoiceUrl(url)
+      }).catch((error) => {
+        console.error('오디오 재생 실패:', error)
+        toast({
+          title: "재생 실패",
+          description: "오디오를 재생할 수 없습니다.",
+          variant: "destructive",
+        })
+      })
+
+      // 재생이 끝나면 상태 초기화
+      audio.addEventListener('ended', () => {
+        setPlayingVoiceUrl(null)
+      })
+
+      // 에러 발생 시 상태 초기화
+      audio.addEventListener('error', () => {
+        setPlayingVoiceUrl(null)
+        toast({
+          title: "재생 오류",
+          description: "오디오 파일을 로드할 수 없습니다.",
+          variant: "destructive",
+        })
+      })
+    }
+  }
+
+  const handleDownloadVoice = async (url: string, id: string) => {
+    try {
+      const response = await fetch(url)
+      const blob = await response.blob()
+      const downloadUrl = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = downloadUrl
+      link.download = `voice_${id}.mp3`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      window.URL.revokeObjectURL(downloadUrl)
+    } catch (error) {
+      console.error('다운로드 실패:', error)
+      toast({
+        title: "다운로드 실패",
+        description: "음성 파일 다운로드에 실패했습니다.",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const handleDeleteVoice = async (id: string) => {
+    if (!confirm('이 음성을 삭제하시겠습니까?')) return
+
+    try {
+      await apiClient.delete(`/api/v1/voices/${id}`)
+      
+      // 로컬에서 제거
+      setVoiceHistory(prev => prev.filter(v => v.id !== id))
+      
+      toast({
+        title: "삭제 완료",
+        description: "음성이 삭제되었습니다.",
+      })
+    } catch (error) {
+      console.error('음성 삭제 실패:', error)
+      toast({
+        title: "삭제 실패",
+        description: "음성 삭제에 실패했습니다.",
+        variant: "destructive",
+      })
+    }
+  }
+
   // model이 null이거나 로딩 중이면 로딩 메시지 표시
   if (isModelLoading || !model) {
     return (
@@ -1567,7 +1994,7 @@ function ModelDetailContent() {
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-5">
+          <TabsList className="grid w-full grid-cols-6">
             <TabsTrigger value="analytics" className="flex items-center space-x-2">
               <BarChart3 className="h-4 w-4" />
               <span>분석</span>
@@ -1587,6 +2014,10 @@ function ModelDetailContent() {
             <TabsTrigger value="settings" className="flex items-center space-x-2">
               <Info className="h-4 w-4" />
               <span>정보</span>
+            </TabsTrigger>
+            <TabsTrigger value="voice" className="flex items-center space-x-2">
+              <Mic className="h-4 w-4" />
+              <span>음성</span>
             </TabsTrigger>
           </TabsList>
 
@@ -2273,6 +2704,288 @@ function ModelDetailContent() {
                 </CardContent>
               </Card>
 
+            </div>
+          </TabsContent>
+
+          {/* 음성 탭 */}
+          <TabsContent value="voice">
+            <div className="space-y-6">
+              {/* 베이스 음성 업로드 카드 */}
+              <Card className="bg-white shadow-sm border border-gray-200">
+                <CardHeader className="pb-4">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-12 h-12 bg-indigo-100 rounded-lg flex items-center justify-center">
+                      <Upload className="h-6 w-6 text-indigo-600" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-lg font-medium text-gray-900">베이스 음성 설정</CardTitle>
+                      <CardDescription className="text-sm text-gray-600 mt-1">
+                        AI 인플루언서의 목소리가 될 기본 음성을 업로드하세요.
+                      </CardDescription>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {hasBaseVoice ? (
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between p-4 bg-green-50 border border-green-200 rounded-lg">
+                        <div className="flex items-center space-x-3">
+                          <CheckCircle className="h-5 w-5 text-green-600" />
+                          <div>
+                            <p className="text-sm font-medium text-green-900">베이스 음성이 설정되었습니다</p>
+                            <p className="text-xs text-green-700 mt-1">이제 텍스트를 음성으로 변환할 수 있습니다.</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          {baseVoiceUrl && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handlePlayVoice(baseVoiceUrl)}
+                            >
+                              {playingVoiceUrl === baseVoiceUrl ? (
+                                <PauseCircle className="h-4 w-4" />
+                              ) : (
+                                <PlayCircle className="h-4 w-4" />
+                              )}
+                            </Button>
+                          )}
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handleChangeBaseVoice}
+                            className="text-indigo-600 hover:text-indigo-700"
+                          >
+                            변경
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
+                        <input
+                          type="file"
+                          accept="audio/*"
+                          onChange={handleBaseVoiceFileSelect}
+                          className="hidden"
+                          id="base-voice-upload"
+                        />
+                        <label
+                          htmlFor="base-voice-upload"
+                          className="cursor-pointer"
+                        >
+                          <Upload className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                          <p className="text-sm font-medium text-gray-900 mb-1">
+                            클릭하여 음성 파일 선택
+                          </p>
+                          <p className="text-xs text-gray-500">
+                            MP3, WAV, M4A 등 (최대 10MB)
+                          </p>
+                        </label>
+                      </div>
+                      {baseVoiceFile && (
+                        <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                          <div className="flex items-center space-x-3">
+                            <Volume2 className="h-5 w-5 text-gray-600" />
+                            <div>
+                              <p className="text-sm font-medium text-gray-900">{baseVoiceFile.name}</p>
+                              <p className="text-xs text-gray-500">
+                                {(baseVoiceFile.size / 1024 / 1024).toFixed(2)} MB
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                setBaseVoiceFile(null)
+                              }}
+                            >
+                              취소
+                            </Button>
+                            <Button
+                              size="sm"
+                              onClick={handleUploadBaseVoice}
+                              disabled={isUploadingBaseVoice}
+                              className="bg-indigo-600 hover:bg-indigo-700 text-white"
+                            >
+                              {isUploadingBaseVoice ? (
+                                <>
+                                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                  업로드 중...
+                                </>
+                              ) : (
+                                '업로드'
+                              )}
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* 음성 생성 카드 */}
+              <Card className={`bg-white shadow-sm border border-gray-200 ${!hasBaseVoice ? 'opacity-50' : ''}`}>
+                <CardHeader className="pb-4">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
+                      <Mic className="h-6 w-6 text-purple-600" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-lg font-medium text-gray-900">음성 생성</CardTitle>
+                      <CardDescription className="text-sm text-gray-600 mt-1">
+                        텍스트를 입력하면 AI 인플루언서의 음성으로 변환할 수 있습니다.
+                      </CardDescription>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {!hasBaseVoice && (
+                    <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                      <p className="text-sm text-yellow-800">
+                        <AlertCircle className="h-4 w-4 inline mr-1" />
+                        먼저 베이스 음성을 업로드해주세요.
+                      </p>
+                    </div>
+                  )}
+                  <div>
+                    <Label htmlFor="voice-text">텍스트 입력</Label>
+                    <Textarea
+                      id="voice-text"
+                      placeholder="음성으로 변환할 텍스트를 입력하세요..."
+                      className="min-h-[100px] mt-2"
+                      value={voiceText}
+                      onChange={(e) => setVoiceText(e.target.value)}
+                      disabled={!hasBaseVoice}
+                    />
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-500">
+                      {voiceText.length} / 500자
+                    </span>
+                    <Button
+                      onClick={handleGenerateVoice}
+                      disabled={!hasBaseVoice || !voiceText.trim() || isGeneratingVoice || voiceText.length > 500}
+                      className="bg-purple-600 hover:bg-purple-700 text-white"
+                    >
+                      {isGeneratingVoice ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          생성 중...
+                        </>
+                      ) : (
+                        <>
+                          <Volume2 className="h-4 w-4 mr-2" />
+                          음성 생성
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* 생성된 음성 목록 카드 */}
+              <Card className="bg-white shadow-sm border border-gray-200">
+                <CardHeader className="pb-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-3">
+                      <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
+                        <Volume2 className="h-6 w-6 text-green-600" />
+                      </div>
+                      <div>
+                        <CardTitle className="text-lg font-medium text-gray-900">생성된 음성</CardTitle>
+                        <CardDescription className="text-sm text-gray-600 mt-1">
+                          이전에 생성한 음성 파일들을 관리할 수 있습니다.
+                        </CardDescription>
+                      </div>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={loadVoiceHistory}
+                      disabled={isLoadingVoiceHistory}
+                      className="flex items-center space-x-2"
+                    >
+                      <RefreshCw className={`h-4 w-4 ${isLoadingVoiceHistory ? 'animate-spin' : ''}`} />
+                      <span>새로고침</span>
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {isLoadingVoiceHistory ? (
+                    <div className="text-center py-8">
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600 mx-auto mb-4"></div>
+                      <p className="text-gray-500">음성 목록을 불러오는 중...</p>
+                    </div>
+                  ) : voiceHistory.length > 0 ? (
+                    <div className="space-y-3">
+                      {voiceHistory.map((voice) => (
+                        <div key={voice.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                          <div className="flex items-center space-x-3">
+                            {voice.status === 'pending' ? (
+                              <div className="p-2 bg-yellow-100 rounded-full">
+                                <Loader2 className="h-5 w-5 text-yellow-600 animate-spin" />
+                              </div>
+                            ) : voice.status === 'failed' ? (
+                              <div className="p-2 bg-red-100 rounded-full">
+                                <AlertCircle className="h-5 w-5 text-red-600" />
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => handlePlayVoice(voice.url)}
+                                className="p-2 bg-white rounded-full shadow-sm hover:shadow-md transition-shadow"
+                                disabled={!voice.url}
+                              >
+                                {playingVoiceUrl === voice.url ? (
+                                  <PauseCircle className="h-5 w-5 text-purple-600" />
+                                ) : (
+                                  <PlayCircle className="h-5 w-5 text-purple-600" />
+                                )}
+                              </button>
+                            )}
+                            <div>
+                              <p className="text-sm font-medium text-gray-900 line-clamp-1">{voice.text}</p>
+                              <p className="text-xs text-gray-500">
+                                {new Date(voice.createdAt).toLocaleDateString('ko-KR')} •{' '}
+                                {voice.status === 'pending' ? '생성 중...' : 
+                                 voice.status === 'failed' ? '생성 실패' :
+                                 voice.duration ? `${voice.duration}초` : '길이 정보 없음'}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleDownloadVoice(voice.url, voice.id)}
+                            >
+                              <Download className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleDeleteVoice(voice.id)}
+                              className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8">
+                      <Volume2 className="h-12 w-12 mx-auto mb-4 text-gray-300" />
+                      <p className="text-gray-500 text-lg">아직 생성된 음성이 없습니다</p>
+                      <p className="text-gray-400 mt-2">위에서 텍스트를 입력하고 음성을 생성해보세요!</p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
             </div>
           </TabsContent>
         </Tabs>

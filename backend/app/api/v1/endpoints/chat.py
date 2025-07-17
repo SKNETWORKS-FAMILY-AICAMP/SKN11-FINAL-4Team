@@ -95,8 +95,8 @@ async def chatbot_chat(
 
                 # VLLM 서버에서 응답 생성
                 # chatbot.py와 동일한 방식으로 처리
-                if influencer.influencer_model_repo:
-                    model_id = str(influencer.influencer_model_repo)
+                if influencer.influencer_id:
+                    model_id = str(influencer.influencer_id)
                     
                     # HF 토큰 가져오기 (chatbot.py와 동일한 방식)
                     from app.models.user import HFTokenManage
@@ -117,7 +117,7 @@ async def chatbot_chat(
                     
                     # 어댑터 로드 (chatbot.py와 동일한 방식)
                     try:
-                        await vllm_client.load_adapter(model_id, model_id, hf_token)
+                        await vllm_client.load_adapter(model_id, hf_repo_name=influencer.influencer_model_repo, hf_token=hf_token)
                         logger.info(f"✅ VLLM 어댑터 로드 완료: {model_id}")
                     except Exception as e:
                         logger.warning(f"⚠️ 어댑터 로드 실패, 기본 모델 사용: {e}")
@@ -130,7 +130,6 @@ async def chatbot_chat(
                     user_message=request.message,
                     system_message=system_message,
                     influencer_name=str(influencer.influencer_name),
-
                     model_id=model_id,
                     max_new_tokens=200,
                     temperature=0.7,
