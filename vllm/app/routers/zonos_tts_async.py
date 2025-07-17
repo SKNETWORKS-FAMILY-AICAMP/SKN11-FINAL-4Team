@@ -34,7 +34,8 @@ task_status: Dict[str, Dict[str, Any]] = {}
 executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
 # 웹훅 URL 설정 (환경 변수에서 가져오거나 기본값 사용)
-WEBHOOK_URL = os.getenv('TTS_WEBHOOK_URL', 'http://localhost:8000/api/v1/tts/webhook/tts-complete')
+# 백엔드가 HTTPS로 실행되고 있으므로 HTTPS 사용
+WEBHOOK_URL = os.getenv('TTS_WEBHOOK_URL', 'https://localhost:8000/api/v1/tts/webhook/tts-complete')
 
 # 미리 정의된 감정 벡터
 PREDEFINED_EMOTIONS = {
@@ -226,7 +227,7 @@ async def send_webhook_notification(
             "error_message": error_message
         }
         
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(verify=False) as client:  # 개발 환경에서 자체 서명 인증서 사용
             response = await client.post(
                 WEBHOOK_URL,
                 json=webhook_data,
@@ -349,7 +350,7 @@ async def process_tts_task(
                 
                 # S3 업로드 성공 시 로컬 파일 삭제
                 try:
-                    output_path.unlink()
+                    Path(output_path).unlink()
                     logger.info(f"🗑️ 로컬 파일 삭제 완료: {output_path}")
                 except Exception as e:
                     logger.warning(f"로컬 파일 삭제 실패: {e}")
@@ -658,7 +659,7 @@ async def process_tts_with_voice_task(task_id: str, request: ZonosTTSWithVoiceRe
                 
                 # S3 업로드 성공 시 로컬 파일 삭제
                 try:
-                    output_path.unlink()
+                    Path(output_path).unlink()
                     logger.info(f"🗑️ 로컬 파일 삭제 완료: {output_path}")
                 except Exception as e:
                     logger.warning(f"로컬 파일 삭제 실패: {e}")
