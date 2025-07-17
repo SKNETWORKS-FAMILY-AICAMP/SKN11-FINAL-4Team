@@ -1745,11 +1745,17 @@ async def track_api_usage(db: Session, influencer_id: str):
         db.rollback()
 
 
+# Base64 음성 업로드 요청 모델
+class VoiceUploadRequest(BaseModel):
+    file_data: str  # Base64 encoded file data
+    file_name: str
+    file_type: str
+
 # 음성 관련 API 엔드포인트
 @router.post("/{influencer_id}/voice/base")
 async def upload_base_voice(
     influencer_id: str,
-    file: UploadFile = File(...),
+    request: VoiceUploadRequest,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
     s3_service: S3Service = Depends(get_s3_service),
@@ -1764,20 +1770,25 @@ async def upload_base_voice(
     if not influencer:
         raise HTTPException(status_code=404, detail="인플루언서를 찾을 수 없습니다")
     
-    # 파일 검증
-    if not file.content_type.startswith('audio/'):
+    # 파일 타입 검증
+    if not request.file_type.startswith('audio/'):
         raise HTTPException(status_code=400, detail="오디오 파일만 업로드 가능합니다")
     
-    # 파일 크기 검증 (10MB)
-    file_size = 0
-    contents = await file.read()
+    # Base64 디코딩
+    import base64
+    try:
+        contents = base64.b64decode(request.file_data)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail="잘못된 파일 데이터 형식입니다")
+    
     file_size = len(contents)
     
+    # 파일 크기 검증 (10MB)
     if file_size > 10 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="파일 크기는 10MB 이하여야 합니다")
     
     # 파일 확장자 추출
-    file_extension = file.filename.split('.')[-1].lower()
+    file_extension = request.file_name.split('.')[-1].lower()
     if file_extension not in ['mp3', 'wav', 'm4a', 'ogg', 'flac']:
         raise HTTPException(status_code=400, detail="지원하지 않는 오디오 형식입니다")
     
@@ -1792,30 +1803,30 @@ async def upload_base_voice(
     
     try:
         # S3에 업로드
-        s3_url = s3_service.upload_file(tmp_file_path, s3_key, content_type=file.content_type)
+        s3_url = s3_service.upload_file(tmp_file_path, s3_key, content_type=request.file_type)
         if not s3_url:
             raise HTTPException(status_code=500, detail="S3 업로드 실패")
         
         # 기존 베이스 음성이 있는지 확인
         existing_voice = db.query(VoiceBase).filter(
-            VoiceBase.influencer_id == influencer.id
+            VoiceBase.influencer_id == influencer.influencer_id
         ).first()
         
         if existing_voice:
             # 기존 음성 업데이트
-            existing_voice.file_name = file.filename
+            existing_voice.file_name = request.file_name
             existing_voice.file_size = file_size
-            existing_voice.file_type = file.content_type
+            existing_voice.file_type = request.file_type
             existing_voice.s3_url = s3_url
             existing_voice.s3_key = s3_key
             existing_voice.updated_at = datetime.utcnow()
         else:
             # 새로운 베이스 음성 생성
             new_voice = VoiceBase(
-                influencer_id=influencer.id,
-                file_name=file.filename,
+                influencer_id=influencer.influencer_id,
+                file_name=request.file_name,
                 file_size=file_size,
-                file_type=file.content_type,
+                file_type=request.file_type,
                 s3_url=s3_url,
                 s3_key=s3_key
             )
@@ -1826,7 +1837,7 @@ async def upload_base_voice(
         return {
             "message": "베이스 음성이 성공적으로 업로드되었습니다",
             "s3_url": s3_url,
-            "file_name": file.filename,
+            "file_name": request.file_name,
             "file_size": file_size
         }
         
@@ -1844,6 +1855,7 @@ async def get_base_voice(
     influencer_id: str,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
+    s3_service: S3Service = Depends(get_s3_service),
 ):
     """AI 인플루언서의 베이스 음성 조회"""
     user_id = current_user.get("sub")
@@ -1857,18 +1869,36 @@ async def get_base_voice(
     
     # 베이스 음성 조회
     base_voice = db.query(VoiceBase).filter(
-        VoiceBase.influencer_id == influencer.id
+        VoiceBase.influencer_id == influencer.influencer_id
     ).first()
     
     if not base_voice:
-        raise HTTPException(status_code=404, detail="베이스 음성이 설정되지 않았습니다")
+        # 음성이 없는 것은 정상적인 상황이므로 200으로 응답
+        return {
+            "base_voice_url": None,
+            "file_name": None,
+            "file_size": None,
+            "created_at": None,
+            "updated_at": None,
+            "has_voice": False,
+            "message": "베이스 음성이 아직 설정되지 않았습니다"
+        }
+    
+    # Presigned URL 생성
+    presigned_url = None
+    if base_voice.s3_key:
+        presigned_url = s3_service.generate_presigned_url(base_voice.s3_key, expiration=3600)
+    
+    # presigned URL이 없으면 기존 URL 사용
+    voice_url = presigned_url or base_voice.s3_url
     
     return {
-        "base_voice_url": base_voice.s3_url,
+        "base_voice_url": voice_url,
         "file_name": base_voice.file_name,
         "file_size": base_voice.file_size,
         "created_at": base_voice.created_at.isoformat(),
-        "updated_at": base_voice.updated_at.isoformat()
+        "updated_at": base_voice.updated_at.isoformat(),
+        "has_voice": True
     }
 
 
@@ -1879,6 +1909,7 @@ async def get_generated_voices(
     limit: int = 20,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
+    s3_service: S3Service = Depends(get_s3_service),
 ):
     """AI 인플루언서의 생성된 음성 목록 조회"""
     user_id = current_user.get("sub")
@@ -1892,21 +1923,30 @@ async def get_generated_voices(
     
     # 생성된 음성 목록 조회 (삭제되지 않은 것만)
     voices = db.query(GeneratedVoice).filter(
-        GeneratedVoice.influencer_id == influencer.id,
+        GeneratedVoice.influencer_id == influencer.influencer_id,
         GeneratedVoice.is_deleted == False
     ).order_by(GeneratedVoice.created_at.desc()).offset(skip).limit(limit).all()
     
-    return [
-        {
+    # 각 음성에 대해 presigned URL 생성
+    result = []
+    for voice in voices:
+        presigned_url = None
+        if voice.s3_key:
+            presigned_url = s3_service.generate_presigned_url(voice.s3_key, expiration=3600)
+        
+        # presigned URL이 없으면 기존 URL 사용
+        voice_url = presigned_url or voice.s3_url
+        
+        result.append({
             "id": str(voice.id),
             "text": voice.text,
-            "s3_url": voice.s3_url,
+            "s3_url": voice_url,
             "duration": voice.duration,
             "file_size": voice.file_size,
             "created_at": voice.created_at.isoformat()
-        }
-        for voice in voices
-    ]
+        })
+    
+    return result
 
 
 @router.delete("/voices/{voice_id}")
@@ -1930,7 +1970,7 @@ async def delete_generated_voice(
     
     # 소유자 확인
     influencer = db.query(AIInfluencer).filter(
-        AIInfluencer.id == voice.influencer_id,
+        AIInfluencer.influencer_id == voice.influencer_id,
         AIInfluencer.user_id == user_id
     ).first()
     

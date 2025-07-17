@@ -643,6 +643,9 @@ async def process_tts_with_voice_task(task_id: str, request: ZonosTTSWithVoiceRe
                 
                 logger.info(f"✅ S3 업로드 완료: {s3_info['key']}")
                 
+                # 파일 크기 가져오기
+                file_size = Path(output_path).stat().st_size if Path(output_path).exists() else None
+                
                 # 웹훅 전송
                 await send_webhook_notification(
                     task_id=task_id,
@@ -650,7 +653,7 @@ async def process_tts_with_voice_task(task_id: str, request: ZonosTTSWithVoiceRe
                     s3_url=s3_info.get('url'),
                     s3_key=s3_info.get('key'),
                     duration=None,  # TODO: 실제 오디오 길이 계산 필요
-                    file_size=len(file_data)
+                    file_size=file_size
                 )
                 
                 # S3 업로드 성공 시 로컬 파일 삭제

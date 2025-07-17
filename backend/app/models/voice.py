@@ -37,12 +37,15 @@ class GeneratedVoice(Base):
     influencer_id = Column(String(255), ForeignKey("AI_INFLUENCER.influencer_id"), nullable=False)
     base_voice_id = Column(Integer, ForeignKey("voice_base.id"), nullable=False)
     text = Column(Text, nullable=False)  # 변환된 텍스트
-    s3_url = Column(Text, nullable=False)
-    s3_key = Column(String(500), nullable=False)
+    task_id = Column(String(255), nullable=True)  # 비동기 작업 ID
+    status = Column(String(50), default="pending")  # pending, completed, failed
+    s3_url = Column(Text, nullable=True)  # 비동기 작업 시 처음엔 null
+    s3_key = Column(String(500), nullable=True)  # 비동기 작업 시 처음엔 null
     duration = Column(Float)  # 음성 길이 (초)
     file_size = Column(Integer)  # 파일 크기 (bytes)
     is_deleted = Column(Boolean, default=False)  # 소프트 삭제
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
     # Relationships
     influencer = relationship("AIInfluencer", back_populates="generated_voices")

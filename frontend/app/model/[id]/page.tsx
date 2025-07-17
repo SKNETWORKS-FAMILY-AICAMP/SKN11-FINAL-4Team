@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, Suspense, useEffect } from "react"
+import { useState, Suspense, useEffect, useRef } from "react"
 import { AlertCircle } from "lucide-react"
 import React from "react"
 import { useParams, useSearchParams, useRouter } from "next/navigation"
@@ -159,11 +159,14 @@ function ModelDetailContent() {
     url: string
     duration?: number
     createdAt: string
+    status?: string  // pending, completed, failed
   }>>([])
   const [isLoadingVoiceHistory, setIsLoadingVoiceHistory] = useState(false)
+  const previousVoiceStatusRef = useRef<Map<string, string>>(new Map())
   const [playingVoiceUrl, setPlayingVoiceUrl] = useState<string | null>(null)
   const [baseVoiceFile, setBaseVoiceFile] = useState<File | null>(null)
   const [baseVoiceUrl, setBaseVoiceUrl] = useState<string | null>(null)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
   const [isUploadingBaseVoice, setIsUploadingBaseVoice] = useState(false)
   const [hasBaseVoice, setHasBaseVoice] = useState(false)
   const [instagramStatus, setInstagramStatus] = useState<{
@@ -890,6 +893,16 @@ function ModelDetailContent() {
   }, [params.id])
 
   // 모델 데이터 로드 후 Instagram 상태 확인
+  // 컴포넌트 언마운트 시 오디오 정리
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause()
+        audioRef.current = null
+      }
+    }
+  }, [])
+
   React.useEffect(() => {
     if (!isModelLoading && model) {
       // 베이스 음성 확인
@@ -936,10 +949,80 @@ function ModelDetailContent() {
   // 예약된 게시글이 있을 때 주기적으로 상태 확인 (30초마다)
   // 음성 탭이 선택되었을 때 음성 히스토리 로드
   React.useEffect(() => {
-    if (activeTab === 'voice' && hasBaseVoice && voiceHistory.length === 0) {
+    if (activeTab === 'voice' && !isLoadingVoiceHistory) {
       loadVoiceHistory()
     }
-  }, [activeTab, hasBaseVoice])
+  }, [activeTab])
+
+  // pending 상태의 음성이 있을 때 주기적으로 상태 확인 (3초마다)
+  React.useEffect(() => {
+    // 현재 상태를 ref에 저장
+    voiceHistory.forEach(voice => {
+      if (voice.id && voice.status) {
+        previousVoiceStatusRef.current.set(voice.id, voice.status)
+      }
+    })
+    
+    const hasPendingVoices = voiceHistory.some(voice => voice.status === 'pending')
+    
+    if (hasPendingVoices && activeTab === 'voice') {
+      const interval = setInterval(async () => {
+        console.log('🔄 pending 음성 상태 확인 중...')
+        
+        // 음성 목록 다시 로드
+        const response = await apiClient.get<any[]>(`/api/v1/influencers/${params.id}/voices`)
+        
+        if (Array.isArray(response)) {
+          const updatedVoices = response.map((voice: any) => ({
+            id: voice.id,
+            text: voice.text,
+            url: voice.s3_url,
+            duration: voice.duration,
+            createdAt: voice.created_at,
+            status: voice.status || 'completed'
+          }))
+          
+          // 새로 완료된 음성 찾기
+          const newlyCompletedVoices = updatedVoices.filter(voice => {
+            const previousStatus = previousVoiceStatusRef.current.get(voice.id)
+            return previousStatus === 'pending' && voice.status === 'completed'
+          })
+          
+          // 새로 실패한 음성 찾기
+          const newlyFailedVoices = updatedVoices.filter(voice => {
+            const previousStatus = previousVoiceStatusRef.current.get(voice.id)
+            return previousStatus === 'pending' && voice.status === 'failed'
+          })
+          
+          // 상태 업데이트
+          setVoiceHistory(updatedVoices)
+          
+          // 알림 표시
+          if (newlyCompletedVoices.length > 0) {
+            toast({
+              title: "음성 생성 완료",
+              description: `${newlyCompletedVoices.length}개의 음성이 성공적으로 생성되었습니다.`,
+            })
+            
+            // 첫 번째 완료된 음성 자동 재생 (선택사항)
+            if (newlyCompletedVoices[0]?.url) {
+              handlePlayVoice(newlyCompletedVoices[0].url)
+            }
+          }
+          
+          if (newlyFailedVoices.length > 0) {
+            toast({
+              title: "음성 생성 실패",
+              description: `${newlyFailedVoices.length}개의 음성 생성에 실패했습니다.`,
+              variant: "destructive",
+            })
+          }
+        }
+      }, 3000) // 3초마다 확인
+      
+      return () => clearInterval(interval)
+    }
+  }, [voiceHistory, activeTab, params.id])
 
   React.useEffect(() => {
     const hasScheduledPosts = posts.some(post => post.status === 'scheduled')
@@ -1553,19 +1636,33 @@ function ModelDetailContent() {
 
     setIsUploadingBaseVoice(true)
     try {
-      const formData = new FormData()
-      formData.append('file', baseVoiceFile)
-      formData.append('influencer_id', params.id as string)
-
-      // 베이스 음성 업로드 API 호출
-      const response = await apiClient.post(`/api/v1/influencers/${params.id}/voice/base`, formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
+      // 파일을 Base64로 변환
+      const reader = new FileReader()
+      const fileData = await new Promise<string>((resolve, reject) => {
+        reader.onload = () => {
+          const base64 = reader.result as string
+          // data:audio/mp3;base64, 부분을 제거하고 base64 데이터만 추출
+          const base64Data = base64.split(',')[1]
+          resolve(base64Data)
+        }
+        reader.onerror = reject
+        reader.readAsDataURL(baseVoiceFile)
       })
 
-      if (response.data.s3_url) {
-        setBaseVoiceUrl(response.data.s3_url)
+      // JSON으로 전송
+      const requestData = {
+        file_data: fileData,
+        file_name: baseVoiceFile.name,
+        file_type: baseVoiceFile.type
+      }
+
+      // 베이스 음성 업로드 API 호출
+      const response = await apiClient.post<{s3_url: string, file_name: string, file_size: number, message: string}>(`/api/v1/influencers/${params.id}/voice/base`, requestData)
+      
+      console.log('Upload response:', response)
+
+      if (response?.s3_url) {
+        setBaseVoiceUrl(response.s3_url)
         setHasBaseVoice(true)
         setBaseVoiceFile(null)
         
@@ -1573,6 +1670,8 @@ function ModelDetailContent() {
           title: "업로드 완료",
           description: "베이스 음성이 성공적으로 업로드되었습니다.",
         })
+      } else {
+        throw new Error('응답에 s3_url이 없습니다')
       }
     } catch (error: any) {
       console.error('베이스 음성 업로드 실패:', error)
@@ -1603,27 +1702,43 @@ function ModelDetailContent() {
         base_voice_url: baseVoiceUrl
       })
 
-      if (response.data.s3_url) {
-        // 생성된 음성을 히스토리에 추가
-        const newVoice = {
-          id: Date.now().toString(),
-          text: voiceText,
-          url: response.data.s3_url,
-          duration: response.data.duration,
-          createdAt: new Date().toISOString()
-        }
-        setVoiceHistory(prev => [newVoice, ...prev])
-        
-        // 입력 필드 초기화
-        setVoiceText("")
-        
-        toast({
-          title: "음성 생성 완료",
-          description: "음성이 성공적으로 생성되었습니다.",
-        })
+      if (response) {
+        if (response.status === 'pending' && response.task_id) {
+          // 비동기 작업인 경우
+          toast({
+            title: "음성 생성 시작",
+            description: "음성 생성 작업이 시작되었습니다. 잠시 후 목록에 표시됩니다.",
+          })
+          
+          // 입력 필드 초기화
+          setVoiceText("")
+          
+          // 잠시 후 음성 목록 새로고침
+          setTimeout(() => {
+            loadVoiceHistory()
+          }, 5000)
+        } else if (response.s3_url) {
+          // 동기 작업인 경우 (즉시 완료)
+          const newVoice = {
+            id: Date.now().toString(),
+            text: voiceText,
+            url: response.s3_url,
+            duration: response.duration,
+            createdAt: new Date().toISOString()
+          }
+          setVoiceHistory(prev => [newVoice, ...prev])
+          
+          // 입력 필드 초기화
+          setVoiceText("")
+          
+          toast({
+            title: "음성 생성 완료",
+            description: "음성이 성공적으로 생성되었습니다.",
+          })
 
-        // 자동 재생 (선택사항)
-        handlePlayVoice(response.data.s3_url)
+          // 자동 재생 (선택사항)
+          handlePlayVoice(response.s3_url)
+        }
       }
     } catch (error: any) {
       console.error('음성 생성 실패:', error)
@@ -1640,57 +1755,118 @@ function ModelDetailContent() {
   const checkBaseVoice = async () => {
     try {
       // 베이스 음성 확인 API 호출
-      const response = await apiClient.get(`/api/v1/influencers/${params.id}/voice/base`)
-      if (response.data && response.data.base_voice_url) {
-        setBaseVoiceUrl(response.data.base_voice_url)
+      const response = await apiClient.get<{
+        base_voice_url: string | null,
+        has_voice: boolean,
+        message?: string
+      }>(`/api/v1/influencers/${params.id}/voice/base`)
+      
+      if (response && response.has_voice && response.base_voice_url) {
+        setBaseVoiceUrl(response.base_voice_url)
         setHasBaseVoice(true)
+      } else {
+        // 음성이 없는 경우
+        console.log(response?.message || '베이스 음성이 아직 설정되지 않았습니다.')
+        setHasBaseVoice(false)
+        setBaseVoiceUrl(null)
       }
-    } catch (error) {
-      console.error('베이스 음성 확인 실패:', error)
-      // 베이스 음성이 없는 경우 에러가 발생할 수 있으므로 무시
+    } catch (error: any) {
+      console.error('베이스 음성 확인 중 오류:', error)
+      setHasBaseVoice(false)
+      setBaseVoiceUrl(null)
     }
   }
 
   const loadVoiceHistory = async () => {
     setIsLoadingVoiceHistory(true)
     try {
-      const response = await apiClient.get(`/api/v1/influencers/${params.id}/voices`)
+      const response = await apiClient.get<any[]>(`/api/v1/influencers/${params.id}/voices`)
       
-      // 응답 데이터를 프론트엔드 형식에 맞게 변환
-      const voiceHistory = response.data.map((voice: any) => ({
-        id: voice.id,
-        text: voice.text,
-        url: voice.s3_url,
-        duration: voice.duration,
-        createdAt: voice.created_at
-      }))
-      
-      setVoiceHistory(voiceHistory)
+      // response가 배열인지 확인 (apiClient는 데이터를 직접 반환)
+      if (Array.isArray(response)) {
+        // 응답 데이터를 프론트엔드 형식에 맞게 변환
+        const voiceHistory = response.map((voice: any) => ({
+          id: voice.id,
+          text: voice.text,
+          url: voice.s3_url,
+          duration: voice.duration,
+          createdAt: voice.created_at,
+          status: voice.status || 'completed'
+        }))
+        
+        setVoiceHistory(voiceHistory)
+      } else if (response?.data && Array.isArray(response.data)) {
+        // response.data가 배열인 경우
+        const voiceHistory = response.data.map((voice: any) => ({
+          id: voice.id,
+          text: voice.text,
+          url: voice.s3_url,
+          duration: voice.duration,
+          createdAt: voice.created_at,
+          status: voice.status || 'completed'
+        }))
+        
+        setVoiceHistory(voiceHistory)
+      } else {
+        // 빈 배열로 설정
+        setVoiceHistory([])
+      }
     } catch (error) {
       console.error('음성 목록 로드 실패:', error)
+      // 에러가 발생한 경우에만 실패 메시지 표시
       toast({
         title: "로드 실패",
         description: "음성 목록을 불러오는데 실패했습니다.",
         variant: "destructive",
       })
+      setVoiceHistory([])
     } finally {
       setIsLoadingVoiceHistory(false)
     }
   }
 
   const handlePlayVoice = (url: string) => {
-    if (playingVoiceUrl === url) {
+    if (!url) return
+
+    if (playingVoiceUrl === url && audioRef.current) {
       // 이미 재생 중이면 정지
+      audioRef.current.pause()
       setPlayingVoiceUrl(null)
-      // TODO: 실제 오디오 플레이어 정지 로직
     } else {
-      setPlayingVoiceUrl(url)
-      // TODO: 실제 오디오 플레이어 재생 로직
+      // 이전 오디오가 재생 중이면 정지
+      if (audioRef.current) {
+        audioRef.current.pause()
+      }
+
+      // 새로운 오디오 재생
+      const audio = new Audio(url)
+      audioRef.current = audio
       
-      // 임시로 3초 후 정지
-      setTimeout(() => {
+      audio.play().then(() => {
+        setPlayingVoiceUrl(url)
+      }).catch((error) => {
+        console.error('오디오 재생 실패:', error)
+        toast({
+          title: "재생 실패",
+          description: "오디오를 재생할 수 없습니다.",
+          variant: "destructive",
+        })
+      })
+
+      // 재생이 끝나면 상태 초기화
+      audio.addEventListener('ended', () => {
         setPlayingVoiceUrl(null)
-      }, 3000)
+      })
+
+      // 에러 발생 시 상태 초기화
+      audio.addEventListener('error', () => {
+        setPlayingVoiceUrl(null)
+        toast({
+          title: "재생 오류",
+          description: "오디오 파일을 로드할 수 없습니다.",
+          variant: "destructive",
+        })
+      })
     }
   }
 
@@ -2750,21 +2926,34 @@ function ModelDetailContent() {
                       {voiceHistory.map((voice) => (
                         <div key={voice.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                           <div className="flex items-center space-x-3">
-                            <button
-                              onClick={() => handlePlayVoice(voice.url)}
-                              className="p-2 bg-white rounded-full shadow-sm hover:shadow-md transition-shadow"
-                            >
-                              {playingVoiceUrl === voice.url ? (
-                                <PauseCircle className="h-5 w-5 text-purple-600" />
-                              ) : (
-                                <PlayCircle className="h-5 w-5 text-purple-600" />
-                              )}
-                            </button>
+                            {voice.status === 'pending' ? (
+                              <div className="p-2 bg-yellow-100 rounded-full">
+                                <Loader2 className="h-5 w-5 text-yellow-600 animate-spin" />
+                              </div>
+                            ) : voice.status === 'failed' ? (
+                              <div className="p-2 bg-red-100 rounded-full">
+                                <AlertCircle className="h-5 w-5 text-red-600" />
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => handlePlayVoice(voice.url)}
+                                className="p-2 bg-white rounded-full shadow-sm hover:shadow-md transition-shadow"
+                                disabled={!voice.url}
+                              >
+                                {playingVoiceUrl === voice.url ? (
+                                  <PauseCircle className="h-5 w-5 text-purple-600" />
+                                ) : (
+                                  <PlayCircle className="h-5 w-5 text-purple-600" />
+                                )}
+                              </button>
+                            )}
                             <div>
                               <p className="text-sm font-medium text-gray-900 line-clamp-1">{voice.text}</p>
                               <p className="text-xs text-gray-500">
                                 {new Date(voice.createdAt).toLocaleDateString('ko-KR')} •{' '}
-                                {voice.duration ? `${voice.duration}초` : '길이 정보 없음'}
+                                {voice.status === 'pending' ? '생성 중...' : 
+                                 voice.status === 'failed' ? '생성 실패' :
+                                 voice.duration ? `${voice.duration}초` : '길이 정보 없음'}
                               </p>
                             </div>
                           </div>
