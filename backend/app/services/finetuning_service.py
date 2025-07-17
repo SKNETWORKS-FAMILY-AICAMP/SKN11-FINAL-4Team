@@ -678,12 +678,13 @@ class InfluencerFineTuningService:
             성공 여부
         """
         try:
-            # 인플루언서 정보 가져오기
-            from app.services.influencers.crud import get_influencer_by_id
-            
-            user_id = "system"  # 시스템 작업으로 처리
-            influencer_data = get_influencer_by_id(db, user_id, influencer_id)
-            
+            # 인플루언서 정보 가져오기 (시스템 레벨에서 권한 체크 없이 조회)
+            from app.models.influencer import AIInfluencer
+
+            influencer_data = db.query(AIInfluencer).filter(
+                AIInfluencer.influencer_id == influencer_id
+            ).first()
+
             if not influencer_data:
                 logger.error(f"인플루언서를 찾을 수 없습니다: {influencer_id}")
                 return False

@@ -156,8 +156,58 @@ async def get_style_presets_list(
         # StylePreset 모델만 직접 사용하여 순환 참조 문제 회피
         from app.models.influencer import StylePreset
         presets = db.query(StylePreset).offset(skip).limit(limit).all()
-        logger.info(f"✅ 프리셋 조회 성공 - 개수: {len(presets)}")
-        return presets
+        
+        for preset in presets:
+            # 해당 프리셋을 사용하는 인플루언서들의 MBTI 정보 수집
+            # 가장 많이 사용되는 MBTI를 찾기 위해 서브쿼리 사용
+            from sqlalchemy import func
+            
+            mbti_counts = db.query(
+                ModelMBTI.mbti_id,
+                ModelMBTI.mbti_name,
+                ModelMBTI.mbti_traits,
+                ModelMBTI.mbti_speech,
+                func.count(AIInfluencer.influencer_id).label('count')
+            ).join(
+                AIInfluencer, 
+                ModelMBTI.mbti_id == AIInfluencer.mbti_id
+            ).filter(
+                AIInfluencer.style_preset_id == preset.style_preset_id,
+                AIInfluencer.mbti_id.isnot(None)
+            ).group_by(
+                ModelMBTI.mbti_id,
+                ModelMBTI.mbti_name,
+                ModelMBTI.mbti_traits,
+                ModelMBTI.mbti_speech
+            ).order_by(
+                func.count(AIInfluencer.influencer_id).desc()
+            ).first()
+            
+            # MBTI 정보가 있으면 가장 많이 사용되는 것을 사용, 없으면 None
+            mbti_info = mbti_counts if mbti_counts else None
+            
+            # 프리셋 데이터를 딕셔너리로 변환
+            preset_dict = {
+                "style_preset_id": preset.style_preset_id,
+                "style_preset_name": preset.style_preset_name,
+                "influencer_type": preset.influencer_type,
+                "influencer_gender": preset.influencer_gender,
+                "influencer_age_group": preset.influencer_age_group,
+                "influencer_hairstyle": preset.influencer_hairstyle,
+                "influencer_style": preset.influencer_style,
+                "influencer_personality": preset.influencer_personality,
+                "influencer_speech": preset.influencer_speech,
+                "created_at": preset.created_at,
+                "updated_at": preset.updated_at,
+                "mbti_id": preset.mbti_id,
+                "system_prompt": preset.system_prompt,
+                "influencer_description": preset.influencer_description,
+            }
+            
+            presets_with_mbti.append(StylePresetWithMBTI(**preset_dict))
+        
+        logger.info(f"✅ 프리셋 조회 성공 - 개수: {len(presets_with_mbti)}")
+        return presets_with_mbti
     except Exception as e:
         logger.error(f"❌ 프리셋 조회 실패: {str(e)}")
         raise HTTPException(status_code=500, detail=f"프리셋 조회 중 오류 발생: {str(e)}")
@@ -766,8 +816,15 @@ async def handle_finetuning_webhook(
             if influencer:
                 influencer.learning_status = 1  # 1: 사용가능
                 if webhook_data.hf_model_url:
-                    influencer.influencer_model_repo = webhook_data.hf_model_url
-                logger.info(f"✅ 인플루언서 모델 상태 업데이트 완료: influencer_id={batch_key_entry.influencer_id}, status=사용 가능")
+                    # 허깅페이스 URL에서 뒷부분만 추출 (예: https://huggingface.co/username/model-name -> username/model-name)
+                    hf_url = webhook_data.hf_model_url
+                    if hf_url.startswith("https://huggingface.co/"):
+                        influencer.influencer_model_repo = hf_url.replace("https://huggingface.co/", "")
+                    else:
+                        influencer.influencer_model_repo = hf_url
+                logger.info(
+                    f"✅ 인플루언서 모델 상태 업데이트 완료: influencer_id={batch_key_entry.influencer_id}, status=사용 가능, repo={influencer.influencer_model_repo}"
+                )
         elif webhook_data.status == "failed":
             batch_key_entry.status = QAGenerationStatus.FAILED.value
             batch_key_entry.error_message = webhook_data.error_message

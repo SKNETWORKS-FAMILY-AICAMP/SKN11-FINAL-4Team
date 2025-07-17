@@ -141,16 +141,21 @@ class StartupService:
                 
                 for batch_job in restart_candidates:
                     try:
-                        logger.info(f"🔍 파인튜닝 상태 확인: task_id={batch_job.task_id}, influencer_id={batch_job.influencer_id}")
-                        
-                        # 인플루언서 정보 조회
-                        from app.services.influencers.crud import get_influencer_by_id
-                        influencer_data = get_influencer_by_id(db, "system", batch_job.influencer_id)
-                        
+                        logger.info(
+                            f"🔍 파인튜닝 상태 확인: task_id={batch_job.task_id}, influencer_id={batch_job.influencer_id}"
+                        )
+
+                        # 인플루언서 정보 조회 (시스템 레벨에서 권한 체크 없이 조회)
+                        from app.models.influencer import AIInfluencer
+                        print("0")
+                        influencer_data = db.query(AIInfluencer).filter(
+                            AIInfluencer.influencer_id == batch_job.influencer_id
+                        ).first()
+                        print("1")
                         if not influencer_data:
                             logger.warning(f"⚠️ 인플루언서를 찾을 수 없음: {batch_job.influencer_id}")
                             continue
-                        
+                        print("2")
                         # 이미 파인튜닝이 완료되었는지 확인
                         if self.finetuning_service.is_influencer_finetuned(influencer_data, db):
                             logger.info(f"✅ 이미 파인튜닝 완료됨: influencer_id={batch_job.influencer_id}")
@@ -158,19 +163,21 @@ class StartupService:
                             batch_job.is_finetuning_started = True
                             db.commit() # 개별 작업 처리 후 커밋
                             continue
-                        
-                        logger.info(f"🚀 파인튜닝 자동 재시작: task_id={batch_job.task_id}, influencer_id={batch_job.influencer_id}")
-                        
+                        print("3")
+                        logger.info(
+                            f"🚀 파인튜닝 자동 재시작: task_id={batch_job.task_id}, influencer_id={batch_job.influencer_id}"
+                        )
+
                         # S3 URL 확인 및 수정
                         s3_qa_url = batch_job.s3_qa_file_url
-                        
+                        print("4")
                         # 잘못된 URL인 경우 수정 (임시 조치)
                         if s3_qa_url and 'generated_qa_results.jsonl' in s3_qa_url:
                             logger.warning(f"⚠️ 잘못된 S3 URL 감지, 처리된 QA URL로 변경 시도")
                             # processed_qa 파일 URL로 변경
                             s3_qa_url = s3_qa_url.replace('qa_results/', 'qa_pairs/').replace('generated_qa_results.jsonl', f'processed_qa_{batch_job.task_id.split("_")[-1]}.json')
                             logger.info(f"📝 수정된 S3 URL: {s3_qa_url}")
-                        
+                        print("5")
                         # 파인튜닝 시작 (task_id 전달)
                         success = await self.finetuning_service.start_finetuning_for_influencer(
                             influencer_id=batch_job.influencer_id,

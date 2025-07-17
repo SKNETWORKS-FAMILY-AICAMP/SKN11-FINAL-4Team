@@ -52,7 +52,9 @@ def create_influencer(db: Session, user_id: str, influencer_data: AIInfluencerCr
                 influencer_hairstyle=influencer_data.hair_style or "기본 헤어스타일",
                 influencer_style=influencer_data.mood or "자연스럽고 편안한",
                 influencer_personality=influencer_data.personality,
-                influencer_speech=influencer_data.tone
+                influencer_speech=influencer_data.tone,
+                system_prompt=influencer_data.system_prompt or f"당신은 {influencer_data.influencer_name}입니다. {influencer_data.personality}한 성격을 가지고 있으며, {influencer_data.tone}한 말투를 사용합니다.",
+                influencer_description=influencer_data.influencer_description or f"{influencer_data.influencer_name}은 {influencer_data.personality}한 성격의 AI 인플루언서입니다.",
             )
             
             style_preset = create_style_preset(db, preset_data)
