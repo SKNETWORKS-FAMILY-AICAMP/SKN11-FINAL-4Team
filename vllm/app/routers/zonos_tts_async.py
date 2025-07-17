@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 from datetime import datetime
 import concurrent.futures
+import httpx
 
 import torch
 import torchaudio
@@ -31,6 +32,9 @@ task_status: Dict[str, Dict[str, Any]] = {}
 
 # ThreadPoolExecutor for CPU-bound tasks
 executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+
+# 웹훅 URL 설정 (환경 변수에서 가져오거나 기본값 사용)
+WEBHOOK_URL = os.getenv('TTS_WEBHOOK_URL', 'http://localhost:8000/api/v1/tts/webhook/tts-complete')
 
 # 미리 정의된 감정 벡터
 PREDEFINED_EMOTIONS = {
@@ -200,6 +204,44 @@ def generate_tts_sync(
     
     return wavs[0]
 
+
+async def send_webhook_notification(
+    task_id: str,
+    status: str,
+    s3_url: Optional[str] = None,
+    s3_key: Optional[str] = None,
+    duration: Optional[float] = None,
+    file_size: Optional[int] = None,
+    error_message: Optional[str] = None
+):
+    """웹훅으로 작업 완료 알림을 전송"""
+    try:
+        webhook_data = {
+            "task_id": task_id,
+            "status": status,
+            "s3_url": s3_url,
+            "s3_key": s3_key,
+            "duration": duration,
+            "file_size": file_size,
+            "error_message": error_message
+        }
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                WEBHOOK_URL,
+                json=webhook_data,
+                timeout=10.0
+            )
+            
+            if response.status_code == 200:
+                logger.info(f"✅ 웹훅 전송 성공: task_id={task_id}, status={status}")
+            else:
+                logger.error(f"❌ 웹훅 전송 실패: status_code={response.status_code}, response={response.text}")
+                
+    except Exception as e:
+        logger.error(f"❌ 웹훅 전송 중 오류 발생: {str(e)}")
+
+
 async def process_tts_task(
     task_id: str,
     request: ZonosTTSRequest
@@ -295,6 +337,16 @@ async def process_tts_task(
                 
                 logger.info(f"✅ S3 업로드 완료: {s3_info['key']}")
                 
+                # 웹훅 전송
+                await send_webhook_notification(
+                    task_id=task_id,
+                    status="completed",
+                    s3_url=s3_info.get('url'),
+                    s3_key=s3_info.get('key'),
+                    duration=None,  # TODO: 실제 오디오 길이 계산 필요
+                    file_size=len(file_data)
+                )
+                
                 # S3 업로드 성공 시 로컬 파일 삭제
                 try:
                     output_path.unlink()
@@ -328,6 +380,13 @@ async def process_tts_task(
         task_status[task_id]["status"] = "failed"
         task_status[task_id]["error"] = str(e)
         task_status[task_id]["updated_at"] = datetime.utcnow().isoformat()
+        
+        # 실패 웹훅 전송
+        await send_webhook_notification(
+            task_id=task_id,
+            status="failed",
+            error_message=str(e)
+        )
 
 @router.post("/generate_tts", response_model=ZonosTTSResponse)
 async def generate_tts_async(
@@ -584,6 +643,16 @@ async def process_tts_with_voice_task(task_id: str, request: ZonosTTSWithVoiceRe
                 
                 logger.info(f"✅ S3 업로드 완료: {s3_info['key']}")
                 
+                # 웹훅 전송
+                await send_webhook_notification(
+                    task_id=task_id,
+                    status="completed",
+                    s3_url=s3_info.get('url'),
+                    s3_key=s3_info.get('key'),
+                    duration=None,  # TODO: 실제 오디오 길이 계산 필요
+                    file_size=len(file_data)
+                )
+                
                 # S3 업로드 성공 시 로컬 파일 삭제
                 try:
                     output_path.unlink()
@@ -617,6 +686,13 @@ async def process_tts_with_voice_task(task_id: str, request: ZonosTTSWithVoiceRe
         task_status[task_id]["status"] = "failed"
         task_status[task_id]["error"] = str(e)
         task_status[task_id]["updated_at"] = datetime.utcnow().isoformat()
+        
+        # 실패 웹훅 전송
+        await send_webhook_notification(
+            task_id=task_id,
+            status="failed",
+            error_message=str(e)
+        )
 
 def _generate_tts_with_voice_sync(
     voice_path: str,
