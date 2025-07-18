@@ -976,10 +976,11 @@ function ModelDetailContent() {
           const updatedVoices = response.map((voice: any) => ({
             id: voice.id,
             text: voice.text,
-            url: voice.s3_url,
+            url: voice.url || voice.s3_url,
             duration: voice.duration,
-            createdAt: voice.created_at,
-            status: voice.status || 'completed'
+            createdAt: voice.createdAt || voice.created_at,
+            status: voice.status || 'completed',
+            task_id: voice.task_id
           }))
           
           // 새로 완료된 음성 찾기
@@ -1722,9 +1723,10 @@ function ModelDetailContent() {
           const newVoice = {
             id: Date.now().toString(),
             text: voiceText,
-            url: response.s3_url,
+            url: response.url || response.s3_url,
             duration: response.duration,
-            createdAt: new Date().toISOString()
+            createdAt: new Date().toISOString(),
+            status: 'completed'
           }
           setVoiceHistory(prev => [newVoice, ...prev])
           
@@ -1788,10 +1790,11 @@ function ModelDetailContent() {
         const voiceHistory = response.map((voice: any) => ({
           id: voice.id,
           text: voice.text,
-          url: voice.s3_url,
+          url: voice.url || voice.s3_url,  // url 필드를 우선 사용
           duration: voice.duration,
-          createdAt: voice.created_at,
-          status: voice.status || 'completed'
+          createdAt: voice.createdAt || voice.created_at,  // createdAt 필드를 우선 사용
+          status: voice.status || 'completed',
+          task_id: voice.task_id
         }))
         
         setVoiceHistory(voiceHistory)
@@ -1800,10 +1803,11 @@ function ModelDetailContent() {
         const voiceHistory = response.data.map((voice: any) => ({
           id: voice.id,
           text: voice.text,
-          url: voice.s3_url,
+          url: voice.url || voice.s3_url,
           duration: voice.duration,
-          createdAt: voice.created_at,
-          status: voice.status || 'completed'
+          createdAt: voice.createdAt || voice.created_at,
+          status: voice.status || 'completed',
+          task_id: voice.task_id
         }))
         
         setVoiceHistory(voiceHistory)

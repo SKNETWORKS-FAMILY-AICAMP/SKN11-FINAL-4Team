@@ -1940,10 +1940,14 @@ async def get_generated_voices(
         result.append({
             "id": str(voice.id),
             "text": voice.text,
-            "s3_url": voice_url,
+            "url": voice_url,  # 프론트엔드와 일치하도록 url로 변경
+            "s3_url": voice_url,  # 호환성을 위해 유지
             "duration": voice.duration,
             "file_size": voice.file_size,
-            "created_at": voice.created_at.isoformat()
+            "status": voice.status if hasattr(voice, 'status') else "completed",
+            "task_id": voice.task_id if hasattr(voice, 'task_id') else None,
+            "createdAt": voice.created_at.isoformat(),  # 프론트엔드 형식
+            "created_at": voice.created_at.isoformat()  # 호환성을 위해 유지
         })
     
     return result

@@ -227,7 +227,7 @@ async def send_webhook_notification(
             "error_message": error_message
         }
         
-        async with httpx.AsyncClient(verify=False) as client:  # 개발 환경에서 자체 서명 인증서 사용
+        async with httpx.AsyncClient(verify=False) as client:
             response = await client.post(
                 WEBHOOK_URL,
                 json=webhook_data,
