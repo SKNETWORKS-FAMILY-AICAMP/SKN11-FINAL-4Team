@@ -120,7 +120,7 @@ jobs:
 
       - name: Clone and setup backend repository
         run: |
-          cd ..
+          cd ../../
           # 기존 디렉토리 삭제
           rm -rf backend-repo
           # 새로 클론
