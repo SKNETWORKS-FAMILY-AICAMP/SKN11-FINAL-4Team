@@ -157,7 +157,7 @@ jobs:
       - name: Commit and push to backend repository
         run: |
           cd backend-repo
-          
+          pwd
           # 현재 원격 저장소 확인
           echo "푸시 전 원격 저장소 확인:"
           git remote -v
