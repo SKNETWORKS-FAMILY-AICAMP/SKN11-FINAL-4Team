@@ -18,7 +18,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2  # 이전 커밋과 비교하기 위해
+          fetch-depth: 2
 
       - name: Detect changes
         id: changes
@@ -27,7 +27,6 @@ jobs:
           echo "Changed files:"
           echo "$CHANGED_FILES"
           
-          # frontend 폴더 변경 확인
           if echo "$CHANGED_FILES" | grep -q "^frontend/"; then
             echo "frontend=true" >> $GITHUB_OUTPUT
             echo "Frontend changes detected"
@@ -36,7 +35,6 @@ jobs:
             echo "No frontend changes"
           fi
           
-          # backend 폴더 변경 확인
           if echo "$CHANGED_FILES" | grep -q "^backend/"; then
             echo "backend=true" >> $GITHUB_OUTPUT
             echo "Backend changes detected"
@@ -61,15 +59,26 @@ jobs:
           git config --global user.name "kicet3"
           git config --global user.email "kicet3@gmail.com"
 
-      - name: Clone frontend repository (A레포)
+      - name: Clone and setup frontend repository
         run: |
           git clone https://${{ secrets.FRONTEND_REPO_TOKEN }}@github.com/kicet3/AIMex-front.git frontend-repo
+          cd frontend-repo
+          
+          # 원격 저장소의 기본 브랜치 확인
+          git ls-remote --heads origin
+          
+          # main 브랜치가 없으면 생성
+          if ! git ls-remote --heads origin | grep -q "refs/heads/main"; then
+            echo "main 브랜치가 없어서 새로 생성합니다."
+            git checkout -b main
+          else
+            git checkout main || git checkout -b main
+          fi
         env:
           FRONTEND_REPO_TOKEN: ${{ secrets.FRONTEND_REPO_TOKEN }}
 
       - name: Copy frontend files
         run: |
-          # frontend 폴더 내용을 A레포로 복사
           rsync -av --delete ./frontend/ ./frontend-repo/
           
       - name: Commit and push to frontend repository
@@ -83,7 +92,13 @@ jobs:
           fi
           
           git commit -m "Sync frontend from develop: ${{ github.sha }}"
-          git push origin main
+          
+          # 브랜치 존재 여부 확인 후 푸시
+          if git ls-remote --heads origin | grep -q "refs/heads/main"; then
+            git push origin main --force
+          else
+            git push -u origin main --force
+          fi
         env:
           GITHUB_TOKEN: ${{ secrets.FRONTEND_REPO_TOKEN }}
 
@@ -103,20 +118,50 @@ jobs:
           git config --global user.name "kicet3"
           git config --global user.email "kicet3@gmail.com"
 
-      - name: Clone backend repository (B레포)
+      - name: Clone and setup backend repository
         run: |
+          # 기존 디렉토리가 있으면 삭제
+          rm -rf backend-repo
+          
+          # 새로 클론
           git clone https://${{ secrets.BACKEND_REPO_TOKEN }}@github.com/kicet3/AIMEX-back.git backend-repo
+          cd backend-repo
+          
+          # 원격 저장소 URL 확인 및 재설정
+          echo "현재 원격 저장소 URL:"
+          git remote -v
+          
+          # 원격 저장소 URL을 명시적으로 재설정
+          git remote set-url origin https://${{ secrets.BACKEND_REPO_TOKEN }}@github.com/kicet3/AIMEX-back.git
+          
+          echo "재설정된 원격 저장소 URL:"
+          git remote -v
+          
+          # 원격 저장소의 기본 브랜치 확인
+          git ls-remote --heads origin
+          
+          # main 브랜치가 없으면 생성
+          if ! git ls-remote --heads origin | grep -q "refs/heads/main"; then
+            echo "main 브랜치가 없어서 새로 생성합니다."
+            git checkout -b main
+          else
+            git checkout main || git checkout -b main
+          fi
         env:
           BACKEND_REPO_TOKEN: ${{ secrets.BACKEND_REPO_TOKEN }}
 
       - name: Copy backend files
         run: |
-          # backend 폴더 내용을 B레포로 복사
           rsync -av --delete ./backend/ ./backend-repo/
           
       - name: Commit and push to backend repository
         run: |
           cd backend-repo
+          
+          # 현재 원격 저장소 확인
+          echo "푸시 전 원격 저장소 확인:"
+          git remote -v
+          
           git add .
           
           if git diff --staged --quiet; then
@@ -125,6 +170,19 @@ jobs:
           fi
           
           git commit -m "Sync backend from develop: ${{ github.sha }}"
-          git push origin main --force
+          
+          # 푸시 전에 다시 한번 원격 저장소 URL 확인
+          echo "푸시할 저장소: https://github.com/kicet3/AIMEX-back.git"
+          echo "현재 설정된 origin:"
+          git remote get-url origin
+          
+          # 브랜치 존재 여부 확인 후 푸시
+          if git ls-remote --heads origin | grep -q "refs/heads/main"; then
+            echo "기존 main 브랜치에 푸시합니다."
+            git push origin main --force
+          else
+            echo "새로운 main 브랜치를 생성하여 푸시합니다."
+            git push -u origin main --force
+          fi
         env:
           GITHUB_TOKEN: ${{ secrets.BACKEND_REPO_TOKEN }}
