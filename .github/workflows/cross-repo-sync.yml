@@ -125,6 +125,6 @@ jobs:
           fi
           
           git commit -m "Sync backend from develop: ${{ github.sha }}"
-          git push origin main
+          git push origin main --force
         env:
           GITHUB_TOKEN: ${{ secrets.BACKEND_REPO_TOKEN }}
