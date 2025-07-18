@@ -1422,61 +1422,77 @@ export default function ImageGeneratorPage() {
 
           {/* 갤러리 탭 */}
           <TabsContent value="gallery" className="space-y-6">
-            <div className="flex justify-between items-center">
-              <h2 className="text-xl font-semibold">생성된 이미지</h2>
-              <Button variant="outline" onClick={() => window.location.reload()}>
-                <RefreshCw className="h-4 w-4 mr-2" />
-                새로고침
-              </Button>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-              {images.map((image) => (
-                <Card key={image.id} className="overflow-hidden">
-                  <div className="aspect-square relative">
-                    <img
-                      src={image.image_url}
-                      alt={image.prompt}
-                      className="w-full h-full object-cover"
-                    />
-                    <div className="absolute top-2 right-2 flex gap-2">
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        onClick={() => handleDownloadImage(image.image_url, `generated_${image.id}.png`)}
-                      >
-                        <Download className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        onClick={() => handleDeleteImage(image.id)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
+            <Card>
+              <CardHeader>
+                <div className="flex justify-between items-center">
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      <ImageIcon className="h-5 w-5" />
+                      생성된 이미지 갤러리
+                    </CardTitle>
+                    <CardDescription>
+                      AI로 생성된 이미지들을 확인하고 관리하세요
+                    </CardDescription>
                   </div>
-                  <CardContent className="p-4">
-                    <p className="text-sm text-gray-600 line-clamp-2 mb-2">
-                      {image.prompt}
-                    </p>
-                    <div className="flex justify-between items-center text-xs text-gray-500">
-                      <span>{image.width} × {image.height}</span>
-                      <span>{new Date(image.created_at).toLocaleDateString()}</span>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-
-
-            {images.length === 0 && (
-              <div className="text-center py-12">
-                <ImageIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                <p className="text-lg font-medium text-gray-900 mb-2">생성된 이미지가 없습니다</p>
-                <p className="text-gray-600">첫 번째 이미지를 생성해보세요</p>
-              </div>
-            )}
+                  <Button variant="outline" onClick={() => window.location.reload()}>
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    새로고침
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {images.length > 0 ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                    {images.map((image) => (
+                      <Card key={image.id} className="overflow-hidden hover:shadow-lg transition-shadow">
+                        <div className="aspect-square relative group">
+                          <img
+                            src={image.image_url}
+                            alt={image.prompt}
+                            className="w-full h-full object-cover"
+                          />
+                          <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-20 transition-all duration-200 flex items-center justify-center">
+                            <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex gap-2">
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={() => handleDownloadImage(image.image_url, `generated_${image.id}.png`)}
+                                className="bg-white text-gray-800 hover:bg-gray-100"
+                              >
+                                <Download className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                onClick={() => handleDeleteImage(image.id)}
+                                className="bg-red-600 hover:bg-red-700"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                        <CardContent className="p-4">
+                          <p className="text-sm text-gray-600 line-clamp-2 mb-2">
+                            {image.prompt}
+                          </p>
+                          <div className="flex justify-between items-center text-xs text-gray-500">
+                            <span>{image.width} × {image.height}</span>
+                            <span>{new Date(image.created_at).toLocaleDateString()}</span>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-12">
+                    <ImageIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                    <p className="text-lg font-medium text-gray-900 mb-2">생성된 이미지가 없습니다</p>
+                    <p className="text-gray-600">첫 번째 이미지를 생성해보세요</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </TabsContent>
         </Tabs>
       </div>
