@@ -120,7 +120,7 @@ jobs:
 
       - name: Clone and setup backend repository
         run: |
-          cd ../../
+          cd ../
           # 기존 디렉토리 삭제
           rm -rf backend-repo
           # 새로 클론
@@ -132,7 +132,7 @@ jobs:
 
       - name: Copy backend files
         run: |
-          cd ../../
+          cd ../
           ls -al
           cp -r ./SKN11-FINAL-4Team/backend/* ./backend-repo/
           
