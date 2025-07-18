@@ -1,0 +1,130 @@
+name: Conditional Repository Sync
+
+on:
+  push:
+    branches:
+      - develop
+    paths:
+      - 'frontend/**'
+      - 'backend/**'
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      frontend-changed: ${{ steps.changes.outputs.frontend }}
+      backend-changed: ${{ steps.changes.outputs.backend }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2  # 이전 커밋과 비교하기 위해
+
+      - name: Detect changes
+        id: changes
+        run: |
+          CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD)
+          echo "Changed files:"
+          echo "$CHANGED_FILES"
+          
+          # frontend 폴더 변경 확인
+          if echo "$CHANGED_FILES" | grep -q "^frontend/"; then
+            echo "frontend=true" >> $GITHUB_OUTPUT
+            echo "Frontend changes detected"
+          else
+            echo "frontend=false" >> $GITHUB_OUTPUT
+            echo "No frontend changes"
+          fi
+          
+          # backend 폴더 변경 확인
+          if echo "$CHANGED_FILES" | grep -q "^backend/"; then
+            echo "backend=true" >> $GITHUB_OUTPUT
+            echo "Backend changes detected"
+          else
+            echo "backend=false" >> $GITHUB_OUTPUT
+            echo "No backend changes"
+          fi
+
+  sync-frontend:
+    needs: detect-changes
+    runs-on: ubuntu-latest
+    if: needs.detect-changes.outputs.frontend-changed == 'true'
+    
+    steps:
+      - name: Checkout source repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Git
+        run: |
+          git config --global user.name "kicet3"
+          git config --global user.email "kicet3@gmail.com"
+
+      - name: Clone frontend repository (A레포)
+        run: |
+          git clone https://${{ secrets.FRONTEND_REPO_TOKEN }}@github.com:kicet3/AIMex-front.git frontend-repo
+        env:
+          FRONTEND_REPO_TOKEN: ${{ secrets.FRONTEND_REPO_TOKEN }}
+
+      - name: Copy frontend files
+        run: |
+          # frontend 폴더 내용을 A레포로 복사
+          rsync -av --delete ./frontend/ ./frontend-repo/
+          
+      - name: Commit and push to frontend repository
+        run: |
+          cd frontend-repo
+          git add .
+          
+          if git diff --staged --quiet; then
+            echo "Frontend: 변경사항이 없습니다."
+            exit 0
+          fi
+          
+          git commit -m "Sync frontend from develop: ${{ github.sha }}"
+          git push origin main
+        env:
+          GITHUB_TOKEN: ${{ secrets.FRONTEND_REPO_TOKEN }}
+
+  sync-backend:
+    needs: detect-changes
+    runs-on: ubuntu-latest
+    if: needs.detect-changes.outputs.backend-changed == 'true'
+    
+    steps:
+      - name: Checkout source repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Git
+        run: |
+          git config --global user.name "kicet3"
+          git config --global user.email "kicet3@gmail.com"
+
+      - name: Clone backend repository (B레포)
+        run: |
+          git clone https://${{ secrets.BACKEND_REPO_TOKEN }}@github.com:kicet3/AIMEX-back.git backend-repo
+        env:
+          BACKEND_REPO_TOKEN: ${{ secrets.BACKEND_REPO_TOKEN }}
+
+      - name: Copy backend files
+        run: |
+          # backend 폴더 내용을 B레포로 복사
+          rsync -av --delete ./backend/ ./backend-repo/
+          
+      - name: Commit and push to backend repository
+        run: |
+          cd backend-repo
+          git add .
+          
+          if git diff --staged --quiet; then
+            echo "Backend: 변경사항이 없습니다."
+            exit 0
+          fi
+          
+          git commit -m "Sync backend from develop: ${{ github.sha }}"
+          git push origin main
+        env:
+          GITHUB_TOKEN: ${{ secrets.BACKEND_REPO_TOKEN }}
