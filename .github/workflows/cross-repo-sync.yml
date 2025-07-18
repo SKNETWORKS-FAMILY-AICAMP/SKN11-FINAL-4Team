@@ -82,6 +82,13 @@ jobs:
       - name: Copy frontend files
         run: |
           cd ../
+           # .git을 제외한 모든 내용 삭제
+          shopt -s dotglob
+          for item in ./frontend-repo/*; do
+            if [[ "$(basename "$item")" != ".git" ]]; then
+              rm -rf "$item"
+            fi
+          done
           cp -r ./SKN11-FINAL-4Team/frontend/* ./frontend-repo/
           
       - name: Commit and push to frontend repository
@@ -135,7 +142,12 @@ jobs:
       - name: Copy backend files
         run: |
           cd ../
-          
+          shopt -s dotglob
+          for item in ./backend-repo/*; do
+            if [[ "$(basename "$item")" != ".git" ]]; then
+              rm -rf "$item"
+            fi
+          done
           cp -r ./SKN11-FINAL-4Team/backend/* ./backend-repo/
           
       - name: Commit and push to backend repository
@@ -189,7 +201,12 @@ jobs:
       - name: Copy vllm files
         run: |
           cd ../
-          
+          shopt -s dotglob
+          for item in ./vllm-repo/*; do
+            if [[ "$(basename "$item")" != ".git" ]]; then
+              rm -rf "$item"
+            fi
+          done
           cp -r ./SKN11-FINAL-4Team/vllm/* ./vllm-repo/
           
       - name: Commit and push to vllm repository
