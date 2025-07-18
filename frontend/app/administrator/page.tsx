@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { User, Save, ShieldCheck, ShieldX, Plus, Trash2, Users, Eye, EyeOff, Key, Loader2, FileText, Upload, Download } from "lucide-react"
+import { User, Save, ShieldCheck, ShieldX, Plus, Trash2, Users, Eye, EyeOff, Key, Loader2, FileText, Upload, Download, Settings, ChevronDown, ChevronUp } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { AlertDialog, AlertDialogTrigger, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogCancel, AlertDialogAction } from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
@@ -59,6 +59,12 @@ export default function AdministratorPage() {
   const [loadingDocuments, setLoadingDocuments] = useState(false)
   const [uploadingDocument, setUploadingDocument] = useState(false)
   const [selectedFiles, setSelectedFiles] = useState<File[]>([])
+  
+  // RAG 고급 설정 관련 상태들
+  const [showAdvancedSettings, setShowAdvancedSettings] = useState(false)
+  const [chunkSize, setChunkSize] = useState(1000)
+  const [chunkOverlap, setChunkOverlap] = useState(200)
+  const [topK, setTopK] = useState(5)
 
   // API에서 데이터 로드
   useEffect(() => {
@@ -1058,14 +1064,36 @@ export default function AdministratorPage() {
                         {/* 드래그 앤 드롭 영역 */}
                         <div
                           className={`relative group transition-all duration-300`}
+                          onDragOver={(e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                          }}
+                          onDrop={(e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            const files = Array.from(e.dataTransfer.files)
+                            // PDF 파일만 필터링
+                            const pdfFiles = files.filter(file => file.type === 'application/pdf')
+                            setSelectedFiles(prev => [...prev, ...pdfFiles])
+                          }}
                         >
-                          <div className={`
-                            relative overflow-hidden rounded-xl border-2 border-dashed transition-all duration-300
-                            ${selectedFiles.length > 0
-                              ? "border-blue-500 bg-gradient-to-br from-blue-50 to-indigo-50 shadow-lg shadow-blue-100"
-                              : "border-gray-300 bg-gradient-to-br from-gray-50 to-white hover:border-blue-400 hover:bg-gradient-to-br hover:from-blue-50 hover:to-indigo-50"
-                            }
-                          `}>
+                          <div 
+                            className={`
+                              relative overflow-hidden rounded-xl border-2 border-dashed transition-all duration-300
+                              ${selectedFiles.length > 0
+                                ? "border-blue-500 bg-gradient-to-br from-blue-50 to-indigo-50 shadow-lg shadow-blue-100"
+                                : "border-gray-300 bg-gradient-to-br from-gray-50 to-white hover:border-blue-400 hover:bg-gradient-to-br hover:from-blue-50 hover:to-indigo-50"
+                              }
+                            `}
+                            onDragEnter={(e) => {
+                              e.preventDefault()
+                              e.stopPropagation()
+                            }}
+                            onDragLeave={(e) => {
+                              e.preventDefault()
+                              e.stopPropagation()
+                            }}
+                          >
                             {/* 배경 패턴 */}
                             <div className="absolute inset-0 opacity-5">
                               <div className="absolute top-4 left-4 w-8 h-8 border-2 border-gray-400 rounded-lg"></div>
@@ -1111,7 +1139,7 @@ export default function AdministratorPage() {
                                   RAG 챗봇 학습용 문서들을 드래그하여 놓거나 클릭하여 선택하세요
                                 </p>
                                 <p className="text-xs text-gray-500">
-                                  지원 형식: PDF, DOCX, TXT (여러 파일 선택 가능)
+                                  지원 형식: PDF (여러 파일 선택 가능)
                                 </p>
                               </div>
 
@@ -1119,11 +1147,13 @@ export default function AdministratorPage() {
                               <div className="mt-6">
                                 <input
                                   type="file"
-                                  accept=".pdf,.docx,.txt"
+                                  accept=".pdf"
                                   multiple
                                   onChange={(e) => {
                                     const files = Array.from(e.target.files || [])
-                                    setSelectedFiles(prev => [...prev, ...files])
+                                    // PDF 파일만 필터링
+                                    const pdfFiles = files.filter(file => file.type === 'application/pdf')
+                                    setSelectedFiles(prev => [...prev, ...pdfFiles])
                                   }}
                                   className="hidden"
                                   id="document-upload"
@@ -1178,6 +1208,104 @@ export default function AdministratorPage() {
                                 </div>
                               ))}
                             </div>
+
+                            {/* RAG 고급 설정 토글 */}
+                            <div className="mt-6 border-t pt-4">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                onClick={() => setShowAdvancedSettings(!showAdvancedSettings)}
+                                className="w-full flex items-center justify-between"
+                              >
+                                <div className="flex items-center gap-2">
+                                  <Settings className="h-4 w-4" />
+                                  <span className="font-medium">RAG 임베딩 고급 설정</span>
+                                </div>
+                                {showAdvancedSettings ? (
+                                  <ChevronUp className="h-4 w-4" />
+                                ) : (
+                                  <ChevronDown className="h-4 w-4" />
+                                )}
+                              </Button>
+
+                              {/* 고급 설정 패널 */}
+                              {showAdvancedSettings && (
+                                <div className="mt-4 p-4 bg-gray-50 rounded-lg border">
+                                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    {/* 청크 크기 설정 */}
+                                    <div>
+                                      <Label htmlFor="chunk-size" className="text-sm font-medium">
+                                        청크 크기 (토큰)
+                                      </Label>
+                                      <Input
+                                        id="chunk-size"
+                                        type="number"
+                                        value={chunkSize}
+                                        onChange={(e) => setChunkSize(Number(e.target.value))}
+                                        min="100"
+                                        max="4000"
+                                        step="100"
+                                        className="mt-1"
+                                      />
+                                      <p className="text-xs text-gray-500 mt-1">
+                                        문서를 나눌 청크의 크기 (100-4000)
+                                      </p>
+                                    </div>
+
+                                    {/* 청크 오버랩 설정 */}
+                                    <div>
+                                      <Label htmlFor="chunk-overlap" className="text-sm font-medium">
+                                        청크 오버랩 (토큰)
+                                      </Label>
+                                      <Input
+                                        id="chunk-overlap"
+                                        type="number"
+                                        value={chunkOverlap}
+                                        onChange={(e) => setChunkOverlap(Number(e.target.value))}
+                                        min="0"
+                                        max={chunkSize}
+                                        step="50"
+                                        className="mt-1"
+                                      />
+                                      <p className="text-xs text-gray-500 mt-1">
+                                        연속된 청크 간의 겹치는 부분 (0-{chunkSize})
+                                      </p>
+                                    </div>
+
+                                    {/* Top-K 설정 */}
+                                    <div>
+                                      <Label htmlFor="top-k" className="text-sm font-medium">
+                                        Top-K
+                                      </Label>
+                                      <Input
+                                        id="top-k"
+                                        type="number"
+                                        value={topK}
+                                        onChange={(e) => setTopK(Number(e.target.value))}
+                                        min="1"
+                                        max="20"
+                                        step="1"
+                                        className="mt-1"
+                                      />
+                                      <p className="text-xs text-gray-500 mt-1">
+                                        검색할 관련 문서 수 (1-20)
+                                      </p>
+                                    </div>
+                                  </div>
+
+                                  {/* 설정 요약 */}
+                                  <div className="mt-4 p-3 bg-blue-50 rounded border border-blue-200">
+                                    <h6 className="text-sm font-medium text-blue-900 mb-2">현재 설정 요약</h6>
+                                    <div className="text-xs text-blue-800 space-y-1">
+                                      <p>• 청크 크기: {chunkSize} 토큰</p>
+                                      <p>• 청크 오버랩: {chunkOverlap} 토큰</p>
+                                      <p>• Top-K: {topK}</p>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+
                             <div className="flex gap-2 mt-4">
                               <Button
                                 onClick={() => setSelectedFiles([])}
@@ -1188,8 +1316,13 @@ export default function AdministratorPage() {
                               </Button>
                               <Button
                                 onClick={() => {
-                                  // TODO: 실제 업로드 로직 구현
+                                  // TODO: 실제 업로드 로직 구현 (RAG 설정 포함)
                                   console.log('업로드할 파일들:', selectedFiles)
+                                  console.log('RAG 설정:', {
+                                    chunkSize,
+                                    chunkOverlap,
+                                    topK
+                                  })
                                   setUploadingDocument(true)
                                   setTimeout(() => {
                                     setUploadingDocument(false)
