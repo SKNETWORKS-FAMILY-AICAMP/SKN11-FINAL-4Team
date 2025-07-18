@@ -121,6 +121,8 @@ jobs:
       - name: Clone and setup backend repository
         run: |
           cd ..
+          # 기존 디렉토리 삭제
+          rm -rf backend-repo
           # 새로 클론
           git clone https://${{ secrets.BACKEND_REPO_TOKEN }}@github.com/kicet3/AIMEX-back.git backend-repo
         env:
@@ -128,6 +130,8 @@ jobs:
 
       - name: Copy backend files
         run: |
+          pwd
+          ls -al
           cp -r ./SKN11-FINAL-4Team/backend/ ./backend-repo/
           
       - name: Commit and push to backend repository
