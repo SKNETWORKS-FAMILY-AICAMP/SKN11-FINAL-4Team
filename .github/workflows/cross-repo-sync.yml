@@ -7,13 +7,14 @@ on:
     paths:
       - 'frontend/**'
       - 'backend/**'
-
+      - 'vllm/**'
 jobs:
   detect-changes:
     runs-on: ubuntu-latest
     outputs:
       frontend-changed: ${{ steps.changes.outputs.frontend }}
       backend-changed: ${{ steps.changes.outputs.backend }}
+      vllm-changed: ${{ steps.changes.outputs.vllm }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -41,6 +42,14 @@ jobs:
           else
             echo "backend=false" >> $GITHUB_OUTPUT
             echo "No backend changes"
+          fi
+
+          if echo "$CHANGED_FILES" | grep -q "^vllm/"; then
+            echo "vllm=true" >> $GITHUB_OUTPUT
+            echo "vllm changes detected"
+          else
+            echo "vllm=false" >> $GITHUB_OUTPUT
+            echo "No vllm changes"
           fi
 
   sync-frontend:
@@ -149,3 +158,57 @@ jobs:
           git push origin main --force
         env:
           GITHUB_TOKEN: ${{ secrets.BACKEND_REPO_TOKEN }}
+
+  sync-vllm:
+    needs: detect-changes
+    runs-on: ubuntu-latest
+    if: needs.detect-changes.outputs.vllm-changed == 'true'
+    
+    steps:
+      - name: Checkout source repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Git
+        run: |
+          git config --global user.name "kicet3"
+          git config --global user.email "kicet3@gmail.com"
+
+      - name: Clone and setup vllm repository
+        run: |
+          cd ../
+          # 기존 디렉토리 삭제
+          rm -rf vllm-repo
+          # 새로 클론
+          git clone https://${{ secrets.VLLM_REPO_TOKEN }}@github.com/kicet3/aimex-vllm.git vllm-repo
+
+        env:
+          VLLM_REPO_TOKEN: ${{ secrets.VLLM_REPO_TOKEN }}
+
+      - name: Copy vllm files
+        run: |
+          cd ../
+          
+          cp -r ./SKN11-FINAL-4Team/vllm/* ./vllm-repo/
+          
+      - name: Commit and push to vllm repository
+        run: |
+          cd ../
+          cd vllm-repo
+
+          # 현재 원격 저장소 확인
+          echo "푸시 전 원격 저장소 확인:"
+          git remote -v
+          
+          git add .
+          
+          if git diff --staged --quiet; then
+            echo "vllm: 변경사항이 없습니다."
+            exit 0
+          fi
+          
+          git commit -m "Sync vllm from develop: ${{ github.sha }}"
+          git push origin main --force
+        env:
+          GITHUB_TOKEN: ${{ secrets.VLLM_REPO_TOKEN }}
