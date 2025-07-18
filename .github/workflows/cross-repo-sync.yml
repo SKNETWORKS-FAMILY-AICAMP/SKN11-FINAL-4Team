@@ -95,9 +95,9 @@ jobs:
           
           # 브랜치 존재 여부 확인 후 푸시
           if git ls-remote --heads origin | grep -q "refs/heads/main"; then
-            git push origin main --force
+            git push origin main
           else
-            git push -u origin main --force
+            git push -u origin main
           fi
         env:
           GITHUB_TOKEN: ${{ secrets.FRONTEND_REPO_TOKEN }}
@@ -157,7 +157,7 @@ jobs:
       - name: Commit and push to backend repository
         run: |
           cd backend-repo
-          pwd
+          
           # 현재 원격 저장소 확인
           echo "푸시 전 원격 저장소 확인:"
           git remote -v
@@ -179,10 +179,10 @@ jobs:
           # 브랜치 존재 여부 확인 후 푸시
           if git ls-remote --heads origin | grep -q "refs/heads/main"; then
             echo "기존 main 브랜치에 푸시합니다."
-            git push origin main --force
+            git push origin main
           else
             echo "새로운 main 브랜치를 생성하여 푸시합니다."
-            git push -u origin main --force
+            git push -u origin main
           fi
         env:
           GITHUB_TOKEN: ${{ secrets.BACKEND_REPO_TOKEN }}
