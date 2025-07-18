@@ -123,7 +123,6 @@ jobs:
           cd ..
           # 새로 클론
           git clone https://${{ secrets.BACKEND_REPO_TOKEN }}@github.com/kicet3/AIMEX-back.git backend-repo
-          cd backend-repo
         env:
           BACKEND_REPO_TOKEN: ${{ secrets.BACKEND_REPO_TOKEN }}
 
@@ -148,18 +147,5 @@ jobs:
           
           git commit -m "Sync backend from develop: ${{ github.sha }}"
           
-          # 푸시 전에 다시 한번 원격 저장소 URL 확인
-          echo "푸시할 저장소: https://github.com/kicet3/AIMEX-back.git"
-          echo "현재 설정된 origin:"
-          git remote get-url origin
-          
-          # 브랜치 존재 여부 확인 후 푸시
-          if git ls-remote --heads origin | grep -q "refs/heads/main"; then
-            echo "기존 main 브랜치에 푸시합니다."
-            git push origin main
-          else
-            echo "새로운 main 브랜치를 생성하여 푸시합니다."
-            git push -u origin main
-          fi
         env:
           GITHUB_TOKEN: ${{ secrets.BACKEND_REPO_TOKEN }}
