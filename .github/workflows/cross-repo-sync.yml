@@ -61,44 +61,38 @@ jobs:
 
       - name: Clone and setup frontend repository
         run: |
+          cd ../
+          # 기존 디렉토리 삭제
+          rm -rf frontend-repo
+          # 새로 클론
           git clone https://${{ secrets.FRONTEND_REPO_TOKEN }}@github.com/kicet3/AIMex-front.git frontend-repo
-          cd frontend-repo
           
-          # 원격 저장소의 기본 브랜치 확인
-          git ls-remote --heads origin
-          
-          # main 브랜치가 없으면 생성
-          if ! git ls-remote --heads origin | grep -q "refs/heads/main"; then
-            echo "main 브랜치가 없어서 새로 생성합니다."
-            git checkout -b main
-          else
-            git checkout main || git checkout -b main
-          fi
         env:
           FRONTEND_REPO_TOKEN: ${{ secrets.FRONTEND_REPO_TOKEN }}
 
       - name: Copy frontend files
         run: |
-          rsync -av --delete ./frontend/ ./frontend-repo/
+          cd ../
+          cp -r ./SKN11-FINAL-4Team/frontend/* ./frontend-repo/
           
       - name: Commit and push to frontend repository
         run: |
+          cd ../
           cd frontend-repo
+
+          # 현재 원격 저장소 확인
+          echo "푸시 전 원격 저장소 확인:"
+          git remote -v
+
           git add .
           
           if git diff --staged --quiet; then
             echo "Frontend: 변경사항이 없습니다."
             exit 0
           fi
-          
+
           git commit -m "Sync frontend from develop: ${{ github.sha }}"
-          
-          # 브랜치 존재 여부 확인 후 푸시
-          if git ls-remote --heads origin | grep -q "refs/heads/main"; then
-            git push origin main
-          else
-            git push -u origin main
-          fi
+          git push origin main --force
         env:
           GITHUB_TOKEN: ${{ secrets.FRONTEND_REPO_TOKEN }}
 
@@ -125,15 +119,14 @@ jobs:
           rm -rf backend-repo
           # 새로 클론
           git clone https://${{ secrets.BACKEND_REPO_TOKEN }}@github.com/kicet3/AIMEX-back.git backend-repo
-          pwd
-          ls -al
+          
         env:
           BACKEND_REPO_TOKEN: ${{ secrets.BACKEND_REPO_TOKEN }}
 
       - name: Copy backend files
         run: |
           cd ../
-          ls -al
+          
           cp -r ./SKN11-FINAL-4Team/backend/* ./backend-repo/
           
       - name: Commit and push to backend repository
@@ -153,6 +146,6 @@ jobs:
           fi
           
           git commit -m "Sync backend from develop: ${{ github.sha }}"
-          
+          git push origin main --force
         env:
           GITHUB_TOKEN: ${{ secrets.BACKEND_REPO_TOKEN }}
