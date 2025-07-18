@@ -63,7 +63,7 @@ jobs:
 
       - name: Clone frontend repository (A레포)
         run: |
-          git clone https://${{ secrets.FRONTEND_REPO_TOKEN }}@github.com:kicet3/AIMex-front.git frontend-repo
+          git clone https://${{ secrets.FRONTEND_REPO_TOKEN }}@github.com/kicet3/AIMex-front.git frontend-repo
         env:
           FRONTEND_REPO_TOKEN: ${{ secrets.FRONTEND_REPO_TOKEN }}
 
@@ -105,7 +105,7 @@ jobs:
 
       - name: Clone backend repository (B레포)
         run: |
-          git clone https://${{ secrets.BACKEND_REPO_TOKEN }}@github.com:kicet3/AIMEX-back.git backend-repo
+          git clone https://${{ secrets.BACKEND_REPO_TOKEN }}@github.com/kicet3/AIMEX-back.git backend-repo
         env:
           BACKEND_REPO_TOKEN: ${{ secrets.BACKEND_REPO_TOKEN }}
 
