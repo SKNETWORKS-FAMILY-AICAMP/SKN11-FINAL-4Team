@@ -125,12 +125,14 @@ jobs:
           rm -rf backend-repo
           # 새로 클론
           git clone https://${{ secrets.BACKEND_REPO_TOKEN }}@github.com/kicet3/AIMEX-back.git backend-repo
+          pwd
+          ls -al
         env:
           BACKEND_REPO_TOKEN: ${{ secrets.BACKEND_REPO_TOKEN }}
 
       - name: Copy backend files
         run: |
-          pwd
+          cd ../../
           ls -al
           cp -r ./SKN11-FINAL-4Team/backend/ ./backend-repo/
           
