@@ -120,46 +120,21 @@ jobs:
 
       - name: Clone and setup backend repository
         run: |
-          # 기존 디렉토리가 있으면 삭제
-          rm -rf backend-repo
-          
+          cd ..
           # 새로 클론
           git clone https://${{ secrets.BACKEND_REPO_TOKEN }}@github.com/kicet3/AIMEX-back.git backend-repo
           cd backend-repo
-          
-          # 원격 저장소 URL 확인 및 재설정
-          echo "현재 원격 저장소 URL:"
-          git remote -v
-          
-          # 원격 저장소 URL을 명시적으로 재설정
-          git remote set-url origin https://${{ secrets.BACKEND_REPO_TOKEN }}@github.com/kicet3/AIMEX-back.git
-          
-          echo "재설정된 원격 저장소 URL:"
-          git remote -v
-          
-          # 원격 저장소의 기본 브랜치 확인
-          git ls-remote --heads origin
-          
-          # main 브랜치가 없으면 생성
-          if ! git ls-remote --heads origin | grep -q "refs/heads/main"; then
-            echo "main 브랜치가 없어서 새로 생성합니다."
-            git checkout -b main
-          else
-            git checkout main || git checkout -b main
-          fi
         env:
           BACKEND_REPO_TOKEN: ${{ secrets.BACKEND_REPO_TOKEN }}
 
       - name: Copy backend files
         run: |
-          rsync -av --delete ./backend/ ./backend-repo/
+          cp -r ./SKN11-FINAL-4Team/backend/ ./backend-repo/
           
       - name: Commit and push to backend repository
         run: |
           cd backend-repo
-          ls -al
-          pwd
-          ls -al ../
+
           # 현재 원격 저장소 확인
           echo "푸시 전 원격 저장소 확인:"
           git remote -v
