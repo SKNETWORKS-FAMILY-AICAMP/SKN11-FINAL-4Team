@@ -134,7 +134,7 @@ jobs:
         run: |
           cd ../../
           ls -al
-          cp -r ./SKN11-FINAL-4Team/backend/ ./backend-repo/
+          cp -r ./SKN11-FINAL-4Team/backend/* ./backend-repo/
           
       - name: Commit and push to backend repository
         run: |
