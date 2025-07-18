@@ -1235,7 +1235,7 @@ export default function AdministratorPage() {
                                     {/* 청크 크기 설정 */}
                                     <div>
                                       <Label htmlFor="chunk-size" className="text-sm font-medium">
-                                        청크 크기 (토큰)
+                                        청크 크기
                                       </Label>
                                       <Input
                                         id="chunk-size"
@@ -1255,7 +1255,7 @@ export default function AdministratorPage() {
                                     {/* 청크 오버랩 설정 */}
                                     <div>
                                       <Label htmlFor="chunk-overlap" className="text-sm font-medium">
-                                        청크 오버랩 (토큰)
+                                        청크 오버랩
                                       </Label>
                                       <Input
                                         id="chunk-overlap"
