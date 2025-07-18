@@ -1921,10 +1921,9 @@ async def get_generated_voices(
     if not influencer:
         raise HTTPException(status_code=404, detail="인플루언서를 찾을 수 없습니다")
     
-    # 생성된 음성 목록 조회 (삭제되지 않은 것만)
+    # 생성된 음성 목록 조회
     voices = db.query(GeneratedVoice).filter(
-        GeneratedVoice.influencer_id == influencer.influencer_id,
-        GeneratedVoice.is_deleted == False
+        GeneratedVoice.influencer_id == influencer.influencer_id
     ).order_by(GeneratedVoice.created_at.desc()).offset(skip).limit(limit).all()
     
     # 각 음성에 대해 presigned URL 생성
@@ -1958,8 +1957,9 @@ async def delete_generated_voice(
     voice_id: int,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
+    s3_service: S3Service = Depends(get_s3_service),
 ):
-    """생성된 음성 삭제 (소프트 삭제)"""
+    """생성된 음성 삭제 (소프트 삭제 + S3 파일 삭제)"""
     user_id = current_user.get("sub")
     if not user_id:
         raise HTTPException(status_code=401, detail="User ID not found")
@@ -1981,9 +1981,71 @@ async def delete_generated_voice(
     if not influencer:
         raise HTTPException(status_code=403, detail="권한이 없습니다")
     
-    # 소프트 삭제
-    voice.is_deleted = True
+    # S3에서 파일 삭제
+    if voice.s3_key and s3_service.is_available():
+        try:
+            s3_service.delete_file(voice.s3_key)
+            logger.info(f"S3 파일 삭제 성공: {voice.s3_key}")
+        except Exception as e:
+            logger.error(f"S3 파일 삭제 실패: {voice.s3_key}, 에러: {str(e)}")
+            # S3 삭제 실패해도 DB 삭제는 진행
+    
+    # 데이터베이스에서 완전 삭제
+    db.delete(voice)
     db.commit()
     
+    logger.info(f"음성 완전 삭제 완료: voice_id={voice_id}")
+    
     return {"message": "음성이 삭제되었습니다"}
+
+
+@router.get("/voices/{voice_id}/download")
+async def get_voice_download_url(
+    voice_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+    s3_service: S3Service = Depends(get_s3_service),
+):
+    """음성 다운로드를 위한 presigned URL 생성"""
+    user_id = current_user.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User ID not found")
+    
+    # 음성 조회
+    voice = db.query(GeneratedVoice).filter(
+        GeneratedVoice.id == voice_id
+    ).first()
+    
+    if not voice:
+        raise HTTPException(status_code=404, detail="음성을 찾을 수 없습니다")
+    
+    # 소유자 확인
+    influencer = db.query(AIInfluencer).filter(
+        AIInfluencer.influencer_id == voice.influencer_id,
+        AIInfluencer.user_id == user_id
+    ).first()
+    
+    if not influencer:
+        raise HTTPException(status_code=403, detail="권한이 없습니다")
+    
+    # 다운로드용 presigned URL 생성
+    if voice.s3_key and s3_service.is_available():
+        try:
+            # Content-Disposition 헤더를 포함한 presigned URL 생성
+            presigned_url = s3_service.s3_client.generate_presigned_url(
+                'get_object',
+                Params={
+                    'Bucket': s3_service.bucket_name,
+                    'Key': voice.s3_key,
+                    'ResponseContentDisposition': f'attachment; filename="voice_{voice_id}.mp3"',
+                    'ResponseContentType': 'audio/mpeg'
+                },
+                ExpiresIn=3600  # 1시간 유효
+            )
+            return {"download_url": presigned_url}
+        except Exception as e:
+            logger.error(f"다운로드 URL 생성 실패: {str(e)}")
+            raise HTTPException(status_code=500, detail="다운로드 URL 생성에 실패했습니다")
+    else:
+        raise HTTPException(status_code=404, detail="음성 파일을 찾을 수 없습니다")
 
