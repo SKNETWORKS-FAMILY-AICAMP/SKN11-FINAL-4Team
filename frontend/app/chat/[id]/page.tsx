@@ -26,6 +26,8 @@ interface Message {
   sender: "user" | "bot"
   timestamp: Date
   isStreaming?: boolean // 스트리밍 중인 메시지를 위한 속성
+  tools_used?: string[]
+  isMCPResponse?: boolean
 }
 
 interface ChatModel {
@@ -47,6 +49,7 @@ export default function ChatPage() {
   const [isModelLoading, setIsModelLoading] = useState(true)
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('connecting')
   const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false)
+  const [mcpToolsEnabled, setMcpToolsEnabled] = useState(true)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const wsRef = useRef<WebSocket | null>(null)
@@ -101,7 +104,7 @@ export default function ChatPage() {
         timeoutRef.current = null;
       }
 
-      setIsLoading(false); // 응답 수신 시 로딩 상태 해제
+      setIsLoading(false);
       try {
         const data = JSON.parse(event.data);
         
@@ -144,6 +147,17 @@ export default function ChatPage() {
             }
             return newMessages;
           });
+        } else if (data.type === "mcp_response") {
+          // MCP 도구 응답 처리
+          setIsLoading(false);
+          setMessages(prev => [...prev, {
+            id: Date.now().toString(),
+            content: data.content,
+            sender: "bot",
+            timestamp: new Date(),
+            tools_used: data.tools_used || [],
+            isMCPResponse: true
+          }]);
         } else if (data.type === "error") {
           // 에러 처리
           setIsLoading(false);
@@ -259,7 +273,12 @@ export default function ChatPage() {
     
     try {
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(currentMessage);
+        // MCP 도구 사용 여부를 포함한 메시지 전송
+        const messageData = {
+          message: currentMessage,
+          use_mcp_tools: mcpToolsEnabled
+        };
+        wsRef.current.send(JSON.stringify(messageData));
       } else {
         throw new Error("WebSocket이 연결되지 않았습니다.");
       }
@@ -338,6 +357,38 @@ export default function ChatPage() {
   return (
     <div className="h-screen bg-gray-50">
       <div className="h-full flex flex-col p-4 max-w-3xl mx-auto">
+
+        {/* 헤더 */}
+        <div className="flex items-center justify-between p-4 border-b bg-white">
+          <div className="flex items-center space-x-3">
+            <Avatar className="h-10 w-10">
+              <AvatarFallback className="bg-green-500 text-white">
+                <Bot className="h-5 w-5" />
+              </AvatarFallback>
+            </Avatar>
+            <div>
+              <h2 className="text-lg font-semibold">{model?.name || "로딩 중..."}</h2>
+              <p className="text-sm text-gray-500">
+                {connectionStatus === 'connected' ? '🟢 연결됨' : 
+                 connectionStatus === 'connecting' ? '🟡 연결 중...' : 
+                 connectionStatus === 'error' ? '🔴 연결 오류' : '⚪ 연결 끊김'}
+              </p>
+            </div>
+          </div>
+          
+          {/* MCP 도구 토글 */}
+          <div className="flex items-center space-x-2">
+            <label className="flex items-center space-x-2 text-sm">
+              <input
+                type="checkbox"
+                checked={mcpToolsEnabled}
+                onChange={(e) => setMcpToolsEnabled(e.target.checked)}
+                className="rounded"
+              />
+              <span>🔧 MCP 도구</span>
+            </label>
+          </div>
+        </div>
 
         {/* 채팅 영역 */}
         <Card className="flex-1 flex flex-col min-h-0">
@@ -421,29 +472,32 @@ export default function ChatPage() {
                 messages.map((message) => (
                   <div
                     key={message.id}
-                    className={`flex ${message.sender === "user" ? "justify-end" : "justify-start"}`}
+                    className={`flex ${message.sender === "user" ? "justify-end" : "justify-start"} mb-4`}
                   >
-                    <div className={`flex items-start space-x-3 max-w-[70%] ${message.sender === "user" ? "flex-row-reverse space-x-reverse" : ""}`}>
-                      <Avatar className="h-8 w-8">
-                        <AvatarFallback className={message.sender === "user" ? "bg-blue-500 text-white" : "bg-green-500 text-white"}>
-                          {message.sender === "user" ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
-                        </AvatarFallback>
-                      </Avatar>
-
-                      <div className={`rounded-lg px-4 py-2 ${message.sender === "user"
-                        ? "bg-blue-500 text-white"
-                        : "bg-gray-100 text-gray-900"
-
-                        }`}>
-                        <p className="text-sm whitespace-pre-wrap">{message.content}</p>
-                        <p className={`text-xs mt-1 ${message.sender === "user" ? "text-blue-100" : "text-gray-500"
-                          }`}>
-                          {message.timestamp.toLocaleTimeString('ko-KR', {
-                            hour: '2-digit',
-                            minute: '2-digit'
-                          })}
-                        </p>
-                      </div>
+                    <div
+                      className={`max-w-[70%] rounded-lg px-4 py-2 ${
+                        message.sender === "user"
+                          ? "bg-blue-500 text-white"
+                          : "bg-gray-200 text-gray-800"
+                      }`}
+                    >
+                      <div className="whitespace-pre-wrap">{message.content}</div>
+                      
+                      {/* MCP 도구 사용 표시 */}
+                      {message.isMCPResponse && message.tools_used && message.tools_used.length > 0 && (
+                        <div className="mt-2 pt-2 border-t border-gray-300">
+                          <div className="text-xs text-gray-500">
+                            🔧 사용된 도구: {message.tools_used.join(", ")}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* 스트리밍 표시 */}
+                      {message.isStreaming && (
+                        <div className="mt-1">
+                          <div className="inline-block w-2 h-2 bg-gray-400 rounded-full animate-pulse"></div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))
