@@ -653,13 +653,13 @@ export default function CreatePostPage() {
               <CardContent className="space-y-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
-                    <Label htmlFor="influencer_id">인스타그램 연동 AI 인플루언서 선택</Label>
+                    <Label htmlFor="influencer_id">AI 인플루언서 선택</Label>
                     <Select
                       value={formData.influencer_id}
                       onValueChange={(value) => handleInputChange('influencer_id', value)}
                     >
                       <SelectTrigger>
-                        <SelectValue placeholder="인스타그램 연동 인플루언서를 선택하세요">
+                        <SelectValue placeholder="인플루언서를 선택하세요">
                           {formData.influencer_id && (
                             <div className="flex items-center space-x-2">
                               <span>{influencers.find(inf => inf.influencer_id === formData.influencer_id)?.influencer_name}</span>
@@ -717,158 +717,6 @@ export default function CreatePostPage() {
                     </Select>
                   </div>
                 </div>
-
-                <div>
-                  <Label htmlFor="board_topic">게시글 주제</Label>
-                  <Input
-                    id="board_topic"
-                    placeholder="게시글의 주제를 입력하세요"
-                    value={formData.board_topic}
-                    onChange={(e) => handleInputChange('board_topic', e.target.value)}
-                    required
-                  />
-                </div>
-
-                <div>
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="board_description">게시글 내용</Label>
-                    <div className="flex space-x-2">
-                      {isGenerateEnabled && (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={generateContent}
-                          disabled={isEnhancing}
-                        >
-                          {isEnhancing ? (
-                            <>
-                              <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                              생성 중...
-                            </>
-                          ) : (
-                            <>
-                              <Sparkles className="h-3 w-3 mr-1" />
-                              AI 생성
-                            </>
-                          )}
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                  <Textarea
-                    id="board_description"
-                    placeholder="게시글에 대한 추가 설명을 입력하세요"
-                    value={formData.board_description}
-                    onChange={(e) => handleInputChange('board_description', e.target.value)}
-                    rows={3}
-                    className="mt-2"
-                  />
-                  {generated && (
-                    <div className="mt-4 space-y-4">
-                      <div className="p-4 bg-green-50 border border-green-200 rounded-lg relative">
-                        <h4 className="font-medium text-green-900 mb-2 flex items-center">AI가 생성한 본문</h4>
-                        <div className="text-sm text-green-800 whitespace-pre-wrap bg-white p-3 rounded border mb-4 max-h-60 overflow-y-auto leading-relaxed">
-                          {generated.content}
-                        </div>
-                        <h5 className="font-medium text-green-800 mb-2 flex items-center">자동 생성 해시태그</h5>
-                        <div className="flex flex-wrap gap-2">
-                          {generated.hashtags.map((tag: string, index: number) => (
-                            <Badge key={index} variant="secondary" className="bg-green-100 text-green-800 border-green-300">{tag}</Badge>
-                          ))}
-                        </div>
-                        <span className="text-xs text-green-600 block mt-2">{generated.content.length}자 • 스크롤 또는 전체 보기로 확인</span>
-                        <div className="flex flex-wrap justify-end items-center gap-2 mt-6">
-                          <Button
-                            type="button"
-                            onClick={() => setShowFullPreview(true)}
-                            variant="outline"
-                            size="sm"
-                            className="flex items-center gap-1 border-blue-300 hover:border-blue-500 hover:bg-blue-50 transition-colors"
-                          >
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-                            전체 보기
-                          </Button>
-                          <Button type="button" onClick={approveGenerated} variant="outline" className="flex items-center space-x-2 border-green-400 hover:border-green-600 hover:bg-green-50 transition-colors">
-                            <span>✓</span>
-                            <span>폼에 적용</span>
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                  {converted && (
-                    <div className="mt-4 space-y-4">
-                      <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg relative">
-                        <h4 className="font-medium text-blue-900 mb-2 flex items-center">
-                          <User className="h-4 w-4 mr-2" />
-                          인플루언서 말투로 변환된 본문
-                        </h4>
-                        <div className="text-sm text-blue-800 whitespace-pre-wrap bg-white p-3 rounded border mb-4 max-h-60 overflow-y-auto leading-relaxed">
-                          {converted}
-                        </div>
-                        <span className="text-xs text-blue-600 block mt-2">{converted.length}자 • 스크롤 또는 전체 보기로 확인</span>
-                        <div className="flex flex-wrap justify-end items-center gap-2 mt-6">
-                          <Button
-                            type="button"
-                            onClick={() => setShowFullPreview(true)}
-                            variant="outline"
-                            size="sm"
-                            className="flex items-center gap-1 border-blue-300 hover:border-blue-500 hover:bg-blue-50 transition-colors"
-                          >
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-                            전체 보기
-                          </Button>
-                          <Button type="button" onClick={approveConverted} variant="outline" className="flex items-center space-x-2 border-blue-400 hover:border-blue-600 hover:bg-blue-50 transition-colors">
-                            <span>✓</span>
-                            <span>폼에 적용 (해시태그 포함)</span>
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* 해시태그 설정 */}
-                <div className="space-y-4">
-                  <div>
-                    <Label className="flex items-center space-x-2">
-                      <Hash className="h-4 w-4" />
-                      <span>해시태그</span>
-                    </Label>
-                    <div className="flex space-x-2 mt-2">
-                      <Input
-                        placeholder="해시태그 입력 (Enter 또는 , 로 추가)"
-                        value={hashtagInput}
-                        onChange={(e) => setHashtagInput(e.target.value)}
-                        onKeyDown={handleHashtagKeyDown}
-                      />
-                      <Button type="button" onClick={addHashtag} variant="outline">
-                        추가
-                      </Button>
-                    </div>
-                  </div>
-
-                  {formData.board_hashtag.length > 0 && (
-                    <div>
-                      <Label className="text-sm font-medium">선택된 해시태그</Label>
-                      <div className="flex flex-wrap gap-2 mt-2">
-                        {formData.board_hashtag.map((tag, index) => (
-                          <Badge key={index} variant="secondary" className="cursor-pointer hover:bg-red-100">
-                            <span>#{tag}</span>
-                            <button
-                              type="button"
-                              onClick={() => removeHashtag(index)}
-                              className="ml-1 text-red-500 hover:text-red-700"
-                            >
-                              ×
-                            </button>
-                          </Badge>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
               </CardContent>
             </Card>
 
@@ -877,12 +725,11 @@ export default function CreatePostPage() {
               <CardHeader>
                 <CardTitle className="flex items-center space-x-2">
                   <ImageIcon className="h-5 w-5" />
-                  <span>이미지 업로드</span>
+                  <span>게시글 내용 및 이미지</span>
                 </CardTitle>
-                <CardDescription>이미지를 업로드하거나 AI로 생성하세요</CardDescription>
+                <CardDescription>게시글의 내용을 작성하고 이미지를 업로드하세요</CardDescription>
               </CardHeader>
-              <CardContent className="space-y-4">
-
+              <CardContent className="space-y-6">
 
                 {/* 이미지 업로드 영역 */}
                 <div>
@@ -1047,6 +894,160 @@ export default function CreatePostPage() {
                             </label>
                           </div>
                         </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* 게시글 주제 */}
+                <div>
+                  <Label htmlFor="board_topic">게시글 주제</Label>
+                  <Input
+                    id="board_topic"
+                    placeholder="게시글의 주제를 입력하세요"
+                    value={formData.board_topic}
+                    onChange={(e) => handleInputChange('board_topic', e.target.value)}
+                    required
+                  />
+                </div>
+
+                {/* 게시글 내용 */}
+                <div>
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="board_description">게시글 내용</Label>
+                    <div className="flex space-x-2">
+                      {isGenerateEnabled && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={generateContent}
+                          disabled={isEnhancing}
+                        >
+                          {isEnhancing ? (
+                            <>
+                              <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                              생성 중...
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles className="h-3 w-3 mr-1" />
+                              AI 생성
+                            </>
+                          )}
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                  <Textarea
+                    id="board_description"
+                    placeholder="게시글에 대한 추가 설명을 입력하세요"
+                    value={formData.board_description}
+                    onChange={(e) => handleInputChange('board_description', e.target.value)}
+                    rows={3}
+                    className="mt-2"
+                  />
+                  {generated && (
+                    <div className="mt-4 space-y-4">
+                      <div className="p-4 bg-green-50 border border-green-200 rounded-lg relative">
+                        <h4 className="font-medium text-green-900 mb-2 flex items-center">AI가 생성한 본문</h4>
+                        <div className="text-sm text-green-800 whitespace-pre-wrap bg-white p-3 rounded border mb-4 max-h-60 overflow-y-auto leading-relaxed">
+                          {generated.content}
+                        </div>
+                        <h5 className="font-medium text-green-800 mb-2 flex items-center">자동 생성 해시태그</h5>
+                        <div className="flex flex-wrap gap-2">
+                          {generated.hashtags.map((tag: string, index: number) => (
+                            <Badge key={index} variant="secondary" className="bg-green-100 text-green-800 border-green-300">{tag}</Badge>
+                          ))}
+                        </div>
+                        <span className="text-xs text-green-600 block mt-2">{generated.content.length}자 • 스크롤 또는 전체 보기로 확인</span>
+                        <div className="flex flex-wrap justify-end items-center gap-2 mt-6">
+                          <Button
+                            type="button"
+                            onClick={() => setShowFullPreview(true)}
+                            variant="outline"
+                            size="sm"
+                            className="flex items-center gap-1 border-blue-300 hover:border-blue-500 hover:bg-blue-50 transition-colors"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                            전체 보기
+                          </Button>
+                          <Button type="button" onClick={approveGenerated} variant="outline" className="flex items-center space-x-2 border-green-400 hover:border-green-600 hover:bg-green-50 transition-colors">
+                            <span>✓</span>
+                            <span>폼에 적용</span>
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {converted && (
+                    <div className="mt-4 space-y-4">
+                      <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg relative">
+                        <h4 className="font-medium text-blue-900 mb-2 flex items-center">
+                          <User className="h-4 w-4 mr-2" />
+                          인플루언서 말투로 변환된 본문
+                        </h4>
+                        <div className="text-sm text-blue-800 whitespace-pre-wrap bg-white p-3 rounded border mb-4 max-h-60 overflow-y-auto leading-relaxed">
+                          {converted}
+                        </div>
+                        <span className="text-xs text-blue-600 block mt-2">{converted.length}자 • 스크롤 또는 전체 보기로 확인</span>
+                        <div className="flex flex-wrap justify-end items-center gap-2 mt-6">
+                          <Button
+                            type="button"
+                            onClick={() => setShowFullPreview(true)}
+                            variant="outline"
+                            size="sm"
+                            className="flex items-center gap-1 border-blue-300 hover:border-blue-500 hover:bg-blue-50 transition-colors"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                            전체 보기
+                          </Button>
+                          <Button type="button" onClick={approveConverted} variant="outline" className="flex items-center space-x-2 border-blue-400 hover:border-blue-600 hover:bg-blue-50 transition-colors">
+                            <span>✓</span>
+                            <span>폼에 적용 (해시태그 포함)</span>
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* 해시태그 설정 */}
+                <div className="space-y-4">
+                  <div>
+                    <Label className="flex items-center space-x-2">
+                      <Hash className="h-4 w-4" />
+                      <span>해시태그</span>
+                    </Label>
+                    <div className="flex space-x-2 mt-2">
+                      <Input
+                        placeholder="해시태그 입력 (Enter 또는 , 로 추가)"
+                        value={hashtagInput}
+                        onChange={(e) => setHashtagInput(e.target.value)}
+                        onKeyDown={handleHashtagKeyDown}
+                      />
+                      <Button type="button" onClick={addHashtag} variant="outline">
+                        추가
+                      </Button>
+                    </div>
+                  </div>
+
+                  {formData.board_hashtag.length > 0 && (
+                    <div>
+                      <Label className="text-sm font-medium">선택된 해시태그</Label>
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        {formData.board_hashtag.map((tag, index) => (
+                          <Badge key={index} variant="secondary" className="cursor-pointer hover:bg-red-100">
+                            <span>#{tag}</span>
+                            <button
+                              type="button"
+                              onClick={() => removeHashtag(index)}
+                              className="ml-1 text-red-500 hover:text-red-700"
+                            >
+                              ×
+                            </button>
+                          </Badge>
+                        ))}
                       </div>
                     </div>
                   )}
