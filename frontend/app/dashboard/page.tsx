@@ -424,8 +424,17 @@ export default function DashboardPage() {
 
           {filteredInfluencers.length === 0 && !loading && (
             <div className="text-center py-12">
-              <p className="text-gray-500 text-lg">검색 결과가 없습니다.</p>
-              <p className="text-gray-400 mt-2">다른 검색어를 시도해보세요.</p>
+              {searchTerm || platformFilter !== "all" ? (
+                <>
+                  <p className="text-gray-500 text-lg">검색 결과가 없습니다.</p>
+                  <p className="text-gray-400 mt-2">다른 검색어를 시도해보세요.</p>
+                </>
+              ) : (
+                <>
+                  <p className="text-gray-500 text-lg">생성된 인플루언서가 없습니다.</p>
+                  <p className="text-gray-400 mt-2">새로운 AI 인플루언서를 생성해보세요.</p>
+                </>
+              )}
             </div>
           )}
         </div>
