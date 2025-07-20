@@ -38,7 +38,7 @@ import {
   MoreHorizontal,
   Bookmark,
   Bot,
-  Clock,
+    Clock,
   Trash2,
   Upload,
   MessageSquare,
@@ -55,6 +55,7 @@ import {
   PlayCircle,
   PauseCircle,
   Loader2,
+  ImageIcon,
 } from "lucide-react"
 import type { AIModel } from "@/lib/types"
 import {
@@ -169,6 +170,11 @@ function ModelDetailContent() {
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const [isUploadingBaseVoice, setIsUploadingBaseVoice] = useState(false)
   const [hasBaseVoice, setHasBaseVoice] = useState(false)
+  const [isImageModalOpen, setIsImageModalOpen] = useState(false)
+  const [isGalleryModalOpen, setIsGalleryModalOpen] = useState(false)
+  const [galleryImages, setGalleryImages] = useState<string[]>([])
+  const [isLoadingGallery, setIsLoadingGallery] = useState(false)
+  const [hasImageChanges, setHasImageChanges] = useState(false)
   const [instagramStatus, setInstagramStatus] = useState<{
     is_connected: boolean
     connected_at?: string
@@ -586,6 +592,7 @@ function ModelDetailContent() {
       const reader = new FileReader()
       reader.onload = (e) => {
         setImagePreview(e.target?.result as string)
+        setHasImageChanges(true) // 이미지 변경 감지
       }
       reader.readAsDataURL(file)
     } catch (error) {
@@ -631,6 +638,55 @@ function ModelDetailContent() {
   const removeImage = () => {
     setUploadedImage(null)
     setImagePreview(null)
+    setHasImageChanges(false) // 이미지 제거 시 변경 상태 초기화
+    
+    // 파일 입력 초기화
+    const fileInput = document.getElementById('modal-image-upload') as HTMLInputElement
+    if (fileInput) {
+      fileInput.value = ''
+    }
+  }
+
+  const openImageModal = () => {
+    setIsImageModalOpen(true)
+  }
+
+  const openGalleryModal = async () => {
+    setIsGalleryModalOpen(true)
+    await loadGalleryImages()
+  }
+
+  const loadGalleryImages = async () => {
+    setIsLoadingGallery(true)
+    try {
+      // S3에서 이미지 목록을 가져오는 API 호출
+      const response = await apiClient.get('/api/v1/gallery/images')
+      setGalleryImages(Array.isArray(response) ? response : [])
+    } catch (error) {
+      console.error('갤러리 이미지 로드 실패:', error)
+      toast({
+        title: "갤러리 로드 실패",
+        description: "이미지 목록을 불러오는데 실패했습니다.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsLoadingGallery(false)
+    }
+  }
+
+  const selectGalleryImage = (imageUrl: string) => {
+    // 선택된 이미지를 프로필 이미지로 설정
+    setModel((prev: any) => ({
+      ...prev,
+      image_url: imageUrl
+    }))
+    setHasImageChanges(true) // 이미지 변경 감지
+    setIsGalleryModalOpen(false)
+    toast({
+      title: "이미지 선택 완료",
+      description: "갤러리에서 이미지를 선택했습니다.",
+      variant: "default",
+    })
   }
 
   const handleUpdateModel = async () => {
@@ -693,6 +749,7 @@ function ModelDetailContent() {
         setUploadedImage(null)
         setImagePreview(null)
       }
+      setHasImageChanges(false) // 변경 상태 초기화
 
       // 모델 데이터 다시 로드하여 변경사항 반영
       await loadModelData()
@@ -740,9 +797,30 @@ function ModelDetailContent() {
     }, 1000)
   }
 
-  const copyApiKey = () => {
-    if (model.apiKey) {
-      navigator.clipboard.writeText(model.apiKey)
+  const copyApiKey = async () => {
+    if (!model.apiKey) {
+      toast({
+        title: "API 키 없음",
+        description: "복사할 API 키가 없습니다.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    try {
+      await navigator.clipboard.writeText(model.apiKey)
+      toast({
+        title: "API 키 복사 완료",
+        description: "API 키가 클립보드에 복사되었습니다!",
+        variant: "default",
+      })
+    } catch (error) {
+      console.error("API key copy error:", error)
+      toast({
+        title: "복사 실패",
+        description: "API 키 복사에 실패했습니다. 수동으로 복사해주세요.",
+        variant: "destructive",
+      })
     }
   }
 
@@ -757,10 +835,18 @@ function ModelDetailContent() {
       })
       // 모델 상태에 API 키 업데이트
       setModel((prev: any) => ({ ...prev, apiKey: response.api_key }))
-      alert("새로운 API 키가 성공적으로 생성되었습니다!")
+      toast({
+        title: "API 키 생성 완료",
+        description: "새로운 API 키가 성공적으로 생성되었습니다!",
+        variant: "default",
+      })
     } catch (error) {
       console.error("API key generation error:", error)
-      alert("API 키 생성에 실패했습니다. 다시 시도해주세요.")
+      toast({
+        title: "API 키 생성 실패",
+        description: "API 키 생성에 실패했습니다. 다시 시도해주세요.",
+        variant: "destructive",
+      })
     } finally {
       setIsGeneratingApiKey(false)
     }
@@ -768,7 +854,11 @@ function ModelDetailContent() {
 
   const testChatbot = async () => {
     if (!testMessage.trim() || !model.apiKey) {
-      alert("메시지를 입력하고 API 키가 있어야 합니다.")
+      toast({
+        title: "입력 오류",
+        description: "메시지를 입력하고 API 키가 있어야 합니다.",
+        variant: "destructive",
+      })
       return
     }
 
@@ -783,6 +873,45 @@ function ModelDetailContent() {
       setTestResponse(`오류: ${error.response?.data?.detail || error.message || '알 수 없는 오류'}`)
     } finally {
       setIsTestingChatbot(false)
+    }
+  }
+
+  const handleChatbotToggle = async () => {
+    try {
+      // 챗봇 옵션 토글 (true -> false, false -> true)
+      const newChatbotOption = !model.chatbot_option
+      
+      // 백엔드 API 호출하여 chatbot_option 업데이트
+      await ModelService.updateInfluencer(params.id as string, {
+        chatbot_option: newChatbotOption
+      })
+      
+      // 로컬 상태 업데이트
+      setModel((prev: any) => ({
+        ...prev,
+        chatbot_option: newChatbotOption
+      }))
+      
+      if (newChatbotOption) {
+        toast({
+          title: "챗봇 활성화",
+          description: "챗봇이 활성화되었습니다!",
+          variant: "default",
+        })
+      } else {
+        toast({
+          title: "챗봇 비활성화",
+          description: "챗봇이 비활성화되었습니다.",
+          variant: "default",
+        })
+      }
+    } catch (error: any) {
+      console.error("Chatbot toggle error:", error)
+      toast({
+        title: "오류",
+        description: "챗봇 상태 변경에 실패했습니다.",
+        variant: "destructive",
+      })
     }
   }
 
@@ -838,9 +967,17 @@ function ModelDetailContent() {
                 account_type: '',
               },
             })
-            alert('Instagram 비즈니스 계정이 성공적으로 연동되었습니다!')
+            toast({
+              title: "Instagram 연동 완료",
+              description: "Instagram 비즈니스 계정이 성공적으로 연동되었습니다!",
+              variant: "default",
+            })
           } catch (error: any) {
-            alert('Instagram 연동에 실패했습니다. 다시 시도해주세요.')
+            toast({
+              title: "Instagram 연동 실패",
+              description: "Instagram 연동에 실패했습니다. 다시 시도해주세요.",
+              variant: "destructive",
+            })
           }
 
           setIsConnecting(false)
@@ -848,7 +985,11 @@ function ModelDetailContent() {
           popup?.close()
           window.removeEventListener('message', handleMessage)
           setIsConnecting(false)
-          alert('Instagram 연동이 취소되었거나 오류가 발생했습니다.')
+          toast({
+            title: "Instagram 연동 취소",
+            description: "Instagram 연동이 취소되었거나 오류가 발생했습니다.",
+            variant: "destructive",
+          })
         }
       }
 
@@ -865,7 +1006,11 @@ function ModelDetailContent() {
 
     } catch (error) {
       setIsConnecting(false)
-      alert('Instagram 연동 중 오류가 발생했습니다.')
+      toast({
+        title: "Instagram 연동 오류",
+        description: "Instagram 연동 중 오류가 발생했습니다.",
+        variant: "destructive",
+      })
     }
   }
 
@@ -877,9 +1022,17 @@ function ModelDetailContent() {
       setInstagramStatus({
         is_connected: false
       })
-      alert("Instagram 계정 연동이 해제되었습니다.")
+      toast({
+        title: "Instagram 연동 해제",
+        description: "Instagram 계정 연동이 해제되었습니다.",
+        variant: "default",
+      })
     } catch (error) {
-      alert("Instagram 연동 해제에 실패했습니다. 다시 시도해주세요.")
+      toast({
+        title: "Instagram 연동 해제 실패",
+        description: "Instagram 연동 해제에 실패했습니다. 다시 시도해주세요.",
+        variant: "destructive",
+      })
     }
   }
 
@@ -1241,32 +1394,7 @@ function ModelDetailContent() {
   };
 
   // 게시글 삭제
-  const handleDeletePost = async (postId: string | undefined) => {
-    if (!postId) return
 
-    const postToDelete = posts.find((post) => post.id === postId)
-    const postTitle = postToDelete?.title || "게시글"
-
-    try {
-      await apiClient.delete(`/api/v1/boards/${postId}`)
-
-      // 로컬 상태에서 게시글 제거
-      setPosts((prev) => prev.filter((post) => post.id !== postId))
-
-      // 모달 닫기
-      setIsPostDetailModalOpen(false)
-      setSelectedPost(null)
-
-      // 분석 데이터 다시 로드 (게시글 수 변경 반영)
-      await loadAnalyticsData()
-
-      console.log(`게시글 "${postTitle}" 삭제 완료`)
-
-    } catch (error) {
-      console.error('게시글 삭제 실패:', error);
-      alert('게시글 삭제에 실패했습니다. 다시 시도해주세요.');
-    }
-  }
 
   // 플랫폼별 게시글 렌더링
   const renderPlatformSpecificPost = (post: ContentPost) => {
@@ -1960,10 +2088,10 @@ function ModelDetailContent() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => window.open(`/chat/${model.id}`, '_blank')}
+                  onClick={model.chatbot_option ? () => window.open(`/chat/${model.id}`, '_blank') : handleChatbotToggle}
                 >
                   <MessageSquare className="h-4 w-4 mr-2" />
-                  {model.chatbot_option ? "챗봇 페이지 이동" : "챗봇 생성"}
+                  {model.chatbot_option ? "챗봇 페이지로 이동" : "챗봇 생성"}
                 </Button>
               )}
               <AlertDialog>
@@ -2560,11 +2688,11 @@ function ModelDetailContent() {
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                     {/* 프로필 이미지 섹션 */}
                     <div className="flex flex-col items-center space-y-4">
-                      {/* 대형 프로필 이미지 */}
-                      <div className="relative">
+                      {/* 대형 프로필 이미지 - 클릭 가능 */}
+                      <div className="relative cursor-pointer" onClick={openImageModal}>
                         {uploadedImage && imagePreview ? (
                           // 업로드된 이미지 미리보기
-                          <div className="w-36 h-36 rounded-full overflow-hidden shadow-lg">
+                          <div className="w-36 h-36 rounded-full overflow-hidden shadow-lg hover:opacity-80 transition-opacity">
                             <img
                               src={imagePreview}
                               alt="Uploaded"
@@ -2573,7 +2701,7 @@ function ModelDetailContent() {
                           </div>
                         ) : model?.image_url ? (
                           // 기존 인플루언서 이미지
-                          <div className="w-36 h-36 rounded-full overflow-hidden shadow-lg">
+                          <div className="w-36 h-36 rounded-full overflow-hidden shadow-lg hover:opacity-80 transition-opacity">
                             <img
                               src={model.image_url}
                               alt="Profile"
@@ -2599,71 +2727,23 @@ function ModelDetailContent() {
                           </div>
                         ) : (
                           // 기본 아이콘
-                          <div className="w-36 h-36 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg">
+                          <div className="w-36 h-36 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg hover:opacity-80 transition-opacity">
                             <div className="w-20 h-20 bg-orange-500 rounded-lg flex items-center justify-center">
                               <Bot className="h-10 w-10 text-white" />
                             </div>
                           </div>
                         )}
+                        {/* 클릭 안내 오버레이 */}
+                        <div className="absolute inset-0 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity bg-black bg-opacity-30 rounded-full">
+                          <div className="text-center">
+                            <span className="text-white text-sm font-medium">확대/변경</span>
+                          </div>
+                        </div>
                       </div>
 
                       <div className="text-center space-y-3">
                         <p className="text-sm text-gray-500">권장 크기: 400x400px, 최대 5MB</p>
-
-                        {/* 업로드된 이미지가 있을 때 */}
-                        {uploadedImage && imagePreview ? (
-                          <div className="space-y-3">
-                            <div className="relative">
-                              <img
-                                src={imagePreview}
-                                alt="Uploaded"
-                                className="w-32 h-32 object-cover rounded-lg border mx-auto"
-                              />
-                            </div>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={removeImage}
-                              className="w-full text-red-600 border-red-200 hover:bg-red-50"
-                            >
-                              <Trash2 className="h-4 w-4 mr-2" />
-                              제거
-                            </Button>
-                          </div>
-                        ) : (
-                          /* 이미지 업로드 영역 */
-                          <div
-                            className={`
-                              border-2 border-dashed rounded-lg p-6 transition-all duration-300 cursor-pointer
-                              ${isDragOver
-                                ? "border-blue-500 bg-blue-50"
-                                : "border-gray-300 hover:border-blue-400 hover:bg-blue-50"
-                              }
-                            `}
-                            onDragOver={handleDragOver}
-                            onDragLeave={handleDragLeave}
-                            onDrop={handleDrop}
-                          >
-                            <input
-                              id="influencer-image-upload"
-                              type="file"
-                              accept="image/*"
-                              onChange={handleImageUpload}
-                              className="hidden"
-                            />
-                            <label htmlFor="influencer-image-upload" className="cursor-pointer">
-                              <div className="text-center">
-                                <Upload className="h-8 w-8 mx-auto mb-2 text-gray-400" />
-                                <p className="text-sm text-gray-600 mb-1">
-                                  클릭하여 이미지 선택
-                                </p>
-                                <p className="text-xs text-gray-500">
-                                  또는 이미지를 여기로 드래그하세요
-                                </p>
-                              </div>
-                            </label>
-                          </div>
-                        )}
+                        <p className="text-xs text-gray-400">이미지를 클릭하여 확대/변경</p>
                       </div>
                     </div>
 
@@ -3045,15 +3125,7 @@ function ModelDetailContent() {
                     <span>인스타그램 보기</span>
                   </Button>
                 )}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleDeletePost(selectedPost?.id)}
-                  className="flex items-center space-x-1 text-red-600 hover:text-red-700 hover:bg-red-50"
-                >
-                  <Trash2 className="h-4 w-4" />
-                  <span>삭제</span>
-                </Button>
+
               </div>
             </DialogHeader>
 
@@ -3233,6 +3305,176 @@ function ModelDetailContent() {
                 </div>
               </div>
             )}
+          </DialogContent>
+        </Dialog>
+
+        {/* 이미지 모달 */}
+        <Dialog open={isImageModalOpen} onOpenChange={setIsImageModalOpen}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle className="flex items-center space-x-2">
+                <Bot className="h-5 w-5" />
+                <span>프로필 이미지</span>
+              </DialogTitle>
+            </DialogHeader>
+            
+            <div className="space-y-6">
+              {/* 현재 이미지 표시 */}
+              <div className="flex justify-center">
+                {uploadedImage && imagePreview ? (
+                  <div className="relative">
+                    <img
+                      src={imagePreview}
+                      alt="Uploaded"
+                      className="w-80 h-80 object-cover rounded-lg shadow-lg"
+                    />
+                  </div>
+                ) : model?.image_url ? (
+                  <div className="relative">
+                    <img
+                      src={model.image_url}
+                      alt="Profile"
+                      className="w-80 h-80 object-cover rounded-lg shadow-lg"
+                      onError={(e) => {
+                        const target = e.target as HTMLImageElement;
+                        target.style.display = 'none';
+                        const parent = target.parentElement;
+                        if (parent) {
+                          parent.innerHTML = `
+                            <div class="w-80 h-80 rounded-lg bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg">
+                              <div class="w-40 h-40 bg-orange-500 rounded-lg flex items-center justify-center">
+                                <svg class="h-20 w-20 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+                                </svg>
+                              </div>
+                            </div>
+                          `;
+                        }
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <div className="w-80 h-80 rounded-lg bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg">
+                    <div className="w-40 h-40 bg-orange-500 rounded-lg flex items-center justify-center">
+                      <Bot className="h-20 w-20 text-white" />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* 이미지 정보 */}
+              <div className="text-center space-y-2">
+                <p className="text-sm text-gray-600">권장 크기: 400x400px, 최대 5MB</p>
+                <p className="text-xs text-gray-400">JPG, PNG 형식 지원</p>
+              </div>
+
+              {/* 액션 버튼들 */}
+              <div className="flex justify-center space-x-4">
+                {/* 파일 업로드 버튼 */}
+                <input
+                  id="modal-image-upload"
+                  type="file"
+                  accept="image/*"
+                  onChange={handleImageUpload}
+                  className="hidden"
+                />
+                <Button
+                  variant="outline"
+                  className="flex items-center space-x-2"
+                  onClick={() => document.getElementById('modal-image-upload')?.click()}
+                >
+                  <Upload className="h-4 w-4" />
+                  <span>이미지 업로드</span>
+                </Button>
+
+                {/* 갤러리에서 불러오기 버튼 */}
+                <Button
+                  variant="outline"
+                  onClick={openGalleryModal}
+                  className="flex items-center space-x-2"
+                >
+                  <ImageIcon className="h-4 w-4" />
+                  <span>갤러리에서 불러오기</span>
+                </Button>
+
+              </div>
+
+              {/* 저장 버튼과 제거 버튼 - 변경사항이 있을 때만 표시 */}
+              {hasImageChanges && (
+                <div className="flex justify-center space-x-4 pt-4 border-t">
+                  <Button
+                    onClick={async () => {
+                      await handleUpdateModel()
+                      setIsImageModalOpen(false)
+                    }}
+                    disabled={isUpdating || isModelLoading || isUploadingImage}
+                    className="bg-blue-600 hover:bg-blue-700 text-white font-medium px-8"
+                  >
+                    {isUploadingImage ? "업로드 중..." : isUpdating ? "저장 중..." : isModelLoading ? "로딩 중..." : "저장"}
+                  </Button>
+                  
+                  {/* 이미지 제거 버튼 (업로드된 이미지가 있을 때만) */}
+                  {uploadedImage && imagePreview && (
+                    <Button
+                      variant="outline"
+                      onClick={removeImage}
+                      className="text-red-600 border-red-200 hover:bg-red-50 px-8"
+                    >
+                      <Trash2 className="h-4 w-4 mr-2" />
+                      제거
+                    </Button>
+                  )}
+                </div>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* 갤러리 모달 */}
+        <Dialog open={isGalleryModalOpen} onOpenChange={setIsGalleryModalOpen}>
+          <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center space-x-2">
+                <ImageIcon className="h-5 w-5" />
+                <span>갤러리에서 이미지 선택</span>
+              </DialogTitle>
+            </DialogHeader>
+            
+            <div className="space-y-6">
+              {isLoadingGallery ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+                  <span className="ml-2 text-gray-600">이미지 목록을 불러오는 중...</span>
+                </div>
+              ) : galleryImages.length > 0 ? (
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                  {galleryImages.map((imageUrl, index) => (
+                    <div
+                      key={index}
+                      className="relative group cursor-pointer"
+                      onClick={() => selectGalleryImage(imageUrl)}
+                    >
+                      <img
+                        src={imageUrl}
+                        alt={`Gallery image ${index + 1}`}
+                        className="w-full h-32 object-cover rounded-lg border hover:border-blue-500 transition-colors"
+                      />
+                      <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all duration-200 rounded-lg flex items-center justify-center">
+                        <span className="text-white opacity-0 group-hover:opacity-100 text-sm font-medium">
+                          선택
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-12">
+                  <ImageIcon className="h-12 w-12 mx-auto mb-4 text-gray-300" />
+                  <p className="text-gray-500 text-lg">갤러리에 이미지가 없습니다</p>
+                  <p className="text-gray-400 mt-2">먼저 이미지를 업로드해주세요</p>
+                </div>
+              )}
+            </div>
           </DialogContent>
         </Dialog>
       </div>
