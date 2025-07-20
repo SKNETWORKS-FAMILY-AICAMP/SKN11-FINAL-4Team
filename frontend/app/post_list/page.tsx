@@ -942,8 +942,17 @@ function PostListContent() {
 
         {!loading && filteredPosts.length === 0 && (
           <div className="text-center py-12">
-            <p className="text-gray-500 text-lg">검색 결과가 없습니다.</p>
-            <p className="text-gray-400 mt-2">다른 검색어를 시도해보세요.</p>
+            {searchTerm || statusFilter !== "all" || modelFilter !== "all" || platformFilter.length > 0 ? (
+              <>
+                <p className="text-gray-500 text-lg">검색 결과가 없습니다.</p>
+                <p className="text-gray-400 mt-2">다른 검색어를 시도해보세요.</p>
+              </>
+            ) : (
+              <>
+                <p className="text-gray-500 text-lg">생성된 게시글이 없습니다.</p>
+                <p className="text-gray-400 mt-2">새로운 게시글을 생성해보세요.</p>
+              </>
+            )}
           </div>
         )}
 
