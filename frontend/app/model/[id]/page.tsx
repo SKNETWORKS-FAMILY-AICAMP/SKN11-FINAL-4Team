@@ -13,7 +13,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 
 import { tokenUtils } from "@/lib/auth"
@@ -170,6 +170,7 @@ function ModelDetailContent() {
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const [isUploadingBaseVoice, setIsUploadingBaseVoice] = useState(false)
   const [hasBaseVoice, setHasBaseVoice] = useState(false)
+  const [voiceToDelete, setVoiceToDelete] = useState<string | null>(null)
   const [instagramStatus, setInstagramStatus] = useState<{
     is_connected: boolean
     connected_at?: string
@@ -1609,16 +1610,27 @@ function ModelDetailContent() {
       }
 
       // 베이스 음성 업로드 API 호출
-      const response = await apiClient.post<{s3_url: string, file_name: string, file_size: number, message: string}>(`/api/v1/influencers/${params.id}/voice/base`, requestData)
+      const response = await apiClient.post<{
+        s3_url: string, 
+        file_name: string, 
+        file_size: number, 
+        message: string,
+        original_filename?: string
+      }>(`/api/v1/influencers/${params.id}/voice/base`, requestData)
       
       if (response?.s3_url) {
         setBaseVoiceUrl(response.s3_url)
         setHasBaseVoice(true)
         setBaseVoiceFile(null)
         
+        // 원본 파일명이 있으면 WAV로 변환되었음을 알림
+        const description = response.original_filename 
+          ? `베이스 음성이 WAV 형식으로 변환되어 업로드되었습니다. (원본: ${response.original_filename})`
+          : "베이스 음성이 성공적으로 업로드되었습니다."
+        
         toast({
           title: "업로드 완료",
-          description: "베이스 음성이 성공적으로 업로드되었습니다.",
+          description,
         })
       } else {
         throw new Error('응답에 s3_url이 없습니다')
@@ -1905,20 +1917,22 @@ function ModelDetailContent() {
     }
   }
 
-  const handleDeleteVoice = async (id: string) => {
-    if (!confirm('이 음성을 삭제하시겠습니까?')) return
+  const handleDeleteVoice = async () => {
+    if (!voiceToDelete) return
 
     try {
       // 올바른 엔드포인트 경로로 수정
-      await apiClient.delete(`/api/v1/influencers/voices/${id}`)
+      await apiClient.delete(`/api/v1/influencers/voices/${voiceToDelete}`)
       
       // 로컬에서 제거
-      setVoiceHistory(prev => prev.filter(v => v.id !== id))
+      setVoiceHistory(prev => prev.filter(v => v.id !== voiceToDelete))
       
       toast({
         title: "삭제 완료",
         description: "음성이 삭제되었습니다.",
       })
+      
+      setVoiceToDelete(null)
     } catch (error: any) {
       console.error('음성 삭제 실패:', error)
       toast({
@@ -2873,17 +2887,29 @@ function ModelDetailContent() {
                       placeholder="음성으로 변환할 텍스트를 입력하세요..."
                       className="min-h-[100px] mt-2"
                       value={voiceText}
-                      onChange={(e) => setVoiceText(e.target.value)}
+                      onChange={(e) => {
+                        const newText = e.target.value
+                        if (newText.length <= 300) {
+                          setVoiceText(newText)
+                        } else {
+                          toast({
+                            title: "글자수 제한",
+                            description: "텍스트는 300자까지만 입력할 수 있습니다.",
+                            variant: "destructive",
+                          })
+                        }
+                      }}
                       disabled={!hasBaseVoice}
+                      maxLength={300}
                     />
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-gray-500">
-                      {voiceText.length} / 500자
+                      {voiceText.length} / 300자
                     </span>
                     <Button
                       onClick={handleGenerateVoice}
-                      disabled={!hasBaseVoice || !voiceText.trim() || isGeneratingVoice || voiceText.length > 500}
+                      disabled={!hasBaseVoice || !voiceText.trim() || isGeneratingVoice || voiceText.length > 300}
                       className="bg-purple-600 hover:bg-purple-700 text-white"
                     >
                       {isGeneratingVoice ? (
@@ -2982,7 +3008,7 @@ function ModelDetailContent() {
                             <Button
                               variant="outline"
                               size="sm"
-                              onClick={() => handleDeleteVoice(voice.id)}
+                              onClick={() => setVoiceToDelete(voice.id)}
                               className="text-red-600 hover:text-red-700 hover:bg-red-50"
                             >
                               <Trash2 className="h-4 w-4" />
@@ -3241,6 +3267,32 @@ function ModelDetailContent() {
                 </div>
               </div>
             )}
+          </DialogContent>
+        </Dialog>
+
+        {/* 음성 삭제 확인 다이얼로그 */}
+        <Dialog open={!!voiceToDelete} onOpenChange={(open) => !open && setVoiceToDelete(null)}>
+          <DialogContent className="sm:max-w-[425px]">
+            <DialogHeader>
+              <DialogTitle>음성 삭제 확인</DialogTitle>
+              <DialogDescription>
+                이 음성을 삭제하시겠습니까? 삭제된 음성은 복구할 수 없습니다.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => setVoiceToDelete(null)}
+              >
+                취소
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={handleDeleteVoice}
+              >
+                삭제
+              </Button>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
       </div>

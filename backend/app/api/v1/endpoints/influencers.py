@@ -1781,29 +1781,38 @@ async def upload_base_voice(
     except Exception as e:
         raise HTTPException(status_code=400, detail="잘못된 파일 데이터 형식입니다")
     
-    file_size = len(contents)
+    # 오디오를 WAV로 변환
+    from app.utils.audio_converter import convert_to_wav, validate_audio_for_tts
+    try:
+        wav_data, wav_filename = convert_to_wav(contents, request.file_name)
+        
+        # TTS용 검증
+        is_valid, validation_message = validate_audio_for_tts(wav_data)
+        if not is_valid:
+            raise HTTPException(status_code=400, detail=validation_message)
+            
+        contents = wav_data  # WAV 데이터로 교체
+        file_size = len(contents)
+        
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     
     # 파일 크기 검증 (10MB)
     if file_size > 10 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="파일 크기는 10MB 이하여야 합니다")
     
-    # 파일 확장자 추출
-    file_extension = request.file_name.split('.')[-1].lower()
-    if file_extension not in ['mp3', 'wav', 'm4a', 'ogg', 'flac']:
-        raise HTTPException(status_code=400, detail="지원하지 않는 오디오 형식입니다")
-    
-    # S3 키 생성 (audio_base/influencer_id/base.extension)
-    s3_key = f"audio_base/{influencer_id}/base.{file_extension}"
+    # S3 키 생성 (audio_base/influencer_id/base.wav)
+    s3_key = f"audio_base/{influencer_id}/base.wav"
     
     # 임시 파일로 저장
     import tempfile
-    with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_extension}") as tmp_file:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_file:
         tmp_file.write(contents)
         tmp_file_path = tmp_file.name
     
     try:
-        # S3에 업로드
-        s3_url = s3_service.upload_file(tmp_file_path, s3_key, content_type=request.file_type)
+        # S3에 업로드 (WAV 파일로)
+        s3_url = s3_service.upload_file(tmp_file_path, s3_key, content_type="audio/wav")
         if not s3_url:
             raise HTTPException(status_code=500, detail="S3 업로드 실패")
         
@@ -1814,9 +1823,9 @@ async def upload_base_voice(
         
         if existing_voice:
             # 기존 음성 업데이트
-            existing_voice.file_name = request.file_name
+            existing_voice.file_name = wav_filename
             existing_voice.file_size = file_size
-            existing_voice.file_type = request.file_type
+            existing_voice.file_type = "audio/wav"
             existing_voice.s3_url = s3_url
             existing_voice.s3_key = s3_key
             existing_voice.updated_at = datetime.utcnow()
@@ -1824,9 +1833,9 @@ async def upload_base_voice(
             # 새로운 베이스 음성 생성
             new_voice = VoiceBase(
                 influencer_id=influencer.influencer_id,
-                file_name=request.file_name,
+                file_name=wav_filename,
                 file_size=file_size,
-                file_type=request.file_type,
+                file_type="audio/wav",
                 s3_url=s3_url,
                 s3_key=s3_key
             )
@@ -1835,10 +1844,11 @@ async def upload_base_voice(
         db.commit()
         
         return {
-            "message": "베이스 음성이 성공적으로 업로드되었습니다",
+            "message": "베이스 음성이 성공적으로 업로드되었습니다 (WAV로 변환됨)",
             "s3_url": s3_url,
-            "file_name": request.file_name,
-            "file_size": file_size
+            "file_name": wav_filename,
+            "file_size": file_size,
+            "original_filename": request.file_name
         }
         
     except Exception as e:
