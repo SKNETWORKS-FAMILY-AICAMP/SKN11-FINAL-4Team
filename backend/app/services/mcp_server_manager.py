@@ -28,25 +28,25 @@ class MCPServerManager:
                 "port": 8002,
                 "description": "날씨 정보 서버",
             },
-            # 추가 MCP 서버들을 위한 포트 예약
-            # "calculator": {
-            #     "script": "examples/mcp_calculator_server.py",
-            #     "transport": "streamable-http",
-            #     "port": 8003,
-            #     "description": "고급 계산기 서버",
-            # },
-            # "translator": {
-            #     "script": "examples/mcp_translator_server.py",
-            #     "transport": "streamable-http",
-            #     "port": 8004,
-            #     "description": "번역 서버",
-            # },
-            # "file_manager": {
-            #     "script": "examples/mcp_file_manager_server.py",
-            #     "transport": "streamable-http",
-            #     "port": 8005,
-            #     "description": "파일 관리 서버",
-            # },
+            # 새로운 MCP 서버들을 위한 포트 예약
+            "calculator": {
+                "script": "examples/mcp_calculator_server.py",
+                "transport": "streamable-http",
+                "port": 8003,
+                "description": "고급 계산기 서버",
+            },
+            "translator": {
+                "script": "examples/mcp_translator_server.py",
+                "transport": "streamable-http",
+                "port": 8004,
+                "description": "번역 서버",
+            },
+            "file_manager": {
+                "script": "examples/mcp_file_manager_server.py",
+                "transport": "streamable-http",
+                "port": 8005,
+                "description": "파일 관리 서버",
+            },
         }
 
     async def start_all_servers(self):

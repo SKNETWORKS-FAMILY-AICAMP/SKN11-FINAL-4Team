@@ -74,13 +74,23 @@ async def chatbot(websocket: WebSocket, lora_repo: str, group_id: int = Query(..
         
         # MCP 도구들 초기화 (선택적)
         mcp_tools_available = False
+        available_servers = []
         try:
-            # MCP 서버 상태 확인
-            math_tools = await mcp_client_service.list_available_tools("math")
-            weather_tools = await mcp_client_service.list_available_tools("weather")
-            mcp_tools_available = len(math_tools) > 0 or len(weather_tools) > 0
+            # MCP 서버 매니저에서 실행 중인 서버들 확인
+            from app.services.mcp_server_manager import mcp_server_manager
+            server_status = mcp_server_manager.get_server_status()
+            
+            for server_name, status in server_status.items():
+                if status.get("running", False):
+                    available_servers.append(server_name)
+                    logger.info(f"[WS] ✅ MCP 서버 '{server_name}' 실행 중")
+            
+            mcp_tools_available = len(available_servers) > 0
             if mcp_tools_available:
-                logger.info(f"[WS] ✅ MCP 도구들 사용 가능: 수학({len(math_tools)}개), 날씨({len(weather_tools)}개)")
+                logger.info(f"[WS] ✅ MCP 도구들 사용 가능: {available_servers}")
+            else:
+                logger.info(f"[WS] ⚠️ 실행 중인 MCP 서버가 없습니다")
+                
         except Exception as e:
             logger.warning(f"[WS] ⚠️ MCP 도구 초기화 실패: {e}")
         
@@ -104,13 +114,13 @@ async def chatbot(websocket: WebSocket, lora_repo: str, group_id: int = Query(..
                 if mcp_tools_available and use_mcp_tools and _should_use_mcp_tools(user_message):
                     try:
                         # MCP 도구를 사용한 응답 생성
-                        mcp_response = await _process_with_mcp_tools(user_message)
+                        mcp_response, tools_used = await _process_with_mcp_tools(user_message)
                         await websocket.send_text(json.dumps({
                             "type": "mcp_response",
                             "content": mcp_response,
-                            "tools_used": ["math", "weather"]
+                            "tools_used": tools_used
                         }))
-                        logger.info(f"[WS] MCP 도구 응답 전송 완료")
+                        logger.info(f"[WS] MCP 도구 응답 전송 완료, 사용된 도구: {tools_used}")
                         continue
                     except Exception as e:
                         logger.warning(f"[WS] MCP 도구 처리 실패, VLLM으로 폴백: {e}")
@@ -175,36 +185,89 @@ async def chatbot(websocket: WebSocket, lora_repo: str, group_id: int = Query(..
             pass
 
 def _should_use_mcp_tools(message: str) -> bool:
-    """메시지가 MCP 도구 사용이 필요한지 확인"""
-    mcp_keywords = [
-        "계산", "더하기", "빼기", "곱하기", "나누기", "제곱", "제곱근", "팩토리얼",
-        "날씨", "기온", "습도", "강수", "바람", "자외선", "대기질", "일출", "일몰"
-    ]
-    message_lower = message.lower()
-    return any(keyword in message_lower for keyword in mcp_keywords)
+    """메시지가 MCP 도구 사용이 필요한지 확인 (개선된 버전)"""
+    try:
+        from langchain_openai import ChatOpenAI
+        from langchain.prompts import PromptTemplate
+        
+        # OpenAI를 사용한 지능적 판단
+        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+        
+        prompt = PromptTemplate.from_template("""
+다음 사용자 메시지가 수학 계산, 날씨 정보, 파일 처리, 번역 등의 도구가 필요한지 판단해주세요.
+
+사용자 메시지: {message}
+
+다음 중 하나라도 해당되면 'YES'를, 그렇지 않으면 'NO'를 답변해주세요:
+- 수학 계산 (덧셈, 뺄셈, 곱셈, 나눗셈, 제곱, 제곱근, 팩토리얼, 방정식 등)
+- 날씨 정보 (현재 날씨, 예보, 대기질, 자외선 지수 등)
+- 파일 처리 (파일 읽기, 쓰기, 변환 등)
+- 번역 (언어 간 번역)
+- 기타 도구가 필요한 작업
+
+답변 (YES/NO만):
+""")
+        
+        response = await llm.ainvoke(prompt.format(message=message))
+        result = response.content.strip().upper()
+        
+        return result == "YES"
+        
+    except Exception as e:
+        logger.warning(f"MCP 도구 판단 중 오류, 기본 키워드 매칭으로 폴백: {e}")
+        # 폴백: 기존 키워드 매칭
+        mcp_keywords = [
+            "계산", "더하기", "빼기", "곱하기", "나누기", "제곱", "제곱근", "팩토리얼",
+            "날씨", "기온", "습도", "강수", "바람", "자외선", "대기질", "일출", "일몰",
+            "번역", "파일", "변환", "처리"
+        ]
+        message_lower = message.lower()
+        return any(keyword in message_lower for keyword in mcp_keywords)
 
 async def _process_with_mcp_tools(message: str) -> str:
-    """MCP 도구를 사용하여 메시지 처리"""
+    """MCP 도구를 사용하여 메시지 처리 (개선된 버전)"""
     try:
-        # LangChain React Agent를 사용하여 MCP 도구 실행
         from langchain_openai import ChatOpenAI
         from langchain.agents import AgentExecutor, create_react_agent
         from langchain.prompts import PromptTemplate
         
-        # MCP 도구들 가져오기
-        math_tools = await mcp_client_service.get_tools("math")
-        weather_tools = await mcp_client_service.get_tools("weather")
-        all_tools = math_tools + weather_tools
+        # 사용 가능한 모든 MCP 서버의 도구들 가져오기
+        all_tools = []
+        # 동적으로 사용 가능한 서버 목록 사용
+        for server_name in available_servers:
+            try:
+                tools = await mcp_client_service.get_tools(server_name)
+                all_tools.extend(tools)
+                logger.info(f"MCP 서버 '{server_name}'에서 {len(tools)}개 도구 로드")
+            except Exception as e:
+                logger.warning(f"MCP 서버 '{server_name}' 도구 로드 실패: {e}")
         
         if not all_tools:
             raise Exception("사용 가능한 MCP 도구가 없습니다.")
         
-        # React 에이전트 생성
+        logger.info(f"총 {len(all_tools)}개의 MCP 도구 사용 가능")
+        
+        # React 에이전트 생성 (개선된 프롬프트)
         llm = ChatOpenAI(model="gpt-4", temperature=0)
+        
+        system_prompt = """당신은 도움이 되는 AI 어시스턴트입니다. 
+
+사용자의 질문에 적절한 도구를 사용하여 답변해주세요.
+
+사용 가능한 도구들:
+- 수학 계산: 덧셈, 뺄셈, 곱셈, 나눗셈, 제곱, 제곱근, 팩토리얼, 방정식 해
+- 날씨 정보: 현재 날씨, 예보, 대기질, 자외선 지수, 바람 정보, 일출/일몰
+
+주의사항:
+1. 사용자의 질문을 정확히 이해하고 적절한 도구를 선택하세요
+2. 계산 결과나 정보를 명확하고 이해하기 쉽게 설명하세요
+3. 필요시 여러 도구를 조합하여 사용하세요
+4. 한국어로 친근하게 답변하세요"""
+
         agent = create_react_agent(
             llm,
             all_tools,
-            prompt=PromptTemplate.from_template("당신은 도움이 되는 AI 어시스턴트입니다. 사용자의 질문에 적절한 도구를 사용하여 답변해주세요."),
+            prompt=PromptTemplate.from_template(system_prompt),
         )
         agent_executor = AgentExecutor.from_agent_and_tools(
             agent=agent, tools=all_tools, verbose=True
@@ -212,11 +275,20 @@ async def _process_with_mcp_tools(message: str) -> str:
         
         # 에이전트 실행
         response = await agent_executor.ainvoke({"input": message})
-        return response.get("output", str(response))
+        
+        # 사용된 도구들 추출
+        tools_used = []
+        if "intermediate_steps" in response:
+            for step in response["intermediate_steps"]:
+                if "tool" in step:
+                    tools_used.append(step["tool"])
+        
+        logger.info(f"MCP 도구 처리 완료, 사용된 도구: {tools_used}")
+        return response.get("output", str(response)), tools_used
         
     except Exception as e:
         logger.error(f"MCP 도구 처리 중 오류: {e}")
-        return f"MCP 도구 처리 중 오류가 발생했습니다: {str(e)}"
+        return f"MCP 도구 처리 중 오류가 발생했습니다: {str(e)}", []
 
 async def _get_hf_token_by_group(group_id: int, db: Session) -> str:
     """그룹 ID로 HF 토큰을 가져옵니다."""
