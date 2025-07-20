@@ -3,13 +3,21 @@ import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
+import os
+
+# .env 파일 로드
+load_dotenv()
 
 from app.api.v1.api import api_router
 from app.database import init_database
 from app.services.mcp_server_manager import mcp_server_manager
 
 # 로깅 설정
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 
@@ -23,8 +31,7 @@ async def lifespan(app: FastAPI):
     init_database()
     logger.info("✅ 데이터베이스 초기화 완료")
 
-    # 백엔드 서버가 완전히 시작된 후 MCP 서버들을 시작
-    await asyncio.sleep(5)  # 백엔드 서버가 완전히 시작될 때까지 대기
+    # MCP 서버들을 시작
     try:
         await mcp_server_manager.start_all_servers()
         logger.info("✅ MCP 서버들 시작 완료")
@@ -75,16 +82,4 @@ async def root():
 @app.get("/health")
 async def health_check():
     """헬스 체크 엔드포인트"""
-    return {"status": "healthy", "mcp_servers": mcp_server_manager.get_server_status()}
-
-
-@app.get("/mcp/status")
-async def mcp_status():
-    """MCP 서버 상태 확인 엔드포인트"""
-    return {
-        "servers": mcp_server_manager.get_server_status(),
-        "total_servers": len(mcp_server_manager.server_configs),
-        "running_servers": len(
-            [s for s in mcp_server_manager.get_server_status().values() if s["running"]]
-        ),
-    }
+    return {"status": "healthy"}

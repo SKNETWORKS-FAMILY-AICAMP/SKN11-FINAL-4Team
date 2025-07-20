@@ -88,6 +88,8 @@ api_router.include_router(comfyui.router, prefix="/comfyui", tags=["ComfyUI"])
 # MCP 어댑터 API
 api_router.include_router(mcp.router, prefix="/mcp", tags=["MCP"])
 
+
+
 # 워크플로우 전용 라우터 (프론트엔드 호환성)
 from fastapi import APIRouter as FastAPIRouter
 

@@ -6,10 +6,11 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
-import { Loader2, Send, Bot, User, MessageSquare, Settings, Wrench, RefreshCw } from "lucide-react"
-import { MCPService, type MCPServerInfo, type MCPToolInfo } from "@/lib/services/mcp.service"
+import { Loader2, Send, Bot, User, MessageSquare, Settings, Wrench, RefreshCw, Zap, Plus, Server } from "lucide-react"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Label } from "@/components/ui/label"
+import { apiClient } from "@/lib/api"
 
 interface Message {
     id: string
@@ -19,75 +20,100 @@ interface Message {
     tools_used?: string[]
 }
 
+interface ToolInfo {
+    name: string
+    description: string
+    type: "basic" | "mcp"
+}
+
 export default function MCPChatPage() {
     const [messages, setMessages] = useState<Message[]>([])
     const [inputMessage, setInputMessage] = useState("")
     const [isLoading, setIsLoading] = useState(false)
-    const [selectedServer, setSelectedServer] = useState<string>("")
-    const [servers, setServers] = useState<MCPServerInfo[]>([])
-    const [tools, setTools] = useState<MCPToolInfo[]>([])
     const [sessionId, setSessionId] = useState<string>("")
-    const [isRestarting, setIsRestarting] = useState<string | null>(null)
+    const [isInitialized, setIsInitialized] = useState(false)
+    const [isInitializing, setIsInitializing] = useState(false)
+    const [tools, setTools] = useState<ToolInfo[]>([])
+    const [showToolsDialog, setShowToolsDialog] = useState(false)
+    const [newServerName, setNewServerName] = useState("")
+    const [newServerUrl, setNewServerUrl] = useState("")
 
     const messagesEndRef = useRef<HTMLDivElement>(null)
 
-    // MCP 서버 목록 로드
-    const loadServers = async () => {
+    // MCP 챗봇 초기화
+    const initializeChatbot = async () => {
         try {
-            const response = await MCPService.getServers()
-            setServers(response.servers)
-            if (response.servers.length > 0) {
-                setSelectedServer(response.servers[0].name)
-            }
+            setIsInitializing(true)
+            await apiClient.post("/api/v1/mcp/init", undefined, { requireAuth: false })
+            setIsInitialized(true)
+            await loadTools()
+            console.log("MCP 챗봇 초기화 완료")
         } catch (error) {
-            console.error("Error loading MCP servers:", error)
-        }
-    }
-
-    // 선택된 서버의 도구 목록 로드
-    const loadTools = async (serverName: string) => {
-        try {
-            const response = await MCPService.getTools(serverName)
-            setTools(response.tools)
-        } catch (error) {
-            console.error("Error loading MCP tools:", error)
-            setTools([])
-        }
-    }
-
-    // 서버 변경 시 도구 목록 업데이트
-    useEffect(() => {
-        if (selectedServer) {
-            loadTools(selectedServer)
-        }
-    }, [selectedServer])
-
-    // 서버 재시작 함수
-    const restartServer = async (serverName: string) => {
-        try {
-            setIsRestarting(serverName)
-            await MCPService.restartServer(serverName)
-            // 서버 목록 새로고침
-            await loadServers()
-            // 현재 선택된 서버가 재시작된 서버라면 도구 목록도 새로고침
-            if (selectedServer === serverName) {
-                await loadTools(serverName)
-            }
-        } catch (error) {
-            console.error("Error restarting server:", error)
+            console.error("초기화 중 오류:", error)
         } finally {
-            setIsRestarting(null)
+            setIsInitializing(false)
+        }
+    }
+
+    // 도구 목록 로드
+    const loadTools = async () => {
+        try {
+            const data = await apiClient.get("/api/v1/mcp/tools", { requireAuth: false })
+            const toolList = Object.values(data.tools) as ToolInfo[]
+            setTools(toolList)
+        } catch (error) {
+            console.error("도구 목록 로드 중 오류:", error)
+        }
+    }
+
+    // 챗봇 상태 확인
+    const checkStatus = async () => {
+        try {
+            const status = await apiClient.get("/api/v1/mcp/status", { requireAuth: false })
+            setIsInitialized(status.initialized)
+            if (status.initialized) {
+                await loadTools()
+            }
+        } catch (error) {
+            console.error("상태 확인 중 오류:", error)
+        }
+    }
+
+    // 도구 다시 로드
+    const reloadTools = async () => {
+        try {
+            await apiClient.post("/api/v1/mcp/tools/reload", undefined, { requireAuth: false })
+            await loadTools()
+            console.log("도구 다시 로드 완료")
+        } catch (error) {
+            console.error("도구 다시 로드 중 오류:", error)
+        }
+    }
+
+    // 새 MCP 서버 추가
+    const addMCPServer = async () => {
+        if (!newServerName || !newServerUrl) return
+        
+        try {
+            await apiClient.post(`/api/v1/mcp/servers/${newServerName}/add?server_url=${encodeURIComponent(newServerUrl)}`, undefined, { requireAuth: false })
+            await reloadTools()
+            setNewServerName("")
+            setNewServerUrl("")
+            setShowToolsDialog(false)
+            console.log("MCP 서버 추가 완료")
+        } catch (error) {
+            console.error("MCP 서버 추가 중 오류:", error)
         }
     }
 
     // 초기 로드
     useEffect(() => {
-        loadServers()
+        checkStatus()
     }, [])
 
     // 메시지 전송
     const sendMessage = async () => {
-        if (!inputMessage.trim() || !selectedServer || isLoading) return
+        if (!inputMessage.trim() || isLoading) return
 
         const userMessage: Message = {
             id: Date.now().toString(),
@@ -101,21 +127,20 @@ export default function MCPChatPage() {
         setIsLoading(true)
 
         try {
-            const response = await MCPService.chat({
+            const result = await apiClient.post("/api/v1/mcp/chat", {
                 message: currentMessage,
-                server_name: selectedServer,
                 session_id: sessionId,
-            })
+            }, { requireAuth: false })
 
             const botMessage: Message = {
                 id: (Date.now() + 1).toString(),
-                content: response.response,
+                content: result.response,
                 sender: "bot",
                 timestamp: new Date(),
-                tools_used: response.tools_used,
+                tools_used: result.tools_used,
             }
             setMessages(prev => [...prev, botMessage])
-            setSessionId(response.session_id)
+            setSessionId(result.session_id)
         } catch (error) {
             console.error("Error sending message:", error)
             const errorMessage: Message = {
@@ -154,50 +179,87 @@ export default function MCPChatPage() {
                         <div className="flex items-center justify-between">
                             <div className="flex items-center space-x-3">
                                 <Avatar className="h-10 w-10">
-                                    <AvatarFallback className="bg-blue-500 text-white">
-                                        <Wrench className="h-5 w-5" />
+                                    <AvatarFallback className="bg-purple-500 text-white">
+                                        <Zap className="h-5 w-5" />
                                     </AvatarFallback>
                                 </Avatar>
                                 <div>
-                                    <CardTitle className="text-lg">MCP 챗봇</CardTitle>
-                                    <p className="text-sm text-gray-500">Model Context Protocol을 사용한 AI 대화</p>
+                                    <CardTitle className="text-lg">확장 가능한 MCP 챗봇</CardTitle>
+                                    <p className="text-sm text-gray-500">LangChain + 로컬 EXAONE 모델 + 동적 MCP 도구</p>
                                 </div>
                             </div>
                             <div className="flex items-center space-x-2">
-                                <Settings className="h-4 w-4 text-gray-400" />
-                                <Select value={selectedServer} onValueChange={setSelectedServer}>
-                                    <SelectTrigger className="w-48">
-                                        <SelectValue placeholder="서버 선택" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {servers.map((server) => (
-                                            <SelectItem key={server.name} value={server.name}>
-                                                <div className="flex items-center justify-between">
-                                                    <span>{server.description}</span>
-                                                    <div className="flex items-center space-x-2">
-                                                        <Badge
-                                                            variant={server.running ? "default" : "secondary"}
-                                                            className="text-xs"
-                                                        >
-                                                            {server.running ? "실행중" : "중지됨"}
-                                                        </Badge>
-                                                        {isRestarting === server.name && (
-                                                            <RefreshCw className="h-3 w-3 animate-spin" />
-                                                        )}
-                                                    </div>
+                                <Badge
+                                    variant={isInitialized ? "default" : "secondary"}
+                                    className="text-xs"
+                                >
+                                    {isInitialized ? "초기화됨" : "초기화 필요"}
+                                </Badge>
+                                <Dialog open={showToolsDialog} onOpenChange={setShowToolsDialog}>
+                                    <DialogTrigger asChild>
+                                        <Button variant="outline" size="sm">
+                                            <Wrench className="h-4 w-4 mr-1" />
+                                            도구 관리
+                                        </Button>
+                                    </DialogTrigger>
+                                    <DialogContent>
+                                        <DialogHeader>
+                                            <DialogTitle>MCP 도구 관리</DialogTitle>
+                                        </DialogHeader>
+                                        <div className="space-y-4">
+                                            <div>
+                                                <Label>사용 가능한 도구 ({tools.length}개)</Label>
+                                                <div className="mt-2 max-h-40 overflow-y-auto space-y-2">
+                                                    {tools.map((tool, index) => (
+                                                        <div key={index} className="flex items-center justify-between p-2 bg-gray-50 rounded">
+                                                            <div>
+                                                                <div className="font-medium">{tool.name}</div>
+                                                                <div className="text-sm text-gray-600">{tool.description}</div>
+                                                            </div>
+                                                            <Badge variant={tool.type === "mcp" ? "default" : "secondary"} className="text-xs">
+                                                                {tool.type}
+                                                            </Badge>
+                                                        </div>
+                                                    ))}
                                                 </div>
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                                {selectedServer && (
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label>새 MCP 서버 추가</Label>
+                                                <Input
+                                                    placeholder="서버 이름 (예: weather)"
+                                                    value={newServerName}
+                                                    onChange={(e) => setNewServerName(e.target.value)}
+                                                />
+                                                <Input
+                                                    placeholder="서버 URL (예: http://localhost:8002)"
+                                                    value={newServerUrl}
+                                                    onChange={(e) => setNewServerUrl(e.target.value)}
+                                                />
+                                                <Button onClick={addMCPServer} disabled={!newServerName || !newServerUrl}>
+                                                    <Plus className="h-4 w-4 mr-1" />
+                                                    서버 추가
+                                                </Button>
+                                            </div>
+                                            <Button onClick={reloadTools} variant="outline" className="w-full">
+                                                <RefreshCw className="h-4 w-4 mr-1" />
+                                                도구 다시 로드
+                                            </Button>
+                                        </div>
+                                    </DialogContent>
+                                </Dialog>
+                                {!isInitialized && (
                                     <Button
                                         variant="outline"
                                         size="sm"
-                                        onClick={() => restartServer(selectedServer)}
-                                        disabled={isRestarting === selectedServer}
+                                        onClick={initializeChatbot}
+                                        disabled={isInitializing}
                                     >
-                                        <RefreshCw className={`h-4 w-4 ${isRestarting === selectedServer ? 'animate-spin' : ''}`} />
+                                        {isInitializing ? (
+                                            <Loader2 className="h-4 w-4 animate-spin" />
+                                        ) : (
+                                            <RefreshCw className="h-4 w-4" />
+                                        )}
+                                        초기화
                                     </Button>
                                 )}
                             </div>
@@ -205,127 +267,91 @@ export default function MCPChatPage() {
                     </CardHeader>
                 </Card>
 
-                <div className="flex-1 flex gap-4 min-h-0">
-                    {/* 도구 목록 사이드바 */}
-                    <Card className="w-80 flex-shrink-0">
-                        <CardHeader>
-                            <CardTitle className="text-sm">사용 가능한 도구</CardTitle>
-                        </CardHeader>
-                        <CardContent className="overflow-y-auto max-h-96">
-                            {tools.length === 0 ? (
-                                <p className="text-sm text-gray-500">도구를 불러오는 중...</p>
-                            ) : (
-                                <div className="space-y-2">
-                                    {tools.map((tool) => (
-                                        <div key={tool.name} className="p-3 border rounded-lg">
-                                            <div className="font-medium text-sm">{tool.name}</div>
-                                            <div className="text-xs text-gray-500 mt-1">{tool.description}</div>
-                                        </div>
-                                    ))}
-                                </div>
+                {/* 채팅 영역 */}
+                <Card className="flex-1 mb-4">
+                    <CardHeader>
+                        <CardTitle className="text-sm flex items-center space-x-2">
+                            <MessageSquare className="h-4 w-4" />
+                            <span>대화</span>
+                            {tools.length > 0 && (
+                                <Badge variant="outline" className="text-xs">
+                                    {tools.length}개 도구
+                                </Badge>
                             )}
-                        </CardContent>
-                    </Card>
-
-                    {/* 채팅 영역 */}
-                    <Card className="flex-1 flex flex-col min-h-0">
-                        <CardContent className="flex-1 flex flex-col p-0 h-full">
-                            {/* 메시지 영역 */}
-                            <div className="flex-1 overflow-y-auto p-6 space-y-4 min-h-0">
-                                {messages.length === 0 ? (
-                                    <div className="text-center py-12">
-                                        <MessageSquare className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-                                        <p className="text-gray-500 text-lg">대화를 시작해보세요!</p>
-                                        <p className="text-gray-400 mt-2">MCP 도구들을 활용한 AI와 대화할 수 있습니다.</p>
-                                    </div>
-                                ) : (
-                                    messages.map((message) => (
-                                        <div
-                                            key={message.id}
-                                            className={`flex ${message.sender === "user" ? "justify-end" : "justify-start"}`}
-                                        >
-                                            <div className={`flex items-start space-x-3 max-w-[70%] ${message.sender === "user" ? "flex-row-reverse space-x-reverse" : ""}`}>
-                                                <Avatar className="h-8 w-8">
-                                                    <AvatarFallback className={message.sender === "user" ? "bg-blue-500 text-white" : "bg-green-500 text-white"}>
-                                                        {message.sender === "user" ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
-                                                    </AvatarFallback>
-                                                </Avatar>
-
-                                                <div className={`rounded-lg px-4 py-2 ${message.sender === "user"
-                                                    ? "bg-blue-500 text-white"
-                                                    : "bg-gray-100 text-gray-900"
-                                                    }`}>
-                                                    <p className="text-sm whitespace-pre-wrap">{message.content}</p>
-                                                    {message.tools_used && message.tools_used.length > 0 && (
-                                                        <div className="mt-2 flex flex-wrap gap-1">
-                                                            {message.tools_used.map((tool) => (
-                                                                <Badge key={tool} variant="secondary" className="text-xs">
-                                                                    {tool}
-                                                                </Badge>
-                                                            ))}
-                                                        </div>
-                                                    )}
-                                                    <p className={`text-xs mt-1 ${message.sender === "user" ? "text-blue-100" : "text-gray-500"}`}>
-                                                        {message.timestamp.toLocaleTimeString('ko-KR', {
-                                                            hour: '2-digit',
-                                                            minute: '2-digit'
-                                                        })}
-                                                    </p>
-                                                </div>
-                                            </div>
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent className="h-full flex flex-col">
+                        <div className="flex-1 overflow-y-auto space-y-4 mb-4">
+                            {messages.length === 0 ? (
+                                <div className="text-center text-gray-500 py-8">
+                                    <Bot className="h-12 w-12 mx-auto mb-4 text-gray-300" />
+                                    <p>안녕하세요! 확장 가능한 MCP 챗봇입니다.</p>
+                                    <p className="text-sm mt-2">자연어로 질문해보세요. 예: "5와 3을 더해줘", "10의 제곱근은?"</p>
+                                    {!isInitialized && (
+                                        <div className="mt-4">
+                                            <Button onClick={initializeChatbot} disabled={isInitializing}>
+                                                {isInitializing ? (
+                                                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                                                ) : (
+                                                    <Zap className="h-4 w-4 mr-2" />
+                                                )}
+                                                챗봇 초기화
+                                            </Button>
                                         </div>
-                                    ))
-                                )}
-
-                                {isLoading && (
-                                    <div className="flex justify-start">
-                                        <div className="flex items-start space-x-3 max-w-[70%]">
+                                    )}
+                                </div>
+                            ) : (
+                                messages.map((message) => (
+                                    <div
+                                        key={message.id}
+                                        className={`flex ${message.sender === "user" ? "justify-end" : "justify-start"}`}
+                                    >
+                                        <div className={`flex items-start space-x-2 max-w-[80%] ${message.sender === "user" ? "flex-row-reverse space-x-reverse" : ""}`}>
                                             <Avatar className="h-8 w-8">
-                                                <AvatarFallback className="bg-green-500 text-white">
-                                                    <Bot className="h-4 w-4" />
+                                                <AvatarFallback className={message.sender === "user" ? "bg-blue-500 text-white" : "bg-purple-500 text-white"}>
+                                                    {message.sender === "user" ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
                                                 </AvatarFallback>
                                             </Avatar>
-                                            <div className="bg-gray-100 rounded-lg px-4 py-2">
-                                                <div className="flex items-center space-x-2">
-                                                    <Loader2 className="h-4 w-4 animate-spin text-gray-500" />
-                                                    <span className="text-sm text-gray-500">답변을 생성하고 있습니다...</span>
-                                                </div>
+                                            <div className={`rounded-lg px-3 py-2 ${message.sender === "user" ? "bg-blue-500 text-white" : "bg-gray-100"}`}>
+                                                <p className="text-sm">{message.content}</p>
+                                                {message.tools_used && message.tools_used.length > 0 && (
+                                                    <div className="mt-2 flex flex-wrap gap-1">
+                                                        {message.tools_used.map((tool, index) => (
+                                                            <Badge key={index} variant="outline" className="text-xs">
+                                                                <Wrench className="h-3 w-3 mr-1" />
+                                                                {tool}
+                                                            </Badge>
+                                                        ))}
+                                                    </div>
+                                                )}
                                             </div>
                                         </div>
                                     </div>
+                                ))
+                            )}
+                            <div ref={messagesEndRef} />
+                        </div>
+
+                        {/* 입력 영역 */}
+                        <div className="flex items-end space-x-2">
+                            <Textarea
+                                value={inputMessage}
+                                onChange={(e) => setInputMessage(e.target.value)}
+                                onKeyPress={handleKeyPress}
+                                placeholder="메시지를 입력하세요... (예: 5와 3을 더해줘, 10의 제곱근은?)"
+                                className="flex-1 resize-none"
+                                rows={2}
+                            />
+                            <Button onClick={sendMessage} disabled={isLoading || !inputMessage.trim()}>
+                                {isLoading ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                    <Send className="h-4 w-4" />
                                 )}
-
-                                <div ref={messagesEndRef} />
-                            </div>
-
-                            {/* 입력 영역 */}
-                            <div className="border-t p-4">
-                                <div className="flex space-x-2">
-                                    <Textarea
-                                        value={inputMessage}
-                                        onChange={(e) => setInputMessage(e.target.value)}
-                                        onKeyPress={handleKeyPress}
-                                        placeholder="메시지를 입력하세요..."
-                                        className="flex-1 resize-none"
-                                        rows={1}
-                                        disabled={isLoading || !selectedServer}
-                                    />
-                                    <Button
-                                        onClick={sendMessage}
-                                        disabled={!inputMessage.trim() || isLoading || !selectedServer}
-                                        size="sm"
-                                        className="self-end"
-                                    >
-                                        <Send className="h-4 w-4" />
-                                    </Button>
-                                </div>
-                                <p className="text-xs text-gray-500 mt-2">
-                                    Enter로 전송, Shift+Enter로 줄바꿈
-                                </p>
-                            </div>
-                        </CardContent>
-                    </Card>
-                </div>
+                            </Button>
+                        </div>
+                    </CardContent>
+                </Card>
             </div>
         </div>
     )

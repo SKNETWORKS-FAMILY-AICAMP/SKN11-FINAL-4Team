@@ -18,43 +18,35 @@ class MCPServerManager:
         self.server_configs = {
             "math": {
                 "script": "examples/mcp_math_server.py",
-                "transport": "stdio",
-                "port": None,
+                "transport": "streamable-http",  # stdio → streamable-http로 변경
+                "port": 8003,  # 포트 추가
                 "description": "수학 계산 서버",
             },
             "weather": {
                 "script": "examples/mcp_weather_server.py",
                 "transport": "streamable-http",
-                "port": 8002,
+                "port": 8005,  # 포트 변경 (8002 → 8005)
                 "description": "날씨 정보 서버",
             },
-            # 새로운 MCP 서버들을 위한 포트 예약
-            "calculator": {
-                "script": "examples/mcp_calculator_server.py",
-                "transport": "streamable-http",
-                "port": 8003,
-                "description": "고급 계산기 서버",
-            },
-            "translator": {
-                "script": "examples/mcp_translator_server.py",
-                "transport": "streamable-http",
-                "port": 8004,
-                "description": "번역 서버",
-            },
-            "file_manager": {
-                "script": "examples/mcp_file_manager_server.py",
-                "transport": "streamable-http",
-                "port": 8005,
-                "description": "파일 관리 서버",
-            },
+            # 실제 구현된 서버만 활성화 (나머지는 주석 처리)
         }
 
     async def start_all_servers(self):
         """모든 MCP 서버를 시작합니다."""
         logger.info("MCP 서버들을 시작합니다...")
 
-        # 백엔드 서버가 완전히 시작되었는지 확인
-        await self._wait_for_backend_server()
+        # MCP 모듈 사용 가능 여부 확인
+        try:
+            import mcp
+            from langchain_mcp_adapters.client import MultiServerMCPClient
+            logger.info("✅ MCP 모듈 사용 가능")
+        except ImportError as e:
+            logger.warning(f"⚠️ MCP 모듈이 설치되지 않았습니다: {e}")
+            logger.warning("⚠️ MCP 서버 시작을 건너뜁니다.")
+            return
+
+        # MCP 서버들을 바로 시작
+        logger.info("🚀 MCP 서버들을 바로 시작합니다...")
 
         for server_name, config in self.server_configs.items():
             try:
@@ -64,28 +56,17 @@ class MCPServerManager:
 
         logger.info(f"{len(self.processes)}개의 MCP 서버가 시작되었습니다.")
 
-    async def _wait_for_backend_server(self):
-        """백엔드 서버가 완전히 시작될 때까지 대기합니다."""
-        import httpx
-        import asyncio
-
-        max_retries = 15
-        retry_delay = 2
-
-        for attempt in range(max_retries):
-            try:
-                async with httpx.AsyncClient() as client:
-                    response = await client.get("http://localhost:8000/", timeout=10.0)
-                    if response.status_code == 200:
-                        logger.info("백엔드 서버가 준비되었습니다.")
-                        return
-            except Exception as e:
-                logger.info(
-                    f"백엔드 서버 대기 중... (시도 {attempt + 1}/{max_retries})"
-                )
-                await asyncio.sleep(retry_delay)
-
-        logger.warning("백엔드 서버 연결을 확인할 수 없지만 MCP 서버를 시작합니다.")
+    async def _is_port_in_use(self, port: int) -> bool:
+        """포트가 사용 중인지 확인합니다."""
+        import socket
+        
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.settimeout(1)
+                result = sock.connect_ex(('localhost', port))
+                return result == 0
+        except Exception:
+            return False
 
     async def start_server(self, server_name: str, config: dict):
         """특정 MCP 서버를 시작합니다."""
@@ -107,22 +88,37 @@ class MCPServerManager:
                     encoding="utf-8",
                     errors="replace",
                 )
-            elif config["transport"] == "streamable-http":
-                # HTTP 서버는 포트를 지정하여 실행
-                # .env 파일의 MCP_PORT를 우선 사용, 없으면 config의 포트 사용
-                env = os.environ.copy()
-                env_port = os.getenv("MCP_PORT")
-                if env_port:
-                    port = int(env_port)
-                    logger.info(
-                        f"{server_name} 서버를 .env의 포트 {port}에서 시작합니다..."
-                    )
+                
+                # 프로세스가 정상적으로 시작되었는지 확인
+                await asyncio.sleep(2)
+                if process.poll() is None:
+                    self.processes[server_name] = process
+                    logger.info(f"{server_name} 서버 시작됨 (PID: {process.pid})")
                 else:
-                    port = config.get("port", 8002)
-                    logger.info(f"{server_name} 서버를 포트 {port}에서 시작합니다...")
-
+                    stdout, stderr = process.communicate()
+                    logger.error(f"{server_name} 서버 시작 실패:\nstdout: {stdout}\nstderr: {stderr}")
+                    
+            elif config["transport"] == "streamable-http":
+                port = config.get("port")
+                if port is None:
+                    logger.error(f"{server_name} 서버에 포트가 설정되지 않았습니다.")
+                    return
+                
+                # 포트가 사용 중인지 확인
+                if await self._is_port_in_use(port):
+                    logger.warning(f"포트 {port}가 이미 사용 중입니다. {server_name} 서버를 건너뜁니다.")
+                    return
+                
+                logger.info(f"{server_name} 서버를 포트 {port}에서 시작합니다...")
+                
+                # 환경변수 설정
+                env = os.environ.copy()
                 env["MCP_PORT"] = str(port)
                 env["MCP_HOST"] = "0.0.0.0"
+                
+                # 디버그 출력
+                logger.info(f"환경변수 설정: MCP_PORT={env['MCP_PORT']}, MCP_HOST={env['MCP_HOST']}")
+                
                 process = subprocess.Popen(
                     [sys.executable, str(script_path)],
                     stdout=subprocess.PIPE,
@@ -132,61 +128,65 @@ class MCPServerManager:
                     encoding="utf-8",
                     errors="replace",
                 )
-            else:
-                logger.error(f"지원하지 않는 transport: {config['transport']}")
-                return
-
-            # 프로세스가 정상적으로 시작되었는지 확인
-            await asyncio.sleep(2)
-
-            if process.poll() is None:  # 프로세스가 살아있음
-                self.processes[server_name] = process
-                logger.info(f"{server_name} 서버 시작됨 (PID: {process.pid})")
-            else:
-                # 프로세스가 종료된 경우 에러 로그 확인
-                stdout, stderr = process.communicate()
-                logger.error(f"{server_name} 서버 시작 실패:")
-                if stdout:
-                    logger.error(f"stdout: {stdout}")
-                if stderr:
-                    logger.error(f"stderr: {stderr}")
-
+                
+                # 서버가 시작될 때까지 대기
+                await asyncio.sleep(3)
+                if process.poll() is None:
+                    self.processes[server_name] = process
+                    logger.info(f"{server_name} 서버 시작됨 (PID: {process.pid})")
+                else:
+                    stdout, stderr = process.communicate()
+                    logger.error(f"{server_name} 서버 시작 실패:\nstdout: {stdout}\nstderr: {stderr}")
+                    
         except Exception as e:
-            logger.error(f"{server_name} 서버 시작 중 오류: {e}")
+            logger.error(f"{server_name} 서버 시작 실패: {e}")
 
     async def stop_all_servers(self):
         """모든 MCP 서버를 중지합니다."""
         logger.info("MCP 서버들을 중지합니다...")
-
+        
         for server_name, process in self.processes.items():
             try:
-                await self.stop_server(server_name, process)
+                if process.poll() is None:  # 프로세스가 살아있음
+                    process.terminate()
+                    await asyncio.sleep(2)
+                    
+                    if process.poll() is None:  # 여전히 살아있으면 강제 종료
+                        process.kill()
+                        
+                    logger.info(f"{server_name} 서버 정상 종료됨")
+                else:
+                    logger.info(f"{server_name} 서버는 이미 종료됨")
             except Exception as e:
-                logger.error(f"{server_name} 서버 중지 실패: {e}")
-
+                logger.error(f"{server_name} 서버 종료 실패: {e}")
+                
         self.processes.clear()
         logger.info("모든 MCP 서버가 중지되었습니다.")
-
-    async def stop_server(self, server_name: str, process: subprocess.Popen):
-        """특정 MCP 서버를 중지합니다."""
+        
+    async def restart_server(self, server_name: str):
+        """특정 MCP 서버를 재시작합니다."""
         try:
-            # 프로세스가 살아있는 경우에만 종료 시도
-            if process.poll() is None:
-                # SIGTERM으로 정상 종료 시도
-                process.terminate()
-
-                # 5초 대기 후 강제 종료
-                try:
-                    process.wait(timeout=5)
-                    logger.info(f"{server_name} 서버 정상 종료됨")
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    logger.warning(f"{server_name} 서버 강제 종료됨")
+            # 서버 중지
+            if server_name in self.processes:
+                process = self.processes[server_name]
+                if process.poll() is None:
+                    process.terminate()
+                    await asyncio.sleep(2)
+                    if process.poll() is None:
+                        process.kill()
+                del self.processes[server_name]
+                
+            # 서버 재시작
+            if server_name in self.server_configs:
+                config = self.server_configs[server_name]
+                await self.start_server(server_name, config)
+                logger.info(f"{server_name} 서버 재시작 완료")
             else:
-                logger.info(f"{server_name} 서버는 이미 종료됨")
-
+                raise ValueError(f"알 수 없는 서버: {server_name}")
+                
         except Exception as e:
-            logger.error(f"{server_name} 서버 중지 중 오류: {e}")
+            logger.error(f"{server_name} 서버 재시작 실패: {e}")
+            raise
 
     def get_server_status(self) -> Dict[str, dict]:
         """모든 서버의 상태를 반환합니다."""
@@ -201,15 +201,6 @@ class MCPServerManager:
             }
 
         return status
-
-    async def restart_server(self, server_name: str):
-        """특정 서버를 재시작합니다."""
-        if server_name in self.processes:
-            await self.stop_server(server_name, self.processes[server_name])
-            del self.processes[server_name]
-
-        if server_name in self.server_configs:
-            await self.start_server(server_name, self.server_configs[server_name])
 
 
 # 전역 MCP 서버 매니저 인스턴스

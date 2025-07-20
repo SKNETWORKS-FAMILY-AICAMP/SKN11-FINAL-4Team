@@ -111,7 +111,7 @@ async def chatbot(websocket: WebSocket, lora_repo: str, group_id: int = Query(..
                     use_mcp_tools = True
                 
                 # MCP 도구 사용 가능 여부 확인 및 처리
-                if mcp_tools_available and use_mcp_tools and _should_use_mcp_tools(user_message):
+                if mcp_tools_available and use_mcp_tools and await _should_use_mcp_tools(user_message):
                     try:
                         # MCP 도구를 사용한 응답 생성
                         mcp_response, tools_used = await _process_with_mcp_tools(user_message)
@@ -184,7 +184,7 @@ async def chatbot(websocket: WebSocket, lora_repo: str, group_id: int = Query(..
         except:
             pass
 
-def _should_use_mcp_tools(message: str) -> bool:
+async def _should_use_mcp_tools(message: str) -> bool:
     """메시지가 MCP 도구 사용이 필요한지 확인 (개선된 버전)"""
     try:
         from langchain_openai import ChatOpenAI
