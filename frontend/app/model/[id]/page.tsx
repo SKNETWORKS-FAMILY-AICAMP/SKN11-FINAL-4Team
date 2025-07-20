@@ -2562,33 +2562,6 @@ function ModelDetailContent() {
                         </div>
                       )}
 
-
-                      {/* 활성화된 기능들 */}
-                      <div className="space-y-3">
-                        <div className="flex items-center space-x-3">
-                          <CheckCircle className="h-5 w-5 text-green-500 flex-shrink-0" />
-                          <span className="text-sm font-medium text-gray-900">AI 생성 콘텐츠 자동 포스팅</span>
-                        </div>
-
-                        <div className="flex items-center space-x-3">
-                          <CheckCircle className="h-5 w-5 text-green-500 flex-shrink-0" />
-                          <span className="text-sm font-medium text-gray-900">인사이트 및 분석 데이터 수집</span>
-                        </div>
-
-                        <div className="flex items-center space-x-3">
-                          <CheckCircle className="h-5 w-5 text-green-500 flex-shrink-0" />
-                          <span className="text-sm font-medium text-gray-900">광고 및 마케팅 최적화</span>
-                        </div>
-
-                        {instagramStatus.instagram_info?.account_type === 'BUSINESS' && (
-                          <div className="flex items-center space-x-3">
-                            <CheckCircle className="h-5 w-5 text-blue-500 flex-shrink-0" />
-                            <span className="text-sm font-medium text-gray-900">비즈니스 전용 고급 인사이트</span>
-                          </div>
-                        )}
-                      </div>
-
-
                       {/* 재연동/연동 해제 버튼 */}
                       <div className="pt-2 space-y-3">
                         {instagramStatus.token_expired && (
@@ -2622,26 +2595,6 @@ function ModelDetailContent() {
                     </div>
                   ) : (
                     <div className="space-y-6">
-
-                      {/* 기능 리스트 */}
-                      <div className="space-y-3">
-                        <div className="flex items-center space-x-3">
-                          <CheckCircle className="h-5 w-5 text-green-500 flex-shrink-0" />
-                          <span className="text-sm font-medium text-gray-900">AI 생성 콘텐츠 자동 포스팅</span>
-                        </div>
-
-                        <div className="flex items-center space-x-3">
-                          <CheckCircle className="h-5 w-5 text-green-500 flex-shrink-0" />
-                          <span className="text-sm font-medium text-gray-900">인사이트 및 분석 데이터 수집</span>
-                        </div>
-
-                        <div className="flex items-center space-x-3">
-                          <CheckCircle className="h-5 w-5 text-green-500 flex-shrink-0" />
-                          <span className="text-sm font-medium text-gray-900">광고 및 마케팅 최적화</span>
-                        </div>
-                      </div>
-
-
                       {/* 연동 버튼 */}
                       <Button
                         onClick={handleInstagramConnect}
@@ -2687,7 +2640,7 @@ function ModelDetailContent() {
                   {/* 프로필 이미지와 기본 정보를 가로로 배치 */}
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                     {/* 프로필 이미지 섹션 */}
-                    <div className="flex flex-col items-center space-y-4">
+                    <div className="flex flex-col items-center space-y-4 pt-12">
                       {/* 대형 프로필 이미지 - 클릭 가능 */}
                       <div className="relative cursor-pointer" onClick={openImageModal}>
                         {uploadedImage && imagePreview ? (
