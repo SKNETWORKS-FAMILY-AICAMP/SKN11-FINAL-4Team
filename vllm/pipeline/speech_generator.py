@@ -40,18 +40,27 @@ class CharacterProfile:
     
     def __post_init__(self):
         """MBTI 유효성 검사 (선택 입력 가능)"""
-        valid_mbti = {
+        # SpeechGenerator의 클래스 상수 재사용
+        VALID_MBTI_TYPES = {
             'INTJ', 'INTP', 'ENTJ', 'ENTP',
             'INFJ', 'INFP', 'ENFJ', 'ENFP',
             'ISTJ', 'ISFJ', 'ESTJ', 'ESFJ',
             'ISTP', 'ISFP', 'ESTP', 'ESFP'
         }
         if self.mbti and self.mbti != "NONE":
-            if self.mbti.upper() not in valid_mbti:
+            if self.mbti.upper() not in VALID_MBTI_TYPES:
                 raise ValueError(f"올바르지 않은 MBTI 타입: {self.mbti}")
         self.mbti = self.mbti.upper() if self.mbti else None
 
 class SpeechGenerator:
+    # 클래스 상수로 MBTI 타입 정의
+    VALID_MBTI_TYPES = {
+        'INTJ', 'INTP', 'ENTJ', 'ENTP',
+        'INFJ', 'INFP', 'ENFJ', 'ENFP',
+        'ISTJ', 'ISFJ', 'ESTJ', 'ESFJ',
+        'ISTP', 'ISFP', 'ESTP', 'ESFP'
+    }
+    
     def __init__(self, api_key: str, base_url: Optional[str] = None):
         # OpenAI 클라이언트 래퍼 사용
         try:
@@ -61,12 +70,57 @@ class SpeechGenerator:
             from openai import AsyncOpenAI
             self.client = AsyncOpenAI(api_key=api_key, base_url=base_url)
         
-        self.valid_mbti_types = [
-            'INTJ', 'INTP', 'ENTJ', 'ENTP',
-            'INFJ', 'INFP', 'ENFJ', 'ENFP',
-            'ISTJ', 'ISFJ', 'ESTJ', 'ESFJ',
-            'ISTP', 'ISFP', 'ESTP', 'ESFP'
-        ]
+        # 하위 호환성을 위해 인스턴스 변수도 유지
+        self.valid_mbti_types = list(self.VALID_MBTI_TYPES)
+    
+    async def _call_openai_api(
+        self, 
+        messages: List[Dict[str, str]], 
+        model: str = "gpt-4o-mini",
+        temperature: float = 0.8,
+        max_tokens: int = 150
+    ) -> str:
+        """
+        OpenAI API 호출을 위한 통합 헬퍼 메서드
+        
+        Args:
+            messages: 채팅 메시지 리스트
+            model: 사용할 모델 이름
+            temperature: 생성 온도
+            max_tokens: 최대 토큰 수
+            
+        Returns:
+            생성된 텍스트
+        """
+        try:
+            # OpenAI 클라이언트 래퍼 사용
+            if hasattr(self.client, 'chat_completion'):
+                return await self.client.chat_completion(
+                    messages=messages,
+                    model=model,
+                    temperature=temperature,
+                    max_tokens=max_tokens
+                )
+            else:
+                # 직접 API 호출
+                response = await self.client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens
+                )
+                return response.choices[0].message.content.strip()
+        except Exception as e:
+            raise Exception(f"OpenAI API 호출 실패: {e}")
+    
+    def _format_character_info(self, character: CharacterProfile) -> str:
+        """캐릭터 정보를 포맷팅하는 헬퍼 메서드"""
+        return f"""캐릭터 이름: {character.name}
+캐릭터 설명: {character.description}
+캐릭터 성격: {character.personality}
+캐릭터 MBTI: {character.mbti or '없음'}
+캐릭터 연령대: {character.age_range or '없음'}
+캐릭터 성별: {character.gender.value if character.gender else '없음'}"""
 
     async def generate_system_prompt_with_gpt(self, character: CharacterProfile, tone_instruction_seed: str = "") -> str:
         system_prompt = f"""
@@ -99,26 +153,14 @@ class SpeechGenerator:
         모든 내용은 캐릭터 말투 생성을 위한 system prompt 용도로 사용되므로, 형식과 말투의 일관성을 유지해줘.
         """.strip()
 
-        prompt = f"""
-            캐릭터 정보:
-                캐릭터 이름: {character.name}
-                캐릭터 설명: {character.description}
-                캐릭터 성격: {character.personality}
-                캐릭터 MBTI: {character.mbti or '없음'}
-                캐릭터 연령대: {character.age_range or '없음'}
-                캐릭터 성별: {character.gender.value if character.gender else '없음'}
-        """
+        prompt = f"캐릭터 정보:\n{self._format_character_info(character)}"
         
-        res = await self.client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.7,
-            max_tokens=1000
-        )
-        return res.choices[0].message.content.strip()
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt}
+        ]
+        
+        return await self._call_openai_api(messages, temperature=0.7, max_tokens=1000)
 
     async def generate_system_prompt_from_scripts(self, character: CharacterProfile, scripts: List[str]) -> str:
         """
@@ -144,30 +186,11 @@ class SpeechGenerator:
         {script_lines}
         """.strip()
 
-        # OpenAI 클라이언트 래퍼 사용
-        if hasattr(self.client, 'chat_completion'):
-            messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ]
-            return await self.client.chat_completion(
-                messages=messages,
-                model="gpt-4o-mini",
-                temperature=0.7,
-                max_tokens=1200
-            )
-        else:
-            # 비동기 API 호출
-            response = await self.client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=0.7,
-                max_tokens=1200
-            )
-            return response.choices[0].message.content
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+        return await self._call_openai_api(messages, temperature=0.7, max_tokens=1200)
 
     async def generate_question_for_character(self, character: CharacterProfile) -> str:
         """
@@ -192,25 +215,14 @@ class SpeechGenerator:
             - 질문은 상대방이 감정, 경험, 취향 등 구체적인 내용을 자연스럽게 떠올리고 응답할 수 있는 방식으로 구성해주세요.
             - 의미 있는 응답을 할 수 있도록 질문을 한 문장으로 작성해주세요.
             """
-        user_prompt = f"""
-        캐릭터 정보:
-            캐릭터 이름: {character.name}
-            캐릭터 설명: {character.description}
-            캐릭터 성격: {character.personality}
-            캐릭터 MBTI: {character.mbti or '없음'}
-            캐릭터 연령대: {character.age_range or '없음'}
-            성별: {character.gender.value if character.gender else '없음'}
-        """
-        response = await self.client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            max_tokens=100,
-            temperature=0.8
-        )
-        return response.choices[0].message.content.strip()
+        user_prompt = f"캐릭터 정보:\n{self._format_character_info(character)}"
+        
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+        
+        return await self._call_openai_api(messages, temperature=0.8, max_tokens=100)
 
 
     async def create_character_prompt_for_random_tone(self, character: CharacterProfile, tone_variation: int) -> str:
@@ -248,7 +260,6 @@ class SpeechGenerator:
         1. 말투 스타일을 MZ 느낌나게 키워드 3개를 생성해 해시태그 형식으로 작성해 주세요.
         2. 말투 스타일을 한 문장으로 요약해주세요. 반드시 '말투'로 끝나야 합니다. 서술어 없이 명사형으로 끝납니다.
         3. 출력 형식은 반드시 JSON 형식으로 반환해주세요. (추가 설명 없이)
-        
         """
 
         # OpenAI 클라이언트 래퍼 사용
@@ -257,26 +268,21 @@ class SpeechGenerator:
                 system_prompt=system_prompt,
                 model="gpt-4o-mini"
             )
-        else:
-            # 비동기 API 호출
-            response = await self.client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": system_instruction},
-                    {"role": "user", "content": f"말투 지시사항:\n{system_prompt}"}
-                ],
-                max_tokens=200,
-                temperature=0.7
-            )
-            
-            try:
-                return json.loads(response.choices[0].message.content)
-            except Exception as e:
-                print(f"말투 요약 파싱 실패: {e}") 
-                return {
-                    "hashtags": "#GPT #응답파싱 #실패",
-                    "description": "말투 요약 실패한 말투"
-                }
+        
+        messages = [
+            {"role": "system", "content": system_instruction},
+            {"role": "user", "content": f"말투 지시사항:\n{system_prompt}"}
+        ]
+        
+        try:
+            response_text = await self._call_openai_api(messages, temperature=0.7, max_tokens=200)
+            return json.loads(response_text)
+        except Exception as e:
+            print(f"말투 요약 파싱 실패: {e}") 
+            return {
+                "hashtags": "#GPT #응답파싱 #실패",
+                "description": "말투 요약 실패한 말투"
+            }
     
     async def generate_character_tones_for_question(self, character: CharacterProfile, question: str, num_variations: int = 3) -> Dict[str, List[Dict[str, Any]]]:
         """
@@ -299,29 +305,12 @@ class SpeechGenerator:
             system_prompt = await self.create_character_prompt_for_random_tone(character, i+1)
             
             try:
-                # 비동기 응답 생성 (OpenAI 래퍼 사용)
-                if hasattr(self.client, 'chat_completion'):
-                    messages = [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": question}
-                    ]
-                    generated_text = await self.client.chat_completion(
-                        messages=messages,
-                        model="gpt-4o-mini",
-                        temperature=0.8,
-                        max_tokens=150
-                    )
-                else:
-                    response = await self.client.chat.completions.create(
-                        model="gpt-4o-mini",
-                        messages=[
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": question}
-                        ],
-                        max_tokens=150,
-                        temperature=0.8
-                    )
-                    generated_text = response.choices[0].message.content.strip()
+                # 응답 생성
+                messages = [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": question}
+                ]
+                generated_text = await self._call_openai_api(messages, temperature=0.8, max_tokens=150)
                 
                 # 말투 요약 생성
                 tone_summary = await self.summarize_speech_style_with_gpt(system_prompt)
@@ -369,29 +358,12 @@ class SpeechGenerator:
                 current_system_prompt = await self.create_character_prompt_for_random_tone(character, 1) 
             
             try:
-                # 응답 생성 (OpenAI 래퍼 사용)
-                if hasattr(self.client, 'chat_completion'):
-                    messages = [
-                        {"role": "system", "content": current_system_prompt},
-                        {"role": "user", "content": question}
-                    ]
-                    answer = await self.client.chat_completion(
-                        messages=messages,
-                        model="gpt-4o-mini",
-                        temperature=0.8,
-                        max_tokens=150
-                    )
-                else:
-                    response = await self.client.chat.completions.create(
-                        model="gpt-4o-mini",
-                        messages=[
-                            {"role": "system", "content": current_system_prompt},
-                            {"role": "user", "content": question}
-                        ],
-                        max_tokens=150,
-                        temperature=0.8
-                    )
-                    answer = response.choices[0].message.content.strip()
+                # 응답 생성
+                messages = [
+                    {"role": "system", "content": current_system_prompt},
+                    {"role": "user", "content": question}
+                ]
+                answer = await self._call_openai_api(messages, temperature=0.8, max_tokens=150)
                 
                 qa_pairs.append({"question": question, "answer": answer})
                 
@@ -630,38 +602,33 @@ class SpeechGenerator:
         Returns:
             {"말투1": ..., "말투2": ..., "말투3": ...}
         """
+        # 기본 캐릭터 정보 텍스트
+        char_info = f"""캐릭터 정보:
+- 이름: {character.name}
+- 설명: {character.description}
+- 나이: {character.age_range if character.age_range else '정보 없음'}
+- 성별: {character.gender.value}
+- 성격: {character.personality}
+- MBTI: {character.mbti}"""
+        
+        tone_instructions = [
+            "독특하고 창의적인 말투 스타일",
+            "첫 번째와는 완전히 다른 새로운 말투 스타일", 
+            "앞의 두 가지와는 전혀 다른 참신한 말투 스타일"
+        ]
+        
         prompts = [
-            f"""다음 캐릭터의 성격, 설명, MBTI를 반영하여 독특하고 창의적인 말투 스타일을 한 문장(한국어)으로 설명해줘.\n캐릭터 정보:\n- 이름: {character.name}\n- 설명: {character.description}\n- 나이: {character.age_range if character.age_range else '정보 없음'}\n- 성별: {character.gender.value}\n- 성격: {character.personality}\n- MBTI: {character.mbti}\n(말투1)""",
-            f"""다음 캐릭터의 성격, 설명, MBTI를 반영하여 첫 번째와는 완전히 다른 새로운 말투 스타일을 한 문장(한국어)으로 설명해줘.\n캐릭터 정보:\n- 이름: {character.name}\n- 설명: {character.description}\n- 나이: {character.age_range if character.age_range else '정보 없음'}\n- 성별: {character.gender.value}\n- 성격: {character.personality}\n- MBTI: {character.mbti}\n(말투2)""",
-            f"""다음 캐릭터의 성격, 설명, MBTI를 반영하여 앞의 두 가지와는 전혀 다른 참신한 말투 스타일을 한 문장(한국어)으로 설명해줘.\n캐릭터 정보:\n- 이름: {character.name}\n- 설명: {character.description}\n- 나이: {character.age_range if character.age_range else '정보 없음'}\n- 성별: {character.gender.value}\n- 성격: {character.personality}\n- MBTI: {character.mbti}\n(말투3)"""
+            f"다음 캐릭터의 성격, 설명, MBTI를 반영하여 {instruction}을 한 문장(한국어)으로 설명해줘.\n{char_info}\n(말투{i+1})"
+            for i, instruction in enumerate(tone_instructions)
         ]
         tone_names = ["말투1", "말투2", "말투3"]
         descriptions = {}
         for i, prompt in enumerate(prompts):
-            # OpenAI 래퍼 사용 (비동기)
-            if hasattr(self.client, 'chat_completion'):
-                messages = [
-                    {"role": "system", "content": "아래 프롬프트에 따라 말투 스타일 설명을 한 문장으로, 반드시 한국어로만 답변하세요."},
-                    {"role": "user", "content": prompt}
-                ]
-                desc = await self.client.chat_completion(
-                    messages=messages,
-                    model="gpt-4o-mini",
-                    temperature=0.9,
-                    max_tokens=100
-                )
-            else:
-                response = await self.client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {"role": "system", "content": "아래 프롬프트에 따라 말투 스타일 설명을 한 문장으로, 반드시 한국어로만 답변하세요."},
-                        {"role": "user", "content": prompt}
-                    ],
-                    max_tokens=100,
-                    temperature=0.9
-                )
-                desc = response.choices[0].message.content.strip()
-            
+            messages = [
+                {"role": "system", "content": "아래 프롬프트에 따라 말투 스타일 설명을 한 문장으로, 반드시 한국어로만 답변하세요."},
+                {"role": "user", "content": prompt}
+            ]
+            desc = await self._call_openai_api(messages, temperature=0.9, max_tokens=100)
             descriptions[tone_names[i]] = desc
         return descriptions
 
@@ -806,29 +773,11 @@ class SpeechGenerator:
         for tone_name, prompt in system_prompts.items():
             results[selected_message][tone_name] = []
             for i in range(1):  
-                # OpenAI 래퍼 사용
-                if hasattr(self.client, 'chat_completion'):
-                    messages = [
-                        {"role": "system", "content": prompt},
-                        {"role": "user", "content": selected_message}
-                    ]
-                    content = await self.client.chat_completion(
-                        messages=messages,
-                        model="gpt-4o-mini",
-                        temperature=0.9,
-                        max_tokens=2000
-                    )
-                else:
-                    chat_completion = await self.client.chat.completions.create(
-                        model="gpt-4o-mini",
-                        messages=[
-                            {"role": "system", "content": prompt},
-                            {"role": "user", "content": selected_message}
-                        ],
-                        max_tokens=2000,
-                        temperature=0.9
-                    )
-                    content = chat_completion.choices[0].message.content
+                messages = [
+                    {"role": "system", "content": prompt},
+                    {"role": "user", "content": selected_message}
+                ]
+                content = await self._call_openai_api(messages, temperature=0.9, max_tokens=2000)
                 
                 summary = await self.summarize_speech_style_with_gpt(prompt)
 
@@ -870,10 +819,8 @@ def get_character_from_input() -> CharacterProfile:
     gender_map = {"남성": Gender.MALE, "여성": Gender.FEMALE, "없음": Gender.NON_BINARY}
     gender = gender_map.get(gender_str, Gender.NON_BINARY)
     
-    # API key는 환경변수에서 가져오거나 빈 문자열 사용
-    api_key = os.getenv('OPENAI_API_KEY', '')
-    generator = SpeechGenerator(api_key=api_key)
-    mbti = mbti if mbti in generator.valid_mbti_types else "NONE"
+    # MBTI 유효성 검사
+    mbti = mbti if mbti in SpeechGenerator.VALID_MBTI_TYPES else "NONE"
 
     return CharacterProfile(
         name=name,
@@ -902,16 +849,11 @@ async def generate_qa_pairs_with_similarity(generator: SpeechGenerator, characte
         question = await generator.generate_question_for_character(character)
 
         # GPT 응답 생성
-        response = await generator.client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": question}
-            ],
-            temperature=0.8,
-            max_tokens=300
-        )
-        answer = response.choices[0].message.content.strip()
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": question}
+        ]
+        answer = await generator._call_openai_api(messages, temperature=0.8, max_tokens=300)
 
         qa_pairs.append((question, answer))
 
