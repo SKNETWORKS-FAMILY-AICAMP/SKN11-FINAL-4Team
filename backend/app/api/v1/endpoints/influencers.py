@@ -7,7 +7,7 @@ from fastapi import (
     UploadFile,
     File,
     Form,
-    Header
+    Header,
 )
 
 from sqlalchemy.orm import Session
@@ -83,35 +83,33 @@ logger = logging.getLogger(__name__)
 async def verify_api_key(
     x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
     authorization: Optional[str] = Header(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ) -> AIInfluencer:
     """API 키를 검증하고 해당 인플루언서를 반환합니다."""
-    
+
     # API 키 추출 (헤더에서)
     api_key = None
-    
+
     # X-API-Key 헤더 확인
     if x_api_key:
         api_key = x_api_key
     # Authorization 헤더에서 Bearer 토큰 확인
     elif authorization and authorization.startswith("Bearer "):
         api_key = authorization[7:]  # "Bearer " 제거
-    
+
     if not api_key:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="API key is required",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
     try:
         # API 키로 인플루언서 조회
         influencer_api = (
-            db.query(InfluencerAPI)
-            .filter(InfluencerAPI.api_value == api_key)
-            .first()
+            db.query(InfluencerAPI).filter(InfluencerAPI.api_value == api_key).first()
         )
-        
+
         if not influencer_api:
             logger.warning(f"❌ 잘못된 API 키 시도: {api_key[:10]}...")
             raise HTTPException(
@@ -119,30 +117,36 @@ async def verify_api_key(
                 detail="Invalid API key",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-        
+
         # 인플루언서 정보 조회
         influencer = (
             db.query(AIInfluencer)
             .filter(AIInfluencer.influencer_id == influencer_api.influencer_id)
             .first()
         )
-        
+
         if not influencer:
-            logger.error(f"❌ API 키는 유효하지만 인플루언서를 찾을 수 없음: {influencer_api.influencer_id}")
+            logger.error(
+                f"❌ API 키는 유효하지만 인플루언서를 찾을 수 없음: {influencer_api.influencer_id}"
+            )
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Influencer not found",
             )
-        
+
         # 인플루언서가 사용 가능한 상태인지 확인 (학습 상태와 관계없이 접근 허용)
         if influencer.learning_status is None:
-            logger.warning(f"⚠️ 학습 상태가 설정되지 않은 인플루언서 접근: {influencer.influencer_name}")
+            logger.warning(
+                f"⚠️ 학습 상태가 설정되지 않은 인플루언서 접근: {influencer.influencer_name}"
+            )
         elif influencer.learning_status != 1:
-            logger.info(f"ℹ️ 학습 중인 인플루언서 접근: {influencer.influencer_name} (status: {influencer.learning_status})")
-        
+            logger.info(
+                f"ℹ️ 학습 중인 인플루언서 접근: {influencer.influencer_name} (status: {influencer.learning_status})"
+            )
+
         logger.info(f"✅ API 키 인증 성공: {influencer.influencer_name}")
         return influencer
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -1053,8 +1057,10 @@ async def regenerate_conversation_tones(
 
     return await ToneGenerationService.generate_conversation_tones(request, True)
 
-async def _generate_question_for_character(client: OpenAI, character_info: str, temperature: float = 0.6) -> str:
 
+async def _generate_question_for_character(
+    client: OpenAI, character_info: str, temperature: float = 0.6
+) -> str:
     """캐릭터 정보에 어울리는 질문을 GPT가 생성하도록 합니다."""
     prompt = f"""
 당신은 아래 캐릭터 정보를 바탕으로, 이 캐릭터가 가장 잘 드러날 수 있는 상황이나 일상적인 질문 하나를 한 문장으로 작성해주세요.
@@ -1083,8 +1089,10 @@ async def _generate_question_for_character(client: OpenAI, character_info: str, 
 
     return response.choices[0].message.content.strip()
 
-async def _generate_three_tones(client: OpenAI, character_info: str, question: str, temperature: float = 0.9) -> List[Dict[str, str]]:
 
+async def _generate_three_tones(
+    client: OpenAI, character_info: str, question: str, temperature: float = 0.9
+) -> List[Dict[str, str]]:
     """캐릭터 정보를 바탕으로 3가지 다른 말투를 생성합니다."""
 
     conversation_examples = []
@@ -1123,8 +1131,10 @@ async def _generate_three_tones(client: OpenAI, character_info: str, question: s
 
     return conversation_examples
 
-async def _generate_system_prompt_for_tone(client: OpenAI, character_info: str, tone_variation: int) -> str:
 
+async def _generate_system_prompt_for_tone(
+    client: OpenAI, character_info: str, tone_variation: int
+) -> str:
     """캐릭터 정보를 기반으로 특정 말투에 대한 시스템 프롬프트를 생성합니다."""
 
     tone_instructions = {
@@ -1172,6 +1182,7 @@ async def _generate_system_prompt_for_tone(client: OpenAI, character_info: str, 
     )
 
     return response.choices[0].message.content.strip()
+
 
 async def _summarize_speech_style(client: OpenAI, system_prompt: str) -> Dict[str, str]:
     """말투의 시스템 프롬프트를 기반으로 그 말투의 특징을 요약합니다."""
@@ -1319,16 +1330,24 @@ async def generate_api_key(
             f"❌ API 키 생성 실패 - 인플루언서가 존재하지 않음: influencer_id: {influencer_id}"
         )
         raise HTTPException(status_code=404, detail="Influencer not found")
-    
+
     # 팀 권한 체크 (같은 팀에 속한 사용자도 접근 가능)
     try:
-        check_team_resource_permission(current_user, str(influencer_exists.user_id), db=db)
+        check_team_resource_permission(
+            current_user, str(influencer_exists.user_id), db=db
+        )
         influencer = influencer_exists
-        logger.info(f"✅ 팀 권한 확인 성공 - influencer_id: {influencer_id}, user_id: {user_id}")
+        logger.info(
+            f"✅ 팀 권한 확인 성공 - influencer_id: {influencer_id}, user_id: {user_id}"
+        )
     except HTTPException as e:
-        logger.error(f"❌ API 키 생성 실패 - 팀 권한 없음: influencer_id: {influencer_id}, user_id: {user_id}, 실제 소유자: {influencer_exists.user_id}")
-        raise HTTPException(status_code=403, detail="인플루언서에 대한 접근 권한이 없습니다.")
-    
+        logger.error(
+            f"❌ API 키 생성 실패 - 팀 권한 없음: influencer_id: {influencer_id}, user_id: {user_id}, 실제 소유자: {influencer_exists.user_id}"
+        )
+        raise HTTPException(
+            status_code=403, detail="인플루언서에 대한 접근 권한이 없습니다."
+        )
+
     # 인플루언서가 사용 가능한 상태인지 확인
     if influencer.learning_status != 1:
         logger.warning(
@@ -1379,6 +1398,7 @@ async def generate_api_key(
         raise HTTPException(
             status_code=500, detail="API 키 생성 중 오류가 발생했습니다."
         )
+
 
 @router.get("/{influencer_id}/api-key", response_model=APIKeyInfo)
 async def get_api_key(
@@ -1554,90 +1574,147 @@ async def chat_with_influencer(
     api_key: AIInfluencer = Depends(verify_api_key),
     db: Session = Depends(get_db),
 ):
-    """API 키로 인증된 인플루언서와 대화"""
+    """API 키로 인증된 인플루언서와 대화 (MCP 챗봇 기능 포함)"""
     try:
         # API 사용량 추적
         await track_api_usage(db, str(api_key.influencer_id))
-        
+
         # VLLM 서비스 호출
         try:
-            from app.services.vllm_client import vllm_generate_response, vllm_health_check
-            
+            from app.services.vllm_client import get_vllm_client, vllm_health_check
+
             # VLLM 서버 상태 확인
             if not await vllm_health_check():
                 logger.warning("VLLM 서버에 연결할 수 없어 기본 응답을 사용합니다.")
                 response_text = f"안녕하세요! 저는 {api_key.influencer_name}입니다. '{request.message}'에 대한 답변을 드리겠습니다."
             else:
                 # 시스템 프롬프트 구성
-                system_message = str(api_key.system_prompt) if api_key.system_prompt is not None else f"당신은 {api_key.influencer_name}입니다. 친근하고 도움이 되는 답변을 해주세요."
-                
-                # VLLM 서버에서 응답 생성
+                system_message = (
+                    str(api_key.system_prompt)
+                    if api_key.system_prompt is not None
+                    else f"당신은 {api_key.influencer_name}입니다. 친근하고 도움이 되는 답변을 해주세요."
+                )
+
+                # VLLM 클라이언트 가져오기
+                vllm_client = await get_vllm_client()
+
+                # 어댑터 로드 시도
+                model_id = None
+                adapter_loaded = False
+
                 if api_key.influencer_model_repo:
                     model_id = str(api_key.influencer_model_repo)
-                    
+
                     # HF 토큰 가져오기
                     from app.models.user import HFTokenManage
                     from app.core.encryption import decrypt_sensitive_data
-                    
+
                     hf_token = None
-                    if hasattr(api_key, 'group_id') and api_key.group_id:
-                        hf_token_manage = db.query(HFTokenManage).filter(
-                            HFTokenManage.group_id == api_key.group_id
-                        ).order_by(HFTokenManage.created_at.desc()).first()
-                        
+                    if hasattr(api_key, "group_id") and api_key.group_id:
+                        hf_token_manage = (
+                            db.query(HFTokenManage)
+                            .filter(HFTokenManage.group_id == api_key.group_id)
+                            .order_by(HFTokenManage.created_at.desc())
+                            .first()
+                        )
+
                         if hf_token_manage:
-                            hf_token = decrypt_sensitive_data(str(hf_token_manage.hf_token_value))
-                    
-                    # VLLM 클라이언트 가져오기
-                    from app.services.vllm_client import get_vllm_client
-                    vllm_client = await get_vllm_client()
-                    
-                    # 어댑터 로드
-                    try:
-                        await vllm_client.load_adapter(model_id, model_id, hf_token)
-                        logger.info(f"✅ VLLM 어댑터 로드 완료: {model_id}")
-                    except Exception as e:
-                        logger.warning(f"⚠️ 어댑터 로드 실패, 기본 모델 사용: {e}")
-                        # 어댑터 로드 실패 시 기본 모델 사용
-                        model_id = str(api_key.influencer_id)
+                            hf_token = decrypt_sensitive_data(
+                                str(hf_token_manage.hf_token_value)
+                            )
+
+                    # 어댑터 로드 시도 (최대 3번 재시도)
+                    load_attempts = 0
+                    max_attempts = 3
+
+                    while not adapter_loaded and load_attempts < max_attempts:
+                        load_attempts += 1
+                        try:
+                            logger.info(
+                                f"인플루언서 어댑터 로드 시도 {load_attempts}/{max_attempts}: {model_id}"
+                            )
+                            await vllm_client.load_adapter(model_id, model_id, hf_token)
+                            logger.info(f"✅ 인플루언서 어댑터 로드 성공: {model_id}")
+                            adapter_loaded = True
+                        except Exception as e:
+                            logger.warning(
+                                f"⚠️ 인플루언서 어댑터 로드 실패 (시도 {load_attempts}/{max_attempts}): {e}"
+                            )
+                            if load_attempts < max_attempts:
+                                import asyncio
+
+                                await asyncio.sleep(2)  # 2초 대기 후 재시도
+                            else:
+                                logger.error(
+                                    f"❌ 인플루언서 어댑터 로드 최종 실패: {e}"
+                                )
+                                model_id = str(api_key.influencer_id)
+                                adapter_loaded = False
                 else:
                     model_id = str(api_key.influencer_id)
-                
-                response_text = await vllm_generate_response(
+
+                # VLLM을 사용한 응답 생성
+                response = await vllm_client.generate_response(
                     user_message=request.message,
                     system_message=system_message,
                     influencer_name=str(api_key.influencer_name),
                     model_id=model_id,
-                    max_new_tokens=200,
-                    temperature=0.7
+                    max_new_tokens=512,
+                    temperature=0.7,
                 )
-                
-                logger.info(f"✅ VLLM 응답 생성 성공: {api_key.influencer_name}")
-                
+
+                # 응답에서 텍스트 추출
+                if isinstance(response, dict) and "response" in response:
+                    response_text = response["response"]
+                    used_adapter = response.get("used_adapter", False)
+                    actual_model_id = response.get("model_id")
+                elif isinstance(response, str):
+                    response_text = response
+                    used_adapter = False
+                    actual_model_id = None
+                else:
+                    response_text = str(response)
+                    used_adapter = False
+                    actual_model_id = None
+
+                logger.info(
+                    f"✅ VLLM 응답 생성 성공: {api_key.influencer_name} (어댑터 사용: {used_adapter})"
+                )
+
         except Exception as e:
             logger.error(f"❌ VLLM 응답 생성 실패: {e}")
             # VLLM 실패 시 기본 응답 사용
             response_text = f"안녕하세요! 저는 {api_key.influencer_name}입니다. '{request.message}'에 대한 답변을 드리겠습니다."
-        
+            used_adapter = False
+            actual_model_id = None
+
         return {
             "success": True,
             "response": response_text,
             "influencer_name": api_key.influencer_name,
             "message": request.message,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
+            "debug_info": {
+                "adapter_loaded": adapter_loaded,
+                "model_id": model_id,
+                "used_adapter": used_adapter,
+                "actual_model_id": actual_model_id,
+                "influencer_id": str(api_key.influencer_id),
+            },
         }
 
     except Exception as e:
-        logger.error(f"❌ 챗봇 대화 실패 - influencer_id: {api_key.influencer_id}, error: {str(e)}")
+        logger.error(
+            f"❌ 챗봇 대화 실패 - influencer_id: {api_key.influencer_name}, error: {str(e)}"
+        )
         raise HTTPException(status_code=500, detail="챗봇 대화 중 오류가 발생했습니다.")
-
 
 
 async def track_api_usage(db: Session, influencer_id: str):
     """API 사용량을 추적하여 APICallAggregation 테이블에 기록"""
     try:
         from datetime import date
-        
+
         # 해당 인플루언서의 API 키 조회
         api_key = (
             db.query(InfluencerAPI)
@@ -1648,12 +1725,11 @@ async def track_api_usage(db: Session, influencer_id: str):
         if not api_key:
             logger.warning(f"API 키를 찾을 수 없음 - influencer_id: {influencer_id}")
             return
-        
+
         today = date.today()
-        
+
         # 오늘 날짜의 기존 집계 데이터 조회
         existing_aggregation = (
-
             db.query(APICallAggregation)
             .filter(
                 APICallAggregation.api_id == api_key.api_id,
@@ -1662,12 +1738,13 @@ async def track_api_usage(db: Session, influencer_id: str):
             .first()
         )
 
-        
         if existing_aggregation:
             # 기존 데이터가 있으면 호출 횟수 증가
             existing_aggregation.daily_call_count += 1
             existing_aggregation.updated_at = datetime.utcnow()
-            logger.info(f"✅ API 사용량 업데이트 - influencer_id: {influencer_id}, daily_calls: {existing_aggregation.daily_call_count}")
+            logger.info(
+                f"✅ API 사용량 업데이트 - influencer_id: {influencer_id}, daily_calls: {existing_aggregation.daily_call_count}"
+            )
 
         else:
             # 새로운 집계 데이터 생성
@@ -1675,17 +1752,22 @@ async def track_api_usage(db: Session, influencer_id: str):
                 api_id=api_key.api_id,
                 influencer_id=influencer_id,
                 daily_call_count=1,
-
                 created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow()
+                updated_at=datetime.utcnow(),
             )
             db.add(new_aggregation)
-            logger.info(f"✅ 새로운 API 사용량 기록 생성 - influencer_id: {influencer_id}, daily_calls: 1")
-        
+            logger.info(
+                f"✅ 새로운 API 사용량 기록 생성 - influencer_id: {influencer_id}, daily_calls: 1"
+            )
+
         db.commit()
-        
 
     except Exception as e:
-        logger.error(f"❌ API 사용량 추적 실패 - influencer_id: {influencer_id}, error: {str(e)}")
+        logger.error(
+            f"❌ API 사용량 추적 실패 - influencer_id: {influencer_id}, error: {str(e)}"
+        )
         db.rollback()
 
+
+# MCP 도구 관련 기능은 mcp.py에서 관리됩니다.
+# 삭제된 함수들은 더 이상 사용하지 않습니다.

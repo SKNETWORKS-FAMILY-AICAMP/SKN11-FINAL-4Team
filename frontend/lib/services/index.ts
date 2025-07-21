@@ -3,7 +3,6 @@ export { default as UserService } from './user.service'
 export { default as ModelService } from './model.service'
 export { default as PostService } from './post.service'
 export { default as PermissionService } from './permission.service'
-export { MCPService } from './mcp.service'
 
 // Re-export types
 export type {
@@ -39,14 +38,3 @@ export type {
   Team,
   TeamListResponse
 } from './permission.service'
-
-export type {
-  MCPToolInfo,
-  MCPToolsListResponse,
-  MCPToolRequest,
-  MCPToolResponse,
-  MCPChatRequest,
-  MCPChatResponse,
-  MCPServerInfo,
-  MCPServersResponse
-} from './mcp.service'

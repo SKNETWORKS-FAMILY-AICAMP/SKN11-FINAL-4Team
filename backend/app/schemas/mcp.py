@@ -32,19 +32,3 @@ class MCPToolsListResponse(BaseModel):
     server_name: str
     tools: List[MCPToolInfo]
     total_count: int
-
-
-class MCPChatRequest(BaseModel):
-    """MCP 챗봇 요청"""
-
-    message: str
-    server_name: str
-    session_id: Optional[str] = None
-
-
-class MCPChatResponse(BaseModel):
-    """MCP 챗봇 응답"""
-
-    response: str
-    session_id: str
-    tools_used: List[str] = []

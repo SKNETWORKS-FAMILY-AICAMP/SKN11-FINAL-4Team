@@ -9,6 +9,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { tokenUtils } from "@/lib/auth"
 import { ModelService } from "@/lib/services/model.service"
+import { MCPServerSelector } from "@/components/mcp-server-selector"
 
 import {
   Send,
@@ -18,6 +19,7 @@ import {
   Loader2,
   ChevronDown,
   ChevronUp,
+  Settings,
 } from "lucide-react"
 
 interface Message {
@@ -50,6 +52,8 @@ export default function ChatPage() {
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('connecting')
   const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false)
   const [mcpToolsEnabled, setMcpToolsEnabled] = useState(true)
+  const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([])
+  const [showMcpSettings, setShowMcpSettings] = useState(false)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const wsRef = useRef<WebSocket | null>(null)
@@ -107,18 +111,18 @@ export default function ChatPage() {
       setIsLoading(false);
       try {
         const data = JSON.parse(event.data);
-        
+
         if (data.type === "token") {
           // 스트리밍 토큰 처리
           setMessages(prev => {
             const newMessages = [...prev];
             const lastMessage = newMessages[newMessages.length - 1];
-            
+
             if (lastMessage && lastMessage.sender === "bot" && lastMessage.isStreaming) {
               // 기존 스트리밍 메시지에 토큰 추가 (중복 제거)
               const newContent = data.content;
               const currentContent = lastMessage.content;
-              
+
               // 중복 제거: 새로운 토큰이 기존 내용의 끝과 중복되지 않는지 확인
               if (!currentContent.endsWith(newContent)) {
                 lastMessage.content += newContent;
@@ -133,7 +137,7 @@ export default function ChatPage() {
                 isStreaming: true
               });
             }
-            
+
             return newMessages;
           });
         } else if (data.type === "complete") {
@@ -245,7 +249,7 @@ export default function ChatPage() {
     const currentMessage = inputMessage;
     setInputMessage("");
     setIsLoading(true);
-    
+
     // WebSocket 모드
     if (connectionStatus !== 'connected') {
 
@@ -259,24 +263,25 @@ export default function ChatPage() {
 
       return;
     }
-    
+
     // 타임아웃 설정 (30초)
     timeoutRef.current = setTimeout(() => {
-        setIsLoading(false);
-        setMessages(prev => [...prev, {
-          id: (Date.now() + 1).toString(),
-          content: "응답 시간이 초과되었습니다. 다시 시도해주세요.",
-          sender: "bot",
-          timestamp: new Date(),
-        }]);
+      setIsLoading(false);
+      setMessages(prev => [...prev, {
+        id: (Date.now() + 1).toString(),
+        content: "응답 시간이 초과되었습니다. 다시 시도해주세요.",
+        sender: "bot",
+        timestamp: new Date(),
+      }]);
     }, 30000);
-    
+
     try {
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         // MCP 도구 사용 여부를 포함한 메시지 전송
         const messageData = {
           message: currentMessage,
-          use_mcp_tools: mcpToolsEnabled
+          use_mcp_tools: mcpToolsEnabled,
+          selected_mcp_servers: selectedMcpServers
         };
         wsRef.current.send(JSON.stringify(messageData));
       } else {
@@ -369,13 +374,13 @@ export default function ChatPage() {
             <div>
               <h2 className="text-lg font-semibold">{model?.name || "로딩 중..."}</h2>
               <p className="text-sm text-gray-500">
-                {connectionStatus === 'connected' ? '🟢 연결됨' : 
-                 connectionStatus === 'connecting' ? '🟡 연결 중...' : 
-                 connectionStatus === 'error' ? '🔴 연결 오류' : '⚪ 연결 끊김'}
+                {connectionStatus === 'connected' ? '🟢 연결됨' :
+                  connectionStatus === 'connecting' ? '🟡 연결 중...' :
+                    connectionStatus === 'error' ? '🔴 연결 오류' : '⚪ 연결 끊김'}
               </p>
             </div>
           </div>
-          
+
           {/* MCP 도구 토글 */}
           <div className="flex items-center space-x-2">
             <label className="flex items-center space-x-2 text-sm">
@@ -387,8 +392,32 @@ export default function ChatPage() {
               />
               <span>🔧 MCP 도구</span>
             </label>
+            {selectedMcpServers.length > 0 && (
+              <span className="text-xs text-gray-500">
+                ({selectedMcpServers.length}개 서버 선택됨)
+              </span>
+            )}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setShowMcpSettings(!showMcpSettings)}
+              className="flex items-center space-x-2"
+            >
+              <Settings className="h-4 w-4" />
+              <span>MCP 설정</span>
+            </Button>
           </div>
         </div>
+
+        {/* MCP 설정 패널 */}
+        {showMcpSettings && (
+          <div className="border-b bg-white p-4">
+            <MCPServerSelector
+              selectedServers={selectedMcpServers}
+              onServerChange={setSelectedMcpServers}
+            />
+          </div>
+        )}
 
         {/* 채팅 영역 */}
         <Card className="flex-1 flex flex-col min-h-0">
@@ -475,14 +504,13 @@ export default function ChatPage() {
                     className={`flex ${message.sender === "user" ? "justify-end" : "justify-start"} mb-4`}
                   >
                     <div
-                      className={`max-w-[70%] rounded-lg px-4 py-2 ${
-                        message.sender === "user"
-                          ? "bg-blue-500 text-white"
-                          : "bg-gray-200 text-gray-800"
-                      }`}
+                      className={`max-w-[70%] rounded-lg px-4 py-2 ${message.sender === "user"
+                        ? "bg-blue-500 text-white"
+                        : "bg-gray-200 text-gray-800"
+                        }`}
                     >
                       <div className="whitespace-pre-wrap">{message.content}</div>
-                      
+
                       {/* MCP 도구 사용 표시 */}
                       {message.isMCPResponse && message.tools_used && message.tools_used.length > 0 && (
                         <div className="mt-2 pt-2 border-t border-gray-300">
@@ -491,7 +519,7 @@ export default function ChatPage() {
                           </div>
                         </div>
                       )}
-                      
+
                       {/* 스트리밍 표시 */}
                       {message.isStreaming && (
                         <div className="mt-1">

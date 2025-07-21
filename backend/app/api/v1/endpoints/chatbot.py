@@ -1,10 +1,23 @@
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, Depends, HTTPException
+from fastapi import (
+    APIRouter,
+    WebSocket,
+    WebSocketDisconnect,
+    Query,
+    Depends,
+    HTTPException,
+)
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.user import HFTokenManage
-from app.services.vllm_client import VLLMWebSocketClient, VLLMClient, get_vllm_client, vllm_health_check
+from app.services.vllm_client import (
+    VLLMWebSocketClient,
+    VLLMClient,
+    get_vllm_client,
+    vllm_health_check,
+)
 from app.core.encryption import decrypt_sensitive_data
+
 # MCP 클라이언트 추가
 from app.services.mcp_client import mcp_client_service
 import json
@@ -16,287 +29,349 @@ from app.core.config import settings
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+
 class ModelLoadRequest(BaseModel):
     lora_repo: str
     group_id: int
 
+
 @router.websocket("/chatbot/{lora_repo}")
-async def chatbot(websocket: WebSocket, lora_repo: str, group_id: int = Query(...), influencer_id: str = Query(None), db: Session = Depends(get_db)):
+async def chatbot(
+    websocket: WebSocket,
+    lora_repo: str,
+    group_id: int = Query(...),
+    influencer_id: str = Query(None),
+    db: Session = Depends(get_db),
+):
     # lora_repo는 base64로 인코딩되어 있으므로 디코딩
     try:
         lora_repo_decoded = base64.b64decode(lora_repo).decode()
     except Exception as e:
         await websocket.accept()
-        await websocket.send_text(json.dumps({"error_code": "LORA_REPO_DECODE_ERROR", "message": f"lora_repo 디코딩 실패: {e}"}))
+        await websocket.send_text(
+            json.dumps(
+                {
+                    "error_code": "LORA_REPO_DECODE_ERROR",
+                    "message": f"lora_repo 디코딩 실패: {e}",
+                }
+            )
+        )
         await websocket.close()
         return
-    
+
     await websocket.accept()
-    
+
     try:
         # VLLM 서버 상태 확인
         if not await vllm_health_check():
             logger.error(f"[WS] VLLM 서버 연결 실패 (URL: {settings.VLLM_BASE_URL})")
-            await websocket.send_text(json.dumps({
-                "error_code": "VLLM_SERVER_UNAVAILABLE", 
-                "message": "VLLM 서버에 연결할 수 없습니다. 서버 상태를 확인해주세요."
-            }))
+            await websocket.send_text(
+                json.dumps(
+                    {
+                        "error_code": "VLLM_SERVER_UNAVAILABLE",
+                        "message": "VLLM 서버에 연결할 수 없습니다. 서버 상태를 확인해주세요.",
+                    }
+                )
+            )
             await websocket.close()
             return
-        
-        logger.info(f"[WS] VLLM WebSocket 연결 시작: lora_repo={lora_repo_decoded}, group_id={group_id}")
-        
+
+        logger.info(
+            f"[WS] VLLM WebSocket 연결 시작: lora_repo={lora_repo_decoded}, group_id={group_id}"
+        )
+
         # HF 토큰 가져오기
         hf_token = await _get_hf_token_by_group(group_id, db)
 
         if influencer_id:
             from app.models.influencer import AIInfluencer
-            influencer = db.query(AIInfluencer).filter(AIInfluencer.influencer_id == influencer_id).first()
+
+            influencer = (
+                db.query(AIInfluencer)
+                .filter(AIInfluencer.influencer_id == influencer_id)
+                .first()
+            )
             if influencer and influencer.system_prompt is not None:
                 system_prompt = str(influencer.system_prompt)
-                logger.info(f"[WS] ✅ 저장된 시스템 프롬프트 사용: {influencer.influencer_name}")
+                logger.info(
+                    f"[WS] ✅ 저장된 시스템 프롬프트 사용: {influencer.influencer_name}"
+                )
             else:
-                logger.info(f"[WS] ⚠️ 저장된 시스템 프롬프트가 없어 기본 시스템 프롬프트 사용")
-        
+                logger.info(
+                    f"[WS] ⚠️ 저장된 시스템 프롬프트가 없어 기본 시스템 프롬프트 사용"
+                )
+
         # VLLM 서버에 어댑터 로드
         vllm_client = await get_vllm_client()
         try:
-            await vllm_client.load_adapter(lora_repo_decoded, lora_repo_decoded, hf_token)
+            await vllm_client.load_adapter(
+                lora_repo_decoded, lora_repo_decoded, hf_token
+            )
             logger.info(f"[WS] VLLM 어댑터 로드 완료: {lora_repo_decoded}")
         except Exception as e:
             logger.error(f"[WS] VLLM 어댑터 로드 실패: {e}")
-            await websocket.send_text(json.dumps({
-                "error_code": "VLLM_ADAPTER_LOAD_FAILED", 
-                "message": f"VLLM 어댑터 로드에 실패했습니다: {str(e)}"
-            }))
+            await websocket.send_text(
+                json.dumps(
+                    {
+                        "error_code": "VLLM_ADAPTER_LOAD_FAILED",
+                        "message": f"VLLM 어댑터 로드에 실패했습니다: {str(e)}",
+                    }
+                )
+            )
             await websocket.close()
             return
-        
+
         # MCP 도구들 초기화 (선택적)
         mcp_tools_available = False
         available_servers = []
         try:
             # MCP 서버 매니저에서 실행 중인 서버들 확인
             from app.services.mcp_server_manager import mcp_server_manager
+
             server_status = mcp_server_manager.get_server_status()
-            
+
             for server_name, status in server_status.items():
                 if status.get("running", False):
                     available_servers.append(server_name)
                     logger.info(f"[WS] ✅ MCP 서버 '{server_name}' 실행 중")
-            
+
             mcp_tools_available = len(available_servers) > 0
             if mcp_tools_available:
                 logger.info(f"[WS] ✅ MCP 도구들 사용 가능: {available_servers}")
             else:
                 logger.info(f"[WS] ⚠️ 실행 중인 MCP 서버가 없습니다")
-                
+
         except Exception as e:
             logger.warning(f"[WS] ⚠️ MCP 도구 초기화 실패: {e}")
-        
+
         # WebSocket 프록시 모드
         while True:
             try:
                 data = await websocket.receive_text()
                 logger.info(f"[WS] 메시지 수신: {data[:100]}...")
-                
+
                 # JSON 메시지 파싱 시도
                 try:
                     message_data = json.loads(data)
                     user_message = message_data.get("message", data)
                     use_mcp_tools = message_data.get("use_mcp_tools", True)
+                    selected_mcp_servers = message_data.get("selected_mcp_servers", [])
                 except json.JSONDecodeError:
                     # 일반 텍스트 메시지로 처리 (하위 호환성)
                     user_message = data
                     use_mcp_tools = True
-                
+                    selected_mcp_servers = []
+
                 # MCP 도구 사용 가능 여부 확인 및 처리
-                if mcp_tools_available and use_mcp_tools and await _should_use_mcp_tools(user_message):
+                if mcp_tools_available and use_mcp_tools:
                     try:
-                        # MCP 도구를 사용한 응답 생성
-                        mcp_response, tools_used = await _process_with_mcp_tools(user_message)
-                        await websocket.send_text(json.dumps({
-                            "type": "mcp_response",
-                            "content": mcp_response,
-                            "tools_used": tools_used
-                        }))
-                        logger.info(f"[WS] MCP 도구 응답 전송 완료, 사용된 도구: {tools_used}")
-                        continue
+                        from app.api.v1.endpoints.mcp import (
+                            should_use_mcp_tools,
+                            process_with_mcp_tools,
+                        )
+
+                        # MCP 도구 사용 여부 확인
+                        should_use_mcp = await should_use_mcp_tools(user_message)
+
+                        if should_use_mcp:
+                            # MCP 도구를 사용한 응답 생성
+                            mcp_response, tools_used = await process_with_mcp_tools(
+                                user_message, selected_mcp_servers
+                            )
+
+                            # MCP 도구가 없으면 일반 대화로 진행
+                            if mcp_response is None:
+                                logger.info(
+                                    "[WS] MCP 도구가 없어 일반 대화로 진행합니다."
+                                )
+                            else:
+                                # MCP 도구 결과를 LLM에게 전달해서 자연스러운 응답 생성
+                                try:
+                                    vllm_client = await get_vllm_client()
+                                    system_prompt = (
+                                        str(influencer.system_prompt)
+                                        if influencer and influencer.system_prompt
+                                        else "당신은 도움이 되는 AI 어시스턴트입니다."
+                                    )
+
+                                    # 도구 결과를 포함한 사용자 메시지 생성
+                                    enhanced_message = f"""
+사용자 질문: {user_message}
+
+도구 실행 결과:
+{mcp_response}
+
+위의 도구 실행 결과를 바탕으로 답변해주세요.
+
+규칙:
+1. 도구 실행 결과에 포함된 모든 구체적인 정보와 수치를 반드시 포함해야 합니다
+2. 자연스러운 대화체로 설명하되, 실제 정보를 누락하면 안 됩니다
+3. 도구에서 제공한 정확한 데이터를 사용자에게 전달해주세요
+
+답변할 때 도구 실행 결과의 구체적인 정보를 반드시 포함해주세요.
+"""
+
+                                    logger.info(
+                                        "[WS] MCP 도구 결과를 LLM에게 전달하여 자연스러운 응답 생성 중..."
+                                    )
+
+                                    # 스트리밍 응답 생성
+                                    token_count = 0
+                                    async for (
+                                        token
+                                    ) in vllm_client.generate_response_stream(
+                                        user_message=enhanced_message,
+                                        system_message=system_prompt,
+                                        influencer_name=(
+                                            str(influencer.influencer_name)
+                                            if influencer
+                                            else "한세나"
+                                        ),
+                                        model_id=lora_repo_decoded,
+                                        max_new_tokens=512,
+                                        temperature=0.7,
+                                    ):
+                                        # 각 토큰을 실시간으로 클라이언트에 전송
+                                        logger.debug(f"[WS] 토큰 전송: {repr(token)}")
+                                        await websocket.send_text(
+                                            json.dumps(
+                                                {"type": "token", "content": token}
+                                            )
+                                        )
+                                        token_count += 1
+
+                                        # 너무 많은 토큰이 오면 중단 (무한 루프 방지)
+                                        if token_count > 1000:
+                                            logger.warning(
+                                                f"[WS] 토큰 수가 너무 많아 중단: {token_count}"
+                                            )
+                                            break
+
+                                    # 스트리밍 완료 신호
+                                    await websocket.send_text(
+                                        json.dumps({"type": "complete", "content": ""})
+                                    )
+
+                                    logger.info(
+                                        f"[WS] MCP 도구 결과 기반 LLM 응답 전송 완료 (토큰 수: {token_count})"
+                                    )
+                                    continue
+
+                                except Exception as e:
+                                    logger.error(
+                                        f"[WS] MCP 도구 결과 LLM 처리 실패: {e}"
+                                    )
+                                    # LLM 처리 실패 시 원본 결과 전송
+                                    await websocket.send_text(
+                                        json.dumps(
+                                            {
+                                                "type": "mcp_response",
+                                                "content": mcp_response,
+                                                "tools_used": tools_used,
+                                            }
+                                        )
+                                    )
+                                    logger.info(
+                                        f"[WS] MCP 도구 응답 전송 완료 (폴백), 사용된 도구: {tools_used}"
+                                    )
+                                    continue
                     except Exception as e:
                         logger.warning(f"[WS] MCP 도구 처리 실패, VLLM으로 폴백: {e}")
-                
+
                 # VLLM 서버에서 스트리밍 응답 생성
                 try:
                     vllm_client = await get_vllm_client()
-                    system_prompt = str(influencer.system_prompt) if influencer and influencer.system_prompt else "당신은 도움이 되는 AI 어시스턴트입니다."
-                    
+                    system_prompt = (
+                        str(influencer.system_prompt)
+                        if influencer and influencer.system_prompt
+                        else "당신은 도움이 되는 AI 어시스턴트입니다."
+                    )
+
                     # 스트리밍 응답 생성
                     token_count = 0
                     async for token in vllm_client.generate_response_stream(
                         user_message=user_message,
                         system_message=system_prompt,
-                        influencer_name=str(influencer.influencer_name) if influencer else "한세나",
+                        influencer_name=(
+                            str(influencer.influencer_name) if influencer else "한세나"
+                        ),
                         model_id=lora_repo_decoded,
                         max_new_tokens=512,
-                        temperature=0.7
+                        temperature=0.7,
                     ):
                         # 각 토큰을 실시간으로 클라이언트에 전송
                         logger.debug(f"[WS] 토큰 전송: {repr(token)}")
-                        await websocket.send_text(json.dumps({
-                            "type": "token",
-                            "content": token
-                        }))
+                        await websocket.send_text(
+                            json.dumps({"type": "token", "content": token})
+                        )
                         token_count += 1
-                        
+
                         # 너무 많은 토큰이 오면 중단 (무한 루프 방지)
                         if token_count > 1000:
-                            logger.warning(f"[WS] 토큰 수가 너무 많아 중단: {token_count}")
+                            logger.warning(
+                                f"[WS] 토큰 수가 너무 많아 중단: {token_count}"
+                            )
                             break
-                    
+
                     # 스트리밍 완료 신호
-                    await websocket.send_text(json.dumps({
-                        "type": "complete",
-                        "content": ""
-                    }))
-                    
-                    logger.info(f"[WS] VLLM 스트리밍 응답 전송 완료 (토큰 수: {token_count})")
-                    
+                    await websocket.send_text(
+                        json.dumps({"type": "complete", "content": ""})
+                    )
+
+                    logger.info(
+                        f"[WS] VLLM 스트리밍 응답 전송 완료 (토큰 수: {token_count})"
+                    )
+
                 except Exception as e:
                     logger.error(f"[WS] VLLM 스트리밍 추론 중 오류: {e}")
-                    await websocket.send_text(json.dumps({
-                        "type": "error",
-                        "error_code": "VLLM_INFERENCE_ERROR", 
-                        "message": str(e)
-                    }))
-                    
+                    await websocket.send_text(
+                        json.dumps(
+                            {
+                                "type": "error",
+                                "error_code": "VLLM_INFERENCE_ERROR",
+                                "message": str(e),
+                            }
+                        )
+                    )
+
             except WebSocketDisconnect:
                 logger.info(f"[WS] WebSocket 연결 종료: lora_repo={lora_repo_decoded}")
                 break
             except Exception as e:
                 logger.error(f"[WS] WebSocket 처리 중 오류: {e}")
-                await websocket.send_text(json.dumps({"error_code": "WEBSOCKET_ERROR", "message": str(e)}))
+                await websocket.send_text(
+                    json.dumps({"error_code": "WEBSOCKET_ERROR", "message": str(e)})
+                )
                 break
-                
+
     except Exception as e:
         logger.error(f"[WS] WebSocket 연결 처리 중 오류: {e}")
         try:
-            await websocket.send_text(json.dumps({"error_code": "CONNECTION_ERROR", "message": str(e)}))
+            await websocket.send_text(
+                json.dumps({"error_code": "CONNECTION_ERROR", "message": str(e)})
+            )
         except:
             pass
 
-async def _should_use_mcp_tools(message: str) -> bool:
-    """메시지가 MCP 도구 사용이 필요한지 확인 (개선된 버전)"""
-    try:
-        from langchain_openai import ChatOpenAI
-        from langchain.prompts import PromptTemplate
-        
-        # OpenAI를 사용한 지능적 판단
-        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
-        
-        prompt = PromptTemplate.from_template("""
-다음 사용자 메시지가 수학 계산, 날씨 정보, 파일 처리, 번역 등의 도구가 필요한지 판단해주세요.
 
-사용자 메시지: {message}
+# MCP 도구 처리 함수들은 mcp.py에서 관리됩니다.
+# from app.api.v1.endpoints.mcp import should_use_mcp_tools, process_with_mcp_tools
 
-다음 중 하나라도 해당되면 'YES'를, 그렇지 않으면 'NO'를 답변해주세요:
-- 수학 계산 (덧셈, 뺄셈, 곱셈, 나눗셈, 제곱, 제곱근, 팩토리얼, 방정식 등)
-- 날씨 정보 (현재 날씨, 예보, 대기질, 자외선 지수 등)
-- 파일 처리 (파일 읽기, 쓰기, 변환 등)
-- 번역 (언어 간 번역)
-- 기타 도구가 필요한 작업
 
-답변 (YES/NO만):
-""")
-        
-        response = await llm.ainvoke(prompt.format(message=message))
-        result = response.content.strip().upper()
-        
-        return result == "YES"
-        
-    except Exception as e:
-        logger.warning(f"MCP 도구 판단 중 오류, 기본 키워드 매칭으로 폴백: {e}")
-        # 폴백: 기존 키워드 매칭
-        mcp_keywords = [
-            "계산", "더하기", "빼기", "곱하기", "나누기", "제곱", "제곱근", "팩토리얼",
-            "날씨", "기온", "습도", "강수", "바람", "자외선", "대기질", "일출", "일몰",
-            "번역", "파일", "변환", "처리"
-        ]
-        message_lower = message.lower()
-        return any(keyword in message_lower for keyword in mcp_keywords)
+# MCP 도구 처리 함수들은 mcp.py에서 관리됩니다.
+# from app.api.v1.endpoints.mcp import should_use_mcp_tools, process_with_mcp_tools
 
-async def _process_with_mcp_tools(message: str) -> str:
-    """MCP 도구를 사용하여 메시지 처리 (개선된 버전)"""
-    try:
-        from langchain_openai import ChatOpenAI
-        from langchain.agents import AgentExecutor, create_react_agent
-        from langchain.prompts import PromptTemplate
-        
-        # 사용 가능한 모든 MCP 서버의 도구들 가져오기
-        all_tools = []
-        # 동적으로 사용 가능한 서버 목록 사용
-        for server_name in available_servers:
-            try:
-                tools = await mcp_client_service.get_tools(server_name)
-                all_tools.extend(tools)
-                logger.info(f"MCP 서버 '{server_name}'에서 {len(tools)}개 도구 로드")
-            except Exception as e:
-                logger.warning(f"MCP 서버 '{server_name}' 도구 로드 실패: {e}")
-        
-        if not all_tools:
-            raise Exception("사용 가능한 MCP 도구가 없습니다.")
-        
-        logger.info(f"총 {len(all_tools)}개의 MCP 도구 사용 가능")
-        
-        # React 에이전트 생성 (개선된 프롬프트)
-        llm = ChatOpenAI(model="gpt-4", temperature=0)
-        
-        system_prompt = """당신은 도움이 되는 AI 어시스턴트입니다. 
-
-사용자의 질문에 적절한 도구를 사용하여 답변해주세요.
-
-사용 가능한 도구들:
-- 수학 계산: 덧셈, 뺄셈, 곱셈, 나눗셈, 제곱, 제곱근, 팩토리얼, 방정식 해
-- 날씨 정보: 현재 날씨, 예보, 대기질, 자외선 지수, 바람 정보, 일출/일몰
-
-주의사항:
-1. 사용자의 질문을 정확히 이해하고 적절한 도구를 선택하세요
-2. 계산 결과나 정보를 명확하고 이해하기 쉽게 설명하세요
-3. 필요시 여러 도구를 조합하여 사용하세요
-4. 한국어로 친근하게 답변하세요"""
-
-        agent = create_react_agent(
-            llm,
-            all_tools,
-            prompt=PromptTemplate.from_template(system_prompt),
-        )
-        agent_executor = AgentExecutor.from_agent_and_tools(
-            agent=agent, tools=all_tools, verbose=True
-        )
-        
-        # 에이전트 실행
-        response = await agent_executor.ainvoke({"input": message})
-        
-        # 사용된 도구들 추출
-        tools_used = []
-        if "intermediate_steps" in response:
-            for step in response["intermediate_steps"]:
-                if "tool" in step:
-                    tools_used.append(step["tool"])
-        
-        logger.info(f"MCP 도구 처리 완료, 사용된 도구: {tools_used}")
-        return response.get("output", str(response)), tools_used
-        
-    except Exception as e:
-        logger.error(f"MCP 도구 처리 중 오류: {e}")
-        return f"MCP 도구 처리 중 오류가 발생했습니다: {str(e)}", []
 
 async def _get_hf_token_by_group(group_id: int, db: Session) -> str:
     """그룹 ID로 HF 토큰을 가져옵니다."""
     try:
-        hf_token_manage = db.query(HFTokenManage).filter(
-            HFTokenManage.group_id == group_id
-        ).order_by(HFTokenManage.created_at.desc()).first()
-        
+        hf_token_manage = (
+            db.query(HFTokenManage)
+            .filter(HFTokenManage.group_id == group_id)
+            .order_by(HFTokenManage.created_at.desc())
+            .first()
+        )
+
         if hf_token_manage:
             return decrypt_sensitive_data(str(hf_token_manage.hf_token_value))
         else:
@@ -306,6 +381,7 @@ async def _get_hf_token_by_group(group_id: int, db: Session) -> str:
         logger.error(f"HF 토큰 가져오기 실패: {e}")
         return ""
 
+
 @router.post("/load_model")
 async def model_load(req: ModelLoadRequest, db: Session = Depends(get_db)):
     """모델 로드 (VLLM 서버만 사용)"""
@@ -314,25 +390,29 @@ async def model_load(req: ModelLoadRequest, db: Session = Depends(get_db)):
         hf_token = await _get_hf_token_by_group(req.group_id, db)
         if not hf_token:
             raise HTTPException(status_code=400, detail="HF 토큰이 없습니다.")
-        
+
         # VLLM 서버 상태 확인
         if not await vllm_health_check():
-            raise HTTPException(status_code=503, detail="VLLM 서버에 연결할 수 없습니다.")
-        
+            raise HTTPException(
+                status_code=503, detail="VLLM 서버에 연결할 수 없습니다."
+            )
+
         # VLLM 서버에 어댑터 로드
         try:
             vllm_client = await get_vllm_client()
             await vllm_client.load_adapter(req.lora_repo, req.lora_repo, hf_token)
             logger.info(f"[MODEL LOAD API] VLLM 어댑터 로드 성공: {req.lora_repo}")
             return {
-                "success": True, 
+                "success": True,
                 "message": "VLLM 서버에서 모델이 성공적으로 로드되었습니다.",
-                "server_type": "vllm"
+                "server_type": "vllm",
             }
         except Exception as e:
             logger.error(f"[MODEL LOAD API] VLLM 어댑터 로드 실패: {e}")
-            raise HTTPException(status_code=500, detail=f"VLLM 어댑터 로드 실패: {str(e)}")
-            
+            raise HTTPException(
+                status_code=500, detail=f"VLLM 어댑터 로드 실패: {str(e)}"
+            )
+
     except HTTPException:
         raise
     except Exception as e:
