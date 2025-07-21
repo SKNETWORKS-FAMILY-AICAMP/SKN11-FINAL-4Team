@@ -125,18 +125,11 @@ async def generate_character_qa(request: Dict[str, Any]):
 
 @router.post("/generate_qa_fast", response_model=FastToneGenerationResponse)
 async def generate_character_qa_fast(request: Dict[str, Any]):
-    """
-    🚀 고속 어투 생성 (병렬 처리)
-    pipeline의 speech_generator와 동일한 로직으로 3가지 다른 어투 생성
-    LangChain 병렬 처리로 기존 순차 처리 대비 3-5배 빠른 속도
-    """
     try:
-        # 요청 형식 판단 및 character 데이터 추출
+        
         if 'character' in request:
-            # 새로운 형식: {"character": {...}}
             character_data = request['character']
         else:
-            # 기존 형식: {...} (직접 character 데이터)
             character_data = request
         
         logger.info(f"🚀 고속 어투 생성 시작: {character_data.get('name', 'Unknown')}")
@@ -156,20 +149,16 @@ async def generate_character_qa_fast(request: Dict[str, Any]):
             mbti=character_data.get('mbti')
         )
         
-        # SpeechGenerator로 질문 생성 (pipeline과 동일)
         speech_generator = SpeechGenerator(api_key=api_key)
         question = await speech_generator.generate_question_for_character(character_profile)
         logger.info(f"📝 생성된 질문: {question}")
         
-        # LangChain 병렬 처리를 위한 시간 측정 시작
         start_time = asyncio.get_event_loop().time()
         
-        # 병렬로 3가지 어투 생성 (pipeline의 로직을 병렬화)
-        # 각 어투별로 system prompt를 먼저 생성
         tone_tasks = []
         for i in range(3):
             tone_variation = i + 1
-            # 각 어투별로 독립적인 system prompt 생성 (speech_generator와 동일)
+            # 각 어투별로 독립적인 system promp t 생성 (speech_generator와 동일)
             system_prompt_task = speech_generator.create_character_prompt_for_random_tone(
                 character_profile, 
                 tone_variation
@@ -178,7 +167,7 @@ async def generate_character_qa_fast(request: Dict[str, Any]):
         
         # 3개의 system prompt를 병렬로 생성
         system_prompts = await asyncio.gather(*tone_tasks)
-        
+        print(system_prompts)
         # 고속 어투 생성기로 병렬 처리
         tone_generator = get_langchain_tone_generator(api_key=api_key)
         
@@ -321,6 +310,3 @@ async def get_tone_generation_status(task_id: str):
     if not task:
         raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다.")
     return task
-
-# Import datetime for timestamp operations
-from datetime import datetime

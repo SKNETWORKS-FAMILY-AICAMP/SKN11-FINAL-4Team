@@ -69,29 +69,26 @@ class SpeechGenerator:
         ]
 
     async def generate_system_prompt_with_gpt(self, character: CharacterProfile, tone_instruction_seed: str = "") -> str:
-        """
-        GPT에게 캐릭터 정보를 기반으로 완전한 시스템 프롬프트를 생성 요청합니다.
-        [캐릭터 정보] 문장은 정제, [말투 지시사항]과 [주의사항]은 캐릭터에 맞게 창의적으로 생성
-        """
         system_prompt = f"""
+        당신은 System prompt 생성 전문가입니다.
+        당신은 사용자가 제공하는 캐릭터 정보를 바탕으로 캐릭터의 특성을 잘 살릴 수 있는 system prompt를 생성해주세요.
         [요청 조건]
-        다음 캐릭터 정보에 기반하여 GPT의 말투 생성에 적합하도록 system prompt를 구성해줘.
-        1. [캐릭터 정보]의 '설명'과 '성격'은 사용자가 입력한 의미를 유지하면서, GPT가 캐릭터의 말투를 자연스럽게 생성할 수 있도록 더 명확하고 생생하게 표현해줘. 단, 새로운 설정을 추가하거나 의미를 바꾸면 안 돼.
-        2. 이어서 해당 캐릭터 특성을 잘 반영한 [말투 지시사항]과 [주의사항]을 작성해줘. 표현 방식, 말투, 감정 전달 방식 등 말투에 필요한 구체적인 특징이 드러나야 해.
-        3. 응답은 반드시 사용자 질문에 자연스럽게 반응해야 해. 질문의 주제나 감정에 대해 캐릭터의 말투로 자신의 생각, 느낌, 경험을 자유롭게 표현하는 방식이 좋아. 말투는 내용을 더욱 생생하고 설득력 있게 전달하는 데 활용되도록 구성해줘.
+        1. [캐릭터 정보]의 '설명'과 '성격'은 사용자가 입력한 의미를 유지하면서, GPT가 캐릭터의 말투를 자연스럽게 생성할 수 있도록 더 명확하고 생생하게 표현해야 합니다. 단, 새로운 설정을 추가하거나 의미를 바꾸면 안됩니다.
+        2. 이어서 해당 캐릭터 특성을 잘 반영한 [말투 지시사항]과 [주의사항]을 작성하세요. 표현 방식, 말투, 감정 전달 방식 등 말투에 필요한 구체적인 특징이 드러나야 합니다.
+        3. 응답은 반드시 사용자 질문에 자연스럽게 반응해야 합니다. 질문의 주제나 감정에 대해 캐릭터의 말투로 자신의 생각, 느낌, 경험을 자유롭게 표현하는 방식은 허용합니다. 말투는 내용을 더욱 생생하고 설득력 있게 전달하는 데 활용되도록 구성해줘.
         4. 응답은 반드시 질문의 의미(예: 감정, 경험, 이유, 취향 등)를 정확히 파악하고, 구체적인 내용으로 대응해야 합니다. 단순한 분위기 연출이나 말투만으로 대답을 대체해서는 안 됩니다.
         5. ※ 중요: 이 응답은 음성 없이 텍스트로만 보여지므로, 캐릭터의 말투와 감정이 글 속에서도 분명하게 드러나야 합니다. 이를 위해 말끝 표현(~야~, ~거든?), 이모지(😏, 😊), 괄호 속 행동 묘사((미소 지으며)) 등을 적극적으로 활용해주세요. 글만 읽어도 캐릭터의 분위기와 말투가 "보이도록" 만드는 것이 핵심입니다.
         6. 전체 출력 포맷은 아래와 같아야 해:
 
-        당신은 이제 '{{name}}'라는 캐릭터처럼 대화해야 합니다.
+        당신은 이제 [캐릭터 이름] 라는 캐릭터처럼 대화해야 합니다.
 
         [캐릭터 정보]
-        - 이름: {{name}}
-        - 설명: {{정제된 설명}}
-        - 성격: {{정제된 성격}}
-        - MBTI: {{mbti}}
-        - 연령대: {{age_range}}
-        - 성별: {{gender}}
+        - 이름: [캐릭터 이름]
+        - 설명: [캐릭터 설명]
+        - 성격: [캐릭터 성격]
+        - MBTI: [캐릭터 MBTI]
+        - 연령대: [캐릭터 연령대]
+        - 성별: [캐릭터 성별]
 
         [말투 지시사항]
         {{캐릭터 특성에 따라 GPT가 직접 판단한 말투 지시사항}}
@@ -104,12 +101,12 @@ class SpeechGenerator:
 
         prompt = f"""
             캐릭터 정보:
-                이름: {character.name}
-                설명: {character.description}
-                성격: {character.personality}
-                MBTI: {character.mbti or '없음'}
-                연령대: {character.age_range or '없음'}
-                성별: {character.gender.value if character.gender else '없음'}
+                캐릭터 이름: {character.name}
+                캐릭터 설명: {character.description}
+                캐릭터 성격: {character.personality}
+                캐릭터 MBTI: {character.mbti or '없음'}
+                캐릭터 연령대: {character.age_range or '없음'}
+                캐릭터 성별: {character.gender.value if character.gender else '없음'}
         """
         
         res = await self.client.chat.completions.create(
@@ -176,50 +173,44 @@ class SpeechGenerator:
         """
         캐릭터 정보에 어울리는 질문을 GPT가 생성하도록 합니다.
         """
-        prompt = f"""
-    당신은 아래 캐릭터 정보를 바탕으로, 이 캐릭터의 말투와 성격이 자연스럽게 드러나면서도, GPT가 그 질문에 대해 의미 있는 응답을 할 수 있는 대화를 위한 질문을 한 문장으로 작성해주세요.
+        system_prompt = f"""
+            당신은 캐릭터 기반 대화 시나리오 생성 도우미입니다.
+            당신은 사용자가 제공하는 캐릭터 정보를 바탕으로 캐릭터의 특징을 잘 살릴 수 있는 질문 을 생성해주세요.
 
-    [캐릭터 정보]
-    - 이름: {character.name}
-    - 설명: {character.description}
-    - 성격: {character.personality}
-    - MBTI: {character.mbti or '없음'}
-    - 연령대: {character.age_range or '없음'}
-    - 성별: {character.gender.value if character.gender else '없음'}
+            [캐릭터 정보]
+            - 이름: [캐릭터 이름]
+            - 설명: [캐릭터 설명]
+            - 성격: [캐릭터 성격]
+            - MBTI: [캐릭터 MBTI]
+            - 연령대: [캐릭터 연령대]
+            - 성별: [캐릭터 성별]
 
-    조건:
-    - 질문은 반드시 하나만 작성해주세요.
-    - 질문은 일상적인 대화에서 자연스럽게 나올 수 있는 것이어야 합니다.
-    - 질문은 캐릭터의 말투, 어휘, 태도가 자연스럽게 묻어나는 방향으로 구성해주세요.
-    - 질문은 상대방이 감정, 경험, 취향 등 구체적인 내용을 자연스럽게 떠올리고 응답할 수 있는 방식으로 구성해주세요.
-    """
-
-        # OpenAI 클라이언트 래퍼 사용
-        if hasattr(self.client, 'generate_question'):
-            character_info = f"""- 이름: {character.name}
-- 설명: {character.description}
-- 성격: {character.personality}
-- MBTI: {character.mbti or '없음'}
-- 연령대: {character.age_range or '없음'}
-- 성별: {character.gender.value if character.gender else '없음'}"""
-            
-            return await self.client.generate_question(
-                character_info=character_info,
-                temperature=0.8,
-                model="gpt-4o-mini"
-            )
-        else:
-            # 비동기 API 호출
-            response = await self.client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": "당신은 캐리터 기반 대화 시나리오 생성 도우미입니다."},
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=100,
-                temperature=0.8
-            )
-            return response.choices[0].message.content.strip()
+            조건:
+            - 질문은 반드시 하나만 작성해주세요.
+            - 질문은 일상적인 대화에서 자연스럽게 나올 수 있는 것이어야 합니다.
+            - 질문은 캐릭터의 말투, 어휘, 태도가 자연스럽게 묻어나는 방향으로 구성해주세요.
+            - 질문은 상대방이 감정, 경험, 취향 등 구체적인 내용을 자연스럽게 떠올리고 응답할 수 있는 방식으로 구성해주세요.
+            - 의미 있는 응답을 할 수 있도록 질문을 한 문장으로 작성해주세요.
+            """
+        user_prompt = f"""
+        캐릭터 정보:
+            캐릭터 이름: {character.name}
+            캐릭터 설명: {character.description}
+            캐릭터 성격: {character.personality}
+            캐릭터 MBTI: {character.mbti or '없음'}
+            캐릭터 연령대: {character.age_range or '없음'}
+            성별: {character.gender.value if character.gender else '없음'}
+        """
+        response = await self.client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            max_tokens=100,
+            temperature=0.8
+        )
+        return response.choices[0].message.content.strip()
 
 
     async def create_character_prompt_for_random_tone(self, character: CharacterProfile, tone_variation: int) -> str:
@@ -1017,20 +1008,3 @@ async def main_script_based_prompt_generation():
     system_prompt = await generator.generate_system_prompt_from_scripts(character, scripts)
     print("\n======== 생성된 시스템 프롬프트 ========\n")
     print(system_prompt)
-
-# 실제 실행을 위한 동기 래퍼
-def run_main():
-    asyncio.run(main())
-
-def run_main_script_based():
-    asyncio.run(main_script_based_prompt_generation())
-
-# 실제 실행
-if __name__ == "__main__":
-    mode = input("모드 선택 (1: 일반 캐릭터 기반 생성, 2: 대사 기반 시스템 프롬프트 생성): ").strip()
-    if mode == "1":
-        run_main()  # 기존 로직
-    elif mode == "2":
-        run_main_script_based()
-    else:
-        print("잘못된 입력입니다. 1 또는 2 중 선택하세요.")

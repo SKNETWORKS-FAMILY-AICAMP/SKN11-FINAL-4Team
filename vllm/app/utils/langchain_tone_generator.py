@@ -68,6 +68,54 @@ class LangChainToneGenerator:
         
         logger.info("✅ LangChain Tone Generator 초기화 완료")
     
+    def _parse_summary_response(self, response) -> Dict[str, str]:
+        """LLM 응답에서 요약 정보를 파싱"""
+        try:
+            # response가 AIMessage인 경우 content 추출
+            if hasattr(response, 'content'):
+                content = response.content.strip()
+            else:
+                content = str(response).strip()
+            
+            # JSON 파싱 시도
+            # JSON 블록이 있는 경우 추출
+            import re
+            json_match = re.search(r'\{[\s\S]*?\}', content)
+            if json_match:
+                json_str = json_match.group()
+                result = json.loads(json_str)
+                
+                # 유효성 검증
+                if isinstance(result, dict) and result.get("hashtags") and result.get("description"):
+                    logger.debug(f"요약 파싱 성공: {result}")
+                    return result
+            
+            # JSON 파싱 실패 시 텍스트에서 추출
+            logger.warning(f"JSON 파싱 실패, 텍스트 분석 시도: {content}")
+            
+            # 해시태그 추출
+            hashtags = re.findall(r'#\w+', content)
+            if hashtags:
+                hashtag_str = " ".join(hashtags[:3])
+            else:
+                hashtag_str = "#개성있는 #창의적인 #캐릭터"
+            
+            # 설명 추출 (마지막 문장 또는 전체)
+            sentences = content.split('.')
+            description = sentences[-2].strip() + "." if len(sentences) > 1 else "독특하고 개성있는 말투"
+            
+            return {
+                "hashtags": hashtag_str,
+                "description": description
+            }
+            
+        except Exception as e:
+            logger.error(f"요약 파싱 중 오류: {e}")
+            return {
+                "hashtags": "#LangChain #AI #캐릭터",
+                "description": "AI가 생성한 독특한 말투"
+            }
+    
     def _create_optimized_parallel_chain(self):
         """최적화된 병렬 처리 체인 생성 - 한 번의 실행으로 모든 처리 완료"""
         
@@ -122,6 +170,10 @@ class LangChainToneGenerator:
             response_text = data.get("response", f"응답 생성 실패 (말투 {tone_num})")
             summary_data = data.get("summary", {})
             
+            # 디버깅을 위한 로깅
+            if not isinstance(summary_data, dict) or not summary_data.get("hashtags"):
+                logger.warning(f"말투{tone_num} 요약 데이터 문제: {summary_data}")
+            
             return [{
                 "text": response_text,
                 "hashtags": summary_data.get("hashtags", f"#말투{tone_num} #캐릭터 #LangChain"),
@@ -144,14 +196,12 @@ class LangChainToneGenerator:
                     | self.llm
                     | RunnableLambda(extract_text)
                 ),
-                # 요약 생성 브랜치 (오류 시 기본값 반환)
+                # 요약 생성 브랜치 (더 안정적인 처리)
                 summary=(
                     RunnableLambda(prepare_summary_input)
-                    | self.summary_chain
-                    | RunnableLambda(lambda x: x if isinstance(x, dict) else {
-                        "hashtags": f"#말투{tone_num} #캐릭터 #LangChain",
-                        "description": f"LangChain으로 생성된 말투{tone_num}"
-                    })
+                    | self.summary_prompt
+                    | self.llm
+                    | RunnableLambda(self._parse_summary_response)
                 )
             )
             # 4. 최종 포맷팅
