@@ -124,7 +124,45 @@ export default function CreateModelPage() {
   }, [formData.tone]);
 
   const handleInputChange = (field: string, value: string | string[]) => {
-    setFormData((prev) => ({ ...prev, [field]: value }))
+    setFormData((prev) => {
+      // 이미지 메서드가 변경되는 경우 관련 필드들 초기화
+      if (field === "imageMethod") {
+        if (value === "upload") {
+          // 이미지 업로드로 변경 시 이미지 생성 관련 필드들 초기화
+          return {
+            ...prev,
+            [field]: value,
+            modelType: "",
+            hairStyle: "",
+            mood: "",
+          }
+        } else if (value === "prompt") {
+          // 이미지 생성으로 변경 시 이미지 업로드 관련 필드들 초기화
+          return {
+            ...prev,
+            [field]: value,
+            uploadedImageUrl: undefined,
+          }
+        }
+      }
+      
+      // 일반적인 필드 변경
+      return {
+        ...prev,
+        [field]: value,
+      }
+    })
+    
+    // 이미지 메서드가 변경되면 파일 상태도 초기화
+    if (field === "imageMethod") {
+      if (value === "prompt") {
+        // 이미지 생성으로 변경 시 업로드된 파일들 초기화
+        setFiles(prev => ({ ...prev, imageSamples: null }))
+        setImagePreviewUrls([])
+        // 기존 미리보기 URL들 해제
+        imagePreviewUrls.forEach(url => URL.revokeObjectURL(url))
+      }
+    }
   }
 
   const handleFileUpload = async (type: keyof typeof files, uploadedFiles: FileList | null) => {
@@ -649,12 +687,12 @@ export default function CreateModelPage() {
           <Card>
             <CardHeader>
               <CardTitle>기본 정보</CardTitle>
-              <CardDescription>AI 인플루언서의 이름, 설명, 특성을 입력하세요</CardDescription>
+              <CardDescription>AI 인플루언서의 이름, 설명 등 정보를 입력하세요</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               {/* 이름/설명 입력 */}
               <div>
-                <Label htmlFor="name">AI 인플루언서 이름</Label>
+                <Label htmlFor="name">AI 인플루언서 이름*</Label>
                 <Input
                   id="name"
                   placeholder="예: 패션 인플루언서 AI"
@@ -664,7 +702,7 @@ export default function CreateModelPage() {
                 />
               </div>
               <div>
-                <Label htmlFor="description">설명</Label>
+                <Label htmlFor="description">설명*</Label>
                 <Textarea
                   id="description"
                   placeholder="AI 인플루언서에 대한 상세한 설명을 입력하세요"
@@ -732,10 +770,10 @@ export default function CreateModelPage() {
                   </Select>
                 </div>
                 <div>
-                  <Label htmlFor="gender">성별 (선택사항)</Label>
+                  <Label htmlFor="gender">성별*</Label>
                   <Select value={formData.gender} onValueChange={(value) => handleInputChange("gender", value)}>
                     <SelectTrigger>
-                      <SelectValue placeholder="성별 선택 (선택사항)" />
+                      <SelectValue placeholder="성별을 선택하세요" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">선택 안함</SelectItem>
@@ -754,13 +792,12 @@ export default function CreateModelPage() {
                     value={formData.age}
                     onChange={(e) => handleInputChange("age", e.target.value)}
                     min="20"
-                    required
                   />
                 </div>
               </div>
               {/* 허깅페이스 토큰 선택 */}
               <div>
-                <Label htmlFor="huggingFaceToken">허깅페이스 토큰 선택 (선택사항)</Label>
+                <Label htmlFor="huggingFaceToken">허깅페이스 토큰 선택*</Label>
                 <Select value={formData.huggingFaceToken} onValueChange={(value) => handleInputChange("huggingFaceToken", value)}>
                   <SelectTrigger>
                     <SelectValue placeholder="허깅페이스 토큰을 선택하세요" />
@@ -792,7 +829,7 @@ export default function CreateModelPage() {
             </CardHeader>
             <CardContent className="space-y-6">
               <div>
-                <Label htmlFor="personality">성격</Label>
+                <Label htmlFor="personality">성격*</Label>
                 <Input
                   id="personality"
                   placeholder="예: 친근하고 트렌디한, 전문적이고 신뢰할 수 있는, 활발하고 에너지 넘치는"
@@ -804,7 +841,7 @@ export default function CreateModelPage() {
               </div>
 
               <div>
-                <Label className="text-base font-medium">말투 선택</Label>
+                <Label className="text-base font-medium">말투 선택*</Label>
                 <p className="text-sm text-gray-600 mb-4">성격에 맞는 말투를 선택하거나 직접 입력하세요</p>
                 <Tabs value={toneTab} onValueChange={setToneTab} className="w-full mb-4">
                   <TabsList className="grid w-full grid-cols-2">
@@ -945,13 +982,13 @@ export default function CreateModelPage() {
               <CardTitle>이미지 설정</CardTitle>
               <CardDescription>
                 AI 인플루언서의 이미지를 설정하세요.<br />
-                설정하지 않으면 기본 이미지가 자동으로 생성됩니다.
+                이미지 업로드 또는 이미지 생성 중 하나는 필수입니다.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
               {/* 이미지 생성 방법 탭 */}
               <div>
-                <Label className="text-base font-medium mb-3 block">이미지 생성 방법</Label>
+                                      <Label className="text-base font-medium mb-3 block">이미지 생성 방법*</Label>
                 <Tabs value={formData.imageMethod} onValueChange={(value) => handleInputChange("imageMethod", value)} className="w-full">
                   <TabsList className="grid w-full grid-cols-2">
                     <TabsTrigger value="upload">이미지 업로드</TabsTrigger>
@@ -1123,7 +1160,7 @@ export default function CreateModelPage() {
                         </Select>
                       </div>
                       <div>
-                        <Label htmlFor="hairStyle">헤어스타일</Label>
+                        <Label htmlFor="hairStyle">헤어스타일 *</Label>
                         <Input
                           id="hairStyle"
                           placeholder="예: 긴 생머리, 숏컷, 웨이브 머리, 포니테일"
@@ -1133,7 +1170,7 @@ export default function CreateModelPage() {
                         <p className="text-xs text-gray-500 mt-1">💡 원하는 헤어스타일을 자세히 설명해주세요</p>
                       </div>
                       <div>
-                        <Label htmlFor="mood">분위기/스타일</Label>
+                        <Label htmlFor="mood">분위기/스타일 *</Label>
                         <Input
                           id="mood"
                           placeholder="예: 밝고 친근한, 세련되고 우아한, 캐주얼하고 편안한"
@@ -1158,7 +1195,22 @@ export default function CreateModelPage() {
             >
               취소
             </Button>
-            <Button type="submit" disabled={isLoading} className="bg-blue-600 hover:bg-blue-700 text-white">
+            <Button 
+              type="submit" 
+              disabled={
+                isLoading || 
+                !formData.name.trim() || // 이름*
+                !formData.description.trim() || // 설명*
+                formData.gender === "none" || !formData.gender || // 성별*
+                formData.huggingFaceToken === "none" || !formData.huggingFaceToken || // 허깅페이스 토큰*
+                !formData.personality.trim() || // 성격*
+                (!formData.tone.trim() && formData.customTones.length === 0) || // 말투*
+                // 이미지: 업로드 또는 생성 중 하나는 필수
+                (formData.imageMethod === "upload" && (!files.imageSamples || files.imageSamples.length === 0)) ||
+                (formData.imageMethod === "prompt" && (!formData.hairStyle.trim() || !formData.mood.trim()))
+              } 
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+            >
               {isLoading ? '생성 중...' : '생성하기'}
             </Button>
           </div>
