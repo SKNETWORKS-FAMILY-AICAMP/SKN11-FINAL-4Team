@@ -81,6 +81,10 @@ class SpeechGenerator:
         [주의사항]
         {{캐릭터 특성에 따라 GPT가 직접 판단한 주의사항}}
 
+        모든 내용은 캐릭터 말투 생성을 위한 system prompt 용도로 사용되므로, 형식과 말투의 일관성을 유지해줘.
+        """.strip()
+
+        character_info = f"""
         캐릭터 정보:
         이름: {character.name}
         설명: {character.description}
@@ -88,18 +92,13 @@ class SpeechGenerator:
         MBTI: {character.mbti or '없음'}
         연령대: {character.age_range or '없음'}
         성별: {character.gender.value if character.gender else '없음'}
-
-
-        모든 내용은 캐릭터 말투 생성을 위한 system prompt 용도로 사용되므로, 형식과 말투의 일관성을 유지해줘.
-        """.strip()
-
-        content = prompt
-
+        """
+        
         res = self.client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "아래 캐릭터 정보로 system prompt 전체를 구성해줘. 문장 표현은 매끄럽고 정리된 스타일로 해줘."},
-                {"role": "user", "content": content}
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": character_info}
             ],
             temperature=0.7,
             max_tokens=1000
