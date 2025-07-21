@@ -21,8 +21,17 @@ export default function LoginPage() {
     }
   }, [isAuthenticated, authLoading, router])
 
+  // 로그인 중복 방지를 위한 상태
+  const [isRedirecting, setIsRedirecting] = useState(false)
+
   const handleOAuthLogin = async (provider: "google" | "naver") => {
+    // 이미 로딩 중이거나 리다이렉트 중이면 중복 요청 방지
+    if (isLoading !== null || isRedirecting) {
+      return
+    }
+
     setIsLoading(provider)
+    setIsRedirecting(true)
 
     try {
       // 리다이렉트 방식 소셜 로그인 시작
@@ -33,6 +42,7 @@ export default function LoginPage() {
       console.error('로그인 시작 실패:', error)
       alert('로그인을 시작할 수 없습니다. 다시 시도해주세요.')
       setIsLoading(null)
+      setIsRedirecting(false)
     }
   }
 
@@ -71,7 +81,7 @@ export default function LoginPage() {
           {/* 구글 로그인 버튼 */}
           <Button
             onClick={() => handleOAuthLogin("google")}
-            disabled={isLoading !== null}
+            disabled={isLoading !== null || isRedirecting}
             className="w-full bg-white hover:bg-gray-50 text-gray-900 border border-gray-300 flex items-center justify-center space-x-3 py-3"
             variant="outline"
           >
@@ -105,7 +115,7 @@ export default function LoginPage() {
           {/* 네이버 로그인 버튼 */}
           <Button
             onClick={() => handleOAuthLogin("naver")}
-            disabled={isLoading !== null}
+            disabled={isLoading !== null || isRedirecting}
             className="w-full bg-[#03C75A] hover:bg-[#02B351] text-white flex items-center justify-center space-x-3 py-3"
           >
             {isLoading === "naver" ? (
