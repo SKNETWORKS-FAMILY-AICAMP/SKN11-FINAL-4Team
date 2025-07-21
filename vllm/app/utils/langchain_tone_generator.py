@@ -63,17 +63,103 @@ class LangChainToneGenerator:
         # 어투 요약 체인
         self.summary_chain = self.summary_prompt | self.llm | self.json_parser
         
-        # 🚀 진짜 LangChain 병렬 처리 체인 - RunnableParallel 사용
-        self.parallel_tone_chain = RunnableParallel(
-            tone1=self._create_tone_chain(1),
-            tone2=self._create_tone_chain(2), 
-            tone3=self._create_tone_chain(3)
-        )
+        # 🚀 최적화된 병렬 처리 체인 - 3개 어투를 완전 병렬로 처리
+        self.optimized_parallel_chain = self._create_optimized_parallel_chain()
         
         logger.info("✅ LangChain Tone Generator 초기화 완료")
+    
+    def _create_optimized_parallel_chain(self):
+        """최적화된 병렬 처리 체인 생성 - 한 번의 실행으로 모든 처리 완료"""
+        
+        # 3개 어투를 완전 병렬로 처리하는 최상위 체인
+        return RunnableParallel(
+            말투1=self._create_complete_tone_chain(1),
+            말투2=self._create_complete_tone_chain(2),
+            말투3=self._create_complete_tone_chain(3)
+        )
+    
+    def _create_complete_tone_chain(self, tone_num: int):
+        """단일 어투에 대한 완전한 처리 체인 (응답 + 요약)"""
+        
+        # 어투별 지시사항
+        tone_instructions = self._get_tone_instructions()
+        
+        # 시스템 프롬프트 생성을 위한 전처리
+        def prepare_prompt_data(data):
+            """프롬프트 데이터 준비"""
+            prompt_data = data.copy()
+            prompt_data["tone_instruction"] = tone_instructions[tone_num]
+            return prompt_data
+        
+        # 시스템 프롬프트 생성
+        def generate_system_prompt(data):
+            """완전한 시스템 프롬프트 생성"""
+            return self._get_tone_system_prompt().format(**data)
+        
+        # 메시지 생성
+        def create_messages(data):
+            """LLM용 메시지 생성"""
+            return [
+                {"role": "system", "content": data["system_prompt"]},
+                {"role": "user", "content": data["question"]}
+            ]
+        
+        # 응답 텍스트 추출
+        def extract_text(response):
+            """LLM 응답에서 텍스트 추출"""
+            if hasattr(response, 'content'):
+                return response.content.strip()
+            return str(response).strip()
+        
+        # 요약 입력 준비
+        def prepare_summary_input(data):
+            """요약 체인을 위한 입력 준비"""
+            return {"system_prompt": data["system_prompt"]}
+        
+        # 최종 결과 포맷
+        def format_final_result(data):
+            """최종 결과를 speech_generator 형식으로 포맷"""
+            response_text = data.get("response", f"응답 생성 실패 (말투 {tone_num})")
+            summary_data = data.get("summary", {})
+            
+            return [{
+                "text": response_text,
+                "hashtags": summary_data.get("hashtags", f"#말투{tone_num} #캐릭터 #LangChain"),
+                "description": summary_data.get("description", f"LangChain으로 생성된 말투{tone_num}")
+            }]
+        
+        # 완전한 체인 구성: 한 번의 흐름으로 모든 처리
+        return (
+            # 1. 프롬프트 데이터 준비
+            RunnableLambda(prepare_prompt_data)
+            # 2. 시스템 프롬프트 생성
+            | RunnablePassthrough.assign(
+                system_prompt=RunnableLambda(generate_system_prompt)
+            )
+            # 3. 응답과 요약을 병렬로 처리
+            | RunnableParallel(
+                # 응답 생성 브랜치
+                response=(
+                    RunnableLambda(create_messages)
+                    | self.llm
+                    | RunnableLambda(extract_text)
+                ),
+                # 요약 생성 브랜치 (오류 시 기본값 반환)
+                summary=(
+                    RunnableLambda(prepare_summary_input)
+                    | self.summary_chain
+                    | RunnableLambda(lambda x: x if isinstance(x, dict) else {
+                        "hashtags": f"#말투{tone_num} #캐릭터 #LangChain",
+                        "description": f"LangChain으로 생성된 말투{tone_num}"
+                    })
+                )
+            )
+            # 4. 최종 포맷팅
+            | RunnableLambda(format_final_result)
+        )
 
     def _create_tone_chain(self, tone_num: int):
-        """개별 어투 생성 체인 생성"""
+        """개별 어투 생성 체인 생성 - 응답과 요약을 하나의 체인으로 처리"""
         
         def add_tone_instruction(data):
             """어투별 지시사항 추가"""
@@ -82,20 +168,57 @@ class LangChainToneGenerator:
             data["tone_num"] = tone_num
             return data
         
-        def format_response(llm_output):
-            """LLM 출력을 최종 형태로 변환"""
-            return {
-                "text": llm_output.content.strip(),
-                "tone_num": tone_num,
-                "raw_content": llm_output.content
-            }
+        # 응답 생성과 요약을 병렬로 처리하는 체인
+        def create_complete_tone_chain():
+            # 시스템 프롬프트 생성 함수
+            def generate_system_prompt(data):
+                """완전한 시스템 프롬프트 생성"""
+                return self._get_tone_system_prompt().format(**data)
+            
+            # 응답 생성 체인
+            response_chain = (
+                RunnablePassthrough.assign(
+                    system_prompt=RunnableLambda(generate_system_prompt)
+                )
+                | RunnableLambda(lambda x: [
+                    {"role": "system", "content": x["system_prompt"]},
+                    {"role": "user", "content": x["question"]}
+                ])
+                | self.llm
+                | RunnableLambda(lambda x: x.content.strip())
+            )
+            
+            # 요약 생성 체인
+            summary_chain = (
+                RunnablePassthrough.assign(
+                    system_prompt=RunnableLambda(generate_system_prompt)
+                )
+                | RunnableLambda(lambda x: {
+                    "system_prompt": x["system_prompt"]
+                })
+                | self.summary_chain
+            )
+            
+            # 응답과 요약을 병렬로 실행하고 결과를 합치는 체인
+            combined_chain = (
+                RunnableParallel(
+                    response=response_chain,
+                    summary=summary_chain
+                )
+                | RunnableLambda(lambda x: {
+                    "text": x["response"],
+                    "hashtags": x["summary"].get("hashtags", f"#말투{tone_num} #캐릭터 #창의적"),
+                    "description": x["summary"].get("description", f"독특하고 창의적인 말투{tone_num}"),
+                    "tone_num": tone_num
+                })
+            )
+            
+            return combined_chain
         
-        # 체인 구성: 입력 → 어투 지시사항 추가 → 프롬프트 → LLM → 포맷팅
+        # 최종 체인: 입력 → 어투 지시사항 추가 → 응답+요약 병렬 처리
         return (
-            RunnableLambda(add_tone_instruction) 
-            | self.tone_prompt 
-            | self.llm 
-            | RunnableLambda(format_response)
+            RunnableLambda(add_tone_instruction)
+            | create_complete_tone_chain()
         )
 
     def _get_tone_system_prompt(self) -> str:
@@ -151,8 +274,8 @@ class LangChainToneGenerator:
         question: str
     ) -> Dict[str, List[Dict[str, Any]]]:
         """
-        🚀 진짜 LangChain 체인 기반 3개 어투 병렬 생성
-        RunnableParallel을 사용한 최적화된 병렬 처리
+        🚀 최적화된 LangChain 체인 기반 3개 어투 병렬 생성
+        단일 체인 실행으로 응답과 요약을 동시에 처리
         
         Args:
             character_data: 캐릭터 정보
@@ -161,7 +284,7 @@ class LangChainToneGenerator:
         Returns:
             어투별 응답 딕셔너리
         """
-        logger.info(f"🚀 LangChain 체인 기반 3개 어투 병렬 생성 시작: {character_data.get('name', '캐릭터')}")
+        logger.info(f"🚀 최적화된 LangChain 체인 3개 어투 병렬 생성 시작: {character_data.get('name', '캐릭터')}")
         
         # 공통 입력 데이터 준비
         base_input = {
@@ -175,71 +298,21 @@ class LangChainToneGenerator:
         }
         
         try:
-            # 🚀 진짜 LangChain RunnableParallel 체인 실행
-            # 한 번의 체인 호출로 3개 어투 동시 생성
+            # 🚀 최적화된 단일 체인 실행 - 응답과 요약을 한번에!
             start_time = asyncio.get_event_loop().time()
             
-            parallel_results = await self.parallel_tone_chain.ainvoke(base_input)
+            # 병렬 체인 실행 (각 체인이 응답과 요약을 동시에 처리)
+            parallel_results = await self.optimized_parallel_chain.ainvoke(base_input)
             
             end_time = asyncio.get_event_loop().time()
             generation_time = end_time - start_time
             
-            logger.info(f"✅ LangChain 체인 병렬 생성 완료: {generation_time:.2f}초")
+            logger.info(f"✅ 최적화된 체인 병렬 생성 완료: {generation_time:.2f}초")
             
-            # 🔄 병렬로 어투 요약도 생성 (배치 처리)
-            summary_tasks = []
-            for tone_key, tone_result in parallel_results.items():
-                tone_num = tone_result["tone_num"]
-                
-                # 시스템 프롬프트 생성
-                tone_instructions = self._get_tone_instructions()
-                system_prompt_input = {**base_input, "tone_instruction": tone_instructions[tone_num]}
-                system_prompt = self._get_tone_system_prompt().format(**system_prompt_input)
-                
-                # 요약 생성 작업 추가
-                summary_tasks.append(
-                    self.summary_chain.ainvoke({"system_prompt": system_prompt})
-                )
+            # 📦 결과는 이미 올바른 형식으로 반환됨 (최적화된 체인에서 처리)
+            responses = parallel_results
             
-            # 🚀 어투 요약도 병렬 처리
-            summary_results = await asyncio.gather(*summary_tasks, return_exceptions=True)
-            
-            # 📦 최종 결과 조립
-            responses = {}
-            tone_keys = ["tone1", "tone2", "tone3"]
-            
-            for i, (tone_key, tone_result) in enumerate(parallel_results.items()):
-                tone_name = f"말투{i+1}"
-                tone_num = tone_result["tone_num"]
-                
-                # 요약 결과 처리
-                summary_result = summary_results[i] if i < len(summary_results) else {}
-                if isinstance(summary_result, Exception):
-                    logger.warning(f"⚠️ 말투 {tone_num} 요약 생성 실패: {summary_result}")
-                    summary_result = {}
-                
-                # 시스템 프롬프트 재생성
-                tone_instructions = self._get_tone_instructions()
-                system_prompt_input = {**base_input, "tone_instruction": tone_instructions[tone_num]}
-                system_prompt = self._get_tone_system_prompt().format(**system_prompt_input)
-                
-                responses[tone_name] = [{
-                    "text": tone_result["text"],
-                    "tone_info": {
-                        "variation": tone_num,
-                        "description": summary_result.get("description", f"LangChain 체인으로 생성된 말투 {tone_num}"),
-                        "hashtags": summary_result.get("hashtags", f"#LangChain #말투{tone_num} #병렬처리")
-                    },
-                    "character_info": {
-                        "name": character_data.get("name", "캐릭터"),
-                        "mbti": character_data.get("mbti", "ENFP"),
-                        "age_range": character_data.get("age_range", "20-30대"),
-                        "gender": character_data.get("gender", "없음")
-                    },
-                    "system_prompt": system_prompt
-                }]
-            
-            logger.info(f"✅ LangChain 체인 기반 3개 어투 + 요약 생성 완료!")
+            logger.info(f"✅ 최적화된 LangChain 체인 3개 어투 생성 완료!")
             return responses
             
         except Exception as e:
@@ -251,18 +324,8 @@ class LangChainToneGenerator:
                 tone_name = f"말투{i}"
                 responses[tone_name] = [{
                     "text": f"죄송합니다. LangChain 체인 처리 중 오류가 발생했습니다. (말투 {i})",
-                    "tone_info": {
-                        "variation": i,
-                        "description": "체인 처리 실패한 말투",
-                        "hashtags": f"#오류 #LangChain #말투{i}"
-                    },
-                    "character_info": {
-                        "name": character_data.get("name", "캐릭터"),
-                        "mbti": character_data.get("mbti", "ENFP"),
-                        "age_range": character_data.get("age_range", "20-30대"),
-                        "gender": character_data.get("gender", "없음")
-                    },
-                    "system_prompt": "오류로 인한 기본 시스템 프롬프트"
+                    "hashtags": f"#오류 #LangChain #말투{i}",
+                    "description": "체인 처리 실패한 말투"
                 }]
             
             return responses
