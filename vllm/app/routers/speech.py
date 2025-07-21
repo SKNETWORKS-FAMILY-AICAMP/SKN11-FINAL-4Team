@@ -115,6 +115,11 @@ async def generate_character_qa_fast(request: Dict[str, Any]):
         try:
             system_prompts = await speech_generator.create_three_distinct_system_prompts(character_profile)
             logger.info("✅ 단일 요청으로 3개 시스템 프롬프트 생성 성공")
+            
+            # 생성된 시스템 프롬프트 로깅
+            for i, prompt in enumerate(system_prompts, 1):
+                logger.info(f"\n🎭 시스템 프롬프트 {i} (길이: {len(prompt)}자):\n{prompt[:300]}..." if len(prompt) > 300 else f"\n🎭 시스템 프롬프트 {i} (길이: {len(prompt)}자):\n{prompt}")
+                
         except Exception as e:
             logger.warning(f"단일 요청 시스템 프롬프트 생성 실패, 병렬 방식으로 폴백: {e}")
             # 폴백: 기존 병렬 방식
@@ -123,6 +128,11 @@ async def generate_character_qa_fast(request: Dict[str, Any]):
                 for i in range(3)
             ]
             system_prompts = await asyncio.gather(*tone_tasks)
+            
+            # 폴백으로 생성된 시스템 프롬프트도 로깅
+            logger.info("📌 병렬 방식으로 생성된 시스템 프롬프트:")
+            for i, prompt in enumerate(system_prompts, 1):
+                logger.info(f"\n🎭 시스템 프롬프트 {i} (길이: {len(prompt)}자):\n{prompt[:300]}..." if len(prompt) > 300 else f"\n🎭 시스템 프롬프트 {i} (길이: {len(prompt)}자):\n{prompt}")
         
         # 단일 요청으로 3가지 어투 생성 (더 차별화된 결과)
         try:

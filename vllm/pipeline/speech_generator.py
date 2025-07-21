@@ -244,7 +244,12 @@ class SpeechGenerator:
             3: "주어진 캐릭터 정보를 바탕으로 세 번째 독특하고 창의적인 말투로 답변하세요. 앞의 두 가지와는 전혀 다른 참신한 방식으로 표현해주세요."
         }
         tone_instruction = random_instructions.get(tone_variation, "캐릭터의 스타일을 반영한 창의적 말투를 사용하세요.")
-        return await self.generate_system_prompt_with_gpt(character, tone_instruction)
+        system_prompt = await self.generate_system_prompt_with_gpt(character, tone_instruction)
+        
+        # 개별 생성된 시스템 프롬프트 로깅
+        logger.info(f"\n📝 개별 시스템 프롬프트 생성 (말투 {tone_variation}):\n{system_prompt[:200]}..." if len(system_prompt) > 200 else f"\n📝 개별 시스템 프롬프트 생성 (말투 {tone_variation}):\n{system_prompt}")
+        
+        return system_prompt
     
     async def create_three_distinct_system_prompts(self, character: CharacterProfile) -> List[str]:
         """
@@ -297,11 +302,18 @@ class SpeechGenerator:
             json_match = re.search(r'\{[\s\S]*\}', response)
             if json_match:
                 result = json.loads(json_match.group())
-                return [
+                prompts = [
                     result.get("system_prompt_1", ""),
                     result.get("system_prompt_2", ""),
                     result.get("system_prompt_3", "")
                 ]
+                
+                # 생성된 시스템 프롬프트 로깅
+                logger.info("🎯 3개의 시스템 프롬프트 생성 완료:")
+                for i, prompt in enumerate(prompts, 1):
+                    logger.info(f"\n📋 시스템 프롬프트 {i}:\n{prompt[:200]}..." if len(prompt) > 200 else f"\n📋 시스템 프롬프트 {i}:\n{prompt}")
+                
+                return prompts
             else:
                 # 파싱 실패 시 기존 방식으로 폴백
                 logger.warning("3개 시스템 프롬프트 JSON 파싱 실패, 개별 생성으로 폴백")
