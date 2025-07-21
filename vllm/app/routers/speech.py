@@ -127,7 +127,8 @@ async def generate_character_qa(request: Dict[str, Any]):
 async def generate_character_qa_fast(request: Dict[str, Any]):
     """
     🚀 고속 어투 생성 (병렬 처리)
-    기존 순차 처리 대비 3-5배 빠른 속도
+    pipeline의 speech_generator와 동일한 로직으로 3가지 다른 어투 생성
+    LangChain 병렬 처리로 기존 순차 처리 대비 3-5배 빠른 속도
     """
     try:
         # 요청 형식 판단 및 character 데이터 추출
@@ -145,21 +146,7 @@ async def generate_character_qa_fast(request: Dict[str, Any]):
         if not api_key:
             raise HTTPException(status_code=500, detail="OpenAI API 키가 설정되지 않았습니다.")
         
-        # 고속 어투 생성기 인스턴스 생성
-        tone_generator = get_langchain_tone_generator(api_key=api_key)
-        
-        # 캐릭터 데이터 변환 (고속 처리용)
-        fast_character_data = {
-            "name": character_data.get('name', '캐릭터'),
-            "description": character_data.get('description', ''),
-            "personality": character_data.get('personality', '친근한 성격'),
-            "mbti": character_data.get('mbti'),
-            "age_range": character_data.get('age_range', '알 수 없음'),
-            "gender": character_data.get('gender', 'NON_BINARY')
-        }
-        
-        # 질문 생성 (기존 로직과 동일)
-        speech_generator = SpeechGenerator(api_key=api_key)
+        # CharacterProfile 객체 생성 (speech_generator와 동일)
         character_profile = CharacterProfile(
             name=character_data.get('name', '캐릭터'),
             description=character_data.get('description', ''),
@@ -169,17 +156,67 @@ async def generate_character_qa_fast(request: Dict[str, Any]):
             mbti=character_data.get('mbti')
         )
         
+        # SpeechGenerator로 질문 생성 (pipeline과 동일)
+        speech_generator = SpeechGenerator(api_key=api_key)
         question = await speech_generator.generate_question_for_character(character_profile)
         logger.info(f"📝 생성된 질문: {question}")
         
-        # 고속 병렬 어투 생성
+        # LangChain 병렬 처리를 위한 시간 측정 시작
         start_time = asyncio.get_event_loop().time()
         
-        responses = await tone_generator.generate_3_tones_parallel(
-            character_data=fast_character_data,
-            question=question
-        )
+        # 병렬로 3가지 어투 생성 (pipeline의 로직을 병렬화)
+        # 각 어투별로 system prompt를 먼저 생성
+        tone_tasks = []
+        for i in range(3):
+            tone_variation = i + 1
+            # 각 어투별로 독립적인 system prompt 생성 (speech_generator와 동일)
+            system_prompt_task = speech_generator.create_character_prompt_for_random_tone(
+                character_profile, 
+                tone_variation
+            )
+            tone_tasks.append(system_prompt_task)
         
+        # 3개의 system prompt를 병렬로 생성
+        system_prompts = await asyncio.gather(*tone_tasks)
+        
+        # 고속 어투 생성기로 병렬 처리
+        tone_generator = get_langchain_tone_generator(api_key=api_key)
+        
+        # 병렬 응답 생성을 위한 준비
+        response_tasks = []
+        for i, system_prompt in enumerate(system_prompts):
+            # LangChain으로 병렬 응답 생성
+            tone_name = f"말투{i+1}"
+            response_tasks.append(
+                tone_generator._generate_single_tone_with_summary(
+                    character_data=character_data,
+                    question=question,
+                    system_prompt=system_prompt,
+                    tone_num=i+1
+                )
+            )
+        
+        # 모든 응답을 병렬로 생성
+        tone_results = await asyncio.gather(*response_tasks, return_exceptions=True)
+        
+        # 결과 정리 (speech_generator의 출력 형식과 동일하게)
+        responses = {}
+        for i, result in enumerate(tone_results):
+            tone_name = f"말투{i+1}"
+            
+            if isinstance(result, Exception):
+                logger.error(f"말투 {i+1} 생성 실패: {result}")
+                # 실패 시 기본 응답
+                responses[tone_name] = [{
+                    "text": f"죄송합니다. 말투{i+1} 응답 생성에 실패했습니다.",
+                    "hashtags": f"#오류 #말투{i+1}",
+                    "description": f"생성 실패한 말투{i+1}"
+                }]
+            else:
+                # 성공 시 speech_generator와 동일한 형식으로 응답
+                responses[tone_name] = [result]
+        
+        # 생성 시간 계산
         end_time = asyncio.get_event_loop().time()
         generation_time = end_time - start_time
         

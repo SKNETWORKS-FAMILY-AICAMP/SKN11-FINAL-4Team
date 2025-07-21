@@ -102,22 +102,22 @@ class LangChainToneGenerator:
         """어투 생성용 시스템 프롬프트"""
         return """당신은 이제 '{character_name}'라는 캐릭터처럼 대화해야 합니다.
 
-[캐릭터 정보]
-- 이름: {character_name}
-- 설명: {character_description}
-- 성격: {character_personality}
-- MBTI: {character_mbti}
-- 연령대: {character_age}
-- 성별: {character_gender}
+            [캐릭터 정보]
+            - 이름: {character_name}
+            - 설명: {character_description}
+            - 성격: {character_personality}
+            - MBTI: {character_mbti}
+            - 연령대: {character_age}
+            - 성별: {character_gender}
 
-[말투 지시사항]
-{tone_instruction}
+            [말투 지시사항]
+            {tone_instruction}
 
-[주의사항]
-- 캐릭터의 성격과 말투를 일관성 있게 유지하세요
-- 자연스럽고 매력적인 대화를 하세요
-- 주어진 질문에 캐릭터답게 답변하세요
-- 말투의 특징을 잘 드러내세요"""
+            [주의사항]
+            - 캐릭터의 성격과 말투를 일관성 있게 유지하세요
+            - 자연스럽고 매력적인 대화를 하세요
+            - 주어진 질문에 캐릭터답게 답변하세요
+            - 말투의 특징을 잘 드러내세요"""
 
     def _get_tone_user_prompt(self) -> str:
         """어투 생성용 사용자 프롬프트"""
@@ -126,17 +126,16 @@ class LangChainToneGenerator:
     def _get_summary_system_prompt(self) -> str:
         """어투 요약용 시스템 프롬프트"""
         return """주어진 말투의 system prompt를 기반으로 그 말투의 특징을 요약해주세요. 반드시 아래 형식을 그대로 지켜서 JSON으로 출력하세요.
+            형식:
+            {{
+                "hashtags": "#키워드1 #키워드2 #키워드3",
+                "description": "말투 설명 (한 문장, '~말투'로 끝나야 함)"
+            }}
 
-형식:
-{{
-    "hashtags": "#키워드1 #키워드2 #키워드3",
-    "description": "말투 설명 (한 문장, '~말투'로 끝나야 함)"
-}}
-
-조건:
-1. 말투 스타일을 MZ 느낌나게 키워드 3개를 생성해 해시태그 형식으로 작성해 주세요.
-2. 말투 스타일을 한 문장으로 요약해주세요. 반드시 '말투'로 끝나야 합니다. 서술어 없이 명사형으로 끝납니다.
-3. 출력 형식은 반드시 JSON 형식으로 반환해주세요. (추가 설명 없이)"""
+            조건:
+            1. 말투 스타일을 MZ 느낌나게 키워드 3개를 생성해 해시태그 형식으로 작성해 주세요.
+            2. 말투 스타일을 한 문장으로 요약해주세요. 반드시 '말투'로 끝나야 합니다. 서술어 없이 명사형으로 끝납니다.
+            3. 출력 형식은 반드시 JSON 형식으로 반환해주세요. (추가 설명 없이)"""
 
     def _get_tone_instructions(self) -> Dict[int, str]:
         """어투별 지시사항"""
@@ -267,6 +266,68 @@ class LangChainToneGenerator:
                 }]
             
             return responses
+    
+    async def _generate_single_tone_with_summary(
+        self,
+        character_data: Dict[str, Any],
+        question: str,
+        system_prompt: str,
+        tone_num: int
+    ) -> Dict[str, Any]:
+        """
+        단일 어투에 대한 응답과 요약을 생성합니다.
+        speech_generator의 출력 형식과 동일하게 반환합니다.
+        
+        Args:
+            character_data: 캐릭터 정보
+            question: 질문
+            system_prompt: 시스템 프롬프트  
+            tone_num: 어투 번호 (1, 2, 3)
+            
+        Returns:
+            speech_generator와 동일한 형식의 응답 딕셔너리
+        """
+        try:
+            # 캐릭터 정보를 시스템 프롬프트에 반영
+            formatted_prompt = system_prompt
+            
+            # LLM으로 응답 생성
+            messages = [
+                {"role": "system", "content": formatted_prompt},
+                {"role": "user", "content": question}
+            ]
+            
+            # ChatOpenAI를 사용한 응답 생성
+            llm_response = await self.llm.ainvoke(messages)
+            
+            # response.content에서 텍스트 추출
+            if hasattr(llm_response, 'content'):
+                generated_text = llm_response.content.strip()
+            else:
+                generated_text = str(llm_response).strip()
+            
+            # 어투 요약 생성
+            try:
+                summary_response = await self.summary_chain.ainvoke({"system_prompt": formatted_prompt})
+                
+                # speech_generator와 동일한 형식으로 반환
+                return {
+                    "text": generated_text,
+                    "hashtags": summary_response.get("hashtags", f"#말투{tone_num} #캐릭터 #LangChain"),
+                    "description": summary_response.get("description", f"LangChain으로 생성된 말투{tone_num}")
+                }
+            except Exception as summary_error:
+                logger.warning(f"어투 요약 생성 실패 (말투 {tone_num}): {summary_error}")
+                # 요약 실패 시 기본값 반환
+                return {
+                    "text": generated_text,
+                    "hashtags": f"#말투{tone_num} #캐릭터 #LangChain",
+                    "description": f"LangChain으로 생성된 말투{tone_num}"
+                }
+            
+        except Exception as e:
+            logger.error(f"단일 어투 생성 실패 (말투 {tone_num}): {e}")
+            raise e
 
 
 # 전역 인스턴스
