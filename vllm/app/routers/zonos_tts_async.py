@@ -26,6 +26,7 @@ router = APIRouter()
 # Zonos 모델 전역 변수
 zonos_model = None
 device = None
+zonos_initialization_attempted = False  # 초기화 시도 추적
 
 # 비동기 작업 상태 추적
 task_status: Dict[str, Dict[str, Any]] = {}
@@ -150,8 +151,20 @@ class TaskStatusResponse(BaseModel):
     updated_at: str
 
 def initialize_zonos_model():
-    """Zonos 모델 초기화"""
-    global zonos_model, device
+    """Zonos 모델 초기화 (싱글톤 패턴)"""
+    global zonos_model, device, zonos_initialization_attempted
+    
+    # 이미 초기화 시도했으면 스킵 (성공 여부와 관계없이)
+    if zonos_initialization_attempted:
+        if zonos_model is not None:
+            logger.info("ℹ️ Zonos 모델이 이미 초기화되어 있습니다.")
+        else:
+            logger.info("ℹ️ Zonos 모델 초기화가 이미 시도되었습니다.")
+        return zonos_model is not None
+    
+    # 초기화 시도 플래그 설정
+    zonos_initialization_attempted = True
+    
     try:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         logger.info(f"🔧 Zonos 모델 초기화 중... (디바이스: {device})")
@@ -161,6 +174,7 @@ def initialize_zonos_model():
         return True
     except Exception as e:
         logger.error(f"❌ Zonos 모델 초기화 실패: {e}")
+        zonos_model = None  # 실패 시 None으로 설정
         return False
 
 @router.on_event("startup")
@@ -395,8 +409,12 @@ async def generate_tts_async(
     request: ZonosTTSRequest
 ):
     """비동기 TTS 생성 (JSON 전용)"""
+    # 모델이 초기화되지 않았으면 다시 시도
     if zonos_model is None:
-        raise HTTPException(status_code=500, detail="Zonos 모델이 초기화되지 않았습니다.")
+        logger.warning("⚠️ Zonos 모델이 초기화되지 않았습니다. 초기화 시도 중...")
+        success = await asyncio.get_event_loop().run_in_executor(executor, initialize_zonos_model)
+        if not success:
+            raise HTTPException(status_code=500, detail="Zonos 모델 초기화에 실패했습니다. 서버 로그를 확인하세요.")
     
     # 작업 ID 생성
     task_id = str(uuid.uuid4())
@@ -531,8 +549,12 @@ async def generate_tts_with_voice_async(
     request: ZonosTTSWithVoiceRequest
 ):
     """음성 클로닝을 사용한 비동기 TTS 생성 (Base64 인코딩된 음성 데이터 사용)"""
+    # 모델이 초기화되지 않았으면 다시 시도
     if zonos_model is None:
-        raise HTTPException(status_code=500, detail="Zonos 모델이 초기화되지 않았습니다.")
+        logger.warning("⚠️ Zonos 모델이 초기화되지 않았습니다. 초기화 시도 중...")
+        success = await asyncio.get_event_loop().run_in_executor(executor, initialize_zonos_model)
+        if not success:
+            raise HTTPException(status_code=500, detail="Zonos 모델 초기화에 실패했습니다. 서버 로그를 확인하세요.")
     
     # 작업 ID 생성
     task_id = str(uuid.uuid4())

@@ -317,6 +317,120 @@ class LangChainToneGenerator:
             2: "주어진 캐릭터 정보를 바탕으로 두 번째 독특하고 창의적인 말투로 답변하세요. 첫 번째와는 완전히 다른 새로운 스타일로 표현해주세요.",
             3: "주어진 캐릭터 정보를 바탕으로 세 번째 독특하고 창의적인 말투로 답변하세요. 앞의 두 가지와는 전혀 다른 참신한 방식으로 표현해주세요."
         }
+    
+    def _get_single_request_system_prompt(self) -> str:
+        """단일 요청으로 3가지 어투를 생성하는 시스템 프롬프트"""
+        return """당신은 주어진 캐릭터의 3가지 서로 다른 말투 스타일을 생성하는 전문가입니다.
+
+[캐릭터 정보]
+- 이름: {character_name}
+- 설명: {character_description}
+- 성격: {character_personality}
+- MBTI: {character_mbti}
+- 연령대: {character_age}
+- 성별: {character_gender}
+
+[과제]
+주어진 질문에 대해 같은 캐릭터가 3가지 완전히 다른 말투로 답변하는 것을 생성하세요.
+각 말투는 서로 구별되는 독특한 특징을 가져야 합니다.
+
+다음 JSON 형식으로 정확히 출력하세요:
+{{
+    "말투1": {{
+        "text": "첫 번째 말투로 작성한 답변",
+        "hashtags": "#특징1 #특징2 #특징3",
+        "description": "이 말투의 특징을 설명하는 한 문장 (반드시 '말투'로 끝남)"
+    }},
+    "말투2": {{
+        "text": "두 번째 말투로 작성한 답변 (첫 번째와 완전히 다른 스타일)",
+        "hashtags": "#특징4 #특징5 #특징6",
+        "description": "이 말투의 특징을 설명하는 한 문장 (반드시 '말투'로 끝남)"
+    }},
+    "말투3": {{
+        "text": "세 번째 말투로 작성한 답변 (앞의 두 개와 완전히 다른 스타일)",
+        "hashtags": "#특징7 #특징8 #특징9",
+        "description": "이 말투의 특징을 설명하는 한 문장 (반드시 '말투'로 끝남)"
+    }}
+}}
+
+[중요 지침]
+1. 세 가지 말투는 서로 명확히 구별되어야 합니다.
+2. 각 말투는 캐릭터의 기본 성격을 유지하되, 표현 방식이 달라야 합니다.
+3. 해시태그는 각 말투의 특징을 MZ 감성으로 표현해주세요.
+4. 반드시 위의 JSON 형식을 정확히 따라주세요."""
+
+    async def generate_3_tones_single_request(
+        self,
+        character_data: Dict[str, Any],
+        question: str
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        🚀 단일 요청으로 3가지 다른 어투 생성
+        한 번의 LLM 호출로 서로 다른 3가지 어투를 생성하여 차별화 보장
+        
+        Args:
+            character_data: 캐릭터 정보
+            question: 질문
+            
+        Returns:
+            어투별 응답 딕셔너리
+        """
+        logger.info(f"🎯 단일 요청 3개 어투 생성 시작: {character_data.get('name', '캐릭터')}")
+        
+        # 입력 데이터 준비
+        input_data = {
+            "character_name": character_data.get("name", "캐릭터"),
+            "character_description": character_data.get("description", ""),
+            "character_personality": character_data.get("personality", "친근한 성격"),
+            "character_mbti": character_data.get("mbti", "ENFP"),
+            "character_age": character_data.get("age_range", "20-30대"),
+            "character_gender": character_data.get("gender", "없음"),
+            "question": question
+        }
+        
+        try:
+            # 단일 프롬프트로 3가지 어투 생성
+            single_prompt = ChatPromptTemplate.from_messages([
+                ("system", self._get_single_request_system_prompt()),
+                ("user", "{question}")
+            ])
+            
+            # LLM 호출
+            chain = single_prompt | self.llm
+            start_time = asyncio.get_event_loop().time()
+            
+            response = await chain.ainvoke(input_data)
+            
+            # 응답 파싱
+            content = response.content.strip() if hasattr(response, 'content') else str(response).strip()
+            
+            # JSON 파싱
+            import re
+            json_match = re.search(r'\{[\s\S]*\}', content)
+            if json_match:
+                result = json.loads(json_match.group())
+                
+                # 결과 포맷팅
+                responses = {}
+                for tone_key, tone_data in result.items():
+                    responses[tone_key] = [{
+                        "text": tone_data.get("text", ""),
+                        "hashtags": tone_data.get("hashtags", f"#{tone_key}"),
+                        "description": tone_data.get("description", f"{tone_key} 스타일의 말투")
+                    }]
+                
+                generation_time = asyncio.get_event_loop().time() - start_time
+                logger.info(f"✅ 단일 요청 3개 어투 생성 완료: {generation_time:.2f}초")
+                
+                return responses
+                
+            else:
+                raise Exception("JSON 응답을 파싱할 수 없습니다.")
+                
+        except Exception as e:
+            logger.error(f"❌ 단일 요청 어투 생성 실패: {e}")
+            # 폴백: 기존 병렬 방식 사용
+            return await self.generate_3_tones_parallel(character_data, question)
 
     async def generate_3_tones_parallel(
         self,

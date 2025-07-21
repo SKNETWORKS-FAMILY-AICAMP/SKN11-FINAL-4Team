@@ -111,34 +111,48 @@ async def generate_character_qa_fast(request: Dict[str, Any]):
         # 시간 측정 시작
         start_time = asyncio.get_event_loop().time()
         
-        # 3개의 system prompt를 병렬로 생성
-        tone_tasks = [
-            speech_generator.create_character_prompt_for_random_tone(character_profile, i + 1)
-            for i in range(3)
-        ]
-        system_prompts = await asyncio.gather(*tone_tasks)
+        # 한 번의 요청으로 3개의 서로 다른 system prompt 생성
+        try:
+            system_prompts = await speech_generator.create_three_distinct_system_prompts(character_profile)
+            logger.info("✅ 단일 요청으로 3개 시스템 프롬프트 생성 성공")
+        except Exception as e:
+            logger.warning(f"단일 요청 시스템 프롬프트 생성 실패, 병렬 방식으로 폴백: {e}")
+            # 폴백: 기존 병렬 방식
+            tone_tasks = [
+                speech_generator.create_character_prompt_for_random_tone(character_profile, i + 1)
+                for i in range(3)
+            ]
+            system_prompts = await asyncio.gather(*tone_tasks)
         
-        # 병렬 응답 생성
-        response_tasks = [
-            tone_generator._generate_single_tone_with_summary(
+        # 단일 요청으로 3가지 어투 생성 (더 차별화된 결과)
+        try:
+            responses = await tone_generator.generate_3_tones_single_request(
                 character_data=character_data,
-                question=question,
-                system_prompt=system_prompt,
-                tone_num=i+1
+                question=question
             )
-            for i, system_prompt in enumerate(system_prompts)
-        ]
-        tone_results = await asyncio.gather(*response_tasks, return_exceptions=True)
-        
-        # 결과 정리
-        responses = {}
-        for i, result in enumerate(tone_results):
-            tone_name = f"말투{i+1}"
-            if isinstance(result, Exception):
-                logger.error(f"말투 {i+1} 생성 실패: {result}")
-                responses[tone_name] = create_error_response(i+1)
-            else:
-                responses[tone_name] = [result]
+        except Exception as e:
+            logger.warning(f"단일 요청 방식 실패, 병렬 방식으로 폴백: {e}")
+            # 폴백: 기존 병렬 처리 방식
+            response_tasks = [
+                tone_generator._generate_single_tone_with_summary(
+                    character_data=character_data,
+                    question=question,
+                    system_prompt=system_prompt,
+                    tone_num=i+1
+                )
+                for i, system_prompt in enumerate(system_prompts)
+            ]
+            tone_results = await asyncio.gather(*response_tasks, return_exceptions=True)
+            
+            # 결과 정리
+            responses = {}
+            for i, result in enumerate(tone_results):
+                tone_name = f"말투{i+1}"
+                if isinstance(result, Exception):
+                    logger.error(f"말투 {i+1} 생성 실패: {result}")
+                    responses[tone_name] = create_error_response(i+1)
+                else:
+                    responses[tone_name] = [result]
         
         # 생성 시간 계산
         generation_time = asyncio.get_event_loop().time() - start_time

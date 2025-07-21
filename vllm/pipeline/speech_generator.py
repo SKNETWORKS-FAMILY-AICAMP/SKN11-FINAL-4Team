@@ -246,6 +246,78 @@ class SpeechGenerator:
         tone_instruction = random_instructions.get(tone_variation, "캐릭터의 스타일을 반영한 창의적 말투를 사용하세요.")
         return await self.generate_system_prompt_with_gpt(character, tone_instruction)
     
+    async def create_three_distinct_system_prompts(self, character: CharacterProfile) -> List[str]:
+        """
+        한 번의 LLM 호출로 3가지 서로 다른 시스템 프롬프트를 생성합니다.
+        
+        Args:
+            character: 캐릭터 프로필
+            
+        Returns:
+            3개의 서로 다른 system prompt 리스트
+        """
+        system_prompt = """당신은 캐릭터 말투 생성 전문가입니다. 
+주어진 캐릭터 정보를 바탕으로 3가지 서로 다른 말투 스타일의 system prompt를 생성해주세요.
+각 system prompt는 같은 캐릭터의 다른 측면을 보여주며, 서로 명확히 구별되어야 합니다.
+
+다음 JSON 형식으로 정확히 출력하세요:
+{
+    "system_prompt_1": "첫 번째 말투 스타일의 system prompt (캐릭터의 기본적인 면을 강조)",
+    "system_prompt_2": "두 번째 말투 스타일의 system prompt (캐릭터의 다른 측면을 부각)",
+    "system_prompt_3": "세 번째 말투 스타일의 system prompt (캐릭터의 독특한 면을 표현)"
+}
+
+각 system prompt는 다음을 포함해야 합니다:
+1. 캐릭터의 기본 정보와 성격
+2. 구체적인 말투 지시사항 (예: 존댓말/반말, 어미, 특징적 표현)
+3. 예시 표현이나 특징적인 어투
+4. 주의사항
+
+중요: 세 가지 prompt는 서로 다른 말투 스타일을 만들어내도록 차별화되어야 합니다.
+예를 들어:
+- 첫 번째: 친근하고 캐주얼한 말투
+- 두 번째: 격식있고 정중한 말투  
+- 세 번째: 독특하고 개성있는 말투"""
+
+        prompt = f"""캐릭터 정보:
+{self._format_character_info(character)}
+
+위 캐릭터에 대해 3가지 서로 다른 말투 스타일의 system prompt를 생성해주세요."""
+        
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt}
+        ]
+        
+        try:
+            response = await self._call_openai_api(messages, temperature=0.8, max_tokens=2000)
+            
+            # JSON 파싱
+            import re
+            json_match = re.search(r'\{[\s\S]*\}', response)
+            if json_match:
+                result = json.loads(json_match.group())
+                return [
+                    result.get("system_prompt_1", ""),
+                    result.get("system_prompt_2", ""),
+                    result.get("system_prompt_3", "")
+                ]
+            else:
+                # 파싱 실패 시 기존 방식으로 폴백
+                logger.warning("3개 시스템 프롬프트 JSON 파싱 실패, 개별 생성으로 폴백")
+                return await asyncio.gather(*[
+                    self.create_character_prompt_for_random_tone(character, i+1)
+                    for i in range(3)
+                ])
+                
+        except Exception as e:
+            logger.error(f"3개 시스템 프롬프트 생성 실패: {e}")
+            # 에러 시 기존 방식으로 폴백
+            return await asyncio.gather(*[
+                self.create_character_prompt_for_random_tone(character, i+1)
+                for i in range(3)
+            ])
+    
     async def summarize_speech_style_with_gpt(self, system_prompt: str) -> Dict[str, str]:
         system_instruction = """
         주어진 말투의 system prompt를 기반으로 그 말투의 특징을 요약해주세요. 반드시 아래 형식을 그대로 지켜서 JSON으로 출력하세요.
