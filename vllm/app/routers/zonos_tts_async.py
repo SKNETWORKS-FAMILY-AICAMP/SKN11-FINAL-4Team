@@ -28,11 +28,28 @@ zonos_model = None
 device = None
 zonos_initialization_attempted = False  # 초기화 시도 추적
 
-# 비동기 작업 상태 추적
+# 비동기 작업 상태 추적 (Legacy - will be migrated to cache manager)
 task_status: Dict[str, Dict[str, Any]] = {}
 
-# ThreadPoolExecutor for CPU-bound tasks
-executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+# ThreadPoolExecutor for CPU-bound tasks (managed)
+executor = None
+executor_lock = asyncio.Lock()
+
+async def get_executor():
+    """Get or create ThreadPoolExecutor instance (thread-safe)"""
+    global executor
+    async with executor_lock:
+        if executor is None:
+            executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+    return executor
+
+async def shutdown_executor():
+    """Properly shutdown the ThreadPoolExecutor"""
+    global executor
+    async with executor_lock:
+        if executor is not None:
+            executor.shutdown(wait=True)
+            executor = None
 
 # 웹훅 URL 설정 (환경 변수에서 가져오거나 기본값 사용)
 # 백엔드가 HTTPS로 실행되고 있으므로 HTTPS 사용
@@ -892,8 +909,8 @@ async def cleanup_old_tasks():
                 if task.get("result") and task["result"].get("audio_path"):
                     try:
                         Path(task["result"]["audio_path"]).unlink()
-                    except:
-                        pass
+                    except (OSError, IOError) as e:
+                        logger.warning(f"Failed to delete audio file {task['result']['audio_path']}: {e}")
                 del task_status[task_id]
                 
             if tasks_to_delete:
