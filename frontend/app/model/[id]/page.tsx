@@ -13,7 +13,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 
 import { tokenUtils } from "@/lib/auth"
@@ -157,6 +157,7 @@ function ModelDetailContent() {
     id: string
     text: string
     url: string
+    s3_url?: string
     duration?: number
     createdAt: string
     status?: string  // pending, completed, failed
@@ -169,6 +170,7 @@ function ModelDetailContent() {
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const [isUploadingBaseVoice, setIsUploadingBaseVoice] = useState(false)
   const [hasBaseVoice, setHasBaseVoice] = useState(false)
+  const [voiceToDelete, setVoiceToDelete] = useState<string | null>(null)
   const [instagramStatus, setInstagramStatus] = useState<{
     is_connected: boolean
     connected_at?: string
@@ -252,8 +254,6 @@ function ModelDetailContent() {
       // 특정 인플루언서의 게시글만 조회
       const boardData = await apiClient.get<any[]>(`/api/v1/boards?influencer_id=${params.id}`)
 
-      console.log('🔍 백엔드에서 받아온 게시글 데이터:', boardData)
-
       // 게시글 데이터 변환 (백엔드에서 제공하는 인플루언서 정보 사용)
       const transformedPosts: ContentPost[] = boardData.map((board: any) => {
         // 백엔드에서 이미 제공하는 인플루언서 정보 사용
@@ -300,7 +300,6 @@ function ModelDetailContent() {
         }
       })
 
-      console.log('✅ 변환된 게시글 데이터:', transformedPosts)
 
       setPosts(transformedPosts)
     } catch (error) {
@@ -350,14 +349,12 @@ function ModelDetailContent() {
         // 올바른 analytics API 호출
         const apiUsageResponse = await apiClient.get(`/api/v1/analytics/api-calls/`) as any
 
-        console.log('Analytics API 응답:', apiUsageResponse)
 
         // 특정 인플루언서의 API 호출 데이터 필터링
         const influencerApiCalls = apiUsageResponse.filter((call: any) =>
           call.influencer_id === params.id?.toString()
         )
 
-        console.log('필터링된 인플루언서 API 호출:', influencerApiCalls)
 
         // 총 API 호출 수와 오늘 호출 수 계산
         const totalCalls = influencerApiCalls.reduce((sum: number, call: any) =>
@@ -375,13 +372,7 @@ function ModelDetailContent() {
           todayApiCalls: todayCalls
         }
 
-        console.log('Analytics 데이터 로드 성공:', {
-          totalCalls,
-          todayCalls,
-          influencerApiCalls: influencerApiCalls.length
-        })
       } catch (error) {
-        console.log('API 사용량 데이터를 가져올 수 없습니다:', error)
         // 오류 발생 시 기본값 사용
         apiUsageData = {
           totalApiCalls: 0,
@@ -421,26 +412,18 @@ function ModelDetailContent() {
   const loadModelData = async () => {
     setIsModelLoading(true)
     try {
-      console.log('🔍 모델 데이터 로드 시작 - influencer_id:', params.id)
 
       const data = await ModelService.getInfluencer(params.id as string)
-      console.log('✅ 모델 데이터 로드 성공:', data)
 
       // 이미지 URL 처리: S3 키인 경우 URL로 변환
       let processedImageUrl = data.image_url
       if (data.image_url && !data.image_url.startsWith('http')) {
         // S3 키인 경우 직접 URL 생성
         processedImageUrl = `https://aimex-influencers.s3.ap-northeast-2.amazonaws.com/${data.image_url}`
-        console.log('🔍 S3 키를 URL로 변환:', {
-          original: data.image_url,
-          converted: processedImageUrl
-        })
       } else if (data.image_url && data.image_url.startsWith('http')) {
         // 이미 URL인 경우 그대로 사용
         processedImageUrl = data.image_url
-        console.log('🔍 이미 URL 형태:', processedImageUrl)
       } else {
-        console.log('🔍 이미지 URL 없음')
       }
 
       setModel({
@@ -472,28 +455,20 @@ function ModelDetailContent() {
 
   // API 키 정보 로드
   const loadApiKeyInfo = async () => {
-    console.log('🔍 API 키 정보 로드 시작 - influencer_id:', params.id)
 
     // 현재 로그인한 사용자 정보 확인
     const token = localStorage.getItem('access_token')
     if (token) {
       try {
         const payload = JSON.parse(atob(token.split('.')[1]))
-        console.log('👤 현재 로그인한 사용자:', {
-          user_id: payload.sub,
-          email: payload.email,
-          name: payload.name
-        })
+        
       } catch (e) {
-        console.log('❌ 토큰 파싱 실패:', e)
       }
     } else {
-      console.log('❌ 로그인 토큰이 없습니다')
     }
 
     try {
       const apiKeyData = await ModelService.getApiKey(params.id as string)
-      console.log('✅ API 키 조회 성공:', apiKeyData)
 
       setApiKeyInfo({
         api_key: apiKeyData.api_key,
@@ -517,10 +492,8 @@ function ModelDetailContent() {
 
       // API 키가 없는 경우 (404)에만 자동 생성 시도
       if (error.status === 404 && error.data?.detail === "API key not found") {
-        console.log('🔄 API 키가 없어서 자동 생성 시도...')
         try {
           const response = await ModelService.generateApiKey(params.id as string)
-          console.log('✅ API 키 자동 생성 성공:', response)
 
           setApiKeyInfo({
             api_key: response.api_key,
@@ -532,15 +505,8 @@ function ModelDetailContent() {
             ...prev,
             apiKey: response.api_key
           }))
-          console.log('API 키가 자동으로 생성되었습니다.')
         } catch (generateError: any) {
-          console.error('❌ API 키 자동 생성 실패:', {
-            error: generateError,
-            status: generateError.status,
-            detail: generateError.data?.detail,
-            message: generateError.message,
-            stack: generateError.stack
-          })
+          
           setApiKeyInfo(null)
         }
       } else {
@@ -658,12 +624,9 @@ function ModelDetailContent() {
           if (response.ok) {
             const result = await response.json()
             imageUrl = result.file_url
-            console.log('인플루언서 이미지 업로드 성공:', imageUrl)
           } else {
-            console.warn('인플루언서 이미지 업로드 실패')
           }
         } catch (error) {
-          console.warn('인플루언서 이미지 업로드 중 오류:', error)
         } finally {
           setIsUploadingImage(false)
         }
@@ -967,7 +930,6 @@ function ModelDetailContent() {
     
     if (hasPendingVoices && activeTab === 'voice') {
       const interval = setInterval(async () => {
-        console.log('🔄 pending 음성 상태 확인 중...')
         
         // 음성 목록 다시 로드
         const response = await apiClient.get<any[]>(`/api/v1/influencers/${params.id}/voices`)
@@ -976,10 +938,11 @@ function ModelDetailContent() {
           const updatedVoices = response.map((voice: any) => ({
             id: voice.id,
             text: voice.text,
-            url: voice.s3_url,
+            url: voice.url || voice.s3_url,
             duration: voice.duration,
-            createdAt: voice.created_at,
-            status: voice.status || 'completed'
+            createdAt: voice.createdAt || voice.created_at,
+            status: voice.status || 'completed',
+            task_id: voice.task_id
           }))
           
           // 새로 완료된 음성 찾기
@@ -1029,7 +992,6 @@ function ModelDetailContent() {
 
     if (hasScheduledPosts) {
       const interval = setInterval(async () => {
-        console.log('🔄 예약된 게시글 상태 확인 중...')
         await loadPostsData() // 예약된 게시글이 있으면 30초마다 새로고침
 
         // 상태 변경 감지
@@ -1086,15 +1048,12 @@ function ModelDetailContent() {
         )
 
         if (newlyPublished.length > 0) {
-          console.log('✅ 새로 발행된 게시글 감지:', newlyPublished.map(p => p.title))
           setPosts(transformedPosts)
           await loadAnalyticsData() // 분석 데이터도 갱신
 
           // 사용자에게 알림 (선택사항)
           if (newlyPublished.length === 1) {
-            console.log(`🎉 "${newlyPublished[0].title}" 게시글이 발행되었습니다!`)
           } else {
-            console.log(`🎉 ${newlyPublished.length}개의 게시글이 발행되었습니다!`)
           }
         }
 
@@ -1231,10 +1190,7 @@ function ModelDetailContent() {
       setIsEditing(false);
       setIsPostDetailModalOpen(false);
 
-      console.log('게시글 수정 완료:', editTitle)
-
     } catch (error) {
-      console.error('게시글 수정 실패:', error);
     } finally {
       setIsSaving(false);
     }
@@ -1260,10 +1216,7 @@ function ModelDetailContent() {
       // 분석 데이터 다시 로드 (게시글 수 변경 반영)
       await loadAnalyticsData()
 
-      console.log(`게시글 "${postTitle}" 삭제 완료`)
-
     } catch (error) {
-      console.error('게시글 삭제 실패:', error);
       alert('게시글 삭제에 실패했습니다. 다시 시도해주세요.');
     }
   }
@@ -1657,18 +1610,27 @@ function ModelDetailContent() {
       }
 
       // 베이스 음성 업로드 API 호출
-      const response = await apiClient.post<{s3_url: string, file_name: string, file_size: number, message: string}>(`/api/v1/influencers/${params.id}/voice/base`, requestData)
+      const response = await apiClient.post<{
+        s3_url: string, 
+        file_name: string, 
+        file_size: number, 
+        message: string,
+        original_filename?: string
+      }>(`/api/v1/influencers/${params.id}/voice/base`, requestData)
       
-      console.log('Upload response:', response)
-
       if (response?.s3_url) {
         setBaseVoiceUrl(response.s3_url)
         setHasBaseVoice(true)
         setBaseVoiceFile(null)
         
+        // 원본 파일명이 있으면 WAV로 변환되었음을 알림
+        const description = response.original_filename 
+          ? `베이스 음성이 WAV 형식으로 변환되어 업로드되었습니다. (원본: ${response.original_filename})`
+          : "베이스 음성이 성공적으로 업로드되었습니다."
+        
         toast({
           title: "업로드 완료",
-          description: "베이스 음성이 성공적으로 업로드되었습니다.",
+          description,
         })
       } else {
         throw new Error('응답에 s3_url이 없습니다')
@@ -1728,9 +1690,10 @@ function ModelDetailContent() {
           const newVoice = {
             id: Date.now().toString(),
             text: voiceText,
-            url: response.s3_url,
+            url: response.url || response.s3_url,
             duration: response.duration,
-            createdAt: new Date().toISOString()
+            createdAt: new Date().toISOString(),
+            status: 'completed'
           }
           setVoiceHistory(prev => [newVoice, ...prev])
           
@@ -1772,7 +1735,6 @@ function ModelDetailContent() {
         setHasBaseVoice(true)
       } else {
         // 음성이 없는 경우
-        console.log(response?.message || '베이스 음성이 아직 설정되지 않았습니다.')
         setHasBaseVoice(false)
         setBaseVoiceUrl(null)
       }
@@ -1794,10 +1756,11 @@ function ModelDetailContent() {
         const voiceHistory = response.map((voice: any) => ({
           id: voice.id,
           text: voice.text,
-          url: voice.s3_url,
+          url: voice.url || voice.s3_url,  // url 필드를 우선 사용
           duration: voice.duration,
-          createdAt: voice.created_at,
-          status: voice.status || 'completed'
+          createdAt: voice.createdAt || voice.created_at,  // createdAt 필드를 우선 사용
+          status: voice.status || 'completed',
+          task_id: voice.task_id
         }))
         
         setVoiceHistory(voiceHistory)
@@ -1806,10 +1769,11 @@ function ModelDetailContent() {
         const voiceHistory = (response as any).data.map((voice: any) => ({
           id: voice.id,
           text: voice.text,
-          url: voice.s3_url,
+          url: voice.url || voice.s3_url,
           duration: voice.duration,
-          createdAt: voice.created_at,
-          status: voice.status || 'completed'
+          createdAt: voice.createdAt || voice.created_at,
+          status: voice.status || 'completed',
+          task_id: voice.task_id
         }))
         
         setVoiceHistory(voiceHistory)
@@ -1876,46 +1840,110 @@ function ModelDetailContent() {
     }
   }
 
-  const handleDownloadVoice = async (url: string, id: string) => {
+  const handleDownloadVoice = async (url: string | undefined, id: string) => {
     try {
+      if (!url) {
+        throw new Error("음성 파일 URL이 없습니다")
+      }
+      
+      console.log('Download URL:', url)
+      
+      // 다운로드 시작 알림
+      toast({
+        title: "다운로드 시작",
+        description: "음성 파일을 다운로드하고 있습니다...",
+      })
+
       const response = await fetch(url)
-      const blob = await response.blob()
+      
+      if (!response.ok) {
+        throw new Error(`다운로드 실패: ${response.status}`)
+      }
+
+      // 파일 크기 가져오기
+      const contentLength = response.headers.get('content-length')
+      const total = parseInt(contentLength || '0', 10)
+      
+      // ReadableStream을 사용해서 데이터 읽기
+      const reader = response.body?.getReader()
+      if (!reader) throw new Error('스트림을 읽을 수 없습니다')
+      
+      const chunks: Uint8Array[] = []
+      let receivedLength = 0
+
+      while (true) {
+        const { done, value } = await reader.read()
+        
+        if (done) break
+        
+        chunks.push(value)
+        receivedLength += value.length
+        
+        // 진행률 로그 (필요시 UI에 표시 가능)
+        if (total) {
+          const progress = Math.round((receivedLength / total) * 100)
+          console.log(`다운로드 진행률: ${progress}%`)
+        }
+      }
+
+      // Uint8Array로 합치기
+      const chunksAll = new Uint8Array(receivedLength)
+      let position = 0
+      for (const chunk of chunks) {
+        chunksAll.set(chunk, position)
+        position += chunk.length
+      }
+
+      // Blob 생성 및 다운로드
+      const blob = new Blob([chunksAll], { type: 'audio/mpeg' })
       const downloadUrl = window.URL.createObjectURL(blob)
+      
       const link = document.createElement('a')
       link.href = downloadUrl
       link.download = `voice_${id}.mp3`
       document.body.appendChild(link)
       link.click()
+      
+      // 정리
       document.body.removeChild(link)
       window.URL.revokeObjectURL(downloadUrl)
-    } catch (error) {
+      
+      toast({
+        title: "다운로드 완료",
+        description: "음성 파일이 다운로드되었습니다.",
+      })
+      
+    } catch (error: any) {
       console.error('다운로드 실패:', error)
       toast({
         title: "다운로드 실패",
-        description: "음성 파일 다운로드에 실패했습니다.",
+        description: error.message || "음성 파일 다운로드에 실패했습니다.",
         variant: "destructive",
       })
     }
   }
 
-  const handleDeleteVoice = async (id: string) => {
-    if (!confirm('이 음성을 삭제하시겠습니까?')) return
+  const handleDeleteVoice = async () => {
+    if (!voiceToDelete) return
 
     try {
-      await apiClient.delete(`/api/v1/voices/${id}`)
+      // 올바른 엔드포인트 경로로 수정
+      await apiClient.delete(`/api/v1/influencers/voices/${voiceToDelete}`)
       
       // 로컬에서 제거
-      setVoiceHistory(prev => prev.filter(v => v.id !== id))
+      setVoiceHistory(prev => prev.filter(v => v.id !== voiceToDelete))
       
       toast({
         title: "삭제 완료",
         description: "음성이 삭제되었습니다.",
       })
-    } catch (error) {
+      
+      setVoiceToDelete(null)
+    } catch (error: any) {
       console.error('음성 삭제 실패:', error)
       toast({
         title: "삭제 실패",
-        description: "음성 삭제에 실패했습니다.",
+        description: error.response?.data?.detail || "음성 삭제에 실패했습니다.",
         variant: "destructive",
       })
     }
@@ -2865,17 +2893,29 @@ function ModelDetailContent() {
                       placeholder="음성으로 변환할 텍스트를 입력하세요..."
                       className="min-h-[100px] mt-2"
                       value={voiceText}
-                      onChange={(e) => setVoiceText(e.target.value)}
+                      onChange={(e) => {
+                        const newText = e.target.value
+                        if (newText.length <= 300) {
+                          setVoiceText(newText)
+                        } else {
+                          toast({
+                            title: "글자수 제한",
+                            description: "텍스트는 300자까지만 입력할 수 있습니다.",
+                            variant: "destructive",
+                          })
+                        }
+                      }}
                       disabled={!hasBaseVoice}
+                      maxLength={300}
                     />
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-gray-500">
-                      {voiceText.length} / 500자
+                      {voiceText.length} / 300자
                     </span>
                     <Button
                       onClick={handleGenerateVoice}
-                      disabled={!hasBaseVoice || !voiceText.trim() || isGeneratingVoice || voiceText.length > 500}
+                      disabled={!hasBaseVoice || !voiceText.trim() || isGeneratingVoice || voiceText.length > 300}
                       className="bg-purple-600 hover:bg-purple-700 text-white"
                     >
                       {isGeneratingVoice ? (
@@ -2974,7 +3014,7 @@ function ModelDetailContent() {
                             <Button
                               variant="outline"
                               size="sm"
-                              onClick={() => handleDeleteVoice(voice.id)}
+                              onClick={() => setVoiceToDelete(voice.id)}
                               className="text-red-600 hover:text-red-700 hover:bg-red-50"
                             >
                               <Trash2 className="h-4 w-4" />
@@ -3233,6 +3273,32 @@ function ModelDetailContent() {
                 </div>
               </div>
             )}
+          </DialogContent>
+        </Dialog>
+
+        {/* 음성 삭제 확인 다이얼로그 */}
+        <Dialog open={!!voiceToDelete} onOpenChange={(open) => !open && setVoiceToDelete(null)}>
+          <DialogContent className="sm:max-w-[425px]">
+            <DialogHeader>
+              <DialogTitle>음성 삭제 확인</DialogTitle>
+              <DialogDescription>
+                이 음성을 삭제하시겠습니까? 삭제된 음성은 복구할 수 없습니다.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => setVoiceToDelete(null)}
+              >
+                취소
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={handleDeleteVoice}
+              >
+                삭제
+              </Button>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
       </div>
