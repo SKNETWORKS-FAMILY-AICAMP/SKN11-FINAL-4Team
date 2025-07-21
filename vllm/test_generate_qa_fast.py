@@ -22,7 +22,7 @@ async def test_generate_qa_fast():
     }
     
     # API endpoint
-    url = "http://localhost:8000/api/speech/generate_qa_fast"
+    url = "http://localhost:8000/speech/generate_qa_fast"
     
     print("🚀 Testing /generate_qa_fast endpoint...")
     print(f"📝 Character: {test_character['name']}")
@@ -63,8 +63,8 @@ async def test_generate_qa_fast():
     except Exception as e:
         print(f"❌ Unexpected error: {e}")
 
-async def compare_endpoints():
-    """Compare /generate_qa and /generate_qa_fast endpoints"""
+async def test_single_endpoint():
+    """Test the /generate_qa_fast endpoint performance"""
     
     test_character = {
         "name": "알렉스",
@@ -75,31 +75,14 @@ async def compare_endpoints():
         "mbti": "INTJ"
     }
     
-    base_url = "http://localhost:8000/api/speech"
+    base_url = "http://localhost:8000/speech"
     
-    print("🔄 Comparing endpoints performance...")
+    print("🚀 Testing /generate_qa_fast endpoint performance...")
     print("-" * 50)
     
     async with aiohttp.ClientSession() as session:
-        # Test original endpoint
-        print("📊 Testing /generate_qa (original)...")
-        start_original = time.time()
-        
-        try:
-            async with session.post(f"{base_url}/generate_qa", json={"character": test_character}) as response:
-                if response.status == 200:
-                    original_result = await response.json()
-                    original_time = time.time() - start_original
-                    print(f"✅ Original endpoint: {original_time:.2f}s")
-                else:
-                    print(f"❌ Original endpoint error: {response.status}")
-                    original_time = None
-        except Exception as e:
-            print(f"❌ Original endpoint failed: {e}")
-            original_time = None
-        
         # Test fast endpoint
-        print("\n📊 Testing /generate_qa_fast (improved)...")
+        print("📊 Testing /generate_qa_fast...")
         start_fast = time.time()
         
         try:
@@ -116,12 +99,12 @@ async def compare_endpoints():
             print(f"❌ Fast endpoint failed: {e}")
             fast_time = None
         
-        # Compare results
-        if original_time and fast_time:
-            improvement = ((original_time - fast_time) / original_time) * 100
-            speedup = original_time / fast_time
-            print(f"\n📈 Performance improvement: {improvement:.1f}%")
-            print(f"⚡ Speedup: {speedup:.1f}x faster")
+        # Show performance results
+        if fast_time:
+            print(f"\n📈 Performance Summary:")
+            print(f"⚡ Total request time: {fast_time:.2f}s")
+            print(f"⏱️  API processing time: {api_time:.2f}s")
+            print(f"🌐 Network overhead: {fast_time - api_time:.2f}s")
 
 if __name__ == "__main__":
     print("=" * 50)
@@ -133,5 +116,5 @@ if __name__ == "__main__":
     
     print("\n" + "=" * 50)
     
-    # Run comparison
-    asyncio.run(compare_endpoints())
+    # Run performance test
+    asyncio.run(test_single_endpoint())
