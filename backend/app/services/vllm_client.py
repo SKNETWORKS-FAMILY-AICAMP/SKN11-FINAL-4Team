@@ -316,24 +316,32 @@ class VLLMClient:
             raise VLLMClientError(f"음성 생성 실패: {e}")
 
     async def generate_qa_for_character(self, character_data: Dict[str, Any]) -> Dict[str, Any]:
-        """캐릭터에 대한 QA 생성 (vLLM 서버의 /speech/generate_qa 엔드포인트 사용)"""
+        """캐릭터에 대한 QA 생성 (vLLM 서버의 /speech/generate_qa_fast 엔드포인트 사용)"""
         try:
-            # VLLMCharacterProfile 형식으로 변환
+            # vLLM 서버가 기대하는 형식으로 페이로드 구성 (character 키로 감싸기)
             payload = {
-                "name": character_data.get("name", ""),
-                "description": character_data.get("description", ""),
-                "age_range": character_data.get("age_range", ""),
-                "gender": character_data.get("gender", "NON_BINARY"),
-                "personality": character_data.get("personality", ""),
-                "mbti": character_data.get("mbti")
+                "character": {
+                    "name": character_data.get("name", ""),
+                    "description": character_data.get("description", ""),
+                    "age_range": character_data.get("age_range", ""),
+                    "gender": character_data.get("gender", "NON_BINARY"),
+                    "personality": character_data.get("personality", ""),
+                    "mbti": character_data.get("mbti")
+                }
             }
             
-            logger.info(f"vLLM 서버로 QA 생성 요청: {payload}")
-            response = await self.client.post("/speech/generate_qa", json=payload)
+            logger.info(f"vLLM 서버로 QA 생성 요청 (고속 엔드포인트): {payload}")
+            # 올바른 엔드포인트 사용 (/speech/generate_qa_fast)
+            response = await self.client.post("/speech/generate_qa_fast", json=payload)
             response.raise_for_status()
             
             result = response.json()
             logger.debug(f"✅ QA 생성 성공: {character_data.get('name', 'Unknown')}")
+            
+            # 생성 시간 정보가 있으면 로깅
+            if 'generation_time_seconds' in result:
+                logger.info(f"⚡ 생성 소요 시간: {result['generation_time_seconds']:.2f}초")
+            
             return result
             
         except Exception as e:

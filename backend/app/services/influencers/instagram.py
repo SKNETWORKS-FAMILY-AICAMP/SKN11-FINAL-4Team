@@ -210,8 +210,8 @@ async def _load_vllm_adapter_for_influencer(influencer, db: Session):
         
         # 어댑터 로드 요청
         adapter_loaded = await vllm_load_adapter_if_needed(
-            model_id=influencer.influencer_model_repo,
-            hf_repo_name=influencer.influencer_model_repo,
+            model_id=str(influencer.influencer_id),  # 인플루언서 ID를 어댑터 식별자로 사용
+            hf_repo_name=influencer.influencer_model_repo,  # 실제 HuggingFace 레포지토리 경로
             hf_token=hf_token
         )
         

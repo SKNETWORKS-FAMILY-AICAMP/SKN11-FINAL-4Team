@@ -166,28 +166,14 @@ class ToneGenerationService:
             )
             
             async with VLLMClient(vllm_config) as client:
-                # 먼저 고속 엔드포인트 시도
-                try:
-                    # 🚀 고속 어투 생성 엔드포인트 호출
-                    response = await client.client.post(
-                        "/speech/generate_qa_fast",  # 고속 병렬 처리 엔드포인트
-                        json=vllm_request_data,
-                        timeout=30  # 고속 처리로 타임아웃 단축
-                    )
-                    response.raise_for_status()
-                    logger.info("✅ 고속 엔드포인트 사용")
-                    
-                except Exception as fast_error:
-                    logger.warning(f"⚠️ 고속 엔드포인트 실패, 기존 엔드포인트로 폴백: {fast_error}")
-                    
-                    # 폴백: 기존 엔드포인트 사용
-                    response = await client.client.post(
-                        "/speech/generate_qa",  # 기존 호환성 엔드포인트
-                        json=vllm_request_data,
-                        timeout=60  # 기존 방식은 더 오래 걸림
-                    )
-                    response.raise_for_status()
-                    logger.info("✅ 기존 엔드포인트 사용 (폴백)")
+                # 🚀 고속 어투 생성 엔드포인트 호출 (fallback 제거)
+                response = await client.client.post(
+                    "/speech/generate_qa_fast",  # 고속 병렬 처리 엔드포인트
+                    json=vllm_request_data,
+                    timeout=60  # 안정적인 처리를 위해 타임아웃 증가
+                )
+                response.raise_for_status()
+                logger.info("✅ 고속 엔드포인트로 어투 생성 성공")
                 
                 result = response.json()
                 # 성능 정보 로깅

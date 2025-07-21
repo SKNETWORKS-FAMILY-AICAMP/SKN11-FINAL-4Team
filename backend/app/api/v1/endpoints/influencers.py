@@ -1031,11 +1031,15 @@ async def handle_finetuning_webhook(
             )
 
         if webhook_data.status == "completed":
+            # 허깅페이스 URL에서 레포 경로만 추출
+            from app.utils.hf_utils import extract_hf_repo_path
+            hf_repo_path = extract_hf_repo_path(webhook_data.hf_model_url)
+            
             batch_key_entry.status = QAGenerationStatus.FINALIZED.value
-            batch_key_entry.hf_model_url = webhook_data.hf_model_url
+            batch_key_entry.hf_model_url = hf_repo_path  # 레포 경로만 저장
             batch_key_entry.completed_at = datetime.now()
             logger.info(
-                f"✅ 파인튜닝 완료: task_id={webhook_data.task_id}, 모델 URL={webhook_data.hf_model_url}"
+                f"✅ 파인튜닝 완료: task_id={webhook_data.task_id}, 모델 레포={hf_repo_path}"
             )
 
             # AIInfluencer 모델 상태를 사용 가능으로 업데이트
@@ -1047,8 +1051,8 @@ async def handle_finetuning_webhook(
 
             if influencer:
                 influencer.learning_status = 1  # 1: 사용가능
-                if webhook_data.hf_model_url:
-                    influencer.influencer_model_repo = webhook_data.hf_model_url
+                if hf_repo_path:
+                    influencer.influencer_model_repo = hf_repo_path  # 레포 경로만 저장
                 logger.info(
                     f"✅ 인플루언서 모델 상태 업데이트 완료: influencer_id={batch_key_entry.influencer_id}, status=사용 가능"
                 )
@@ -1649,7 +1653,8 @@ async def chat_with_influencer(
                     
                     # 어댑터 로드
                     try:
-                        await vllm_client.load_adapter(model_id, model_id, hf_token)
+                        # model_id는 인플루언서 ID로, hf_repo_name은 실제 레포지토리 경로로 사용
+                        await vllm_client.load_adapter(model_id=str(api_key.influencer_id), hf_repo_name=model_id, hf_token=hf_token)
                         logger.info(f"✅ VLLM 어댑터 로드 완료: {model_id}")
                     except Exception as e:
                         logger.warning(f"⚠️ 어댑터 로드 실패, 기본 모델 사용: {e}")

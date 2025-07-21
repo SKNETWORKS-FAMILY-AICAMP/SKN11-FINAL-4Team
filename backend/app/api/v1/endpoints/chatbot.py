@@ -59,7 +59,9 @@ async def chatbot(websocket: WebSocket, lora_repo: str, group_id: int = Query(..
         # VLLM 서버에 어댑터 로드
         vllm_client = await get_vllm_client()
         try:
-            await vllm_client.load_adapter(lora_repo_decoded, lora_repo_decoded, hf_token)
+            # model_id를 생성 (lora_repo를 기반으로)
+            model_id = lora_repo_decoded.replace("/", "_")  # 슬래시를 언더스코어로 변환
+            await vllm_client.load_adapter(model_id=model_id, hf_repo_name=lora_repo_decoded, hf_token=hf_token)
             logger.info(f"[WS] VLLM 어댑터 로드 완료: {lora_repo_decoded}")
         except Exception as e:
             logger.error(f"[WS] VLLM 어댑터 로드 실패: {e}")
@@ -87,7 +89,7 @@ async def chatbot(websocket: WebSocket, lora_repo: str, group_id: int = Query(..
                         user_message=data,
                         system_message=system_prompt,
                         influencer_name=str(influencer.influencer_name) if influencer else "한세나",
-                        model_id=lora_repo_decoded,
+                        model_id=model_id,  # 이전에 생성한 model_id 사용
                         max_new_tokens=512,
                         temperature=0.7
                     ):
@@ -168,7 +170,9 @@ async def model_load(req: ModelLoadRequest, db: Session = Depends(get_db)):
         # VLLM 서버에 어댑터 로드
         try:
             vllm_client = await get_vllm_client()
-            await vllm_client.load_adapter(req.lora_repo, req.lora_repo, hf_token)
+            # model_id를 생성 (lora_repo를 기반으로)
+            model_id = req.lora_repo.replace("/", "_")  # 슬래시를 언더스코어로 변환
+            await vllm_client.load_adapter(model_id=model_id, hf_repo_name=req.lora_repo, hf_token=hf_token)
             logger.info(f"[MODEL LOAD API] VLLM 어댑터 로드 성공: {req.lora_repo}")
             return {
                 "success": True, 
