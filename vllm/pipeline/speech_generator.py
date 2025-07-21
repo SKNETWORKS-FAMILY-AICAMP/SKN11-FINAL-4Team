@@ -12,6 +12,10 @@ from random import choice
 from sentence_transformers import SentenceTransformer, util
 import torch
 import re
+import logging
+
+# 로거 설정
+logger = logging.getLogger(__name__)
 
 # OpenAI 클라이언트 래퍼 import
 try:
