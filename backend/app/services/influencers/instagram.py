@@ -200,13 +200,14 @@ async def _load_vllm_adapter_for_influencer(influencer, db: Session):
     
     try:
         # vLLM 클라이언트 및 어댑터 로드 함수 import
-        from app.services.vllm_operations import vllm_load_adapter_if_needed, get_hf_token_from_influencer_group
+        from app.services.vllm_client import vllm_load_adapter_if_needed
+        from app.services.hf_token_resolver import get_token_for_influencer
         
         logger.info(f"📲 {influencer.influencer_name}: Instagram 연동 완료, vLLM 어댑터 로드 시작")
         logger.info(f"   - 모델 리포지토리: {influencer.influencer_model_repo}")
         
         # 허깅페이스 토큰 조회
-        hf_token = await get_hf_token_from_influencer_group(influencer, db)
+        hf_token, hf_username = await get_token_for_influencer(influencer, db)
         
         # 어댑터 로드 요청
         adapter_loaded = await vllm_load_adapter_if_needed(

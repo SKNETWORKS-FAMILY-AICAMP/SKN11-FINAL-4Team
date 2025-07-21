@@ -22,6 +22,7 @@ from app.services.influencers.qa_generator import QAGenerationStatus
 from app.services.vllm_client import vllm_load_adapter_if_needed, vllm_health_check
 from app.core.encryption import decrypt_sensitive_data
 from app.utils.timezone_utils import get_current_kst
+from app.services.hf_token_resolver import get_token_for_influencer
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
@@ -373,46 +374,12 @@ class StartupService:
                 loaded_count = 0
                 for influencer in chat_enabled_influencers:
                     try:
-                        # 인플루언서에 직접 연결된 HF 토큰 조회
-                        hf_token_record = None
-                        if influencer.hf_manage_id:
-                            # 1. 인플루언서에 직접 할당된 토큰 조회
-                            hf_token_record = (
-                                db.query(HFTokenManage)
-                                .filter(
-                                    HFTokenManage.hf_manage_id
-                                    == influencer.hf_manage_id
-                                )
-                                .first()
-                            )
-
-                        if not hf_token_record:
-                            # 2. 같은 그룹의 첫 번째 토큰 사용
-                            hf_token_record = (
-                                db.query(HFTokenManage)
-                                .filter(HFTokenManage.group_id == influencer.group_id)
-                                .first()
-                            )
-
-                        if not hf_token_record:
+                        # 중앙화된 토큰 리졸버 사용
+                        hf_token, hf_username = await get_token_for_influencer(influencer, db)
+                        
+                        if not hf_token:
                             logger.warning(
                                 f"⚠️ 인플루언서 {influencer.influencer_id}의 HF 토큰을 찾을 수 없습니다."
-                            )
-                            continue
-
-                        # 토큰 복호화
-                        try:
-                            decrypted_token = decrypt_sensitive_data(
-                                hf_token_record.hf_token_value
-                            )
-                            if not decrypted_token:
-                                logger.warning(
-                                    f"⚠️ 인플루언서 {influencer.influencer_id}의 HF 토큰 복호화에 실패했습니다."
-                                )
-                                continue
-                        except Exception as decrypt_error:
-                            logger.warning(
-                                f"⚠️ 인플루언서 {influencer.influencer_id}의 HF 토큰 복호화 중 오류: {decrypt_error}"
                             )
                             continue
 
@@ -423,7 +390,7 @@ class StartupService:
                         success = await vllm_load_adapter_if_needed(
                             model_id=influencer.influencer_id,
                             hf_repo_name=influencer.influencer_model_repo,
-                            hf_token=decrypted_token,
+                            hf_token=hf_token,
                             base_model_override="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct",  # 기본 베이스 모델 지정
                         )
 
@@ -490,32 +457,12 @@ class StartupService:
                 for influencer in influencers_with_models:
                     print(influencer.group_id)
                     try:
-                        # HF 토큰 정보 가져오기
-                        hf_token_record = (
-                            db.query(HFTokenManage)
-                            .filter(HFTokenManage.group_id == influencer.group_id)
-                            .first()
-                        )
-
-                        if not hf_token_record:
+                        # 중앙화된 토큰 리졸버 사용
+                        hf_token, hf_username = await get_token_for_influencer(influencer, db)
+                        
+                        if not hf_token:
                             logger.warning(
                                 f"⚠️ 인플루언서 {influencer.influencer_name}의 HF 토큰을 찾을 수 없습니다."
-                            )
-                            continue
-
-                        # 토큰 복호화
-                        try:
-                            decrypted_token = decrypt_sensitive_data(
-                                hf_token_record.hf_token_value
-                            )
-                            if not decrypted_token:
-                                logger.warning(
-                                    f"⚠️ 인플루언서 {influencer.influencer_name}의 HF 토큰 복호화에 실패했습니다."
-                                )
-                                continue
-                        except Exception as decrypt_error:
-                            logger.warning(
-                                f"⚠️ 인플루언서 {influencer.influencer_name}의 HF 토큰 복호화 중 오류: {decrypt_error}"
                             )
                             continue
 
@@ -526,7 +473,7 @@ class StartupService:
                         success = await vllm_load_adapter_if_needed(
                             model_id=influencer.influencer_id,
                             hf_repo_name=influencer.influencer_model_repo,
-                            hf_token=decrypted_token,
+                            hf_token=hf_token,
                             base_model_override="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct",  # 기본 베이스 모델 지정
                         )
 

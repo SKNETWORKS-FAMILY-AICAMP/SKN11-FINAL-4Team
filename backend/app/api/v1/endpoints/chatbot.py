@@ -5,6 +5,7 @@ from app.database import get_db
 from app.models.user import HFTokenManage
 from app.services.vllm_client import VLLMWebSocketClient, VLLMClient, get_vllm_client, vllm_health_check
 from app.core.encryption import decrypt_sensitive_data
+from app.services.hf_token_resolver import get_token_by_group
 import json
 import logging
 import base64
@@ -138,21 +139,9 @@ async def chatbot(websocket: WebSocket, lora_repo: str, group_id: int = Query(..
             pass
 
 async def _get_hf_token_by_group(group_id: int, db: Session) -> str | None:
-    """그룹 ID로 HF 토큰 가져오기"""
-    try:
-        hf_token_manage = db.query(HFTokenManage).filter(
-            HFTokenManage.group_id == group_id
-        ).order_by(HFTokenManage.created_at.desc()).first()
-        
-        if hf_token_manage:
-            return decrypt_sensitive_data(str(hf_token_manage.hf_token_value))
-        else:
-            logger.warning(f"그룹 {group_id}에 등록된 HF 토큰이 없습니다.")
-            return None
-            
-    except Exception as e:
-        logger.error(f"HF 토큰 조회 실패: {e}")
-        return None
+    """그룹 ID로 HF 토큰 가져오기 (하위 호환성을 위해 유지)"""
+    hf_token, _ = await get_token_by_group(group_id, db)
+    return hf_token
 
 @router.post("/load_model")
 async def model_load(req: ModelLoadRequest, db: Session = Depends(get_db)):
