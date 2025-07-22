@@ -293,19 +293,6 @@ export default function DashboardPage() {
               </CardContent>
             </Card>
             <Card
-              className={`cursor-pointer transition-shadow ${statusFilter === "learning" ? "ring-2 ring-yellow-400" : "hover:shadow-lg"}`}
-              onClick={() => setStatusFilter("learning")}
-            >
-              <CardContent className="p-6">
-                <div className="text-center">
-                  <p className="text-3xl font-bold text-yellow-600">
-                    {influencers.filter((inf) => inf.learning_status === 0).length}
-                  </p>
-                  <p className="text-sm text-gray-600 mt-1">생성 중</p>
-                </div>
-              </CardContent>
-            </Card>
-            <Card
               className={`cursor-pointer transition-shadow ${statusFilter === "ready" ? "ring-2 ring-green-400" : "hover:shadow-lg"}`}
               onClick={() => setStatusFilter("ready")}
             >
@@ -315,6 +302,19 @@ export default function DashboardPage() {
                     {influencers.filter((inf) => inf.learning_status === 1).length}
                   </p>
                   <p className="text-sm text-gray-600 mt-1">사용 가능</p>
+                </div>
+              </CardContent>
+            </Card>
+            <Card
+              className={`cursor-pointer transition-shadow ${statusFilter === "learning" ? "ring-2 ring-yellow-400" : "hover:shadow-lg"}`}
+              onClick={() => setStatusFilter("learning")}
+            >
+              <CardContent className="p-6">
+                <div className="text-center">
+                  <p className="text-3xl font-bold text-yellow-600">
+                    {influencers.filter((inf) => inf.learning_status === 0).length}
+                  </p>
+                  <p className="text-sm text-gray-600 mt-1">생성 중</p>
                 </div>
               </CardContent>
             </Card>
