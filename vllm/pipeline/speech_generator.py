@@ -24,7 +24,7 @@ except ImportError:
     # 폴백: 직접 AsyncOpenAI 클라이언트 사용
     from openai import AsyncOpenAI
     
-    def get_openai_client(api_key=None, **kwargs):
+    async def get_openai_client(api_key=None, **kwargs):
         """폴백 비동기 OpenAI 클라이언트 생성"""
         return AsyncOpenAI(api_key=api_key or os.getenv('OPENAI_API_KEY'), **kwargs)
 
@@ -66,16 +66,23 @@ class SpeechGenerator:
     }
     
     def __init__(self, api_key: str, base_url: Optional[str] = None):
-        # OpenAI 클라이언트 래퍼 사용
-        try:
-            self.client = get_openai_client(api_key=api_key, base_url=base_url)
-        except Exception:
-            # 폴백: 직접 비동기 OpenAI 클라이언트 사용
-            from openai import AsyncOpenAI
-            self.client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+        # 클라이언트는 나중에 비동기로 초기화
+        self.api_key = api_key
+        self.base_url = base_url
+        self.client = None
         
         # 하위 호환성을 위해 인스턴스 변수도 유지
         self.valid_mbti_types = list(self.VALID_MBTI_TYPES)
+    
+    async def _ensure_client(self):
+        """클라이언트가 초기화되었는지 확인하고 필요하면 초기화"""
+        if self.client is None:
+            try:
+                self.client = await get_openai_client(api_key=self.api_key, base_url=self.base_url)
+            except Exception:
+                # 폴백: 직접 비동기 OpenAI 클라이언트 사용
+                from openai import AsyncOpenAI
+                self.client = AsyncOpenAI(api_key=self.api_key, base_url=self.base_url)
     
     async def _call_openai_api(
         self, 
@@ -97,6 +104,8 @@ class SpeechGenerator:
             생성된 텍스트
         """
         try:
+            # 클라이언트 확인
+            await self._ensure_client()
             # OpenAI 클라이언트 래퍼 사용
             if hasattr(self.client, 'chat_completion'):
                 return await self.client.chat_completion(

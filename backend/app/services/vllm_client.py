@@ -6,7 +6,7 @@ FastAPI 백엔드에서 VLLM 서버로 요청을 라우팅하는 클라이언트
 import asyncio
 import json
 import logging
-from re import A
+import os
 import httpx
 import websockets
 from typing import Optional, Dict, List, Any, AsyncIterator
@@ -55,10 +55,27 @@ class VLLMClient:
     async def health_check(self) -> bool:
         """VLLM 서버 상태 확인"""
         try:
+            logger.info(f"🔍 VLLM 서버 health check 시작: {self.config.base_url}")
             response = await self.client.get("/")
+            logger.info(f"✅ VLLM 서버 응답 성공: 상태 코드 {response.status_code}")
+            if response.status_code != 200:
+                logger.warning(f"⚠️ VLLM 서버가 200이 아닌 상태 코드 반환: {response.status_code}")
+                logger.warning(f"   - 응답 내용: {response.text[:500]}")
             return response.status_code == 200
+        except httpx.ConnectError as e:
+            logger.error(f"❌ VLLM 서버 연결 실패 (ConnectError): {self.config.base_url}")
+            logger.error(f"   - 상세 오류: {str(e)}")
+            logger.error(f"   - 환경 변수 확인: VLLM_ENABLED={os.getenv('VLLM_ENABLED')}, VLLM_SERVER_URL={os.getenv('VLLM_SERVER_URL')}")
+            return False
+        except httpx.TimeoutException as e:
+            logger.error(f"❌ VLLM 서버 연결 시간 초과 (TimeoutException): {self.config.base_url}")
+            logger.error(f"   - 시간 초과 설정: {self.config.timeout}초")
+            return False
         except Exception as e:
-            logger.error(f"VLLM 서버 상태 확인 실패: {e}")
+            logger.error(f"❌ VLLM 서버 상태 확인 실패 (기타 오류): {type(e).__name__}")
+            logger.error(f"   - 상세 오류: {str(e)}")
+            import traceback
+            logger.error(f"   - 스택 트레이스:\n{traceback.format_exc()}")
             return False
     
     async def get_stats(self) -> Dict[str, Any]:

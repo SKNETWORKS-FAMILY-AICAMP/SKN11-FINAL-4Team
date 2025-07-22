@@ -474,9 +474,16 @@ class InfluencerFineTuningService:
             logger.info(f"파인튜닝 시작: {hf_repo_id}")
 
             # VLLM 서버 상태 확인
-            if not await vllm_health_check():
-                logger.error("VLLM 서버가 비활성화되었거나 연결할 수 없습니다.")
+            logger.info(f"🔍 VLLM 서버 상태 확인 중... (URL: {settings.VLLM_BASE_URL})")
+            health_status = await vllm_health_check()
+            if not health_status:
+                logger.error(f"❌ VLLM 서버가 비활성화되었거나 연결할 수 없습니다. URL: {settings.VLLM_BASE_URL}")
+                logger.error(f"   - VLLM_ENABLED: {settings.VLLM_ENABLED}")
+                logger.error(f"   - VLLM_HOST: {getattr(settings, 'VLLM_HOST', 'N/A')}")
+                logger.error(f"   - VLLM_PORT: {getattr(settings, 'VLLM_PORT', 'N/A')}")
                 return None
+            else:
+                logger.info("✅ VLLM 서버 연결 성공")
 
             try:
                 logger.info(f"🚀 VLLM 서버에서 파인튜닝 실행: {hf_repo_id}")
@@ -560,7 +567,7 @@ class InfluencerFineTuningService:
     #             logger.error(f"VLLM 파인튜닝 상태 확인 실패: {e}")
     #             return None
 
-    def start_finetuning_task(
+    async def start_finetuning_task(
         self,
         influencer_id: str,
         qa_task_id: str,
@@ -819,11 +826,14 @@ class InfluencerFineTuningService:
             성공 여부
         """
         try:
-            # 인플루언서 정보 가져오기
-            from app.services.influencers.crud import get_influencer_by_id
-
-            user_id = "system"  # 시스템 작업으로 처리
-            influencer_data = get_influencer_by_id(db, user_id, influencer_id)
+            # 인플루언서 정보 가져오기 (시스템 작업이므로 권한 체크 없이 직접 조회)
+            from app.models.influencer import AIInfluencer
+            
+            influencer_data = (
+                db.query(AIInfluencer)
+                .filter(AIInfluencer.influencer_id == influencer_id)
+                .first()
+            )
 
             if not influencer_data:
                 logger.error(f"인플루언서를 찾을 수 없습니다: {influencer_id}")
@@ -835,7 +845,7 @@ class InfluencerFineTuningService:
             )
 
             # 파인튜닝 작업 시작 (모델 인스턴스 직접 사용)
-            ft_task_id = self.start_finetuning_task(
+            ft_task_id = await self.start_finetuning_task(
                 influencer_id=influencer_id,
                 qa_task_id=f"startup_restart_{influencer_id}",
                 s3_qa_url=s3_qa_file_url,
