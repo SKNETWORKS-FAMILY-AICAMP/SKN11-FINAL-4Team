@@ -84,24 +84,15 @@ def load_model_and_tokenizer(model_name="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct"):
     """모델과 토크나이저 로드"""
     print("모델과 토크나이저 로딩 중...")
     
-    # GPU 할당 확인
-    from pipeline.gpu_utils import find_available_gpu, log_gpu_status
+    # GPU 할당 확인 - execute_finetuning에서 이미 CUDA_VISIBLE_DEVICES가 설정됨
+    cuda_visible_devices = os.environ.get('CUDA_VISIBLE_DEVICES', '0')
+    print(f"파인튜닝에 GPU {cuda_visible_devices} 사용 (execute_finetuning에서 설정됨)")
     
-    # 현재 GPU 상태 로깅
+    # GPU 상태 로깅
+    from pipeline.gpu_utils import log_gpu_status
     log_gpu_status()
     
-    # 사용 가능한 GPU 찾기
-    available_gpu = find_available_gpu(min_memory_mb=10240)  # 10GB 이상 여유 메모리
-    
-    if available_gpu is not None:
-        # 특정 GPU만 사용하도록 설정
-        os.environ['CUDA_VISIBLE_DEVICES'] = str(available_gpu)
-        print(f"파인튜닝에 GPU {available_gpu} 사용")
-        device_map = "auto"  # 단일 GPU에서 auto는 전체 모델을 해당 GPU에 로드
-    else:
-        # 사용 가능한 GPU가 없으면 기본 동작
-        print("경고: 여유 있는 GPU를 찾을 수 없습니다. 기본 설정 사용")
-        device_map = "auto"
+    device_map = "auto"  # 단일 GPU에서 auto는 전체 모델을 해당 GPU에 로드
     
     # 토크나이저 로드
     tokenizer = AutoTokenizer.from_pretrained(model_name)

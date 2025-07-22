@@ -152,6 +152,25 @@ async def execute_finetuning(task_id: str):
     try:
         logger.info(f"🎯 파인튜닝 실행 시작: {task_id}")
         
+        # GPU 선택 로직 추가
+        gpu_manager = await get_gpu_manager()
+        
+        # 모든 GPU의 정보를 가져옴
+        all_gpu_info = await gpu_manager.get_all_gpus_info()
+        
+        # 가장 여유 있는 GPU 선택
+        selected_gpu = gpu_manager.get_least_utilized_gpu(all_gpu_info)
+        
+        logger.info(f"🖥️ GPU 상태:")
+        for gpu_id, info in all_gpu_info.items():
+            logger.info(f"  GPU {gpu_id}: {info['used']}MB/{info['total']}MB ({info.get('utilization', 0):.1f}%)")
+        
+        logger.info(f"✅ 파인튜닝에 GPU {selected_gpu} 선택 (사용률: {all_gpu_info[selected_gpu].get('utilization', 0):.1f}%)")
+        
+        # 선택된 GPU ID를 task에 저장
+        task["selected_gpu"] = selected_gpu
+        task["gpu_info_at_start"] = all_gpu_info[selected_gpu]
+        
         # 1. 데이터 준비 단계
         task["status"] = FineTuningStatus.PREPARING_DATA.value
         task["updated_at"] = time.time()
@@ -193,35 +212,47 @@ async def execute_finetuning(task_id: str):
         task["status"] = FineTuningStatus.TRAINING.value
         task["updated_at"] = time.time()
         
-        hf_model_url = await run_finetuning_pipeline(
-            qa_data=finetuning_data,
-            system_message=system_message,
-            hf_token=task["hf_token"],
-            hf_repo_id=task["hf_repo_id"],
-            training_epochs=task["training_epochs"]
-        )
+        # 선택된 GPU를 환경 변수로 설정
+        original_cuda_visible_devices = os.environ.get('CUDA_VISIBLE_DEVICES', '')
+        os.environ['CUDA_VISIBLE_DEVICES'] = str(selected_gpu)
         
-        if hf_model_url:
-            # 3. 완료
-            task["status"] = FineTuningStatus.COMPLETED.value
-            task["hf_model_url"] = hf_model_url
-            task["updated_at"] = time.time()
+        try:
+            hf_model_url = await run_finetuning_pipeline(
+                qa_data=finetuning_data,
+                system_message=system_message,
+                hf_token=task["hf_token"],
+                hf_repo_id=task["hf_repo_id"],
+                training_epochs=task["training_epochs"]
+            )
             
-            logger.info(f"✅ 파인튜닝 완료: {task_id} → {hf_model_url}")
-            
-            # 완료된 모델을 자동으로 로드
-            try:
-                load_request = LoRALoadRequest(
-                    model_id=task["hf_repo_id"],
-                    hf_repo_name=task["hf_repo_id"],
-                    hf_token=task["hf_token"]
-                )
-                await load_lora_adapter(load_request)
-                logger.info(f"🔄 파인튜닝 완료 후 어댑터 자동 로드: {task['hf_repo_id']}")
-            except Exception as e:
-                logger.warning(f"⚠️ 파인튜닝 완료 후 어댑터 자동 로드 실패: {e}")
-        else:
-            raise Exception("파인튜닝 실행 실패: 모델 URL을 반환하지 못했습니다.")
+            if hf_model_url:
+                # 3. 완료
+                task["status"] = FineTuningStatus.COMPLETED.value
+                task["hf_model_url"] = hf_model_url
+                task["updated_at"] = time.time()
+                
+                logger.info(f"✅ 파인튜닝 완료: {task_id} → {hf_model_url}")
+                
+                # 완료된 모델을 자동으로 로드
+                try:
+                    load_request = LoRALoadRequest(
+                        model_id=task["hf_repo_id"],
+                        hf_repo_name=task["hf_repo_id"],
+                        hf_token=task["hf_token"]
+                    )
+                    await load_lora_adapter(load_request)
+                    logger.info(f"🔄 파인튜닝 완료 후 어댑터 자동 로드: {task['hf_repo_id']}")
+                except Exception as e:
+                    logger.warning(f"⚠️ 파인튜닝 완료 후 어댑터 자동 로드 실패: {e}")
+            else:
+                raise Exception("파인튜닝 실행 실패: 모델 URL을 반환하지 못했습니다.")
+                
+        finally:
+            # 원래 CUDA_VISIBLE_DEVICES 설정 복원
+            if original_cuda_visible_devices:
+                os.environ['CUDA_VISIBLE_DEVICES'] = original_cuda_visible_devices
+            elif 'CUDA_VISIBLE_DEVICES' in os.environ:
+                del os.environ['CUDA_VISIBLE_DEVICES']
             
     except Exception as e:
         task["status"] = FineTuningStatus.FAILED.value
