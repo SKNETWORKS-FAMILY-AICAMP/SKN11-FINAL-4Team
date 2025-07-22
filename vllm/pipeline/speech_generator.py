@@ -319,7 +319,7 @@ class SpeechGenerator:
                 # 생성된 시스템 프롬프트 로깅
                 logger.info("🎯 3개의 시스템 프롬프트 생성 완료:")
                 for i, prompt in enumerate(prompts, 1):
-                    logger.info(f"\n📋 시스템 프롬프트 {i}:\n{prompt[:200]}..." if len(prompt) > 200 else f"\n📋 시스템 프롬프트 {i}:\n{prompt}")
+                    logger.info(f"\n📋 시스템 프롬프트 {i}:\n{prompt}..." if len(prompt) > 200 else f"\n📋 시스템 프롬프트 {i}:\n{prompt}")
                 
                 return prompts
             else:

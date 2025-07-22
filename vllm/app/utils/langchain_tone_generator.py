@@ -377,6 +377,25 @@ class LangChainToneGenerator:
         
         try:
             # 전달받은 시스템 프롬프트들을 조합한 메시지 생성
+            # JSON 형식 부분을 별도 변수로 분리하여 템플릿 변수 인식 문제 해결
+            json_format = """{
+    "말투1": {
+        "text": "첫 번째 말투로 작성한 답변",
+        "hashtags": "#특징1 #특징2 #특징3",
+        "description": "이 말투의 특징을 설명하는 한 문장 (반드시 '말투'로 끝남)"
+    },
+    "말투2": {
+        "text": "두 번째 말투로 작성한 답변",
+        "hashtags": "#특징4 #특징5 #특징6",
+        "description": "이 말투의 특징을 설명하는 한 문장 (반드시 '말투'로 끝남)"
+    },
+    "말투3": {
+        "text": "세 번째 말투로 작성한 답변",
+        "hashtags": "#특징7 #특징8 #특징9",
+        "description": "이 말투의 특징을 설명하는 한 문장 (반드시 '말투'로 끝남)"
+    }
+}"""
+            
             combined_system_prompt = f"""당신은 주어진 3가지 다른 말투 스타일로 응답을 생성하는 전문가입니다.
 
 각각의 말투 스타일은 다음과 같습니다:
@@ -391,23 +410,7 @@ class LangChainToneGenerator:
 {system_prompts[2]}
 
 주어진 질문에 대해 위 3가지 말투로 각각 답변하고, 다음 JSON 형식으로 정확히 출력하세요:
-{{
-    "말투1": {{
-        "text": "첫 번째 말투로 작성한 답변",
-        "hashtags": "#특징1 #특징2 #특징3",
-        "description": "이 말투의 특징을 설명하는 한 문장 (반드시 '말투'로 끝남)"
-    }},
-    "말투2": {{
-        "text": "두 번째 말투로 작성한 답변",
-        "hashtags": "#특징4 #특징5 #특징6",
-        "description": "이 말투의 특징을 설명하는 한 문장 (반드시 '말투'로 끝남)"
-    }},
-    "말투3": {{
-        "text": "세 번째 말투로 작성한 답변",
-        "hashtags": "#특징7 #특징8 #특징9",
-        "description": "이 말투의 특징을 설명하는 한 문장 (반드시 '말투'로 끝남)"
-    }}
-}}"""
+{json_format}"""
             
             # 단일 프롬프트로 3가지 어투 생성
             single_prompt = ChatPromptTemplate.from_messages([
@@ -419,7 +422,7 @@ class LangChainToneGenerator:
             chain = single_prompt | self.llm
             start_time = asyncio.get_event_loop().time()
             
-            response = await chain.ainvoke(input_data)
+            response = await chain.ainvoke({"question": question})
             
             # 응답 파싱
             content = response.content.strip() if hasattr(response, 'content') else str(response).strip()
