@@ -52,12 +52,10 @@ def _extract_numbers_from_params(params: Dict[str, Any], message: str = "") -> t
 @mcp.tool()
 async def add(a: float = None, b: float = None) -> str:
     """두 숫자를 더합니다."""
-    # 기본값 설정
     if a is None:
         a = 0
     if b is None:
         b = 0
-
     result = a + b
     return f"{a} + {b} = {result}"
 
@@ -65,245 +63,117 @@ async def add(a: float = None, b: float = None) -> str:
 @mcp.tool()
 async def subtract(a: float = None, b: float = None) -> str:
     """두 숫자를 뺍니다."""
-    # 매개변수 변환
-    import inspect
-
-    frame = inspect.currentframe()
-    local_vars = frame.f_back.f_locals if frame and frame.f_back else {}
-    message = local_vars.get("message", "")
-    if a is None or b is None:
-        from typing import Dict
-
-        def _extract_numbers_from_params(params: Dict, message: str = ""):
-            import re
-
-            a_value = None
-            b_value = None
-            if "numbers" in params and "number" in params:
-                try:
-                    a_value = float(params["numbers"])
-                    b_value = float(params["number"])
-                except (ValueError, TypeError):
-                    pass
-            if a_value is None or b_value is None:
-                numbers = re.findall(r"\d+", message)
-                if len(numbers) >= 2:
-                    try:
-                        a_value = float(numbers[0])
-                        b_value = float(numbers[1])
-                    except (ValueError, TypeError):
-                        pass
-            return a_value, b_value
-
-        a_val, b_val = _extract_numbers_from_params(local_vars, message)
-        a = a_val if a is None else a
-        b = b_val if b is None else b
     if a is None:
         a = 0
     if b is None:
         b = 0
     result = a - b
-    return f"🔢 계산 결과: {a} - {b} = {result}"
+    return f"{a} - {b} = {result}"
 
 
 @mcp.tool()
 async def multiply(a: float = None, b: float = None) -> str:
     """두 숫자를 곱합니다."""
-    # 매개변수 변환
-    import inspect
-
-    frame = inspect.currentframe()
-    local_vars = frame.f_back.f_locals if frame and frame.f_back else {}
-    message = local_vars.get("message", "")
-    if a is None or b is None:
-        from typing import Dict
-
-        def _extract_numbers_from_params(params: Dict, message: str = ""):
-            import re
-
-            a_value = None
-            b_value = None
-            if "numbers" in params and "number" in params:
-                try:
-                    a_value = float(params["numbers"])
-                    b_value = float(params["number"])
-                except (ValueError, TypeError):
-                    pass
-            if a_value is None or b_value is None:
-                numbers = re.findall(r"\d+", message)
-                if len(numbers) >= 2:
-                    try:
-                        a_value = float(numbers[0])
-                        b_value = float(numbers[1])
-                    except (ValueError, TypeError):
-                        pass
-            return a_value, b_value
-
-        a_val, b_val = _extract_numbers_from_params(local_vars, message)
-        a = a_val if a is None else a
-        b = b_val if b is None else b
     if a is None:
         a = 0
     if b is None:
         b = 0
     result = a * b
-    return f"🔢 계산 결과: {a} × {b} = {result}"
+    return f"{a} * {b} = {result}"
 
 
 @mcp.tool()
 async def divide(a: float = None, b: float = None) -> str:
     """두 숫자를 나눕니다."""
-    # 매개변수 변환
-    import inspect
-
-    frame = inspect.currentframe()
-    local_vars = frame.f_back.f_locals if frame and frame.f_back else {}
-    message = local_vars.get("message", "")
-    if a is None or b is None:
-        from typing import Dict
-
-        def _extract_numbers_from_params(params: Dict, message: str = ""):
-            import re
-
-            a_value = None
-            b_value = None
-            if "numbers" in params and "number" in params:
-                try:
-                    a_value = float(params["numbers"])
-                    b_value = float(params["number"])
-                except (ValueError, TypeError):
-                    pass
-            if a_value is None or b_value is None:
-                numbers = re.findall(r"\d+", message)
-                if len(numbers) >= 2:
-                    try:
-                        a_value = float(numbers[0])
-                        b_value = float(numbers[1])
-                    except (ValueError, TypeError):
-                        pass
-            return a_value, b_value
-
-        a_val, b_val = _extract_numbers_from_params(local_vars, message)
-        a = a_val if a is None else a
-        b = b_val if b is None else b
     if a is None:
         a = 0
     if b is None:
         b = 1
     if b == 0:
-        return "❌ 오류: 0으로 나눌 수 없습니다."
+        return "0으로 나눌 수 없습니다."
     result = a / b
-    return f"🔢 계산 결과: {a} ÷ {b} = {result}"
+    return f"{a} / {b} = {result}"
 
 
 @mcp.tool()
 async def power(base: float = None, exponent: float = None) -> str:
     """숫자의 거듭제곱을 계산합니다."""
-    # 기본값 설정
     if base is None:
         base = 1
     if exponent is None:
         exponent = 1
-
-    logger.info(f"🔢 power 도구 실행: {base}^{exponent}")
     result = base**exponent
-    logger.info(f"✅ 결과: {result}")
     return f"{base}^{exponent} = {result}"
 
 
 @mcp.tool()
 async def sqrt(number: float = None) -> str:
     """숫자의 제곱근을 계산합니다."""
-    # 기본값 설정
     if number is None:
         number = 0
-
     if number < 0:
         return "음수의 제곱근은 계산할 수 없습니다."
-
-    logger.info(f"🔢 sqrt 도구 실행: √{number}")
     result = number**0.5
-    logger.info(f"✅ 결과: {result}")
     return f"√{number} = {result}"
 
 
 @mcp.tool()
 async def factorial(n: int = None) -> str:
     """숫자의 팩토리얼을 계산합니다."""
-    # 기본값 설정
     if n is None:
         n = 0
-
     if n < 0:
         return "음수의 팩토리얼은 정의되지 않습니다."
     if n == 0 or n == 1:
         return "1"
-
-    logger.info(f"🔢 factorial 도구 실행: {n}!")
     result = 1
     for i in range(2, n + 1):
         result *= i
-    logger.info(f"✅ 결과: {result}")
     return f"{n}! = {result}"
 
 
 @mcp.tool()
 async def gcd(a: int = None, b: int = None) -> str:
     """두 숫자의 최대공약수를 계산합니다."""
-    # 기본값 설정
     if a is None:
         a = 0
     if b is None:
         b = 0
-
-    logger.info(f"🔢 gcd 도구 실행: gcd({a}, {b})")
+    orig_a, orig_b = a, b
     while b:
         a, b = b, a % b
     result = abs(a)
-    logger.info(f"✅ 결과: {result}")
-    return f"gcd({a}, {b}) = {result}"
+    return f"gcd({orig_a}, {orig_b}) = {result}"
 
 
 @mcp.tool()
 async def lcm(a: int = None, b: int = None) -> str:
     """두 숫자의 최소공배수를 계산합니다."""
-    # 기본값 설정
     if a is None:
         a = 0
     if b is None:
         b = 0
-
     if a == 0 or b == 0:
         return "0"
-
-    # GCD 계산
     def _gcd(x: int, y: int) -> int:
         while y:
             x, y = y, x % y
         return x
-
-    logger.info(f"🔢 lcm 도구 실행: lcm({a}, {b})")
     gcd_val = _gcd(a, b)
     result = abs(a * b) // gcd_val
-    logger.info(f"✅ 결과: {result}")
     return f"lcm({a}, {b}) = {result}"
 
 
 @mcp.tool()
 async def solve_quadratic(a: float = None, b: float = None, c: float = None) -> str:
     """이차방정식 ax² + bx + c = 0을 풉니다."""
-    # 기본값 설정
     if a is None:
         a = 1
     if b is None:
         b = 0
     if c is None:
         c = 0
-
-    logger.info(f"🔢 solve_quadratic 도구 실행: {a}x² + {b}x + {c} = 0")
-
     discriminant = b**2 - 4 * a * c
-
     if discriminant > 0:
         x1 = (-b + discriminant**0.5) / (2 * a)
         x2 = (-b - discriminant**0.5) / (2 * a)

@@ -37,7 +37,7 @@ class MCPClientService:
         self._initialized = False
         self._init_lock = asyncio.Lock()
 
-    async def initialize_mcp_client(self):
+    async def initialize_mcp_client(self, selected_servers: Optional[List[str]] = None):
         """langchain-mcp-adapters를 사용한 MCP 클라이언트 초기화 (한 번만 실행)"""
         if self._initialized:
             logger.info("✅ MCP 클라이언트가 이미 초기화되어 있습니다.")
@@ -113,39 +113,14 @@ class MCPClientService:
                 self.mcp_client = MultiServerMCPClient(client_config)
                 logger.info("✅ MultiServerMCPClient 초기화 완료")
 
-                # 서버별로 도구 분류 (전체 도구 로드 대신 개별 로드)
-                for server_name in server_configs.keys():
-                    # 각 서버의 도구를 개별적으로 가져오기 위해 세션 사용
-                    try:
-                        async with self.mcp_client.session(server_name) as session:
-                            from langchain_mcp_adapters.tools import load_mcp_tools
-
-                            # 도구 로드 및 캐싱
-                            tools = await load_mcp_tools(session)
-                            self.tools_cache[server_name] = tools
-                            self.cache_timestamp[server_name] = time.time()
-
-                            logger.info(
-                                f"MCP 서버 '{server_name}'에서 {len(tools)}개 도구 로드"
-                            )
-
-                            # 도구 정보 로깅
-                            for i, tool in enumerate(tools, 1):
-                                tool_name = (
-                                    tool.name if hasattr(tool, "name") else f"tool_{i}"
-                                )
-                                tool_desc = (
-                                    tool.description
-                                    if hasattr(tool, "description")
-                                    else "설명 없음"
-                                )
-                                logger.info(f"  - 도구 {i}: {tool_name} - {tool_desc}")
-
-                    except Exception as e:
-                        logger.error(f"❌ MCP 서버 '{server_name}' 도구 로드 실패: {e}")
-                        import traceback
-
-                        logger.error(f"  - 상세 오류: {traceback.format_exc()}")
+                # 선택된 서버만 도구 미리 캐시
+                if selected_servers:
+                    for server_name in selected_servers:
+                        try:
+                            await self.get_cached_tools(server_name)
+                            logger.info(f"선택 서버 '{server_name}' 도구 미리 캐시 완료")
+                        except Exception as e:
+                            logger.error(f"❌ '{server_name}' 도구 미리 캐시 실패: {e}")
 
                 self._initialized = True
                 logger.info(

@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { useParams } from "next/navigation"
+import { useParams, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -41,6 +41,7 @@ interface ChatModel {
 
 export default function ChatPage() {
   const params = useParams()
+  const searchParams = useSearchParams()
   const [model, setModel] = useState<ChatModel | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
   const [inputMessage, setInputMessage] = useState("")
@@ -52,6 +53,10 @@ export default function ChatPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const timeoutRef = useRef<NodeJS.Timeout | null>(null)
+
+  // 쿼리스트링에서 selected_mcp 파싱
+  const selectedMcp = searchParams.get('selected_mcp')
+  const selectedServers = selectedMcp ? selectedMcp.split(',').map(s => s.trim()).filter(Boolean) : undefined
 
   // 모델 데이터 로드
   const loadModelData = async () => {
@@ -235,7 +240,7 @@ export default function ChatPage() {
     // 1. MCP REST 우선 시도
     let mcpResult: string | null = null;
     try {
-      const mcpResponse: MCPChatResponse = await MCPService.processMessage({ message: currentMessage });
+      const mcpResponse: MCPChatResponse = await MCPService.processMessage({ message: currentMessage, ...(selectedServers ? { selected_servers: selectedServers } : {}) });
       if (mcpResponse && mcpResponse.response && mcpResponse.response.trim()) {
         mcpResult = mcpResponse.response.trim();
       }

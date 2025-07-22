@@ -28,6 +28,34 @@ class MCPServerManager:
                 "port": 8005,  # 포트 변경 (8002 → 8005)
                 "description": "날씨 정보 서버",
             },
+            "exa": {
+                "command": "cmd",
+                "args": [
+                    "/c",
+                    "npx",
+                    "-y",
+                    "@smithery/cli@latest",
+                    "run",
+                    "exa",
+                    "--key",
+                    "424b5510-2224-480b-a976-93ed248876ca",
+                    "--profile",
+                    "controversial-swallow-jyXJrS"
+                ],
+                "transport": "stdio",
+                "description": "Exa Search MCP 서버"
+            },
+            "currency": {
+                "command": "cmd",
+                "args": [
+                    "/c",
+                    "npx",
+                    "mcp-remote",
+                    "https://currency-mcp.wesbos.com/sse"
+                ],
+                "transport": "stdio",
+                "description": "Currency MCP 서버 (환율 정보)"
+            },
             # 실제 구현된 서버만 활성화 (나머지는 주석 처리)
         }
 
