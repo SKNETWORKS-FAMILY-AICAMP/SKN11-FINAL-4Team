@@ -174,24 +174,35 @@ def prepare_dataset(tokenizer, qa_data: list[dict], system_message: str, max_len
     for i, item in enumerate(qa_data):
         # 이미 변환된 데이터인지 확인 (messages 키가 있는 경우)
         if "messages" in item:
-            # 이미 변환된 형식에서 question/answer 추출
             messages = item["messages"]
-            question = ""
-            answer = ""
             
-            for msg in messages:
-                if msg.get("role") == "user":
-                    question = msg.get("content", "")
-                elif msg.get("role") == "assistant":
-                    answer = msg.get("content", "")
-            
-            if question and answer:
-                formatted_text = preprocessor.create_chat_format(
-                    question, 
-                    answer,
-                    system_msg=system_message
+            # 멀티턴 대화인 경우 전체 대화를 하나의 텍스트로 처리
+            if len(messages) > 3:  # system + 최소 1턴 이상의 대화
+                # 토크나이저의 채팅 템플릿을 사용해 전체 대화를 포맷팅
+                formatted_text = tokenizer.apply_chat_template(
+                    messages,
+                    tokenize=False,
+                    add_generation_prompt=False
                 )
                 formatted_data.append({"text": formatted_text})
+            else:
+                # 단일 턴 대화 처리 (기존 로직)
+                question = ""
+                answer = ""
+                
+                for msg in messages:
+                    if msg.get("role") == "user":
+                        question = msg.get("content", "")
+                    elif msg.get("role") == "assistant":
+                        answer = msg.get("content", "")
+                
+                if question and answer:
+                    formatted_text = preprocessor.create_chat_format(
+                        question, 
+                        answer,
+                        system_msg=system_message
+                    )
+                    formatted_data.append({"text": formatted_text})
         else:
             # 원시 QA 형식
             question = item.get("question", "")
@@ -279,7 +290,7 @@ def upload_to_huggingface(output_dir, hf_token, hf_repo_id):
     """파인튜닝된 모델을 Hugging Face Hub에 업로드"""
     if not hf_token:
         print("HF_TOKEN이 설정되지 않아 업로드를 건너뜁니다.")
-        return f"https://huggingface.co/{hf_repo_id}"  # 토큰이 없어도 URL은 반환
+        return hf_repo_id  # 레포 경로만 반환
     
     try:
         print(f"\n=== Hugging Face Hub 업로드 시작 ===")
@@ -304,7 +315,7 @@ def upload_to_huggingface(output_dir, hf_token, hf_repo_id):
             token=hf_token,
         )
         
-        print(f"✅ 업로드 완료! 모델 URL: https://huggingface.co/{hf_repo_id}")
+        print(f"✅ 업로드 완료! 모델 레포: {hf_repo_id}")
         
         # 3. 로컬 폴더 삭제
         import shutil
@@ -316,11 +327,11 @@ def upload_to_huggingface(output_dir, hf_token, hf_repo_id):
             print(f"⚠️ 로컬 폴더 삭제 실패: {cleanup_error}")
             # 삭제 실패해도 업로드는 성공했으므로 계속 진행
         
-        return f"https://huggingface.co/{hf_repo_id}"
+        return hf_repo_id  # 레포 경로만 반환
         
     except Exception as e:
         print(f"❌ 업로드 실패: {e}")
-        return f"https://huggingface.co/{hf_repo_id}"  # 실패해도 URL은 반환
+        return hf_repo_id  # 실패해도 레포 경로는 반환
 
 def cleanup_gpu_memory():
     """GPU 메모리 정리"""
@@ -478,7 +489,7 @@ def main(qa_data: list[dict], system_message: str, hf_token: str, hf_repo_id: st
     except Exception as e:
         print(f"⚠️ 메모리 정리 중 오류 (무시됨): {e}")
     
-    # 17. HuggingFace 모델 URL 반환
-    print(f"✅ 파인튜닝 완료! 모델 URL: {hf_model_url}")
+    # 17. HuggingFace 모델 레포 경로 반환
+    print(f"✅ 파인튜닝 완료! 모델 레포: {hf_model_url}")
     return hf_model_url
 

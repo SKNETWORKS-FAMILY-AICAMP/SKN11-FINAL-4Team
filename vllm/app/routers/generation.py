@@ -37,7 +37,7 @@ async def generate_response_endpoint(request: GenerateRequest):
             request.influencer_name
         )
         
-        logger.info(f"🔍 생성된 프롬프트 (처음 200자): {formatted_prompt[:200]}...")
+        logger.info(f"🔍 생성된 프롬프트 (처음 200자): {formatted_prompt}...")
         
         # 샘플링 파라미터 설정
         sampling_params = SamplingParams(

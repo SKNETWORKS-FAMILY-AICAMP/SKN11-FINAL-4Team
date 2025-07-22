@@ -6,6 +6,7 @@ import aioboto3
 from botocore.exceptions import ClientError, NoCredentialsError
 import aiofiles
 from dotenv import load_dotenv
+import asyncio
 
 load_dotenv()
 
@@ -241,28 +242,31 @@ class AsyncS3Manager:
         except ClientError:
             return False
 
-# 전역 비동기 S3 매니저 인스턴스
+# 전역 비동기 S3 매니저 인스턴스 (thread-safe)
 _async_s3_manager: Optional[AsyncS3Manager] = None
+_async_s3_manager_lock = asyncio.Lock()
 
-def get_async_s3_manager() -> AsyncS3Manager:
-    """비동기 S3 매니저 인스턴스 반환"""
+async def get_async_s3_manager() -> AsyncS3Manager:
+    """비동기 S3 매니저 인스턴스 반환 (thread-safe)"""
     global _async_s3_manager
-    if _async_s3_manager is None:
-        _async_s3_manager = AsyncS3Manager()
+    async with _async_s3_manager_lock:
+        if _async_s3_manager is None:
+            _async_s3_manager = AsyncS3Manager()
     return _async_s3_manager
 
-def initialize_async_s3_manager(
+async def initialize_async_s3_manager(
     bucket_name: Optional[str] = None,
     region_name: str = "ap-northeast-2",
     aws_access_key_id: Optional[str] = None,
     aws_secret_access_key: Optional[str] = None
 ) -> AsyncS3Manager:
-    """비동기 S3 매니저 초기화"""
+    """비동기 S3 매니저 초기화 (thread-safe)"""
     global _async_s3_manager
-    _async_s3_manager = AsyncS3Manager(
-        bucket_name=bucket_name,
-        region_name=region_name,
-        aws_access_key_id=aws_access_key_id,
-        aws_secret_access_key=aws_secret_access_key
-    )
+    async with _async_s3_manager_lock:
+        _async_s3_manager = AsyncS3Manager(
+            bucket_name=bucket_name,
+            region_name=region_name,
+            aws_access_key_id=aws_access_key_id,
+            aws_secret_access_key=aws_secret_access_key
+        )
     return _async_s3_manager
