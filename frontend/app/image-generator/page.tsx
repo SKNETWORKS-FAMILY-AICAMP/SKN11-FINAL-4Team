@@ -67,19 +67,116 @@ interface WorkflowTemplate {
   is_active: boolean
 }
 
-const PRESET_STYLES = [
-  { id: 'realistic', name: '사실적', description: '실제 사진과 같은 고품질 이미지' },
-  { id: 'artistic', name: '예술적', description: '예술 작품 스타일의 이미지' },
-  { id: 'anime', name: '애니메이션', description: '애니메이션/만화 스타일' },
-  { id: 'portrait', name: '인물 사진', description: '인물 중심의 포트레이트' },
-  { id: 'landscape', name: '풍경', description: '자연 풍경 및 배경' }
-]
-
 const PRESET_SIZES = [
   { id: 'square', name: '정사각형', width: 512, height: 512 },
   { id: 'portrait', name: '세로형', width: 512, height: 768 },
   { id: 'landscape', name: '가로형', width: 768, height: 512 },
   { id: 'wide', name: '와이드', width: 1024, height: 512 }
+]
+
+// 공통 2단계 유형
+const COMMON_TYPES = [
+  { id: 'real', name: '실사' },
+  { id: 'movie', name: '영화' },
+  { id: 'anime', name: '애니메이션' },
+  { id: 'webtoon', name: '웹툰' },
+  { id: 'digital', name: '디지털' },
+];
+
+const LANDSCAPE_OPTIONS = [
+  { id: 'nature', name: '자연' },
+  { id: 'city', name: '도시' },
+  { id: 'sea', name: '바다' },
+  { id: 'mountain', name: '산' },
+]
+
+// 프롬프트 키워드 매핑
+const PROMPT_KEYWORDS = {
+  // 스타일 키워드
+  styles: {
+    real: 'photo-realistic, 8k portrait, DSLR, realistic skin texture',
+    movie: 'cinematic lighting, film grain, movie poster, dynamic shadows',
+    anime: 'anime style, Makoto Shinkai, Ghibli, anime lighting, 2D cell shading',
+    webtoon: 'webtoon style, flat colors, ink outline, clean lines',
+    digital: 'digital painting, concept art, soft shading, detailed brush strokes'
+  },
+  // 성별 키워드
+  gender: {
+    man: 'male, boy, handsome man, young male, masculine face',
+    woman: 'female, girl, beautiful woman, young female, feminine face'
+  },
+  // 지역 키워드
+  region: {
+    east: 'Asian, Korean, Japanese, Chinese, pale skin, almond eyes',
+    west: 'Caucasian, European, American, blonde hair, blue eyes, fair skin'
+  },
+  // 동물/사물 스타일 키워드
+  animalObjectStyles: {
+    real: 'photo of, ultra-realistic, national geographic, macro shot',
+    movie: 'cinematic animal, Pixar-style, Dreamworks, film lighting',
+    anime: 'anime animal, Ghibli animal, 2D cartoon style',
+    webtoon: 'webtoon-style animal, clean outline, simplified design',
+    digital: 'digital illustration, concept art, soft brush texture, fantasy style'
+  },
+  // 풍경 키워드
+  landscape: {
+    nature: 'mountain landscape, misty forest, sunset at the lake, snowy field, desert dunes',
+    city: 'futuristic city, Korean alley, urban skyline at night, abandoned industrial ruins',
+    space: 'nebula space scene, planet surface, satellite orbit, alien world landscape',
+    digital: 'fantasy digital world, VR cyberspace, holographic environment, synthwave grid'
+  }
+}
+
+const STYLE_CATEGORIES = [
+  {
+    id: 'person',
+    name: '사람',
+    subcategories: COMMON_TYPES.map(type => ({
+      ...type,
+      subcategories: [
+        {
+          id: 'man',
+          name: '남성',
+          styles: [
+            { id: `${type.id}_man_east`, name: '동양' },
+            { id: `${type.id}_man_west`, name: '서양' },
+          ],
+        },
+        {
+          id: 'woman',
+          name: '여성',
+          styles: [
+            { id: `${type.id}_woman_east`, name: '동양' },
+            { id: `${type.id}_woman_west`, name: '서양' },
+          ],
+        },
+      ],
+    })),
+  },
+  {
+    id: 'animal',
+    name: '동물',
+    subcategories: COMMON_TYPES.map(type => ({
+      ...type,
+      name: type.name,
+      id: type.id
+    })),
+  },
+  {
+    id: 'object',
+    name: '사물',
+    subcategories: COMMON_TYPES.map(type => ({
+      ...type,
+      name: type.name,
+      id: type.id
+    })),
+  },
+  {
+    id: 'landscape',
+    name: '풍경',
+    // 풍경은 별도의 세부 옵션만 가짐
+    options: LANDSCAPE_OPTIONS,
+  },
 ]
 
 export default function ImageGeneratorPage() {
@@ -88,7 +185,6 @@ export default function ImageGeneratorPage() {
   const [loading, setLoading] = useState(false)
   // 모델 선택 기능 제거 - 워크플로우에 정의된 모델 자동 사용
   const [selectedWorkflow, setSelectedWorkflow] = useState<string>("")
-  const [selectedStyle, setSelectedStyle] = useState<string>("") // 빈 문자열로 초기화
   const [selectedSize, setSelectedSize] = useState<string>("")
   
   // 생성 파라미터
@@ -212,33 +308,86 @@ export default function ImageGeneratorPage() {
     setIsGenerating(true)
     setGenerationProgress(0)
 
-    // 테스트용: ComfyUI 호출 없이 바로 완료 처리
-    setTimeout(() => {
-      setIsGenerating(false)
-      setGenerationProgress(100)
-      
+    // 선택된 스타일 키워드들을 가져와서 프롬프트와 결합
+    const styleKeywords = getCombinedPromptKeywords()
+    const finalPrompt = styleKeywords ? `${prompt}, ${styleKeywords}` : prompt
+
+    console.log('Final prompt with keywords:', finalPrompt) // 디버깅용
+
+    try {
       const selectedSizeData = PRESET_SIZES.find(size => size.id === selectedSize)
       
-      const testImage: GeneratedImage = {
-        id: `img_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        prompt,
-        negative_prompt: '',
-        model: 'test-model',
-        width: selectedSizeData?.width || 512,
-        height: selectedSizeData?.height || 512,
-        steps,
-        cfg_scale: cfgScale,
-        seed: Math.floor(Math.random() * 1000000),
-        image_url: 'https://picsum.photos/512/512?random=' + Date.now(), // 랜덤 테스트 이미지
-        created_at: new Date().toISOString(),
-        status: 'completed'
+      // ComfyUI API 호출
+      const response = await fetch('/api/comfyui/generate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          prompt: finalPrompt,
+          negative_prompt: '',
+          width: selectedSizeData?.width || 512,
+          height: selectedSizeData?.height || 512,
+          steps,
+          cfg_scale: cfgScale,
+          seed: seed === -1 ? undefined : seed,
+          style: 'realistic', // 기본 스타일
+          workflow_id: selectedWorkflow || 'basic_txt2img'
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error('이미지 생성에 실패했습니다.')
       }
+
+      const data = await response.json()
       
-      setImages(prev => [testImage, ...prev])
-      setPreviewImage(testImage) // 미리보기 영역에 표시
-      setShowImageModal(true) // 모달 띄우기
-      setPrompt("")
-    }, 2000) // 2초 후 완료
+      if (data.success) {
+        // 진행률 시뮬레이션 (실제로는 백엔드에서 진행률을 받아와야 함)
+        const progressInterval = setInterval(() => {
+          setGenerationProgress(prev => {
+            if (prev >= 90) {
+              clearInterval(progressInterval)
+              return prev
+            }
+            return prev + Math.random() * 10
+          })
+        }, 200)
+
+        // 2초 후 완료 처리 (실제로는 백엔드 응답을 기다려야 함)
+        setTimeout(() => {
+          setIsGenerating(false)
+          setGenerationProgress(100)
+          
+          const generatedImage: GeneratedImage = {
+            id: `img_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            prompt: finalPrompt,
+            negative_prompt: '',
+            model: selectedWorkflow || 'basic_txt2img',
+            width: selectedSizeData?.width || 512,
+            height: selectedSizeData?.height || 512,
+            steps,
+            cfg_scale: cfgScale,
+            seed: seed === -1 ? Math.floor(Math.random() * 1000000) : seed,
+            image_url: data.image_url || 'https://picsum.photos/512/512?random=' + Date.now(),
+            created_at: new Date().toISOString(),
+            status: 'completed'
+          }
+          
+          setImages(prev => [generatedImage, ...prev])
+          setPreviewImage(generatedImage)
+          setShowImageModal(true)
+          setPrompt("")
+        }, 2000)
+      } else {
+        throw new Error(data.error || '이미지 생성에 실패했습니다.')
+      }
+    } catch (error) {
+      console.error('Image generation error:', error)
+      setIsGenerating(false)
+      setGenerationProgress(0)
+      alert('이미지 생성에 실패했습니다: ' + (error instanceof Error ? error.message : '알 수 없는 오류'))
+    }
   }
 
   const handleDeleteImage = async (imageId: string) => {
@@ -300,50 +449,6 @@ export default function ImageGeneratorPage() {
 
   const getSelectedSizeData = () => {
     return PRESET_SIZES.find(size => size.id === selectedSize)
-  }
-
-  const getSelectedStyleData = () => {
-    if (!selectedStyle) return null
-    return PRESET_STYLES.find(style => style.id === selectedStyle)
-  }
-
-  // 갤러리에서 이미지 선택 함수
-  const handleSelectFromGallery = (image: GeneratedImage) => {
-    const maxAllowed = getRequiredImageCount()
-    if (selectedImages.length >= maxAllowed) {
-      alert(`최대 ${maxAllowed}개까지 이미지를 선택할 수 있습니다.`)
-      return
-    }
-    
-    const newImage = {
-      id: `gallery_${image.id}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      url: image.image_url,
-      type: 'gallery' as const,
-      galleryImage: image
-    }
-    
-    setSelectedImages(prev => [...prev, newImage])
-  }
-
-  // 갤러리에서 추가 선택 함수
-  const handleAddFromGallery = (image: GeneratedImage) => {
-    const currentCount = selectedImages.length
-    const maxAllowed = getRequiredImageCount()
-    const remainingSlots = maxAllowed - currentCount
-    
-    if (remainingSlots <= 0) {
-      alert(`최대 ${maxAllowed}개까지 이미지를 선택할 수 있습니다.`)
-      return
-    }
-    
-    const newImage = {
-      id: `gallery_${image.id}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      url: image.image_url,
-      type: 'gallery' as const,
-      galleryImage: image
-    }
-    
-    setSelectedImages(prev => [...prev, newImage])
   }
 
   // 갤러리에서 선택된 이미지들
@@ -666,7 +771,7 @@ export default function ImageGeneratorPage() {
     // 탭 변경 시 상태 초기화
     setPrompt("")
     setSelectedSize("")
-    setSelectedStyle("")
+    
     setPreviewImage(null)
     setShowImageModal(false)
     setShowGalleryImageModal(false)
@@ -835,6 +940,120 @@ export default function ImageGeneratorPage() {
     return 0
   }
 
+  // 스타일 선택 상태 (4단계)
+  const [selectedMainCategory, setSelectedMainCategory] = useState<string | null>(null)
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
+  const [selectedSubcategory, setSelectedSubcategory] = useState<string | null>(null)
+  const [selectedDetailStyle, setSelectedDetailStyle] = useState<string | null>(null)
+  // 풍경 선택 상태
+  const [selectedLandscape, setSelectedLandscape] = useState<string | null>(null)
+
+  // 스타일 선택 관련 핸들러
+  const handleMainCategorySelect = (mainId: string | null) => {
+    setSelectedMainCategory(mainId)
+    setSelectedCategory(null)
+    setSelectedSubcategory(null)
+    setSelectedDetailStyle(null)
+    setSelectedLandscape(null)  // 풍경 선택도 초기화
+  }
+  const handleCategorySelect = (categoryId: string | null) => {
+    setSelectedCategory(categoryId)
+    setSelectedSubcategory(null)
+    setSelectedDetailStyle(null)
+    setSelectedLandscape(null)  // 풍경 선택도 초기화
+  }
+  const handleSubcategorySelect = (subcategoryId: string | null) => {
+    setSelectedSubcategory(subcategoryId)
+    setSelectedDetailStyle(null)
+    setSelectedLandscape(null)  // 풍경 선택도 초기화
+  }
+  const handleDetailStyleSelect = (styleId: string | null) => {
+    setSelectedDetailStyle(styleId)
+    setSelectedLandscape(null)  // 풍경 선택도 초기화
+  }
+  const handleLandscapeSelect = (landscapeId: string) => {
+    setSelectedLandscape(landscapeId)
+    // 풍경을 선택하면 스타일 선택 상태 초기화
+    setSelectedMainCategory(null)
+    setSelectedCategory(null)
+    setSelectedSubcategory(null)
+    setSelectedDetailStyle(null)
+  }
+  const handleLandscapeOptionSelect = (optionId: string) => {
+    if (selectedLandscape === 'landscape') {
+      setSelectedCategory(optionId)
+      setSelectedMainCategory(null)
+      setSelectedSubcategory(null)
+      setSelectedDetailStyle(null)
+    }
+  }
+
+  // 선택된 스타일을 프롬프트 키워드로 변환하는 함수
+  const getStylePromptKeywords = () => {
+    let keywords: string[] = []
+
+    // 대분류가 선택되지 않았거나 풍경인 경우
+    if (!selectedMainCategory || selectedMainCategory === 'landscape') {
+      return keywords
+    }
+
+    // 사람인 경우
+    if (selectedMainCategory === 'person') {
+      if (selectedCategory && selectedSubcategory && selectedDetailStyle) {
+        // 스타일 키워드 추가
+        const styleId = selectedCategory // real, movie, anime, webtoon, digital
+        if (PROMPT_KEYWORDS.styles[styleId as keyof typeof PROMPT_KEYWORDS.styles]) {
+          keywords.push(PROMPT_KEYWORDS.styles[styleId as keyof typeof PROMPT_KEYWORDS.styles])
+        }
+
+        // 성별 키워드 추가
+        const genderId = selectedSubcategory // man, woman
+        if (PROMPT_KEYWORDS.gender[genderId as keyof typeof PROMPT_KEYWORDS.gender]) {
+          keywords.push(PROMPT_KEYWORDS.gender[genderId as keyof typeof PROMPT_KEYWORDS.gender])
+        }
+
+        // 지역 키워드 추가
+        const regionId = selectedDetailStyle.includes('east') ? 'east' : 'west'
+        if (PROMPT_KEYWORDS.region[regionId]) {
+          keywords.push(PROMPT_KEYWORDS.region[regionId])
+        }
+      }
+    }
+    // 동물/사물인 경우
+    else if (selectedMainCategory === 'animal' || selectedMainCategory === 'object') {
+      if (selectedCategory) {
+        // 동물/사물 스타일 키워드 추가
+        const styleId = selectedCategory // real, movie, anime, webtoon, digital
+        if (PROMPT_KEYWORDS.animalObjectStyles[styleId as keyof typeof PROMPT_KEYWORDS.animalObjectStyles]) {
+          keywords.push(PROMPT_KEYWORDS.animalObjectStyles[styleId as keyof typeof PROMPT_KEYWORDS.animalObjectStyles])
+        }
+      }
+    }
+
+    return keywords
+  }
+
+  // 풍경 키워드 가져오기
+  const getLandscapePromptKeywords = () => {
+    if (selectedLandscape && selectedLandscape !== '' && PROMPT_KEYWORDS.landscape[selectedLandscape as keyof typeof PROMPT_KEYWORDS.landscape]) {
+      return PROMPT_KEYWORDS.landscape[selectedLandscape as keyof typeof PROMPT_KEYWORDS.landscape]
+    }
+    return ''
+  }
+
+  // 전체 프롬프트 키워드 조합
+  const getCombinedPromptKeywords = () => {
+    const styleKeywords = getStylePromptKeywords()
+    const landscapeKeywords = getLandscapePromptKeywords()
+    
+    let combinedKeywords = [...styleKeywords]
+    if (landscapeKeywords) {
+      combinedKeywords.push(landscapeKeywords)
+    }
+    
+    return combinedKeywords.join(', ')
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
         <Navigation />
@@ -889,191 +1108,400 @@ export default function ImageGeneratorPage() {
                 {activeTab === "generate" && (
                   <div className="space-y-6">
                     <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Wand2 className="h-5 w-5" />
-                  이미지 생성 설정
-                </CardTitle>
-                <CardDescription>
-                  프롬프트를 입력하고 스타일을 설정하여 AI 이미지를 생성하세요
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                  {/* 생성 설정 */}
-                  <div className="lg:col-span-2 space-y-6">
-                    <Card className="border-0 shadow-none bg-gray-50">
-                      <CardHeader className="pb-3">
-                        <CardTitle className="flex items-center gap-2 text-base">
-                          <Sparkles className="h-4 w-4" />
-                          프롬프트 설정
+                      <CardHeader>
+                        <CardTitle className="flex items-center gap-2">
+                          <Wand2 className="h-5 w-5" />
+                          이미지 생성 설정
                         </CardTitle>
                       </CardHeader>
-                      <CardContent className="space-y-4">
-                        <div>
-                          <Label htmlFor="prompt">프롬프트 *</Label>
-                          <Textarea
-                            id="prompt"
-                            placeholder="생성하고 싶은 이미지를 자세히 설명해주세요..."
-                            value={prompt}
-                            onChange={(e) => setPrompt(e.target.value)}
-                            className="min-h-[100px]"
-                          />
-                        </div>
-                        {/* 커스텀 템플릿에서는 부정 프롬프트 사용하지 않아 제거 */}
-                      </CardContent>
-                    </Card>
-
-                    <Card className="border-0 shadow-none bg-gray-50">
-                      <CardHeader className="pb-3">
-                        <CardTitle className="flex items-center gap-2 text-base">
-                          <Palette className="h-4 w-4" />
-                          스타일 및 크기 설정
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent className="space-y-4">
-                        <div>
-                          <Label>스타일 프리셋</Label>
-                          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-2">
-                            <button
-                              onClick={() => setSelectedStyle("")}
-                              className={`p-3 rounded-lg border text-left transition-colors ${
-                                selectedStyle === ""
-                                  ? "bg-blue-100 border-blue-300 text-blue-700"
-                                  : "bg-white border-gray-200 hover:bg-gray-50"
-                              }`}
-                            >
-                              <div className="font-medium text-sm">스타일 없음</div>
-                              <div className="text-xs text-gray-500 mt-1">기본 스타일 사용</div>
-                            </button>
-                            {PRESET_STYLES.map((style) => (
-                              <button
-                                key={style.id}
-                                onClick={() => setSelectedStyle(style.id)}
-                                className={`p-3 rounded-lg border text-left transition-colors ${
-                                  selectedStyle === style.id
-                                    ? "bg-blue-100 border-blue-300 text-blue-700"
-                                    : "bg-white border-gray-200 hover:bg-gray-50"
-                                }`}
-                              >
-                                <div className="font-medium text-sm">{style.name}</div>
-                                <div className="text-xs text-gray-500 mt-1">{style.description}</div>
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-
-                        <div>
-                          <Label>이미지 크기</Label>
-                          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-2">
-                            {PRESET_SIZES.map((size) => (
-                              <button
-                                key={size.id}
-                                onClick={() => setSelectedSize(size.id)}
-                                className={`p-3 rounded-lg border text-center transition-colors ${
-                                  selectedSize === size.id
-                                    ? "bg-blue-100 border-blue-300 text-blue-700"
-                                    : "bg-white border-gray-200 hover:bg-gray-50"
-                                }`}
-                              >
-                                <div className="font-medium text-sm">{size.name}</div>
-                                <div className="text-xs text-gray-500 mt-1">
-                                  {size.width} × {size.height}
+                      <CardContent>
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                          {/* 스타일 3단계 선택 UI */}
+                          <div className="lg:col-span-2 space-y-6">
+                            {/* 스타일 선택: 선택 사항 안내 */}
+                            <Card className="border-0 shadow-none bg-gray-50">
+                              <CardHeader className="pb-3">
+                                <CardTitle className="flex items-center gap-2 text-base">
+                                  <Palette className="h-4 w-4" />
+                                  스타일 선택
+                                </CardTitle>
+                                <CardDescription className="text-xs text-gray-500 mt-1">
+                                  원하는 경우 스타일을 선택하세요. 선택하지 않으면 기본 스타일로 생성됩니다.
+                                </CardDescription>
+                              </CardHeader>
+                              <CardContent className="space-y-4">
+                                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                                  {/* 1단계: 대분류(사람/동물/사물/풍경) */}
+                                  <div>
+                                    <Label className="block mb-2">대분류</Label>
+                                    <div className="flex flex-col gap-2 min-w-[120px]">
+                                      <button
+                                        onClick={() => {
+                                          setSelectedMainCategory("")
+                                          setSelectedCategory("")
+                                          setSelectedSubcategory("")
+                                          setSelectedDetailStyle("")
+                                          setSelectedLandscape("")
+                                        }}
+                                        className={
+                                          "p-3 rounded-xl border text-center transition-colors min-w-[120px] min-h-[40px] text-base font-semibold " +
+                                          (selectedMainCategory === ""
+                                            ? "bg-blue-100 border-blue-300 text-blue-700 ring-2 ring-blue-300 scale-105 shadow"
+                                            : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50 hover:scale-105")
+                                        }
+                                      >
+                                        선택안함
+                                      </button>
+                                      {STYLE_CATEGORIES
+                                        .filter((main): main is { id: string; name: string; subcategories: any[] } => main.id !== 'landscape' && !!main.subcategories)
+                                        .map((main) => (
+                                          <button
+                                            key={main.id}
+                                            onClick={() => handleMainCategorySelect(main.id)}
+                                            className={
+                                              "p-3 rounded-xl border text-center transition-colors min-w-[120px] min-h-[40px] text-base font-semibold " +
+                                              (selectedMainCategory === main.id
+                                                ? "bg-blue-100 border-blue-300 text-blue-700 ring-2 ring-blue-300 scale-105 shadow"
+                                                : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50 hover:scale-105")
+                                            }
+                                          >
+                                            <div>{main.name}</div>
+                                          </button>
+                                        ))}
+                                    </div>
+                                  </div>
+                                  {/* 2단계: 중분류(실사/영화/...) */}
+                                  {selectedMainCategory && selectedMainCategory !== 'landscape' ? (
+                                    <div>
+                                      <Label className="block mb-2">중분류</Label>
+                                      <div className="flex flex-col gap-2 min-w-[120px]">
+                                        <button
+                                          onClick={() => {
+                                            setSelectedCategory("")
+                                            setSelectedSubcategory("")
+                                            setSelectedDetailStyle("")
+                                          }}
+                                          className={
+                                            "p-3 rounded-xl border text-center transition-colors min-w-[120px] min-h-[40px] text-base font-semibold " +
+                                            (selectedCategory === ""
+                                              ? "bg-blue-100 border-blue-300 text-blue-700 ring-2 ring-blue-300 scale-105 shadow"
+                                              : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50 hover:scale-105")
+                                          }
+                                        >
+                                          선택안함
+                                        </button>
+                                        {(() => {
+                                          const main = STYLE_CATEGORIES.find((m: any) => m.id === selectedMainCategory)
+                                          if (main && Array.isArray(main.subcategories)) {
+                                            return main.subcategories.map((cat: { id: string; name: string; subcategories?: any[] }) => (
+                                              <button
+                                                key={cat.id}
+                                                onClick={() => handleCategorySelect(cat.id)}
+                                                className={
+                                                  "p-3 rounded-xl border text-center transition-colors min-w-[120px] min-h-[40px] text-base font-semibold " +
+                                                  (selectedCategory === cat.id
+                                                    ? "bg-blue-100 border-blue-300 text-blue-700 ring-2 ring-blue-300 scale-105 shadow"
+                                                    : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50 hover:scale-105")
+                                                }
+                                              >
+                                                <div>{cat.name}</div>
+                                              </button>
+                                            ))
+                                          }
+                                          return null
+                                        })()}
+                                      </div>
+                                    </div>
+                                  ) : <div />}
+                                  {/* 3단계: 소분류(남성/여성 등) */}
+                                  {selectedMainCategory === "person" && selectedCategory ? (
+                                    <div>
+                                      <Label className="block mb-2">소분류</Label>
+                                      <div className="flex flex-col gap-2 min-w-[120px]">
+                                        <button
+                                          onClick={() => {
+                                            setSelectedSubcategory("")
+                                            setSelectedDetailStyle("")
+                                          }}
+                                          className={
+                                            "p-3 rounded-xl border text-center transition-colors min-w-[120px] min-h-[40px] text-base font-semibold " +
+                                            (selectedSubcategory === ""
+                                              ? "bg-blue-100 border-blue-300 text-blue-700 ring-2 ring-blue-300 scale-105 shadow"
+                                              : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50 hover:scale-105")
+                                          }
+                                        >
+                                          선택안함
+                                        </button>
+                                        {(() => {
+                                          const main = STYLE_CATEGORIES.find((m: any) => m.id === selectedMainCategory)
+                                          const cat = main?.subcategories?.find((c: any) => c.id === selectedCategory)
+                                          if (cat && Array.isArray(cat.subcategories)) {
+                                            return cat.subcategories.map((sub: { id: string; name: string; styles: { id: string; name: string }[] }) => (
+                                              <button
+                                                key={sub.id}
+                                                onClick={() => handleSubcategorySelect(sub.id)}
+                                                className={
+                                                  "p-3 rounded-xl border text-center transition-colors min-w-[120px] min-h-[40px] text-base font-semibold " +
+                                                  (selectedSubcategory === sub.id
+                                                    ? "bg-blue-100 border-blue-300 text-blue-700 ring-2 ring-blue-300 scale-105 shadow"
+                                                    : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50 hover:scale-105")
+                                                }
+                                              >
+                                                <div>{sub.name}</div>
+                                              </button>
+                                            ))
+                                          }
+                                          return null
+                                        })()}
+                                      </div>
+                                    </div>
+                                  ) : <div />}
+                                  {/* 4단계: 세부 스타일(동양/서양 등) */}
+                                  {selectedMainCategory === "person" && selectedCategory && selectedSubcategory ? (
+                                    <div>
+                                      <Label className="block mb-2">세부 스타일</Label>
+                                      <div className="flex flex-col gap-2 min-w-[120px]">
+                                        <button
+                                          onClick={() => setSelectedDetailStyle("")}
+                                          className={
+                                            "p-3 rounded-xl border text-center transition-colors min-w-[120px] min-h-[40px] text-base font-semibold " +
+                                            (selectedDetailStyle === ""
+                                              ? "bg-blue-100 border-blue-300 text-blue-700 ring-2 ring-blue-300 scale-105 shadow"
+                                              : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50 hover:scale-105")
+                                          }
+                                        >
+                                          선택안함
+                                        </button>
+                                        {(() => {
+                                          const main = STYLE_CATEGORIES.find((m: any) => m.id === selectedMainCategory)
+                                          const cat = main?.subcategories?.find((c: any) => c.id === selectedCategory)
+                                          const sub = cat?.subcategories?.find((s: any) => s.id === selectedSubcategory)
+                                          if (sub && Array.isArray(sub.styles)) {
+                                            return sub.styles.map((style: { id: string; name: string }) => (
+                                              <button
+                                                key={style.id}
+                                                onClick={() => handleDetailStyleSelect(style.id)}
+                                                className={
+                                                  "p-3 rounded-xl border text-center transition-colors min-w-[120px] min-h-[40px] text-base font-semibold " +
+                                                  (selectedDetailStyle === style.id
+                                                    ? "bg-blue-100 border-blue-300 text-blue-700 ring-2 ring-blue-300 scale-105 shadow"
+                                                    : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50 hover:scale-105")
+                                                }
+                                              >
+                                                <div>{style.name}</div>
+                                              </button>
+                                            ))
+                                          }
+                                          return null
+                                        })()}
+                                      </div>
+                                    </div>
+                                  ) : <div />}
                                 </div>
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  </div>
+                              </CardContent>
+                            </Card>
 
-                  {/* 미리보기 및 생성 버튼 */}
-                  <div className="space-y-6">
-                    <Card className="border-0 shadow-none bg-gray-50 min-h-[600px]">
-                      <CardHeader className="pb-3">
-                        <CardTitle className="text-base">생성 미리보기</CardTitle>
-                      </CardHeader>
-                      <CardContent className="h-full flex flex-col">
-                        <div className="aspect-square bg-gray-100 rounded-lg flex items-center justify-center mb-4 overflow-hidden flex-shrink-0">
-                          {isGenerating ? (
-                            <div className="text-center">
-                              <Loader2 className="h-8 w-8 animate-spin text-blue-600 mx-auto mb-2" />
-                              <p className="text-sm text-gray-600">생성 중...</p>
-                              <Progress value={generationProgress} className="mt-2" />
-                              <p className="text-xs text-gray-500 mt-1">{generationProgress}%</p>
-                            </div>
-                          ) : previewImage ? (
-                            <div className="relative w-full h-full">
-                              <img
-                                src={previewImage.image_url}
-                                alt={previewImage.prompt}
-                                className="w-full h-full object-cover cursor-pointer"
-                                onClick={() => setShowImageModal(true)}
-                              />
-                              <div className="absolute top-2 right-2">
-                                <Button
-                                  size="sm"
-                                  variant="secondary"
-                                  onClick={() => setShowImageModal(true)}
-                                >
-                                  <Maximize2 className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="text-center text-gray-500">
-                              <ImageIcon className="h-12 w-12 mx-auto mb-2" />
-                              <p className="text-sm">이미지 미리보기</p>
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="space-y-2 text-sm flex-grow">
-                          <div className="flex justify-between">
-                            <span className="text-gray-600">워크플로우:</span>
-                            <span className="font-medium">{Array.isArray(workflows) ? workflows.find(w => w.id === selectedWorkflow)?.name || '기본' : '기본'}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-gray-600">스타일:</span>
-                            <span className="font-medium">
-                              {selectedStyle ? getSelectedStyleData()?.name : "기본 스타일"}
-                            </span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-gray-600">크기:</span>
-                            <span className="font-medium">
-                              {getSelectedSizeData()?.width} × {getSelectedSizeData()?.height}
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className="mt-auto pt-4">
-                          <Button 
-                            onClick={handleGenerateImage}
-                            disabled={!prompt.trim() || !selectedSize || isGenerating}
-                            className="w-full text-white bg-blue-600 hover:bg-blue-700"
-                            size="lg"
-                          >
-                            {isGenerating ? (
-                              <>
-                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                생성 중...
-                              </>
-                            ) : (
-                              <>
-                                <Wand2 className="h-4 w-4 mr-2" />
-                                이미지 생성
-                              </>
+                            {/* 스타일 선택이 모두 끝난 경우에만 풍경 선택 카드 표시 */}
+                            {(
+                              // 대분류가 '선택안함'이면 바로 풍경 선택 카드 표시
+                              selectedMainCategory === "" ||
+                              // 사람
+                              (selectedMainCategory === "person" && selectedCategory !== null && selectedSubcategory !== null && selectedDetailStyle !== null) ||
+                              // 동물/사물 (2단계만 있으므로 분류까지만 선택하면 됨)
+                              ((selectedMainCategory === "animal" || selectedMainCategory === "object") && selectedCategory !== null)
+                            ) && (
+                              <Card className="border-0 shadow-none bg-gray-50 mt-4">
+                                <CardHeader className="pb-3">
+                                  <CardTitle className="flex items-center gap-2 text-base">
+                                    <Palette className="h-4 w-4" />
+                                    풍경 선택
+                                  </CardTitle>
+                                  <CardDescription className="text-xs text-gray-500 mt-1">
+                                    원하는 풍경 유형을 바로 선택하세요.
+                                  </CardDescription>
+                                </CardHeader>
+                                <CardContent className="space-y-4">
+                                  <div className="flex gap-3 flex-wrap">
+                                    <button
+                                      onClick={() => setSelectedLandscape("")}
+                                      className={
+                                        "p-3 rounded-xl border text-center transition-colors min-w-[120px] min-h-[40px] text-base font-semibold " +
+                                        (selectedLandscape === ""
+                                          ? "bg-blue-100 border-blue-300 text-blue-700 ring-2 ring-blue-300 scale-105 shadow"
+                                          : selectedLandscape === null
+                                            ? "bg-white border-gray-200 text-gray-400"
+                                            : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50 hover:scale-105")
+                                      }
+                                    >
+                                      선택안함
+                                    </button>
+                                    {[
+                                      { id: 'nature', name: '자연' },
+                                      { id: 'city', name: '도시' },
+                                      { id: 'space', name: '우주' },
+                                      { id: 'digital', name: '디지털' },
+                                    ].map(opt => (
+                                      <button
+                                        key={opt.id}
+                                        onClick={() => {
+                                          setSelectedLandscape(opt.id)
+                                          // 스타일 선택 초기화는 필요에 따라 조정
+                                        }}
+                                        className={
+                                          "p-3 rounded-xl border text-center transition-colors min-w-[120px] min-h-[40px] text-base font-semibold " +
+                                          (selectedLandscape === opt.id
+                                            ? "bg-blue-100 border-blue-300 text-blue-700 ring-2 ring-blue-300 scale-105 shadow"
+                                            : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50 hover:scale-105")
+                                        }
+                                      >
+                                        {opt.name}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </CardContent>
+                              </Card>
                             )}
-                          </Button>
+
+                            {/* 이미지 설명(프롬프트) 입력란: 풍경이 '선택안함'("")이거나 실제 풍경이 선택된 경우 모두 표시 */}
+                            {selectedLandscape !== null && (
+                              <Card className="border-0 shadow-none bg-gray-50 mt-4">
+                                <CardHeader className="pb-3">
+                                  <CardTitle className="flex items-center gap-2 text-base">
+                                    <Sparkles className="h-4 w-4" />
+                                    이미지 설명 입력
+                                  </CardTitle>
+                                </CardHeader>
+                                <CardContent className="space-y-4">
+                                  <div>
+                                    <Label htmlFor="prompt">이미지 설명*</Label>
+                                    <Textarea
+                                      id="prompt"
+                                      placeholder="생성하고 싶은 이미지를 자세히 설명해주세요..."
+                                      value={prompt}
+                                      onChange={(e) => setPrompt(e.target.value)}
+                                      className="min-h-[100px]"
+                                    />
+                                  </div>
+                                </CardContent>
+                              </Card>
+                            )}
+                            {/* 이미지 크기 선택: 항상 표시 */}
+                            <Card className="border-0 shadow-none bg-gray-50 mt-4">
+                              <CardHeader className="pb-3">
+                                <CardTitle className="flex items-center gap-2 text-base">
+                                  <Palette className="h-4 w-4" />
+                                  이미지 크기 선택
+                                </CardTitle>
+                              </CardHeader>
+                              <CardContent className="space-y-4">
+                                <div>
+                                  <Label>이미지 크기</Label>
+                                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-2">
+                                    {PRESET_SIZES.map((size) => (
+                                      <button
+                                        key={size.id}
+                                        onClick={() => setSelectedSize(size.id)}
+                                        className={`p-3 rounded-lg border text-center transition-colors ${
+                                          selectedSize === size.id
+                                            ? "bg-blue-100 border-blue-300 text-blue-700"
+                                            : "bg-white border-gray-200 hover:bg-gray-50"
+                                        }`}
+                                      >
+                                        <div className="font-medium text-sm">{size.name}</div>
+                                        <div className="text-xs text-gray-500 mt-1">
+                                          {size.width} × {size.height}
+                                        </div>
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              </CardContent>
+                            </Card>
+                          </div>
+                          {/* 미리보기 및 생성 버튼 영역은 기존대로 유지 */}
+                          <div className="space-y-6">
+                            <Card className="border-0 shadow-none bg-gray-50 min-h-[600px]">
+                              <CardHeader className="pb-3">
+                                <CardTitle className="text-base">생성 미리보기</CardTitle>
+                              </CardHeader>
+                              <CardContent className="h-full flex flex-col">
+                                <div className="aspect-square bg-gray-100 rounded-lg flex items-center justify-center mb-4 overflow-hidden flex-shrink-0">
+                                  {isGenerating ? (
+                                    <div className="text-center">
+                                      <Loader2 className="h-8 w-8 animate-spin text-blue-600 mx-auto mb-2" />
+                                      <p className="text-sm text-gray-600">생성 중...</p>
+                                      <Progress value={generationProgress} className="mt-2" />
+                                      <p className="text-xs text-gray-500 mt-1">{generationProgress}%</p>
+                                    </div>
+                                  ) : previewImage ? (
+                                    <div className="relative w-full h-full">
+                                      <img
+                                        src={previewImage.image_url}
+                                        alt={previewImage.prompt}
+                                        className="w-full h-full object-cover cursor-pointer"
+                                        onClick={() => setShowImageModal(true)}
+                                      />
+                                      <div className="absolute top-2 right-2">
+                                        <Button
+                                          size="sm"
+                                          variant="secondary"
+                                          onClick={() => setShowImageModal(true)}
+                                        >
+                                          <Maximize2 className="h-4 w-4" />
+                                        </Button>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <div className="text-center text-gray-500">
+                                      <ImageIcon className="h-12 w-12 mx-auto mb-2" />
+                                      <p className="text-sm">이미지 미리보기</p>
+                                    </div>
+                                  )}
+                                </div>
+
+                                <div className="space-y-2 text-sm flex-grow">
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-600">워크플로우:</span>
+                                    <span className="font-medium">{Array.isArray(workflows) ? workflows.find(w => w.id === selectedWorkflow)?.name || '기본' : '기본'}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-600">스타일:</span>
+                                    <span className="font-medium">선택된 스타일</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-600">크기:</span>
+                                    <span className="font-medium">
+                                      {getSelectedSizeData()?.width} × {getSelectedSizeData()?.height}
+                                    </span>
+                                  </div>
+                                </div>
+
+                                <div className="mt-auto pt-4">
+                                  <Button 
+                                    onClick={handleGenerateImage}
+                                    disabled={!prompt.trim() || !selectedSize || isGenerating}
+                                    className="w-full text-white bg-blue-600 hover:bg-blue-700"
+                                    size="lg"
+                                  >
+                                    {isGenerating ? (
+                                      <>
+                                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                        생성 중...
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Wand2 className="h-4 w-4 mr-2" />
+                                        이미지 생성
+                                      </>
+                                    )}
+                                  </Button>
+                                </div>
+                              </CardContent>
+                            </Card>
+                          </div>
                         </div>
                       </CardContent>
                     </Card>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
                   </div>
                 )}
 
