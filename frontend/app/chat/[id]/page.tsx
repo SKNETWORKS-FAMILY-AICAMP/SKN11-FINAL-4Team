@@ -9,7 +9,6 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { tokenUtils } from "@/lib/auth"
 import { ModelService } from "@/lib/services/model.service"
-import { MCPServerSelector } from "@/components/mcp-server-selector"
 
 import {
   Send,
@@ -19,7 +18,6 @@ import {
   Loader2,
   ChevronDown,
   ChevronUp,
-  Settings,
 } from "lucide-react"
 
 interface Message {
@@ -28,8 +26,6 @@ interface Message {
   sender: "user" | "bot"
   timestamp: Date
   isStreaming?: boolean // 스트리밍 중인 메시지를 위한 속성
-  tools_used?: string[]
-  isMCPResponse?: boolean
 }
 
 interface ChatModel {
@@ -51,9 +47,6 @@ export default function ChatPage() {
   const [isModelLoading, setIsModelLoading] = useState(true)
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('connecting')
   const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false)
-  const [mcpToolsEnabled, setMcpToolsEnabled] = useState(true)
-  const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([])
-  const [showMcpSettings, setShowMcpSettings] = useState(false)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const wsRef = useRef<WebSocket | null>(null)
@@ -108,21 +101,21 @@ export default function ChatPage() {
         timeoutRef.current = null;
       }
 
-      setIsLoading(false);
+      setIsLoading(false); // 응답 수신 시 로딩 상태 해제
       try {
         const data = JSON.parse(event.data);
-
+        
         if (data.type === "token") {
           // 스트리밍 토큰 처리
           setMessages(prev => {
             const newMessages = [...prev];
             const lastMessage = newMessages[newMessages.length - 1];
-
+            
             if (lastMessage && lastMessage.sender === "bot" && lastMessage.isStreaming) {
               // 기존 스트리밍 메시지에 토큰 추가 (중복 제거)
               const newContent = data.content;
               const currentContent = lastMessage.content;
-
+              
               // 중복 제거: 새로운 토큰이 기존 내용의 끝과 중복되지 않는지 확인
               if (!currentContent.endsWith(newContent)) {
                 lastMessage.content += newContent;
@@ -137,7 +130,7 @@ export default function ChatPage() {
                 isStreaming: true
               });
             }
-
+            
             return newMessages;
           });
         } else if (data.type === "complete") {
@@ -151,17 +144,6 @@ export default function ChatPage() {
             }
             return newMessages;
           });
-        } else if (data.type === "mcp_response") {
-          // MCP 도구 응답 처리
-          setIsLoading(false);
-          setMessages(prev => [...prev, {
-            id: Date.now().toString(),
-            content: data.content,
-            sender: "bot",
-            timestamp: new Date(),
-            tools_used: data.tools_used || [],
-            isMCPResponse: true
-          }]);
         } else if (data.type === "error") {
           // 에러 처리
           setIsLoading(false);
@@ -249,7 +231,7 @@ export default function ChatPage() {
     const currentMessage = inputMessage;
     setInputMessage("");
     setIsLoading(true);
-
+    
     // WebSocket 모드
     if (connectionStatus !== 'connected') {
 
@@ -263,27 +245,21 @@ export default function ChatPage() {
 
       return;
     }
-
+    
     // 타임아웃 설정 (30초)
     timeoutRef.current = setTimeout(() => {
-      setIsLoading(false);
-      setMessages(prev => [...prev, {
-        id: (Date.now() + 1).toString(),
-        content: "응답 시간이 초과되었습니다. 다시 시도해주세요.",
-        sender: "bot",
-        timestamp: new Date(),
-      }]);
+        setIsLoading(false);
+        setMessages(prev => [...prev, {
+          id: (Date.now() + 1).toString(),
+          content: "응답 시간이 초과되었습니다. 다시 시도해주세요.",
+          sender: "bot",
+          timestamp: new Date(),
+        }]);
     }, 30000);
-
+    
     try {
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        // MCP 도구 사용 여부를 포함한 메시지 전송
-        const messageData = {
-          message: currentMessage,
-          use_mcp_tools: mcpToolsEnabled,
-          selected_mcp_servers: selectedMcpServers
-        };
-        wsRef.current.send(JSON.stringify(messageData));
+        wsRef.current.send(currentMessage);
       } else {
         throw new Error("WebSocket이 연결되지 않았습니다.");
       }
@@ -362,62 +338,6 @@ export default function ChatPage() {
   return (
     <div className="h-screen bg-gray-50">
       <div className="h-full flex flex-col p-4 max-w-3xl mx-auto">
-
-        {/* 헤더 */}
-        <div className="flex items-center justify-between p-4 border-b bg-white">
-          <div className="flex items-center space-x-3">
-            <Avatar className="h-10 w-10">
-              <AvatarFallback className="bg-green-500 text-white">
-                <Bot className="h-5 w-5" />
-              </AvatarFallback>
-            </Avatar>
-            <div>
-              <h2 className="text-lg font-semibold">{model?.name || "로딩 중..."}</h2>
-              <p className="text-sm text-gray-500">
-                {connectionStatus === 'connected' ? '🟢 연결됨' :
-                  connectionStatus === 'connecting' ? '🟡 연결 중...' :
-                    connectionStatus === 'error' ? '🔴 연결 오류' : '⚪ 연결 끊김'}
-              </p>
-            </div>
-          </div>
-
-          {/* MCP 도구 토글 */}
-          <div className="flex items-center space-x-2">
-            <label className="flex items-center space-x-2 text-sm">
-              <input
-                type="checkbox"
-                checked={mcpToolsEnabled}
-                onChange={(e) => setMcpToolsEnabled(e.target.checked)}
-                className="rounded"
-              />
-              <span>🔧 MCP 도구</span>
-            </label>
-            {selectedMcpServers.length > 0 && (
-              <span className="text-xs text-gray-500">
-                ({selectedMcpServers.length}개 서버 선택됨)
-              </span>
-            )}
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setShowMcpSettings(!showMcpSettings)}
-              className="flex items-center space-x-2"
-            >
-              <Settings className="h-4 w-4" />
-              <span>MCP 설정</span>
-            </Button>
-          </div>
-        </div>
-
-        {/* MCP 설정 패널 */}
-        {showMcpSettings && (
-          <div className="border-b bg-white p-4">
-            <MCPServerSelector
-              selectedServers={selectedMcpServers}
-              onServerChange={setSelectedMcpServers}
-            />
-          </div>
-        )}
 
         {/* 채팅 영역 */}
         <Card className="flex-1 flex flex-col min-h-0">
@@ -501,31 +421,29 @@ export default function ChatPage() {
                 messages.map((message) => (
                   <div
                     key={message.id}
-                    className={`flex ${message.sender === "user" ? "justify-end" : "justify-start"} mb-4`}
+                    className={`flex ${message.sender === "user" ? "justify-end" : "justify-start"}`}
                   >
-                    <div
-                      className={`max-w-[70%] rounded-lg px-4 py-2 ${message.sender === "user"
+                    <div className={`flex items-start space-x-3 max-w-[70%] ${message.sender === "user" ? "flex-row-reverse space-x-reverse" : ""}`}>
+                      <Avatar className="h-8 w-8">
+                        <AvatarFallback className={message.sender === "user" ? "bg-blue-500 text-white" : "bg-green-500 text-white"}>
+                          {message.sender === "user" ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
+                        </AvatarFallback>
+                      </Avatar>
+
+                      <div className={`rounded-lg px-4 py-2 ${message.sender === "user"
                         ? "bg-blue-500 text-white"
-                        : "bg-gray-200 text-gray-800"
-                        }`}
-                    >
-                      <div className="whitespace-pre-wrap">{message.content}</div>
+                        : "bg-gray-100 text-gray-900"
 
-                      {/* MCP 도구 사용 표시 */}
-                      {message.isMCPResponse && message.tools_used && message.tools_used.length > 0 && (
-                        <div className="mt-2 pt-2 border-t border-gray-300">
-                          <div className="text-xs text-gray-500">
-                            🔧 사용된 도구: {message.tools_used.join(", ")}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* 스트리밍 표시 */}
-                      {message.isStreaming && (
-                        <div className="mt-1">
-                          <div className="inline-block w-2 h-2 bg-gray-400 rounded-full animate-pulse"></div>
-                        </div>
-                      )}
+                        }`}>
+                        <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                        <p className={`text-xs mt-1 ${message.sender === "user" ? "text-blue-100" : "text-gray-500"
+                          }`}>
+                          {message.timestamp.toLocaleTimeString('ko-KR', {
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          })}
+                        </p>
+                      </div>
                     </div>
                   </div>
                 ))

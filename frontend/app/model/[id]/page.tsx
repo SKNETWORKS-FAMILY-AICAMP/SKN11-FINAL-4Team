@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, Suspense, useEffect } from "react"
+import { useState, Suspense, useEffect, useRef } from "react"
 import { AlertCircle } from "lucide-react"
 import React from "react"
 import { useParams, useSearchParams, useRouter } from "next/navigation"
@@ -13,7 +13,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 
 import { tokenUtils } from "@/lib/auth"
@@ -38,7 +38,7 @@ import {
   MoreHorizontal,
   Bookmark,
   Bot,
-  Clock,
+    Clock,
   Trash2,
   Upload,
   MessageSquare,
@@ -50,6 +50,12 @@ import {
   Edit,
   User,
   Settings,
+  Mic,
+  Volume2,
+  PlayCircle,
+  PauseCircle,
+  Loader2,
+  ImageIcon,
 } from "lucide-react"
 import type { AIModel } from "@/lib/types"
 import {
@@ -144,6 +150,33 @@ function ModelDetailContent() {
   const [testMessage, setTestMessage] = useState("")
   const [testResponse, setTestResponse] = useState("")
   const [isTestingChatbot, setIsTestingChatbot] = useState(false)
+  
+  // 음성 관련 상태
+  const [voiceText, setVoiceText] = useState("")
+  const [isGeneratingVoice, setIsGeneratingVoice] = useState(false)
+  const [voiceHistory, setVoiceHistory] = useState<Array<{
+    id: string
+    text: string
+    url: string
+    s3_url?: string
+    duration?: number
+    createdAt: string
+    status?: string  // pending, completed, failed
+  }>>([])
+  const [isLoadingVoiceHistory, setIsLoadingVoiceHistory] = useState(false)
+  const previousVoiceStatusRef = useRef<Map<string, string>>(new Map())
+  const [playingVoiceUrl, setPlayingVoiceUrl] = useState<string | null>(null)
+  const [baseVoiceFile, setBaseVoiceFile] = useState<File | null>(null)
+  const [baseVoiceUrl, setBaseVoiceUrl] = useState<string | null>(null)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const [isUploadingBaseVoice, setIsUploadingBaseVoice] = useState(false)
+  const [hasBaseVoice, setHasBaseVoice] = useState(false)
+  const [isImageModalOpen, setIsImageModalOpen] = useState(false)
+  const [isGalleryModalOpen, setIsGalleryModalOpen] = useState(false)
+  const [galleryImages, setGalleryImages] = useState<string[]>([])
+  const [isLoadingGallery, setIsLoadingGallery] = useState(false)
+  const [hasImageChanges, setHasImageChanges] = useState(false)
+  const [voiceToDelete, setVoiceToDelete] = useState<string | null>(null)
   const [instagramStatus, setInstagramStatus] = useState<{
     is_connected: boolean
     connected_at?: string
@@ -227,8 +260,6 @@ function ModelDetailContent() {
       // 특정 인플루언서의 게시글만 조회
       const boardData = await apiClient.get<any[]>(`/api/v1/boards?influencer_id=${params.id}`)
 
-      console.log('🔍 백엔드에서 받아온 게시글 데이터:', boardData)
-
       // 게시글 데이터 변환 (백엔드에서 제공하는 인플루언서 정보 사용)
       const transformedPosts: ContentPost[] = boardData.map((board: any) => {
         // 백엔드에서 이미 제공하는 인플루언서 정보 사용
@@ -275,7 +306,6 @@ function ModelDetailContent() {
         }
       })
 
-      console.log('✅ 변환된 게시글 데이터:', transformedPosts)
 
       setPosts(transformedPosts)
     } catch (error) {
@@ -325,14 +355,12 @@ function ModelDetailContent() {
         // 올바른 analytics API 호출
         const apiUsageResponse = await apiClient.get(`/api/v1/analytics/api-calls/`) as any
 
-        console.log('Analytics API 응답:', apiUsageResponse)
 
         // 특정 인플루언서의 API 호출 데이터 필터링
         const influencerApiCalls = apiUsageResponse.filter((call: any) =>
           call.influencer_id === params.id?.toString()
         )
 
-        console.log('필터링된 인플루언서 API 호출:', influencerApiCalls)
 
         // 총 API 호출 수와 오늘 호출 수 계산
         const totalCalls = influencerApiCalls.reduce((sum: number, call: any) =>
@@ -350,13 +378,7 @@ function ModelDetailContent() {
           todayApiCalls: todayCalls
         }
 
-        console.log('Analytics 데이터 로드 성공:', {
-          totalCalls,
-          todayCalls,
-          influencerApiCalls: influencerApiCalls.length
-        })
       } catch (error) {
-        console.log('API 사용량 데이터를 가져올 수 없습니다:', error)
         // 오류 발생 시 기본값 사용
         apiUsageData = {
           totalApiCalls: 0,
@@ -396,26 +418,18 @@ function ModelDetailContent() {
   const loadModelData = async () => {
     setIsModelLoading(true)
     try {
-      console.log('🔍 모델 데이터 로드 시작 - influencer_id:', params.id)
 
       const data = await ModelService.getInfluencer(params.id as string)
-      console.log('✅ 모델 데이터 로드 성공:', data)
 
       // 이미지 URL 처리: S3 키인 경우 URL로 변환
       let processedImageUrl = data.image_url
       if (data.image_url && !data.image_url.startsWith('http')) {
         // S3 키인 경우 직접 URL 생성
         processedImageUrl = `https://aimex-influencers.s3.ap-northeast-2.amazonaws.com/${data.image_url}`
-        console.log('🔍 S3 키를 URL로 변환:', {
-          original: data.image_url,
-          converted: processedImageUrl
-        })
       } else if (data.image_url && data.image_url.startsWith('http')) {
         // 이미 URL인 경우 그대로 사용
         processedImageUrl = data.image_url
-        console.log('🔍 이미 URL 형태:', processedImageUrl)
       } else {
-        console.log('🔍 이미지 URL 없음')
       }
 
       setModel({
@@ -447,28 +461,20 @@ function ModelDetailContent() {
 
   // API 키 정보 로드
   const loadApiKeyInfo = async () => {
-    console.log('🔍 API 키 정보 로드 시작 - influencer_id:', params.id)
 
     // 현재 로그인한 사용자 정보 확인
     const token = localStorage.getItem('access_token')
     if (token) {
       try {
         const payload = JSON.parse(atob(token.split('.')[1]))
-        console.log('👤 현재 로그인한 사용자:', {
-          user_id: payload.sub,
-          email: payload.email,
-          name: payload.name
-        })
+        
       } catch (e) {
-        console.log('❌ 토큰 파싱 실패:', e)
       }
     } else {
-      console.log('❌ 로그인 토큰이 없습니다')
     }
 
     try {
       const apiKeyData = await ModelService.getApiKey(params.id as string)
-      console.log('✅ API 키 조회 성공:', apiKeyData)
 
       setApiKeyInfo({
         api_key: apiKeyData.api_key,
@@ -492,10 +498,8 @@ function ModelDetailContent() {
 
       // API 키가 없는 경우 (404)에만 자동 생성 시도
       if (error.status === 404 && error.data?.detail === "API key not found") {
-        console.log('🔄 API 키가 없어서 자동 생성 시도...')
         try {
           const response = await ModelService.generateApiKey(params.id as string)
-          console.log('✅ API 키 자동 생성 성공:', response)
 
           setApiKeyInfo({
             api_key: response.api_key,
@@ -507,15 +511,8 @@ function ModelDetailContent() {
             ...prev,
             apiKey: response.api_key
           }))
-          console.log('API 키가 자동으로 생성되었습니다.')
         } catch (generateError: any) {
-          console.error('❌ API 키 자동 생성 실패:', {
-            error: generateError,
-            status: generateError.status,
-            detail: generateError.data?.detail,
-            message: generateError.message,
-            stack: generateError.stack
-          })
+          
           setApiKeyInfo(null)
         }
       } else {
@@ -561,6 +558,7 @@ function ModelDetailContent() {
       const reader = new FileReader()
       reader.onload = (e) => {
         setImagePreview(e.target?.result as string)
+        setHasImageChanges(true) // 이미지 변경 감지
       }
       reader.readAsDataURL(file)
     } catch (error) {
@@ -606,6 +604,55 @@ function ModelDetailContent() {
   const removeImage = () => {
     setUploadedImage(null)
     setImagePreview(null)
+    setHasImageChanges(false) // 이미지 제거 시 변경 상태 초기화
+    
+    // 파일 입력 초기화
+    const fileInput = document.getElementById('modal-image-upload') as HTMLInputElement
+    if (fileInput) {
+      fileInput.value = ''
+    }
+  }
+
+  const openImageModal = () => {
+    setIsImageModalOpen(true)
+  }
+
+  const openGalleryModal = async () => {
+    setIsGalleryModalOpen(true)
+    await loadGalleryImages()
+  }
+
+  const loadGalleryImages = async () => {
+    setIsLoadingGallery(true)
+    try {
+      // S3에서 이미지 목록을 가져오는 API 호출
+      const response = await apiClient.get('/api/v1/gallery/images')
+      setGalleryImages(Array.isArray(response) ? response : [])
+    } catch (error) {
+      console.error('갤러리 이미지 로드 실패:', error)
+      toast({
+        title: "갤러리 로드 실패",
+        description: "이미지 목록을 불러오는데 실패했습니다.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsLoadingGallery(false)
+    }
+  }
+
+  const selectGalleryImage = (imageUrl: string) => {
+    // 선택된 이미지를 프로필 이미지로 설정
+    setModel((prev: any) => ({
+      ...prev,
+      image_url: imageUrl
+    }))
+    setHasImageChanges(true) // 이미지 변경 감지
+    setIsGalleryModalOpen(false)
+    toast({
+      title: "이미지 선택 완료",
+      description: "갤러리에서 이미지를 선택했습니다.",
+      variant: "default",
+    })
   }
 
   const handleUpdateModel = async () => {
@@ -633,12 +680,9 @@ function ModelDetailContent() {
           if (response.ok) {
             const result = await response.json()
             imageUrl = result.file_url
-            console.log('인플루언서 이미지 업로드 성공:', imageUrl)
           } else {
-            console.warn('인플루언서 이미지 업로드 실패')
           }
         } catch (error) {
-          console.warn('인플루언서 이미지 업로드 중 오류:', error)
         } finally {
           setIsUploadingImage(false)
         }
@@ -668,6 +712,7 @@ function ModelDetailContent() {
         setUploadedImage(null)
         setImagePreview(null)
       }
+      setHasImageChanges(false) // 변경 상태 초기화
 
       // 모델 데이터 다시 로드하여 변경사항 반영
       await loadModelData()
@@ -715,9 +760,30 @@ function ModelDetailContent() {
     }, 1000)
   }
 
-  const copyApiKey = () => {
-    if (model.apiKey) {
-      navigator.clipboard.writeText(model.apiKey)
+  const copyApiKey = async () => {
+    if (!model.apiKey) {
+      toast({
+        title: "API 키 없음",
+        description: "복사할 API 키가 없습니다.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    try {
+      await navigator.clipboard.writeText(model.apiKey)
+      toast({
+        title: "API 키 복사 완료",
+        description: "API 키가 클립보드에 복사되었습니다!",
+        variant: "default",
+      })
+    } catch (error) {
+      console.error("API key copy error:", error)
+      toast({
+        title: "복사 실패",
+        description: "API 키 복사에 실패했습니다. 수동으로 복사해주세요.",
+        variant: "destructive",
+      })
     }
   }
 
@@ -732,10 +798,18 @@ function ModelDetailContent() {
       })
       // 모델 상태에 API 키 업데이트
       setModel((prev: any) => ({ ...prev, apiKey: response.api_key }))
-      alert("새로운 API 키가 성공적으로 생성되었습니다!")
+      toast({
+        title: "API 키 생성 완료",
+        description: "새로운 API 키가 성공적으로 생성되었습니다!",
+        variant: "default",
+      })
     } catch (error) {
       console.error("API key generation error:", error)
-      alert("API 키 생성에 실패했습니다. 다시 시도해주세요.")
+      toast({
+        title: "API 키 생성 실패",
+        description: "API 키 생성에 실패했습니다. 다시 시도해주세요.",
+        variant: "destructive",
+      })
     } finally {
       setIsGeneratingApiKey(false)
     }
@@ -743,7 +817,11 @@ function ModelDetailContent() {
 
   const testChatbot = async () => {
     if (!testMessage.trim() || !model.apiKey) {
-      alert("메시지를 입력하고 API 키가 있어야 합니다.")
+      toast({
+        title: "입력 오류",
+        description: "메시지를 입력하고 API 키가 있어야 합니다.",
+        variant: "destructive",
+      })
       return
     }
 
@@ -758,6 +836,45 @@ function ModelDetailContent() {
       setTestResponse(`오류: ${error.response?.data?.detail || error.message || '알 수 없는 오류'}`)
     } finally {
       setIsTestingChatbot(false)
+    }
+  }
+
+  const handleChatbotToggle = async () => {
+    try {
+      // 챗봇 옵션 토글 (true -> false, false -> true)
+      const newChatbotOption = !model.chatbot_option
+      
+      // 백엔드 API 호출하여 chatbot_option 업데이트
+      await ModelService.updateInfluencer(params.id as string, {
+        chatbot_option: newChatbotOption
+      })
+      
+      // 로컬 상태 업데이트
+      setModel((prev: any) => ({
+        ...prev,
+        chatbot_option: newChatbotOption
+      }))
+      
+      if (newChatbotOption) {
+        toast({
+          title: "챗봇 활성화",
+          description: "챗봇이 활성화되었습니다!",
+          variant: "default",
+        })
+      } else {
+        toast({
+          title: "챗봇 비활성화",
+          description: "챗봇이 비활성화되었습니다.",
+          variant: "default",
+        })
+      }
+    } catch (error: any) {
+      console.error("Chatbot toggle error:", error)
+      toast({
+        title: "오류",
+        description: "챗봇 상태 변경에 실패했습니다.",
+        variant: "destructive",
+      })
     }
   }
 
@@ -813,9 +930,17 @@ function ModelDetailContent() {
                 account_type: '',
               },
             })
-            alert('Instagram 비즈니스 계정이 성공적으로 연동되었습니다!')
+            toast({
+              title: "Instagram 연동 완료",
+              description: "Instagram 비즈니스 계정이 성공적으로 연동되었습니다!",
+              variant: "default",
+            })
           } catch (error: any) {
-            alert('Instagram 연동에 실패했습니다. 다시 시도해주세요.')
+            toast({
+              title: "Instagram 연동 실패",
+              description: "Instagram 연동에 실패했습니다. 다시 시도해주세요.",
+              variant: "destructive",
+            })
           }
 
           setIsConnecting(false)
@@ -823,7 +948,11 @@ function ModelDetailContent() {
           popup?.close()
           window.removeEventListener('message', handleMessage)
           setIsConnecting(false)
-          alert('Instagram 연동이 취소되었거나 오류가 발생했습니다.')
+          toast({
+            title: "Instagram 연동 취소",
+            description: "Instagram 연동이 취소되었거나 오류가 발생했습니다.",
+            variant: "destructive",
+          })
         }
       }
 
@@ -840,7 +969,11 @@ function ModelDetailContent() {
 
     } catch (error) {
       setIsConnecting(false)
-      alert('Instagram 연동 중 오류가 발생했습니다.')
+      toast({
+        title: "Instagram 연동 오류",
+        description: "Instagram 연동 중 오류가 발생했습니다.",
+        variant: "destructive",
+      })
     }
   }
 
@@ -852,9 +985,17 @@ function ModelDetailContent() {
       setInstagramStatus({
         is_connected: false
       })
-      alert("Instagram 계정 연동이 해제되었습니다.")
+      toast({
+        title: "Instagram 연동 해제",
+        description: "Instagram 계정 연동이 해제되었습니다.",
+        variant: "default",
+      })
     } catch (error) {
-      alert("Instagram 연동 해제에 실패했습니다. 다시 시도해주세요.")
+      toast({
+        title: "Instagram 연동 해제 실패",
+        description: "Instagram 연동 해제에 실패했습니다. 다시 시도해주세요.",
+        variant: "destructive",
+      })
     }
   }
 
@@ -868,8 +1009,21 @@ function ModelDetailContent() {
   }, [params.id])
 
   // 모델 데이터 로드 후 Instagram 상태 확인
+  // 컴포넌트 언마운트 시 오디오 정리
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause()
+        audioRef.current = null
+      }
+    }
+  }, [])
+
   React.useEffect(() => {
     if (!isModelLoading && model) {
+      // 베이스 음성 확인
+      checkBaseVoice()
+      
       const checkInstagramStatus = async () => {
         try {
           // 모델 데이터에서 Instagram 정보 확인
@@ -909,12 +1063,88 @@ function ModelDetailContent() {
   }, [isModelLoading, model, params.id])
 
   // 예약된 게시글이 있을 때 주기적으로 상태 확인 (30초마다)
+  // 음성 탭이 선택되었을 때 음성 히스토리 로드
+  React.useEffect(() => {
+    if (activeTab === 'voice' && !isLoadingVoiceHistory) {
+      loadVoiceHistory()
+    }
+  }, [activeTab])
+
+  // pending 상태의 음성이 있을 때 주기적으로 상태 확인 (3초마다)
+  React.useEffect(() => {
+    // 현재 상태를 ref에 저장
+    voiceHistory.forEach(voice => {
+      if (voice.id && voice.status) {
+        previousVoiceStatusRef.current.set(voice.id, voice.status)
+      }
+    })
+    
+    const hasPendingVoices = voiceHistory.some(voice => voice.status === 'pending')
+    
+    if (hasPendingVoices && activeTab === 'voice') {
+      const interval = setInterval(async () => {
+        
+        // 음성 목록 다시 로드
+        const response = await apiClient.get<any[]>(`/api/v1/influencers/${params.id}/voices`)
+        
+        if (Array.isArray(response)) {
+          const updatedVoices = response.map((voice: any) => ({
+            id: voice.id,
+            text: voice.text,
+            url: voice.url || voice.s3_url,
+            duration: voice.duration,
+            createdAt: voice.createdAt || voice.created_at,
+            status: voice.status || 'completed',
+            task_id: voice.task_id
+          }))
+          
+          // 새로 완료된 음성 찾기
+          const newlyCompletedVoices = updatedVoices.filter(voice => {
+            const previousStatus = previousVoiceStatusRef.current.get(voice.id)
+            return previousStatus === 'pending' && voice.status === 'completed'
+          })
+          
+          // 새로 실패한 음성 찾기
+          const newlyFailedVoices = updatedVoices.filter(voice => {
+            const previousStatus = previousVoiceStatusRef.current.get(voice.id)
+            return previousStatus === 'pending' && voice.status === 'failed'
+          })
+          
+          // 상태 업데이트
+          setVoiceHistory(updatedVoices)
+          
+          // 알림 표시
+          if (newlyCompletedVoices.length > 0) {
+            toast({
+              title: "음성 생성 완료",
+              description: `${newlyCompletedVoices.length}개의 음성이 성공적으로 생성되었습니다.`,
+            })
+            
+            // 첫 번째 완료된 음성 자동 재생 (선택사항)
+            if (newlyCompletedVoices[0]?.url) {
+              handlePlayVoice(newlyCompletedVoices[0].url)
+            }
+          }
+          
+          if (newlyFailedVoices.length > 0) {
+            toast({
+              title: "음성 생성 실패",
+              description: `${newlyFailedVoices.length}개의 음성 생성에 실패했습니다.`,
+              variant: "destructive",
+            })
+          }
+        }
+      }, 3000) // 3초마다 확인
+      
+      return () => clearInterval(interval)
+    }
+  }, [voiceHistory, activeTab, params.id])
+
   React.useEffect(() => {
     const hasScheduledPosts = posts.some(post => post.status === 'scheduled')
 
     if (hasScheduledPosts) {
       const interval = setInterval(async () => {
-        console.log('🔄 예약된 게시글 상태 확인 중...')
         await loadPostsData() // 예약된 게시글이 있으면 30초마다 새로고침
 
         // 상태 변경 감지
@@ -971,15 +1201,12 @@ function ModelDetailContent() {
         )
 
         if (newlyPublished.length > 0) {
-          console.log('✅ 새로 발행된 게시글 감지:', newlyPublished.map(p => p.title))
           setPosts(transformedPosts)
           await loadAnalyticsData() // 분석 데이터도 갱신
 
           // 사용자에게 알림 (선택사항)
           if (newlyPublished.length === 1) {
-            console.log(`🎉 "${newlyPublished[0].title}" 게시글이 발행되었습니다!`)
           } else {
-            console.log(`🎉 ${newlyPublished.length}개의 게시글이 발행되었습니다!`)
           }
         }
 
@@ -1116,42 +1343,11 @@ function ModelDetailContent() {
       setIsEditing(false);
       setIsPostDetailModalOpen(false);
 
-      console.log('게시글 수정 완료:', editTitle)
-
     } catch (error) {
-      console.error('게시글 수정 실패:', error);
     } finally {
       setIsSaving(false);
     }
   };
-
-  // 게시글 삭제
-  const handleDeletePost = async (postId: string | undefined) => {
-    if (!postId) return
-
-    const postToDelete = posts.find((post) => post.id === postId)
-    const postTitle = postToDelete?.title || "게시글"
-
-    try {
-      await apiClient.delete(`/api/v1/boards/${postId}`)
-
-      // 로컬 상태에서 게시글 제거
-      setPosts((prev) => prev.filter((post) => post.id !== postId))
-
-      // 모달 닫기
-      setIsPostDetailModalOpen(false)
-      setSelectedPost(null)
-
-      // 분석 데이터 다시 로드 (게시글 수 변경 반영)
-      await loadAnalyticsData()
-
-      console.log(`게시글 "${postTitle}" 삭제 완료`)
-
-    } catch (error) {
-      console.error('게시글 삭제 실패:', error);
-      alert('게시글 삭제에 실패했습니다. 다시 시도해주세요.');
-    }
-  }
 
   // 플랫폼별 게시글 렌더링
   const renderPlatformSpecificPost = (post: ContentPost) => {
@@ -1488,6 +1684,399 @@ function ModelDetailContent() {
 
   const platformStats = calculatePlatformStats()
 
+  // 음성 관련 함수들
+  const handleBaseVoiceFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    // 파일 크기 체크 (10MB)
+    if (file.size > 10 * 1024 * 1024) {
+      toast({
+        title: "파일 크기 초과",
+        description: "음성 파일은 10MB 이하여야 합니다.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    // 오디오 파일 타입 체크
+    if (!file.type.startsWith('audio/')) {
+      toast({
+        title: "파일 형식 오류",
+        description: "오디오 파일만 업로드할 수 있습니다.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    setBaseVoiceFile(file)
+  }
+
+  const handleUploadBaseVoice = async () => {
+    if (!baseVoiceFile) return
+
+    setIsUploadingBaseVoice(true)
+    try {
+      // 파일을 Base64로 변환
+      const reader = new FileReader()
+      const fileData = await new Promise<string>((resolve, reject) => {
+        reader.onload = () => {
+          const base64 = reader.result as string
+          // data:audio/mp3;base64, 부분을 제거하고 base64 데이터만 추출
+          const base64Data = base64.split(',')[1]
+          resolve(base64Data)
+        }
+        reader.onerror = reject
+        reader.readAsDataURL(baseVoiceFile)
+      })
+
+      // JSON으로 전송
+      const requestData = {
+        file_data: fileData,
+        file_name: baseVoiceFile.name,
+        file_type: baseVoiceFile.type
+      }
+
+      // 베이스 음성 업로드 API 호출
+      const response = await apiClient.post<{
+        s3_url: string, 
+        file_name: string, 
+        file_size: number, 
+        message: string,
+        original_filename?: string
+      }>(`/api/v1/influencers/${params.id}/voice/base`, requestData)
+      
+      if (response?.s3_url) {
+        setBaseVoiceUrl(response.s3_url)
+        setHasBaseVoice(true)
+        setBaseVoiceFile(null)
+        
+        // 원본 파일명이 있으면 WAV로 변환되었음을 알림
+        const description = response.original_filename 
+          ? `베이스 음성이 WAV 형식으로 변환되어 업로드되었습니다. (원본: ${response.original_filename})`
+          : "베이스 음성이 성공적으로 업로드되었습니다."
+        
+        toast({
+          title: "업로드 완료",
+          description,
+        })
+      } else {
+        throw new Error('응답에 s3_url이 없습니다')
+      }
+    } catch (error: any) {
+      console.error('베이스 음성 업로드 실패:', error)
+      toast({
+        title: "업로드 실패",
+        description: error.response?.data?.detail || "베이스 음성 업로드 중 오류가 발생했습니다.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsUploadingBaseVoice(false)
+    }
+  }
+
+  const handleChangeBaseVoice = () => {
+    setHasBaseVoice(false)
+    setBaseVoiceUrl(null)
+    setBaseVoiceFile(null)
+  }
+
+  const handleGenerateVoice = async () => {
+    if (!voiceText.trim() || isGeneratingVoice || !hasBaseVoice) return
+
+    setIsGeneratingVoice(true)
+    try {
+      const response = await apiClient.post<{
+        status?: string;
+        task_id?: string;
+        audio_url?: string;
+        s3_url?: string;
+        duration?: number;
+      }>('/api/v1/tts/generate_voice', {
+        text: voiceText,
+        influencer_id: params.id,
+        base_voice_url: baseVoiceUrl
+      })
+
+      if (response) {
+        if (response.status === 'pending' && response.task_id) {
+          // 비동기 작업인 경우
+          toast({
+            title: "음성 생성 시작",
+            description: "음성 생성 작업이 시작되었습니다. 잠시 후 목록에 표시됩니다.",
+          })
+          
+          // 입력 필드 초기화
+          setVoiceText("")
+          
+          // 잠시 후 음성 목록 새로고침
+          setTimeout(() => {
+            loadVoiceHistory()
+          }, 5000)
+        } else if (response.s3_url) {
+          // 동기 작업인 경우 (즉시 완료)
+          const newVoice = {
+            id: Date.now().toString(),
+            text: voiceText,
+            url: response.url || response.s3_url,
+            duration: response.duration,
+            createdAt: new Date().toISOString(),
+            status: 'completed'
+          }
+          setVoiceHistory(prev => [newVoice, ...prev])
+          
+          // 입력 필드 초기화
+          setVoiceText("")
+          
+          toast({
+            title: "음성 생성 완료",
+            description: "음성이 성공적으로 생성되었습니다.",
+          })
+
+          // 자동 재생 (선택사항)
+          handlePlayVoice(response.s3_url)
+        }
+      }
+    } catch (error: any) {
+      console.error('음성 생성 실패:', error)
+      toast({
+        title: "음성 생성 실패",
+        description: error.response?.data?.detail || "음성 생성 중 오류가 발생했습니다.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsGeneratingVoice(false)
+    }
+  }
+
+  const checkBaseVoice = async () => {
+    try {
+      // 베이스 음성 확인 API 호출
+      const response = await apiClient.get<{
+        base_voice_url: string | null,
+        has_voice: boolean,
+        message?: string
+      }>(`/api/v1/influencers/${params.id}/voice/base`)
+      
+      if (response && response.has_voice && response.base_voice_url) {
+        setBaseVoiceUrl(response.base_voice_url)
+        setHasBaseVoice(true)
+      } else {
+        // 음성이 없는 경우
+        setHasBaseVoice(false)
+        setBaseVoiceUrl(null)
+      }
+    } catch (error: any) {
+      console.error('베이스 음성 확인 중 오류:', error)
+      setHasBaseVoice(false)
+      setBaseVoiceUrl(null)
+    }
+  }
+
+  const loadVoiceHistory = async () => {
+    setIsLoadingVoiceHistory(true)
+    try {
+      const response = await apiClient.get<any[]>(`/api/v1/influencers/${params.id}/voices`)
+      
+      // response가 배열인지 확인 (apiClient는 데이터를 직접 반환)
+      if (Array.isArray(response)) {
+        // 응답 데이터를 프론트엔드 형식에 맞게 변환
+        const voiceHistory = response.map((voice: any) => ({
+          id: voice.id,
+          text: voice.text,
+          url: voice.url || voice.s3_url,  // url 필드를 우선 사용
+          duration: voice.duration,
+          createdAt: voice.createdAt || voice.created_at,  // createdAt 필드를 우선 사용
+          status: voice.status || 'completed',
+          task_id: voice.task_id
+        }))
+        
+        setVoiceHistory(voiceHistory)
+      } else if ((response as any)?.data && Array.isArray((response as any).data)) {
+        // response.data가 배열인 경우
+        const voiceHistory = (response as any).data.map((voice: any) => ({
+          id: voice.id,
+          text: voice.text,
+          url: voice.url || voice.s3_url,
+          duration: voice.duration,
+          createdAt: voice.createdAt || voice.created_at,
+          status: voice.status || 'completed',
+          task_id: voice.task_id
+        }))
+        
+        setVoiceHistory(voiceHistory)
+      } else {
+        // 빈 배열로 설정
+        setVoiceHistory([])
+      }
+    } catch (error) {
+      console.error('음성 목록 로드 실패:', error)
+      // 에러가 발생한 경우에만 실패 메시지 표시
+      toast({
+        title: "로드 실패",
+        description: "음성 목록을 불러오는데 실패했습니다.",
+        variant: "destructive",
+      })
+      setVoiceHistory([])
+    } finally {
+      setIsLoadingVoiceHistory(false)
+    }
+  }
+
+  const handlePlayVoice = (url: string) => {
+    if (!url) return
+
+    if (playingVoiceUrl === url && audioRef.current) {
+      // 이미 재생 중이면 정지
+      audioRef.current.pause()
+      setPlayingVoiceUrl(null)
+    } else {
+      // 이전 오디오가 재생 중이면 정지
+      if (audioRef.current) {
+        audioRef.current.pause()
+      }
+
+      // 새로운 오디오 재생
+      const audio = new Audio(url)
+      audioRef.current = audio
+      
+      audio.play().then(() => {
+        setPlayingVoiceUrl(url)
+      }).catch((error) => {
+        console.error('오디오 재생 실패:', error)
+        toast({
+          title: "재생 실패",
+          description: "오디오를 재생할 수 없습니다.",
+          variant: "destructive",
+        })
+      })
+
+      // 재생이 끝나면 상태 초기화
+      audio.addEventListener('ended', () => {
+        setPlayingVoiceUrl(null)
+      })
+
+      // 에러 발생 시 상태 초기화
+      audio.addEventListener('error', () => {
+        setPlayingVoiceUrl(null)
+        toast({
+          title: "재생 오류",
+          description: "오디오 파일을 로드할 수 없습니다.",
+          variant: "destructive",
+        })
+      })
+    }
+  }
+
+  const handleDownloadVoice = async (url: string | undefined, id: string) => {
+    try {
+      if (!url) {
+        throw new Error("음성 파일 URL이 없습니다")
+      }
+      
+      console.log('Download URL:', url)
+      
+      // 다운로드 시작 알림
+      toast({
+        title: "다운로드 시작",
+        description: "음성 파일을 다운로드하고 있습니다...",
+      })
+
+      const response = await fetch(url)
+      
+      if (!response.ok) {
+        throw new Error(`다운로드 실패: ${response.status}`)
+      }
+
+      // 파일 크기 가져오기
+      const contentLength = response.headers.get('content-length')
+      const total = parseInt(contentLength || '0', 10)
+      
+      // ReadableStream을 사용해서 데이터 읽기
+      const reader = response.body?.getReader()
+      if (!reader) throw new Error('스트림을 읽을 수 없습니다')
+      
+      const chunks: Uint8Array[] = []
+      let receivedLength = 0
+
+      while (true) {
+        const { done, value } = await reader.read()
+        
+        if (done) break
+        
+        chunks.push(value)
+        receivedLength += value.length
+        
+        // 진행률 로그 (필요시 UI에 표시 가능)
+        if (total) {
+          const progress = Math.round((receivedLength / total) * 100)
+          console.log(`다운로드 진행률: ${progress}%`)
+        }
+      }
+
+      // Uint8Array로 합치기
+      const chunksAll = new Uint8Array(receivedLength)
+      let position = 0
+      for (const chunk of chunks) {
+        chunksAll.set(chunk, position)
+        position += chunk.length
+      }
+
+      // Blob 생성 및 다운로드
+      const blob = new Blob([chunksAll], { type: 'audio/mpeg' })
+      const downloadUrl = window.URL.createObjectURL(blob)
+      
+      const link = document.createElement('a')
+      link.href = downloadUrl
+      link.download = `voice_${id}.mp3`
+      document.body.appendChild(link)
+      link.click()
+      
+      // 정리
+      document.body.removeChild(link)
+      window.URL.revokeObjectURL(downloadUrl)
+      
+      toast({
+        title: "다운로드 완료",
+        description: "음성 파일이 다운로드되었습니다.",
+      })
+      
+    } catch (error: any) {
+      console.error('다운로드 실패:', error)
+      toast({
+        title: "다운로드 실패",
+        description: error.message || "음성 파일 다운로드에 실패했습니다.",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const handleDeleteVoice = async () => {
+    if (!voiceToDelete) return
+
+    try {
+      // 올바른 엔드포인트 경로로 수정
+      await apiClient.delete(`/api/v1/influencers/voices/${voiceToDelete}`)
+      
+      // 로컬에서 제거
+      setVoiceHistory(prev => prev.filter(v => v.id !== voiceToDelete))
+      
+      toast({
+        title: "삭제 완료",
+        description: "음성이 삭제되었습니다.",
+      })
+      
+      setVoiceToDelete(null)
+    } catch (error: any) {
+      console.error('음성 삭제 실패:', error)
+      toast({
+        title: "삭제 실패",
+        description: error.response?.data?.detail || "음성 삭제에 실패했습니다.",
+        variant: "destructive",
+      })
+    }
+  }
+
   // model이 null이거나 로딩 중이면 로딩 메시지 표시
   if (isModelLoading || !model) {
     return (
@@ -1527,10 +2116,10 @@ function ModelDetailContent() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => window.open(`/chat/${model.id}`, '_blank')}
+                  onClick={model.chatbot_option ? () => window.open(`/chat/${model.id}`, '_blank') : handleChatbotToggle}
                 >
                   <MessageSquare className="h-4 w-4 mr-2" />
-                  {model.chatbot_option ? "챗봇 페이지 이동" : "챗봇 생성"}
+                  {model.chatbot_option ? "챗봇 페이지로 이동" : "챗봇 생성"}
                 </Button>
               )}
               <AlertDialog>
@@ -1567,7 +2156,7 @@ function ModelDetailContent() {
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-5">
+          <TabsList className="grid w-full grid-cols-6">
             <TabsTrigger value="analytics" className="flex items-center space-x-2">
               <BarChart3 className="h-4 w-4" />
               <span>분석</span>
@@ -1587,6 +2176,10 @@ function ModelDetailContent() {
             <TabsTrigger value="settings" className="flex items-center space-x-2">
               <Info className="h-4 w-4" />
               <span>정보</span>
+            </TabsTrigger>
+            <TabsTrigger value="voice" className="flex items-center space-x-2">
+              <Mic className="h-4 w-4" />
+              <span>음성</span>
             </TabsTrigger>
           </TabsList>
 
@@ -1997,33 +2590,6 @@ function ModelDetailContent() {
                         </div>
                       )}
 
-
-                      {/* 활성화된 기능들 */}
-                      <div className="space-y-3">
-                        <div className="flex items-center space-x-3">
-                          <CheckCircle className="h-5 w-5 text-green-500 flex-shrink-0" />
-                          <span className="text-sm font-medium text-gray-900">AI 생성 콘텐츠 자동 포스팅</span>
-                        </div>
-
-                        <div className="flex items-center space-x-3">
-                          <CheckCircle className="h-5 w-5 text-green-500 flex-shrink-0" />
-                          <span className="text-sm font-medium text-gray-900">인사이트 및 분석 데이터 수집</span>
-                        </div>
-
-                        <div className="flex items-center space-x-3">
-                          <CheckCircle className="h-5 w-5 text-green-500 flex-shrink-0" />
-                          <span className="text-sm font-medium text-gray-900">광고 및 마케팅 최적화</span>
-                        </div>
-
-                        {instagramStatus.instagram_info?.account_type === 'BUSINESS' && (
-                          <div className="flex items-center space-x-3">
-                            <CheckCircle className="h-5 w-5 text-blue-500 flex-shrink-0" />
-                            <span className="text-sm font-medium text-gray-900">비즈니스 전용 고급 인사이트</span>
-                          </div>
-                        )}
-                      </div>
-
-
                       {/* 재연동/연동 해제 버튼 */}
                       <div className="pt-2 space-y-3">
                         {instagramStatus.token_expired && (
@@ -2057,26 +2623,6 @@ function ModelDetailContent() {
                     </div>
                   ) : (
                     <div className="space-y-6">
-
-                      {/* 기능 리스트 */}
-                      <div className="space-y-3">
-                        <div className="flex items-center space-x-3">
-                          <CheckCircle className="h-5 w-5 text-green-500 flex-shrink-0" />
-                          <span className="text-sm font-medium text-gray-900">AI 생성 콘텐츠 자동 포스팅</span>
-                        </div>
-
-                        <div className="flex items-center space-x-3">
-                          <CheckCircle className="h-5 w-5 text-green-500 flex-shrink-0" />
-                          <span className="text-sm font-medium text-gray-900">인사이트 및 분석 데이터 수집</span>
-                        </div>
-
-                        <div className="flex items-center space-x-3">
-                          <CheckCircle className="h-5 w-5 text-green-500 flex-shrink-0" />
-                          <span className="text-sm font-medium text-gray-900">광고 및 마케팅 최적화</span>
-                        </div>
-                      </div>
-
-
                       {/* 연동 버튼 */}
                       <Button
                         onClick={handleInstagramConnect}
@@ -2122,12 +2668,12 @@ function ModelDetailContent() {
                   {/* 프로필 이미지와 기본 정보를 가로로 배치 */}
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                     {/* 프로필 이미지 섹션 */}
-                    <div className="flex flex-col items-center space-y-4">
-                      {/* 대형 프로필 이미지 */}
-                      <div className="relative">
+                    <div className="flex flex-col items-center space-y-4 pt-12">
+                      {/* 대형 프로필 이미지 - 클릭 가능 */}
+                      <div className="relative cursor-pointer" onClick={openImageModal}>
                         {uploadedImage && imagePreview ? (
                           // 업로드된 이미지 미리보기
-                          <div className="w-36 h-36 rounded-full overflow-hidden shadow-lg">
+                          <div className="w-36 h-36 rounded-full overflow-hidden shadow-lg hover:opacity-80 transition-opacity">
                             <img
                               src={imagePreview}
                               alt="Uploaded"
@@ -2136,7 +2682,7 @@ function ModelDetailContent() {
                           </div>
                         ) : model?.image_url ? (
                           // 기존 인플루언서 이미지
-                          <div className="w-36 h-36 rounded-full overflow-hidden shadow-lg">
+                          <div className="w-36 h-36 rounded-full overflow-hidden shadow-lg hover:opacity-80 transition-opacity">
                             <img
                               src={model.image_url}
                               alt="Profile"
@@ -2162,71 +2708,23 @@ function ModelDetailContent() {
                           </div>
                         ) : (
                           // 기본 아이콘
-                          <div className="w-36 h-36 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg">
+                          <div className="w-36 h-36 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg hover:opacity-80 transition-opacity">
                             <div className="w-20 h-20 bg-orange-500 rounded-lg flex items-center justify-center">
                               <Bot className="h-10 w-10 text-white" />
                             </div>
                           </div>
                         )}
+                        {/* 클릭 안내 오버레이 */}
+                        <div className="absolute inset-0 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity bg-black bg-opacity-30 rounded-full">
+                          <div className="text-center">
+                            <span className="text-white text-sm font-medium">확대/변경</span>
+                          </div>
+                        </div>
                       </div>
 
                       <div className="text-center space-y-3">
                         <p className="text-sm text-gray-500">권장 크기: 400x400px, 최대 5MB</p>
-
-                        {/* 업로드된 이미지가 있을 때 */}
-                        {uploadedImage && imagePreview ? (
-                          <div className="space-y-3">
-                            <div className="relative">
-                              <img
-                                src={imagePreview}
-                                alt="Uploaded"
-                                className="w-32 h-32 object-cover rounded-lg border mx-auto"
-                              />
-                            </div>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={removeImage}
-                              className="w-full text-red-600 border-red-200 hover:bg-red-50"
-                            >
-                              <Trash2 className="h-4 w-4 mr-2" />
-                              제거
-                            </Button>
-                          </div>
-                        ) : (
-                          /* 이미지 업로드 영역 */
-                          <div
-                            className={`
-                              border-2 border-dashed rounded-lg p-6 transition-all duration-300 cursor-pointer
-                              ${isDragOver
-                                ? "border-blue-500 bg-blue-50"
-                                : "border-gray-300 hover:border-blue-400 hover:bg-blue-50"
-                              }
-                            `}
-                            onDragOver={handleDragOver}
-                            onDragLeave={handleDragLeave}
-                            onDrop={handleDrop}
-                          >
-                            <input
-                              id="influencer-image-upload"
-                              type="file"
-                              accept="image/*"
-                              onChange={handleImageUpload}
-                              className="hidden"
-                            />
-                            <label htmlFor="influencer-image-upload" className="cursor-pointer">
-                              <div className="text-center">
-                                <Upload className="h-8 w-8 mx-auto mb-2 text-gray-400" />
-                                <p className="text-sm text-gray-600 mb-1">
-                                  클릭하여 이미지 선택
-                                </p>
-                                <p className="text-xs text-gray-500">
-                                  또는 이미지를 여기로 드래그하세요
-                                </p>
-                              </div>
-                            </label>
-                          </div>
-                        )}
+                        <p className="text-xs text-gray-400">이미지를 클릭하여 확대/변경</p>
                       </div>
                     </div>
 
@@ -2273,6 +2771,300 @@ function ModelDetailContent() {
                 </CardContent>
               </Card>
 
+            </div>
+          </TabsContent>
+
+          {/* 음성 탭 */}
+          <TabsContent value="voice">
+            <div className="space-y-6">
+              {/* 베이스 음성 업로드 카드 */}
+              <Card className="bg-white shadow-sm border border-gray-200">
+                <CardHeader className="pb-4">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-12 h-12 bg-indigo-100 rounded-lg flex items-center justify-center">
+                      <Upload className="h-6 w-6 text-indigo-600" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-lg font-medium text-gray-900">베이스 음성 설정</CardTitle>
+                      <CardDescription className="text-sm text-gray-600 mt-1">
+                        AI 인플루언서의 목소리가 될 기본 음성을 업로드하세요.
+                      </CardDescription>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {hasBaseVoice ? (
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between p-4 bg-green-50 border border-green-200 rounded-lg">
+                        <div className="flex items-center space-x-3">
+                          <CheckCircle className="h-5 w-5 text-green-600" />
+                          <div>
+                            <p className="text-sm font-medium text-green-900">베이스 음성이 설정되었습니다</p>
+                            <p className="text-xs text-green-700 mt-1">이제 텍스트를 음성으로 변환할 수 있습니다.</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          {baseVoiceUrl && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handlePlayVoice(baseVoiceUrl)}
+                            >
+                              {playingVoiceUrl === baseVoiceUrl ? (
+                                <PauseCircle className="h-4 w-4" />
+                              ) : (
+                                <PlayCircle className="h-4 w-4" />
+                              )}
+                            </Button>
+                          )}
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handleChangeBaseVoice}
+                            className="text-indigo-600 hover:text-indigo-700"
+                          >
+                            변경
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
+                        <input
+                          type="file"
+                          accept="audio/*"
+                          onChange={handleBaseVoiceFileSelect}
+                          className="hidden"
+                          id="base-voice-upload"
+                        />
+                        <label
+                          htmlFor="base-voice-upload"
+                          className="cursor-pointer"
+                        >
+                          <Upload className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                          <p className="text-sm font-medium text-gray-900 mb-1">
+                            클릭하여 음성 파일 선택
+                          </p>
+                          <p className="text-xs text-gray-500">
+                            MP3, WAV, M4A 등 (최대 10MB)
+                          </p>
+                        </label>
+                      </div>
+                      {baseVoiceFile && (
+                        <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                          <div className="flex items-center space-x-3">
+                            <Volume2 className="h-5 w-5 text-gray-600" />
+                            <div>
+                              <p className="text-sm font-medium text-gray-900">{baseVoiceFile.name}</p>
+                              <p className="text-xs text-gray-500">
+                                {(baseVoiceFile.size / 1024 / 1024).toFixed(2)} MB
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                setBaseVoiceFile(null)
+                              }}
+                            >
+                              취소
+                            </Button>
+                            <Button
+                              size="sm"
+                              onClick={handleUploadBaseVoice}
+                              disabled={isUploadingBaseVoice}
+                              className="bg-indigo-600 hover:bg-indigo-700 text-white"
+                            >
+                              {isUploadingBaseVoice ? (
+                                <>
+                                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                  업로드 중...
+                                </>
+                              ) : (
+                                '업로드'
+                              )}
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* 음성 생성 카드 */}
+              <Card className={`bg-white shadow-sm border border-gray-200 ${!hasBaseVoice ? 'opacity-50' : ''}`}>
+                <CardHeader className="pb-4">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
+                      <Mic className="h-6 w-6 text-purple-600" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-lg font-medium text-gray-900">음성 생성</CardTitle>
+                      <CardDescription className="text-sm text-gray-600 mt-1">
+                        텍스트를 입력하면 AI 인플루언서의 음성으로 변환할 수 있습니다.
+                      </CardDescription>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {!hasBaseVoice && (
+                    <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                      <p className="text-sm text-yellow-800">
+                        <AlertCircle className="h-4 w-4 inline mr-1" />
+                        먼저 베이스 음성을 업로드해주세요.
+                      </p>
+                    </div>
+                  )}
+                  <div>
+                    <Label htmlFor="voice-text">텍스트 입력</Label>
+                    <Textarea
+                      id="voice-text"
+                      placeholder="음성으로 변환할 텍스트를 입력하세요..."
+                      className="min-h-[100px] mt-2"
+                      value={voiceText}
+                      onChange={(e) => {
+                        const newText = e.target.value
+                        if (newText.length <= 300) {
+                          setVoiceText(newText)
+                        } else {
+                          toast({
+                            title: "글자수 제한",
+                            description: "텍스트는 300자까지만 입력할 수 있습니다.",
+                            variant: "destructive",
+                          })
+                        }
+                      }}
+                      disabled={!hasBaseVoice}
+                      maxLength={300}
+                    />
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-500">
+                      {voiceText.length} / 300자
+                    </span>
+                    <Button
+                      onClick={handleGenerateVoice}
+                      disabled={!hasBaseVoice || !voiceText.trim() || isGeneratingVoice || voiceText.length > 300}
+                      className="bg-purple-600 hover:bg-purple-700 text-white"
+                    >
+                      {isGeneratingVoice ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          생성 중...
+                        </>
+                      ) : (
+                        <>
+                          <Volume2 className="h-4 w-4 mr-2" />
+                          음성 생성
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* 생성된 음성 목록 카드 */}
+              <Card className="bg-white shadow-sm border border-gray-200">
+                <CardHeader className="pb-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-3">
+                      <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
+                        <Volume2 className="h-6 w-6 text-green-600" />
+                      </div>
+                      <div>
+                        <CardTitle className="text-lg font-medium text-gray-900">생성된 음성</CardTitle>
+                        <CardDescription className="text-sm text-gray-600 mt-1">
+                          이전에 생성한 음성 파일들을 관리할 수 있습니다.
+                        </CardDescription>
+                      </div>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={loadVoiceHistory}
+                      disabled={isLoadingVoiceHistory}
+                      className="flex items-center space-x-2"
+                    >
+                      <RefreshCw className={`h-4 w-4 ${isLoadingVoiceHistory ? 'animate-spin' : ''}`} />
+                      <span>새로고침</span>
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {isLoadingVoiceHistory ? (
+                    <div className="text-center py-8">
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600 mx-auto mb-4"></div>
+                      <p className="text-gray-500">음성 목록을 불러오는 중...</p>
+                    </div>
+                  ) : voiceHistory.length > 0 ? (
+                    <div className="space-y-3">
+                      {voiceHistory.map((voice) => (
+                        <div key={voice.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                          <div className="flex items-center space-x-3">
+                            {voice.status === 'pending' ? (
+                              <div className="p-2 bg-yellow-100 rounded-full">
+                                <Loader2 className="h-5 w-5 text-yellow-600 animate-spin" />
+                              </div>
+                            ) : voice.status === 'failed' ? (
+                              <div className="p-2 bg-red-100 rounded-full">
+                                <AlertCircle className="h-5 w-5 text-red-600" />
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => handlePlayVoice(voice.url)}
+                                className="p-2 bg-white rounded-full shadow-sm hover:shadow-md transition-shadow"
+                                disabled={!voice.url}
+                              >
+                                {playingVoiceUrl === voice.url ? (
+                                  <PauseCircle className="h-5 w-5 text-purple-600" />
+                                ) : (
+                                  <PlayCircle className="h-5 w-5 text-purple-600" />
+                                )}
+                              </button>
+                            )}
+                            <div>
+                              <p className="text-sm font-medium text-gray-900 line-clamp-1">{voice.text}</p>
+                              <p className="text-xs text-gray-500">
+                                {new Date(voice.createdAt).toLocaleDateString('ko-KR')} •{' '}
+                                {voice.status === 'pending' ? '생성 중...' : 
+                                 voice.status === 'failed' ? '생성 실패' :
+                                 voice.duration ? `${voice.duration}초` : '길이 정보 없음'}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleDownloadVoice(voice.url, voice.id)}
+                            >
+                              <Download className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setVoiceToDelete(voice.id)}
+                              className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8">
+                      <Volume2 className="h-12 w-12 mx-auto mb-4 text-gray-300" />
+                      <p className="text-gray-500 text-lg">아직 생성된 음성이 없습니다</p>
+                      <p className="text-gray-400 mt-2">위에서 텍스트를 입력하고 음성을 생성해보세요!</p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
             </div>
           </TabsContent>
         </Tabs>
@@ -2326,15 +3118,7 @@ function ModelDetailContent() {
                     <span>인스타그램 보기</span>
                   </Button>
                 )}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleDeletePost(selectedPost?.id)}
-                  className="flex items-center space-x-1 text-red-600 hover:text-red-700 hover:bg-red-50"
-                >
-                  <Trash2 className="h-4 w-4" />
-                  <span>삭제</span>
-                </Button>
+
               </div>
             </DialogHeader>
 
@@ -2376,7 +3160,7 @@ function ModelDetailContent() {
 
                   {/* 오른쪽 상단에 배지들 배치 */}
                   <div className="flex flex-col items-end space-y-2 ml-4">
-                    {getPlatformBadge(selectedPost.platform)}
+                    {selectedPost.platform && getPlatformBadge(selectedPost.platform)}
                     {getStatusBadge(selectedPost.status)}
                   </div>
                 </div>
@@ -2514,6 +3298,201 @@ function ModelDetailContent() {
                 </div>
               </div>
             )}
+          </DialogContent>
+        </Dialog>
+
+        {/* 이미지 모달 */}
+        <Dialog open={isImageModalOpen} onOpenChange={setIsImageModalOpen}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle className="flex items-center space-x-2">
+                <Bot className="h-5 w-5" />
+                <span>프로필 이미지</span>
+              </DialogTitle>
+            </DialogHeader>
+            
+            <div className="space-y-6">
+              {/* 현재 이미지 표시 */}
+              <div className="flex justify-center">
+                {uploadedImage && imagePreview ? (
+                  <div className="relative">
+                    <img
+                      src={imagePreview}
+                      alt="Uploaded"
+                      className="w-80 h-80 object-cover rounded-lg shadow-lg"
+                    />
+                  </div>
+                ) : model?.image_url ? (
+                  <div className="relative">
+                    <img
+                      src={model.image_url}
+                      alt="Profile"
+                      className="w-80 h-80 object-cover rounded-lg shadow-lg"
+                      onError={(e) => {
+                        const target = e.target as HTMLImageElement;
+                        target.style.display = 'none';
+                        const parent = target.parentElement;
+                        if (parent) {
+                          parent.innerHTML = `
+                            <div class="w-80 h-80 rounded-lg bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg">
+                              <div class="w-40 h-40 bg-orange-500 rounded-lg flex items-center justify-center">
+                                <svg class="h-20 w-20 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+                                </svg>
+                              </div>
+                            </div>
+                          `;
+                        }
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <div className="w-80 h-80 rounded-lg bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg">
+                    <div className="w-40 h-40 bg-orange-500 rounded-lg flex items-center justify-center">
+                      <Bot className="h-20 w-20 text-white" />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* 이미지 정보 */}
+              <div className="text-center space-y-2">
+                <p className="text-sm text-gray-600">권장 크기: 400x400px, 최대 5MB</p>
+                <p className="text-xs text-gray-400">JPG, PNG 형식 지원</p>
+              </div>
+
+              {/* 액션 버튼들 */}
+              <div className="flex justify-center space-x-4">
+                {/* 파일 업로드 버튼 */}
+                <input
+                  id="modal-image-upload"
+                  type="file"
+                  accept="image/*"
+                  onChange={handleImageUpload}
+                  className="hidden"
+                />
+                <Button
+                  variant="outline"
+                  className="flex items-center space-x-2"
+                  onClick={() => document.getElementById('modal-image-upload')?.click()}
+                >
+                  <Upload className="h-4 w-4" />
+                  <span>이미지 업로드</span>
+                </Button>
+
+                {/* 갤러리에서 불러오기 버튼 */}
+                <Button
+                  variant="outline"
+                  onClick={openGalleryModal}
+                  className="flex items-center space-x-2"
+                >
+                  <ImageIcon className="h-4 w-4" />
+                  <span>갤러리에서 불러오기</span>
+                </Button>
+
+              </div>
+
+              {/* 저장 버튼과 제거 버튼 - 변경사항이 있을 때만 표시 */}
+              {hasImageChanges && (
+                <div className="flex justify-center space-x-4 pt-4 border-t">
+                  <Button
+                    onClick={async () => {
+                      await handleUpdateModel()
+                      setIsImageModalOpen(false)
+                    }}
+                    disabled={isUpdating || isModelLoading || isUploadingImage}
+                    className="bg-blue-600 hover:bg-blue-700 text-white font-medium px-8"
+                  >
+                    {isUploadingImage ? "업로드 중..." : isUpdating ? "저장 중..." : isModelLoading ? "로딩 중..." : "저장"}
+                  </Button>
+                  
+                  {/* 이미지 제거 버튼 (업로드된 이미지가 있을 때만) */}
+                  {uploadedImage && imagePreview && (
+                    <Button
+                      variant="outline"
+                      onClick={removeImage}
+                      className="text-red-600 border-red-200 hover:bg-red-50 px-8"
+                    >
+                      <Trash2 className="h-4 w-4 mr-2" />
+                      제거
+                    </Button>
+                  )}
+                </div>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* 갤러리 모달 */}
+        <Dialog open={isGalleryModalOpen} onOpenChange={setIsGalleryModalOpen}>
+          <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center space-x-2">
+                <ImageIcon className="h-5 w-5" />
+                <span>갤러리에서 이미지 선택</span>
+              </DialogTitle>
+            </DialogHeader>
+            
+            <div className="space-y-6">
+              {isLoadingGallery ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+                  <span className="ml-2 text-gray-600">이미지 목록을 불러오는 중...</span>
+                </div>
+              ) : galleryImages.length > 0 ? (
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                  {galleryImages.map((imageUrl, index) => (
+                    <div
+                      key={index}
+                      className="relative group cursor-pointer"
+                      onClick={() => selectGalleryImage(imageUrl)}
+                    >
+                      <img
+                        src={imageUrl}
+                        alt={`Gallery image ${index + 1}`}
+                        className="w-full h-32 object-cover rounded-lg border hover:border-blue-500 transition-colors"
+                      />
+                      <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all duration-200 rounded-lg flex items-center justify-center">
+                        <span className="text-white opacity-0 group-hover:opacity-100 text-sm font-medium">
+                          선택
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-12">
+                  <ImageIcon className="h-12 w-12 mx-auto mb-4 text-gray-300" />
+                  <p className="text-gray-500 text-lg">갤러리에 이미지가 없습니다</p>
+                  <p className="text-gray-400 mt-2">먼저 이미지를 업로드해주세요</p>
+                </div>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={!!voiceToDelete} onOpenChange={(open) => !open && setVoiceToDelete(null)}>
+          <DialogContent className="sm:max-w-[425px]">
+            <DialogHeader>
+              <DialogTitle>음성 삭제 확인</DialogTitle>
+              <DialogDescription>
+                이 음성을 삭제하시겠습니까? 삭제된 음성은 복구할 수 없습니다.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => setVoiceToDelete(null)}
+              >
+                취소
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={handleDeleteVoice}
+              >
+                삭제
+              </Button>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
       </div>

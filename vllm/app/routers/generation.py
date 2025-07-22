@@ -37,7 +37,7 @@ async def generate_response_endpoint(request: GenerateRequest):
             request.influencer_name
         )
         
-        logger.info(f"🔍 생성된 프롬프트 (처음 200자): {formatted_prompt[:200]}...")
+        logger.info(f"🔍 생성된 프롬프트 (처음 200자): {formatted_prompt}...")
         
         # 샘플링 파라미터 설정
         sampling_params = SamplingParams(
@@ -115,76 +115,122 @@ async def generate_response_stream_endpoint(request: GenerateRequest):
     logger.info(f"🔄 스트리밍 응답 생성 엔드포인트 호출됨")
     logger.info(f"📋 요청 데이터: {request.dict()}")
     
+    # 입력 검증
+    if not request.user_message or not request.user_message.strip():
+        raise HTTPException(status_code=400, detail="사용자 메시지가 비어있습니다.")
+    
+    if not request.influencer_name or not request.influencer_name.strip():
+        raise HTTPException(status_code=400, detail="인플루언서 이름이 비어있습니다.")
+    
+    # 엔진 상태 확인
     if core.engine is None:
         logger.error("❌ 엔진이 초기화되지 않았습니다.")
-        raise HTTPException(status_code=500, detail="엔진이 초기화되지 않았습니다.")
+        raise HTTPException(status_code=503, detail="AI 엔진이 초기화되지 않았습니다. 잠시 후 다시 시도해주세요.")
     
     async def generate_stream():
         try:
             # 프롬프트 생성
-            formatted_prompt = create_chat_prompt(
-                request.user_message, 
-                request.system_message, 
-                request.influencer_name
-            )
+            try:
+                formatted_prompt = create_chat_prompt(
+                    request.user_message, 
+                    request.system_message, 
+                    request.influencer_name
+                )
+            except Exception as e:
+                logger.error(f"❌ 프롬프트 생성 실패: {str(e)}")
+                yield f"data: {json.dumps({'error': '프롬프트 생성에 실패했습니다.'})}\n\n"
+                return
             
-            # 샘플링 파라미터 설정
-            sampling_params = SamplingParams(
-                temperature=request.temperature,
-                max_tokens=request.max_new_tokens,
-                top_p=0.9,
-                top_k=50,
-                stop=["[|Human|", "[|System|", "<|im_end|", "</s>", "<|eot_id|>"],
-                repetition_penalty=1.1
-            )
+            # 샘플링 파라미터 검증 및 설정
+            try:
+                if request.temperature < 0 or request.temperature > 2:
+                    yield f"data: {json.dumps({'error': 'temperature는 0과 2 사이의 값이어야 합니다.'})}\n\n"
+                    return
+                
+                if request.max_new_tokens <= 0 or request.max_new_tokens > 4096:
+                    yield f"data: {json.dumps({'error': 'max_new_tokens는 1과 4096 사이의 값이어야 합니다.'})}\n\n"
+                    return
+                
+                sampling_params = SamplingParams(
+                    temperature=request.temperature,
+                    max_tokens=request.max_new_tokens,
+                    top_p=0.9,
+                    top_k=50,
+                    stop=["[|Human|", "[|System|", "<|im_end|>", "</s>", "<|eot_id|>"],
+                    repetition_penalty=1.1
+                )
+            except Exception as e:
+                logger.error(f"❌ 샘플링 파라미터 설정 실패: {str(e)}")
+                yield f"data: {json.dumps({'error': f'잘못된 파라미터: {str(e)}'})}\n\n"
+                return
             
             # LoRA 요청 설정
             lora_request = None
             
             if request.model_id:
-                if request.model_id not in core.loaded_adapters:
-                    yield f"data: {json.dumps({'error': f'어댑터 {request.model_id}가 로드되지 않았습니다.'})}\n\n"
+                try:
+                    if request.model_id not in core.loaded_adapters:
+                        yield f"data: {json.dumps({'error': f'어댑터 \'{request.model_id}\'가 로드되지 않았습니다.'})}\n\n"
+                        return
+                    
+                    adapter_info = core.loaded_adapters[request.model_id]
+                    if not adapter_info or "lora_int_id" not in adapter_info or "hf_repo_name" not in adapter_info:
+                        yield f"data: {json.dumps({'error': f'어댑터 \'{request.model_id}\'의 정보가 불완전합니다.'})}\n\n"
+                        return
+                    
+                    lora_request = LoRARequest(
+                        lora_name=request.model_id,
+                        lora_int_id=adapter_info["lora_int_id"],
+                        lora_path=adapter_info["hf_repo_name"]
+                    )
+                except Exception as e:
+                    logger.error(f"❌ LoRA 어댑터 설정 실패: {str(e)}")
+                    yield f"data: {json.dumps({'error': 'LoRA 어댑터 설정에 실패했습니다.'})}\n\n"
                     return
-                
-                adapter_info = core.loaded_adapters[request.model_id]
-                lora_request = LoRARequest(
-                    lora_name=request.model_id,
-                    lora_int_id=adapter_info["lora_int_id"],
-                    lora_path=adapter_info["hf_repo_name"]
-                )
             
             # 고유 request_id 생성
             request_id = str(uuid.uuid4())
             
             # 스트리밍 생성
-            previous_text = ""
-            token_count = 0     
-            
-            async for output in core.engine.generate(
-                formatted_prompt,
-                sampling_params,
-                request_id=request_id,
-                lora_request=lora_request
-            ):
-                if output.outputs:
-                    current_text = output.outputs[0].text
+            try:
+                previous_text = ""
+                token_count = 0
+                has_output = False
+                
+                async for output in core.engine.generate(
+                    formatted_prompt,
+                    sampling_params,
+                    request_id=request_id,
+                    lora_request=lora_request
+                ):
+                    has_output = True
+                    if output.outputs and len(output.outputs) > 0:
+                        current_text = output.outputs[0].text
 
-                    if len(current_text) > len(previous_text):
-                        new_tokens = current_text[len(previous_text):]
-                        
-                        if new_tokens:
-                            new_tokens = new_tokens.replace('[|endofturn|]', '').replace('[|endoftext|]', '').replace('<|im_end|>', '')
-                            if new_tokens.strip():
-                                yield f"data: {json.dumps({'text': new_tokens})}\n\n"
-                                previous_text = current_text
-                                token_count += len(new_tokens)
-            
-            # 스트리밍 완료 신호
-            yield f"data: {json.dumps({'done': True})}\n\n"
+                        if len(current_text) > len(previous_text):
+                            new_tokens = current_text[len(previous_text):]
+                            
+                            if new_tokens:
+                                new_tokens = new_tokens.replace('[|endofturn|]', '').replace('[|endoftext|]', '').replace('<|im_end|>', '')
+                                if new_tokens.strip():
+                                    yield f"data: {json.dumps({'text': new_tokens})}\n\n"
+                                    previous_text = current_text
+                                    token_count += len(new_tokens)
+                
+                if not has_output:
+                    yield f"data: {json.dumps({'error': '생성된 응답이 없습니다.'})}\n\n"
+                    return
+                
+                # 스트리밍 완료 신호
+                yield f"data: {json.dumps({'done': True})}\n\n"
+                
+            except Exception as e:
+                logger.error(f"❌ AI 스트리밍 생성 중 오류: {str(e)}")
+                yield f"data: {json.dumps({'error': 'AI 응답 생성 중 오류가 발생했습니다.'})}\n\n"
             
         except Exception as e:
             logger.error(f"❌ 스트리밍 생성 중 오류: {str(e)}")
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            yield f"data: {json.dumps({'error': '스트리밍 생성 중 예상치 못한 오류가 발생했습니다.'})}\n\n"
     
     return StreamingResponse(
         generate_stream(),

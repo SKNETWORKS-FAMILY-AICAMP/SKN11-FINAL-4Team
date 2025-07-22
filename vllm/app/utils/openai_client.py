@@ -245,13 +245,14 @@ class OpenAIClientWrapper:
         )
 
 
-# 전역 인스턴스 (싱글톤 패턴)
+# 전역 인스턴스 (싱글톤 패턴) - thread-safe
 _global_openai_client = None
+_openai_client_lock = asyncio.Lock()
 
 
-def get_openai_client(**kwargs) -> OpenAIClientWrapper:
+async def get_openai_client(**kwargs) -> OpenAIClientWrapper:
     """
-    전역 OpenAI 클라이언트 인스턴스 반환
+    전역 OpenAI 클라이언트 인스턴스 반환 (thread-safe)
     
     Args:
         **kwargs: OpenAIClientWrapper 초기화 파라미터
@@ -261,8 +262,9 @@ def get_openai_client(**kwargs) -> OpenAIClientWrapper:
     """
     global _global_openai_client
     
-    if _global_openai_client is None:
-        _global_openai_client = OpenAIClientWrapper(**kwargs)
+    async with _openai_client_lock:
+        if _global_openai_client is None:
+            _global_openai_client = OpenAIClientWrapper(**kwargs)
     
     return _global_openai_client
 

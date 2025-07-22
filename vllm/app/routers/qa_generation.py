@@ -131,7 +131,7 @@ async def generate_qa_for_influencer(
         "total_qa_pairs": request.num_qa_pairs,
         "qa_per_domain": qa_per_domain,
         "domains": domains,
-        "character": request.character.dict(),
+        "character": request.character.model_dump(),
         "batch_requests": [],
         "error": None,
         "start_time": datetime.now().isoformat()
@@ -217,6 +217,78 @@ async def get_openai_batch_status(request: BatchStatusRequest):
         logger.error(f"OpenAI 배치 상태 조회 실패: {str(e)}")
         raise HTTPException(status_code=500, detail=f"배치 상태 조회 중 오류 발생: {str(e)}")
 
+@router.post("/process_batch_for_finetuning")
+async def process_batch_for_finetuning(
+    request: Dict[str, Any],
+    background_tasks: BackgroundTasks
+):
+    """
+    OpenAI 배치 결과를 파싱하여 파인튜닝용 데이터로 변환
+    
+    Args:
+        request: {
+            "batch_id": str,
+            "output_file_id": str,
+            "character_info": {
+                "name": str,
+                "personality": str,
+                "style_info": str (optional)
+            }
+        }
+    """
+    try:
+        import tempfile
+        from app.utils.batch_parsing_utils import parse_batch_results, convert_multi_turn_for_finetuning
+        
+        batch_id = request.get("batch_id")
+        output_file_id = request.get("output_file_id")
+        character_info = request.get("character_info", {})
+        
+        if not batch_id or not output_file_id:
+            raise HTTPException(status_code=400, detail="batch_id와 output_file_id가 필요합니다.")
+        
+        # OpenAI 클라이언트 초기화
+        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        
+        # 배치 결과 파일 다운로드
+        logger.info(f"배치 결과 파일 다운로드 중: {output_file_id}")
+        file_response = client.files.content(output_file_id)
+        
+        # 임시 파일에 저장
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.jsonl', delete=False) as tmp_file:
+            tmp_file.write(file_response.text)
+            tmp_file_path = tmp_file.name
+        
+        # 배치 결과 파싱
+        logger.info(f"배치 결과 파싱 중: {tmp_file_path}")
+        multi_turn_conversations = parse_batch_results(tmp_file_path)
+        
+        # 파인튜닝용 데이터로 변환
+        finetuning_data = convert_multi_turn_for_finetuning(
+            multi_turn_conversations,
+            character_info.get("name", "Unknown"),
+            character_info.get("personality", ""),
+            character_info.get("style_info", "")
+        )
+        
+        # 임시 파일 삭제
+        os.unlink(tmp_file_path)
+        
+        logger.info(f"파인튜닝 데이터 변환 완료: {len(finetuning_data)}개 대화 세션")
+        
+        return {
+            "status": "success",
+            "batch_id": batch_id,
+            "total_conversations": len(multi_turn_conversations),
+            "finetuning_data_count": len(finetuning_data),
+            "finetuning_data": finetuning_data  # 필요시 제거 가능
+        }
+        
+    except Exception as e:
+        logger.error(f"배치 처리 중 오류 발생: {e}")
+        raise HTTPException(status_code=500, detail=f"배치 처리 중 오류 발생: {str(e)}")
+
+
 @router.get("/openai_batch_status/{batch_id}")
 async def get_openai_batch_status_by_id(batch_id: str):
     """OpenAI 배치 작업 상태 조회 (GET 방식)"""
@@ -270,10 +342,10 @@ async def _run_qa_batch_generation(
             # CharacterProfile 생성
             character_profile = CharacterProfile(
                 name=char_data.name,
-                description=char_data.description,
+                description=char_data.description or "",
                 age_range=char_data.age_range,
                 gender=Gender[char_data.gender.upper()] if char_data.gender else Gender.NON_BINARY,
-                personality=char_data.personality,
+                personality=char_data.personality or "친근하고 활발한 성격",
                 mbti=char_data.mbti
             )
             
@@ -307,10 +379,21 @@ async def _run_qa_batch_generation(
                                 },
                                 {
                                     "role": "user", 
-                                    "content": f"""{domain}({domain_desc})에 관한 QA 쌍을 하나 만들어주세요.
-{char_data.name}의 성격과 특성에 맞는 자연스럽고 흥미로운 질문을 만들고, 그에 대해 캐릭터답게 답변해주세요.
-반드시 JSON 형식으로 답변해주세요:
-{{"q": "질문 내용", "a": "답변 내용"}}"""
+                                    "content": f"""{domain}({domain_desc})에 관한 7턴의 자연스러운 멀티턴 대화를 만들어주세요.
+
+{char_data.name}의 성격과 특성에 맞는 흥미롭고 깊이 있는 대화를 만들어주세요.
+대화는 하나의 주제로 시작해서 자연스럽게 연결되며 점차 깊어지는 형태여야 합니다.
+
+반드시 다음 JSON 배열 형식으로 답변해주세요:
+[
+  {{"q": "첫 번째 질문", "a": "첫 번째 답변"}},
+  {{"q": "이전 답변을 바탕으로 한 후속 질문", "a": "더 구체적인 답변"}},
+  {{"q": "더 깊이 파고드는 질문", "a": "개인적 경험이나 의견이 담긴 답변"}},
+  {{"q": "다른 관점에서의 질문", "a": "새로운 시각을 제시하는 답변"}},
+  {{"q": "실용적인 조언을 구하는 질문", "a": "구체적인 제안이 담긴 답변"}},
+  {{"q": "감정이나 가치관에 대한 질문", "a": "캐릭터의 철학이 드러나는 답변"}},
+  {{"q": "마무리하며 정리를 요청하는 질문", "a": "대화를 종합하며 핵심을 정리하는 답변"}}
+]"""
                                 }
                             ],
                             "max_tokens": 500,
@@ -356,10 +439,10 @@ async def _run_influencer_qa_generation(
         # CharacterProfile 생성
         character_profile = CharacterProfile(
             name=character_data.name,
-            description=character_data.description,
+            description=character_data.description or "",
             age_range=character_data.age_range,
             gender=Gender[character_data.gender.upper()] if character_data.gender else Gender.NON_BINARY,
-            personality=character_data.personality,
+            personality=character_data.personality or "친근하고 활발한 성격",
             mbti=character_data.mbti
         )
         

@@ -14,6 +14,8 @@ from app.models import FineTuningStatus, LoRALoadRequest
 from pipeline.speech_generator import SpeechGenerator
 from app.utils.adapter_utils import get_base_model_from_adapter
 from app.utils.finetuning_utils import create_system_message, convert_qa_data_for_finetuning
+from app.utils.cache_manager import get_cache_manager
+from app.utils.gpu_manager import get_gpu_manager
 from pipeline import fine_custom
 import dotenv
 import re
@@ -306,12 +308,20 @@ async def initialize_vllm_engine():
                 os.environ['VLLM_GPU_IDS'] = vllm_gpu_id
                 logger.info(f"vLLM 단일 GPU 모드: GPU {vllm_gpu_id} 사용")
             
+            # Get dynamic GPU memory allocation
+            gpu_manager = await get_gpu_manager()
+            gpu_memory_fraction = await gpu_manager.calculate_optimal_memory_fraction(
+                device_id=0,
+                reserve_mb=2048,  # Reserve 2GB for other processes
+                max_fraction=0.85  # Maximum 85% usage
+            )
+            
             engine_args = AsyncEngineArgs(
                 model="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct",
                 max_model_len=2048,
                 tensor_parallel_size=tensor_parallel_size,
                 trust_remote_code=True,
-                gpu_memory_utilization=0.5,
+                gpu_memory_utilization=gpu_memory_fraction,
                 enable_lora=True,
                 max_loras=8,
                 max_lora_rank=64,

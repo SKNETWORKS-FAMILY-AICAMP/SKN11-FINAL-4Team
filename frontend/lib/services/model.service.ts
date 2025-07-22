@@ -37,6 +37,10 @@ export interface StylePreset {
   influencer_speech: string
   created_at?: string
   updated_at?: string
+  // 추가 컬럼
+  mbti_id?: number
+  system_prompt?: string
+  influencer_description?: string
 }
 
 export interface ModelMBTI {
@@ -208,7 +212,7 @@ export class ModelService {
   }
 
   /**
-   * 스타일 프리셋 목록 조회 (공개 API)
+   * 스타일 프리셋 목록 조회 (MBTI 정보 포함)
    */
   static async getStylePresets(params?: {
     skip?: number
@@ -220,9 +224,16 @@ export class ModelService {
     if (params?.limit) searchParams.set('limit', params.limit.toString())
 
     const query = searchParams.toString()
-    const endpoint = `/api/v1/public/style-presets${query ? `?${query}` : ''}`
+    const endpoint = `/api/v1/influencers/style-presets${query ? `?${query}` : ''}`
     
     return await apiClient.get<StylePreset[]>(endpoint)
+  }
+
+  /**
+   * 단일 스타일 프리셋 조회
+   */
+  static async getStylePresetById(stylePresetId: string): Promise<StylePreset> {
+    return await apiClient.get<StylePreset>(`/api/v1/influencers/style-presets/${stylePresetId}`)
   }
 
   /**

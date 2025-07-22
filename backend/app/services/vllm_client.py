@@ -6,6 +6,7 @@ FastAPI 백엔드에서 VLLM 서버로 요청을 라우팅하는 클라이언트
 import asyncio
 import json
 import logging
+import os
 import httpx
 import websockets
 from typing import Optional, Dict, List, Any, AsyncIterator
@@ -54,10 +55,27 @@ class VLLMClient:
     async def health_check(self) -> bool:
         """VLLM 서버 상태 확인"""
         try:
+            logger.info(f"🔍 VLLM 서버 health check 시작: {self.config.base_url}")
             response = await self.client.get("/")
+            logger.info(f"✅ VLLM 서버 응답 성공: 상태 코드 {response.status_code}")
+            if response.status_code != 200:
+                logger.warning(f"⚠️ VLLM 서버가 200이 아닌 상태 코드 반환: {response.status_code}")
+                logger.warning(f"   - 응답 내용: {response.text[:500]}")
             return response.status_code == 200
+        except httpx.ConnectError as e:
+            logger.error(f"❌ VLLM 서버 연결 실패 (ConnectError): {self.config.base_url}")
+            logger.error(f"   - 상세 오류: {str(e)}")
+            logger.error(f"   - 환경 변수 확인: VLLM_ENABLED={os.getenv('VLLM_ENABLED')}, VLLM_SERVER_URL={os.getenv('VLLM_SERVER_URL')}")
+            return False
+        except httpx.TimeoutException as e:
+            logger.error(f"❌ VLLM 서버 연결 시간 초과 (TimeoutException): {self.config.base_url}")
+            logger.error(f"   - 시간 초과 설정: {self.config.timeout}초")
+            return False
         except Exception as e:
-            logger.error(f"VLLM 서버 상태 확인 실패: {e}")
+            logger.error(f"❌ VLLM 서버 상태 확인 실패 (기타 오류): {type(e).__name__}")
+            logger.error(f"   - 상세 오류: {str(e)}")
+            import traceback
+            logger.error(f"   - 스택 트레이스:\n{traceback.format_exc()}")
             return False
     
     async def get_stats(self) -> Dict[str, Any]:
@@ -275,25 +293,72 @@ class VLLMClient:
             logger.error(f"파인튜닝 작업 목록 조회 실패: {e}")
             raise VLLMClientError(f"파인튜닝 작업 목록 조회 실패: {e}")
     
-    async def generate_qa_for_character(self, character_data: Dict[str, Any]) -> Dict[str, Any]:
-        """캐릭터에 대한 QA 생성 (vLLM 서버의 /speech/generate_qa 엔드포인트 사용)"""
+    async def generate_voice(self, text: str, base_voice_url: str = None, influencer_id: str = None) -> Dict[str, Any]:
+        """음성 생성 (베이스 음성을 사용한 클로닝)"""
         try:
-            # VLLMCharacterProfile 형식으로 변환
+            if not base_voice_url:
+                raise ValueError("베이스 음성 URL이 필요합니다")
+            
+            # base_voice_url에서 파일 다운로드 및 base64 인코딩
+            import base64
+            import httpx
+            
+            async with httpx.AsyncClient() as client:
+                response = await client.get(base_voice_url)
+                response.raise_for_status()
+                voice_data = response.content
+                voice_data_base64 = base64.b64encode(voice_data).decode('utf-8')
+            
             payload = {
-                "name": character_data.get("name", ""),
-                "description": character_data.get("description", ""),
-                "age_range": character_data.get("age_range", ""),
-                "gender": character_data.get("gender", "NON_BINARY"),
-                "personality": character_data.get("personality", ""),
-                "mbti": character_data.get("mbti")
+                "text": text,
+                "voice_data_base64": voice_data_base64,
+                "upload_to_s3": True,
+                "s3_folder_prefix": f"tts/{influencer_id}" if influencer_id else "tts",
+                "async_mode": True,  # 비동기 모드 사용
+                "language": "ko",
+                "speaking_rate": 22.0,
+                "pitch_std": 40.0,
+                "cfg_scale": 4.0,
+                "emotion": [0.3077, 0.0256, 0.0256, 0.0256, 0.0256, 0.0256, 0.2564, 0.3077]  # 중립 감정
+            }
+
+            response = await self.client.post("/zonos/generate_tts_with_voice", json=payload)
+            response.raise_for_status()
+            
+            result = response.json()
+            logger.info(f"음성 생성 응답: {result}")
+            return result
+        except Exception as e:
+            logger.error(f"음성 생성 실패: {e}")
+            raise VLLMClientError(f"음성 생성 실패: {e}")
+
+    async def generate_qa_for_character(self, character_data: Dict[str, Any]) -> Dict[str, Any]:
+        """캐릭터에 대한 QA 생성 (vLLM 서버의 /speech/generate_qa_fast 엔드포인트 사용)"""
+        try:
+            # vLLM 서버가 기대하는 형식으로 페이로드 구성 (character 키로 감싸기)
+            payload = {
+                "character": {
+                    "name": character_data.get("name", ""),
+                    "description": character_data.get("description", ""),
+                    "age_range": character_data.get("age_range", ""),
+                    "gender": character_data.get("gender", "NON_BINARY"),
+                    "personality": character_data.get("personality", ""),
+                    "mbti": character_data.get("mbti")
+                }
             }
             
-            logger.info(f"vLLM 서버로 QA 생성 요청: {payload}")
-            response = await self.client.post("/speech/generate_qa", json=payload)
+            logger.info(f"vLLM 서버로 QA 생성 요청 (고속 엔드포인트): {payload}")
+            # 올바른 엔드포인트 사용 (/speech/generate_qa_fast)
+            response = await self.client.post("/speech/generate_qa_fast", json=payload)
             response.raise_for_status()
             
             result = response.json()
             logger.debug(f"✅ QA 생성 성공: {character_data.get('name', 'Unknown')}")
+            
+            # 생성 시간 정보가 있으면 로깅
+            if 'generation_time_seconds' in result:
+                logger.info(f"⚡ 생성 소요 시간: {result['generation_time_seconds']:.2f}초")
+            
             return result
             
         except Exception as e:
@@ -429,3 +494,8 @@ async def vllm_generate_qa_for_character(character_data: Dict[str, Any]) -> Dict
     """vLLM에서 캐릭터 QA 생성 (편의 함수)"""
     async with VLLMClient(_vllm_config) as client:
         return await client.generate_qa_for_character(character_data)
+
+async def vllm_generate_voice(text: str, base_voice_url: str = None, influencer_id: str = None) -> Dict[str, Any]:
+    """vLLM에서 음성 생성 (편의 함수)"""
+    async with VLLMClient(_vllm_config) as client:
+        return await client.generate_voice(text, base_voice_url, influencer_id)

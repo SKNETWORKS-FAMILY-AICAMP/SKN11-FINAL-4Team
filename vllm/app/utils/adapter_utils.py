@@ -2,6 +2,7 @@ import json
 import logging
 from typing import Optional
 from huggingface_hub import hf_hub_download
+import aiofiles
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +22,8 @@ def get_base_model_from_adapter(hf_repo_name: str, hf_token: Optional[str] = Non
         logger.info(f"📁 다운로드된 config 파일 경로: {config_file}")
         
         logger.info(f"📖 config 파일 읽기 중...")
+        # Note: This is a synchronous function called from sync context
+        # If called from async context, should be refactored to use aiofiles
         with open(config_file, 'r') as f:
             adapter_config = json.load(f)
         

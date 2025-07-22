@@ -3,9 +3,14 @@ from typing import Dict, Any
 
 from app.models import LoRALoadRequest
 from app import core
-from app.core import load_lora_adapter
+from app.core import load_lora_adapter, initialize_vllm_engine
 
 router = APIRouter()
+
+@router.get("/engine_init")
+async def get_engine():
+    await initialize_vllm_engine()
+    return core.engine
 
 @router.post("/load_adapter")
 async def load_lora_adapter_endpoint(request: LoRALoadRequest):

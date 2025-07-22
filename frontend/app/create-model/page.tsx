@@ -35,6 +35,7 @@ interface FormDataType {
   selectedPresetId: string;
   huggingFaceToken: string;
   systemPrompt: string;
+  uploadedImageUrl?: string; // S3에 업로드된 이미지 URL
 }
 
 export default function CreateModelPage() {
@@ -58,6 +59,7 @@ export default function CreateModelPage() {
   const [files, setFiles] = useState({
     imageSamples: null as File[] | null,
   })
+  const [imagePreviewUrls, setImagePreviewUrls] = useState<string[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [toneTab, setToneTab] = useState("recommend")
   const [stylePresets, setStylePresets] = useState<any[]>([])
@@ -70,6 +72,7 @@ export default function CreateModelPage() {
   const [generatedTones, setGeneratedTones] = useState<ConversationExample[]>([])
   const [huggingFaceTokens, setHuggingFaceTokens] = useState<any[]>([])
   const [loadingTokens, setLoadingTokens] = useState(false)
+  const [uploadingImage, setUploadingImage] = useState(false)
 
   useEffect(() => {
     // 실제 API에서 프리셋 데이터 가져오기
@@ -121,17 +124,91 @@ export default function CreateModelPage() {
   }, [formData.tone]);
 
   const handleInputChange = (field: string, value: string | string[]) => {
-    setFormData((prev) => ({ ...prev, [field]: value }))
+    setFormData((prev) => {
+      // 이미지 메서드가 변경되는 경우 관련 필드들 초기화
+      if (field === "imageMethod") {
+        if (value === "upload") {
+          // 이미지 업로드로 변경 시 이미지 생성 관련 필드들 초기화
+          return {
+            ...prev,
+            [field]: value,
+            modelType: "",
+            hairStyle: "",
+            mood: "",
+          }
+        } else if (value === "prompt") {
+          // 이미지 생성으로 변경 시 이미지 업로드 관련 필드들 초기화
+          return {
+            ...prev,
+            [field]: value,
+            uploadedImageUrl: undefined,
+          }
+        }
+      }
+      
+      // 일반적인 필드 변경
+      return {
+        ...prev,
+        [field]: value,
+      }
+    })
+    
+    // 이미지 메서드가 변경되면 파일 상태도 초기화
+    if (field === "imageMethod") {
+      if (value === "prompt") {
+        // 이미지 생성으로 변경 시 업로드된 파일들 초기화
+        setFiles(prev => ({ ...prev, imageSamples: null }))
+        setImagePreviewUrls([])
+        // 기존 미리보기 URL들 해제
+        imagePreviewUrls.forEach(url => URL.revokeObjectURL(url))
+      }
+    }
   }
 
-  const handleFileUpload = (type: keyof typeof files, uploadedFiles: FileList | null) => {
+  const handleFileUpload = async (type: keyof typeof files, uploadedFiles: FileList | null) => {
     if (uploadedFiles) {
-      setFiles((prev) => ({ ...prev, [type]: Array.from(uploadedFiles) }))
+      const fileArray = Array.from(uploadedFiles)
+      setFiles((prev) => ({ ...prev, [type]: fileArray }))
+      
+      // 이미지 미리보기 URL 생성
+      if (type === 'imageSamples') {
+        const urls = fileArray.map(file => URL.createObjectURL(file))
+        setImagePreviewUrls(urls)
+        
+        // 첫 번째 이미지를 S3에 즉시 업로드
+        if (fileArray.length > 0) {
+          setUploadingImage(true);
+          try {
+            const file = fileArray[0];
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            // 인플루언서 이미지 업로드 API 호출
+            const uploadResponse = await fetch('/api/v1/influencers/upload-image', {
+              method: 'POST',
+              body: formData,
+            });
+
+            if (uploadResponse.ok) {
+              const uploadResult = await uploadResponse.json();
+              console.log('인플루언서 이미지 S3 업로드 성공:', uploadResult.file_url);
+              // 업로드된 S3 URL을 상태에 저장 (나중에 인플루언서 생성 시 사용)
+              setFormData(prev => ({ ...prev, uploadedImageUrl: uploadResult.file_url }));
+            } else {
+              console.warn('인플루언서 이미지 S3 업로드 실패');
+            }
+          } catch (error) {
+            console.warn('인플루언서 이미지 S3 업로드 중 오류:', error);
+          } finally {
+            setUploadingImage(false);
+          }
+        }
+      }
     }
   }
 
   // 프리셋 선택 핸들러
-  const handlePresetSelect = (presetId: string) => {
+  const handlePresetSelect = async (presetId: string) => {
     if (presetId === "manual") {
       setToneTab("recommend"); // 직접 입력 시 추천 말투 탭으로
       setFormData(prev => ({
@@ -147,39 +224,49 @@ export default function CreateModelPage() {
         age: "",
         hairStyle: "",
         mood: "",
+        systemPrompt: "",
+        description: "",
       }));
       setGeneratedTones([]); // 직접 입력 시 생성된 말투 초기화
       setShowToneExamples(false); // 직접 입력 시 추천 말투 숨김
       return;
     }
 
-    const selectedPreset = stylePresets.find(p => p.style_preset_id === presetId);
-    if (selectedPreset) {
-      setToneTab("custom"); // 프리셋 선택 시 직접 입력 탭으로 (프리셋 말투 확인용)
-      setFormData(prev => ({
-        ...prev,
-        selectedPresetId: presetId,
-        // 프리셋 데이터로 폼 채우기
-        modelType: selectedPreset.influencer_type === 1 ? "character" : selectedPreset.influencer_type === 2 ? "human" : "objects",
-        personality: selectedPreset.influencer_personality,
-        tone: selectedPreset.influencer_speech,
-        customTones: [selectedPreset.influencer_speech], // 프리셋 말투를 customTones에 추가
-        mbti: selectedPreset.mbti_name || "none", // MBTI는 mbti_name으로 접근
-        gender: selectedPreset.influencer_gender === 0 ? "male" : selectedPreset.influencer_gender === 1 ? "female" : "other",
-        age: selectedPreset.influencer_age_group ? String(selectedPreset.influencer_age_group * 10) : "", // 연령대 매핑
-        hairStyle: selectedPreset.influencer_hairstyle,
-        mood: selectedPreset.influencer_style,
-        imageMethod: "prompt", // 프리셋은 이미지 프롬프트 기반으로 가정
-      }));
-      // 프리셋 선택 시 생성된 말투를 프리셋 말투로 설정
-      setGeneratedTones([{
-        title: selectedPreset.style_preset_name,
-        example: "프리셋에 정의된 말투입니다.", // 실제 예시가 없으므로 임시 텍스트
-        tone: selectedPreset.influencer_speech,
-        hashtags: "", // 프리셋에 해시태그 정보가 있다면 추가
-        system_prompt: "" // 프리셋에 시스템 프롬프트 정보가 있다면 추가
-      }]);
-      setShowToneExamples(true); // 프리셋 말투 표시
+    setLoadingPresets(true);
+    try {
+      const preset = await ModelService.getStylePresetById(presetId);
+      if (preset) {
+        setToneTab("custom"); // 프리셋 선택 시 직접 입력 탭으로 (프리셋 말투 확인용)
+        setFormData(prev => ({
+          ...prev,
+          selectedPresetId: presetId,
+          name: preset.style_preset_name || "",
+          description: preset.influencer_description || "",
+          modelType: preset.influencer_type === 1 ? "character" : preset.influencer_type === 2 ? "human" : "objects",
+          personality: preset.influencer_personality || "",
+          tone: preset.influencer_speech || "",
+          customTones: [preset.influencer_speech || ""],
+          mbti: preset.mbti_id ? String(preset.mbti_id) : "none",
+          gender: preset.influencer_gender === 0 ? "male" : preset.influencer_gender === 1 ? "female" : "other",
+          age: preset.influencer_age_group ? String(preset.influencer_age_group * 10) : "",
+          hairStyle: preset.influencer_hairstyle || "",
+          mood: preset.influencer_style || "",
+          imageMethod: "prompt",
+          systemPrompt: preset.system_prompt || "",
+        }));
+        setGeneratedTones([{
+          title: preset.style_preset_name,
+          example: "프리셋에 정의된 말투입니다.",
+          tone: preset.influencer_speech,
+          hashtags: "",
+          system_prompt: preset.system_prompt || ""
+        }]);
+        setShowToneExamples(true);
+      }
+    } catch (e) {
+      alert("프리셋 정보를 불러오지 못했습니다.");
+    } finally {
+      setLoadingPresets(false);
     }
   }
 
@@ -276,33 +363,8 @@ export default function CreateModelPage() {
         }
       }
 
-      // 이미지 업로드가 있는 경우 먼저 이미지를 업로드
-      let imageUrl = undefined;
-      if (formData.imageMethod === "upload" && files.imageSamples && files.imageSamples.length > 0) {
-        try {
-          // 첫 번째 이미지만 업로드 (인플루언서 프로필 이미지용)
-          const file = files.imageSamples[0];
-          const formDataForUpload = new FormData();
-          formDataForUpload.append('file', file);
-          // influencer_id는 제공하지 않음 (백엔드에서 임시 ID 생성)
-
-          // 인플루언서 이미지 업로드 API 사용
-          const uploadResponse = await fetch('/api/v1/influencers/upload-image', {
-            method: 'POST',
-            body: formDataForUpload,
-          });
-
-          if (uploadResponse.ok) {
-            const uploadResult = await uploadResponse.json();
-            imageUrl = uploadResult.file_url; // 업로드된 이미지 URL
-            console.log('인플루언서 이미지 업로드 성공:', imageUrl);
-          } else {
-            console.warn('인플루언서 이미지 업로드 실패, 기본 이미지 사용');
-          }
-        } catch (error) {
-          console.warn('인플루언서 이미지 업로드 중 오류:', error);
-        }
-      }
+      // 이미지 URL 설정 (이미 S3에 업로드된 경우 사용)
+      let imageUrl = formData.uploadedImageUrl;
 
       // 이미지 URL을 인플루언서 생성 데이터에 추가
       if (imageUrl) {
@@ -599,6 +661,13 @@ export default function CreateModelPage() {
     }));
   };
 
+  // 이미지 미리보기 URL 정리
+  useEffect(() => {
+    return () => {
+      imagePreviewUrls.forEach(url => URL.revokeObjectURL(url))
+    }
+  }, [imagePreviewUrls])
+
   return (
     <div className="min-h-screen bg-gray-50">
       <Navigation />
@@ -618,12 +687,12 @@ export default function CreateModelPage() {
           <Card>
             <CardHeader>
               <CardTitle>기본 정보</CardTitle>
-              <CardDescription>AI 인플루언서의 이름, 설명, 특성을 입력하세요</CardDescription>
+              <CardDescription>AI 인플루언서의 이름, 설명 등 정보를 입력하세요</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               {/* 이름/설명 입력 */}
               <div>
-                <Label htmlFor="name">AI 인플루언서 이름</Label>
+                <Label htmlFor="name">AI 인플루언서 이름*</Label>
                 <Input
                   id="name"
                   placeholder="예: 패션 인플루언서 AI"
@@ -633,7 +702,7 @@ export default function CreateModelPage() {
                 />
               </div>
               <div>
-                <Label htmlFor="description">설명</Label>
+                <Label htmlFor="description">설명*</Label>
                 <Textarea
                   id="description"
                   placeholder="AI 인플루언서에 대한 상세한 설명을 입력하세요"
@@ -701,10 +770,10 @@ export default function CreateModelPage() {
                   </Select>
                 </div>
                 <div>
-                  <Label htmlFor="gender">성별 (선택사항)</Label>
+                  <Label htmlFor="gender">성별*</Label>
                   <Select value={formData.gender} onValueChange={(value) => handleInputChange("gender", value)}>
                     <SelectTrigger>
-                      <SelectValue placeholder="성별 선택 (선택사항)" />
+                      <SelectValue placeholder="성별을 선택하세요" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">선택 안함</SelectItem>
@@ -723,13 +792,12 @@ export default function CreateModelPage() {
                     value={formData.age}
                     onChange={(e) => handleInputChange("age", e.target.value)}
                     min="20"
-                    required
                   />
                 </div>
               </div>
               {/* 허깅페이스 토큰 선택 */}
               <div>
-                <Label htmlFor="huggingFaceToken">허깅페이스 토큰 선택 (선택사항)</Label>
+                <Label htmlFor="huggingFaceToken">허깅페이스 토큰 선택*</Label>
                 <Select value={formData.huggingFaceToken} onValueChange={(value) => handleInputChange("huggingFaceToken", value)}>
                   <SelectTrigger>
                     <SelectValue placeholder="허깅페이스 토큰을 선택하세요" />
@@ -761,7 +829,7 @@ export default function CreateModelPage() {
             </CardHeader>
             <CardContent className="space-y-6">
               <div>
-                <Label htmlFor="personality">성격</Label>
+                <Label htmlFor="personality">성격*</Label>
                 <Input
                   id="personality"
                   placeholder="예: 친근하고 트렌디한, 전문적이고 신뢰할 수 있는, 활발하고 에너지 넘치는"
@@ -773,7 +841,7 @@ export default function CreateModelPage() {
               </div>
 
               <div>
-                <Label className="text-base font-medium">말투 선택</Label>
+                <Label className="text-base font-medium">말투 선택*</Label>
                 <p className="text-sm text-gray-600 mb-4">성격에 맞는 말투를 선택하거나 직접 입력하세요</p>
                 <Tabs value={toneTab} onValueChange={setToneTab} className="w-full mb-4">
                   <TabsList className="grid w-full grid-cols-2">
@@ -914,13 +982,13 @@ export default function CreateModelPage() {
               <CardTitle>이미지 설정</CardTitle>
               <CardDescription>
                 AI 인플루언서의 이미지를 설정하세요.<br />
-                설정하지 않으면 기본 이미지가 자동으로 생성됩니다.
+                이미지 업로드 또는 이미지 생성 중 하나는 필수입니다.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
               {/* 이미지 생성 방법 탭 */}
               <div>
-                <Label className="text-base font-medium mb-3 block">이미지 생성 방법</Label>
+                                      <Label className="text-base font-medium mb-3 block">이미지 생성 방법*</Label>
                 <Tabs value={formData.imageMethod} onValueChange={(value) => handleInputChange("imageMethod", value)} className="w-full">
                   <TabsList className="grid w-full grid-cols-2">
                     <TabsTrigger value="upload">이미지 업로드</TabsTrigger>
@@ -930,64 +998,148 @@ export default function CreateModelPage() {
                   <TabsContent value="upload" className="mt-4">
                     <div>
                       <Label className="text-base font-medium mb-3 block">이미지 파일 업로드</Label>
-                      <div className="relative group transition-all duration-300 hover:scale-[1.02]">
-                        <div className="relative overflow-hidden rounded-xl border-2 border-dashed transition-all duration-300 border-gray-300 bg-gradient-to-br from-gray-50 to-white hover:border-blue-400 hover:bg-gradient-to-br hover:from-blue-50 hover:to-indigo-50">
-                          {/* 배경 패턴 */}
-                          <div className="absolute inset-0 opacity-5">
-                            <div className="absolute top-4 left-4 w-8 h-8 border-2 border-gray-400 rounded-lg"></div>
-                            <div className="absolute top-12 right-8 w-6 h-6 border-2 border-gray-400 rounded-full"></div>
-                            <div className="absolute bottom-8 left-12 w-4 h-4 border-2 border-gray-400 rotate-45"></div>
-                            <div className="absolute bottom-16 right-4 w-10 h-10 border-2 border-gray-400 rounded-lg"></div>
-                          </div>
-
-                          <div className="relative p-12 text-center">
-                            {/* 아이콘 영역 */}
-                            <div className="relative mx-auto mb-6 w-20 h-20 rounded-full flex items-center justify-center transition-all duration-300 bg-gray-100 group-hover:bg-blue-100 group-hover:shadow-lg group-hover:shadow-blue-200">
-                              <Upload className="h-8 w-8 transition-all duration-300 text-gray-500 group-hover:text-blue-600 group-hover:scale-110" />
+                      
+                      {imagePreviewUrls.length === 0 ? (
+                        // 이미지가 없을 때: 업로드 영역 표시
+                        <div className="relative group transition-all duration-300 hover:scale-[1.02]">
+                          <div className="relative overflow-hidden rounded-xl border-2 border-dashed transition-all duration-300 border-gray-300 bg-gradient-to-br from-gray-50 to-white hover:border-blue-400 hover:bg-gradient-to-br hover:from-blue-50 hover:to-indigo-50">
+                            {/* 배경 패턴 */}
+                            <div className="absolute inset-0 opacity-5">
+                              <div className="absolute top-4 left-4 w-8 h-8 border-2 border-gray-400 rounded-lg"></div>
+                              <div className="absolute top-12 right-8 w-6 h-6 border-2 border-gray-400 rounded-full"></div>
+                              <div className="absolute bottom-8 left-12 w-4 h-4 border-2 border-gray-400 rotate-45"></div>
+                              <div className="absolute bottom-16 right-4 w-10 h-10 border-2 border-gray-400 rounded-lg"></div>
                             </div>
 
-                            {/* 텍스트 영역 */}
-                            <div className="space-y-3">
-                              <h3 className="text-xl font-semibold transition-colors duration-300 text-gray-800 group-hover:text-blue-700">
-                                이미지 업로드
-                              </h3>
-                              <p className="text-sm transition-colors duration-300 max-w-md mx-auto text-gray-600 group-hover:text-blue-600">
-                                AI 인플루언서 학습용 이미지들을 드래그하여 놓거나 클릭하여 선택하세요
-                              </p>
-                              <p className="text-xs text-gray-500">
-                                지원 형식: JPG, PNG, WebP (여러 파일 선택 가능)
-                              </p>
-                            </div>
+                            <div className="relative p-12 text-center">
+                              {/* 아이콘 영역 */}
+                              <div className="relative mx-auto mb-6 w-20 h-20 rounded-full flex items-center justify-center transition-all duration-300 bg-gray-100 group-hover:bg-blue-100 group-hover:shadow-lg group-hover:shadow-blue-200">
+                                <Upload className="h-8 w-8 transition-all duration-300 text-gray-500 group-hover:text-blue-600 group-hover:scale-110" />
+                              </div>
 
-                            {/* 파일 선택 버튼 */}
-                            <div className="mt-6">
-                              <input
-                                type="file"
-                                multiple
-                                accept=".jpg,.jpeg,.png,.webp"
-                                onChange={(e) => handleFileUpload("imageSamples", e.target.files)}
-                                className="hidden"
-                                id="image-upload"
-                              />
-                              <label htmlFor="image-upload">
-                                <Button
-                                  className="transition-all duration-300 cursor-pointer bg-white hover:bg-blue-50 text-gray-700 border-gray-300 hover:border-blue-400 hover:text-blue-700 shadow-sm hover:shadow-md"
-                                  asChild
-                                >
-                                  <span className="flex items-center gap-2">
-                                    <Upload className="h-4 w-4" />
-                                    파일 선택
-                                  </span>
-                                </Button>
-                              </label>
-                            </div>
+                              {/* 텍스트 영역 */}
+                              <div className="space-y-3">
+                                <h3 className="text-xl font-semibold transition-colors duration-300 text-gray-800 group-hover:text-blue-700">
+                                  이미지 업로드
+                                </h3>
+                                <p className="text-sm transition-colors duration-300 max-w-md mx-auto text-gray-600 group-hover:text-blue-600">
+                                  AI 인플루언서 학습용 이미지들을 드래그하여 놓거나 클릭하여 선택하세요
+                                </p>
+                                <p className="text-xs text-gray-500">
+                                  지원 형식: JPG, PNG, WebP (여러 파일 선택 가능)
+                                </p>
+                              </div>
 
-                            {files.imageSamples && (
-                              <p className="text-xs text-green-600 mt-2">{files.imageSamples.length}개 파일 선택됨</p>
-                            )}
+                              {/* 파일 선택 버튼 */}
+                              <div className="mt-6">
+                                <input
+                                  type="file"
+                                  multiple
+                                  accept=".jpg,.jpeg,.png,.webp"
+                                  onChange={(e) => handleFileUpload("imageSamples", e.target.files)}
+                                  className="hidden"
+                                  id="image-upload"
+                                />
+                                <label htmlFor="image-upload">
+                                  <Button
+                                    className="transition-all duration-300 cursor-pointer bg-white hover:bg-blue-50 text-gray-700 border-gray-300 hover:border-blue-400 hover:text-blue-700 shadow-sm hover:shadow-md"
+                                    asChild
+                                  >
+                                    <span className="flex items-center gap-2">
+                                      <Upload className="h-4 w-4" />
+                                      파일 선택
+                                    </span>
+                                  </Button>
+                                </label>
+                              </div>
+                            </div>
                           </div>
                         </div>
-                      </div>
+                      ) : (
+                        // 이미지가 있을 때: 미리보기와 추가 업로드 버튼
+                        <div className="space-y-6">
+                          {/* 업로드된 이미지 미리보기 */}
+                          <div>
+                            <div className="flex items-center justify-between mb-4">
+                              <Label className="text-base font-medium">프로필 이미지</Label>
+                              <div className="flex gap-2">
+                                {uploadingImage && (
+                                  <div className="flex items-center gap-2 text-sm text-blue-600">
+                                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                                    업로드 중...
+                                  </div>
+                                )}
+                                {formData.uploadedImageUrl && (
+                                  <div className="flex items-center gap-2 text-sm text-green-600">
+                                    <div className="w-2 h-2 bg-green-600 rounded-full"></div>
+                                    업로드 완료
+                                  </div>
+                                )}
+                                <input
+                                  type="file"
+                                  multiple
+                                  accept=".jpg,.jpeg,.png,.webp"
+                                  onChange={(e) => handleFileUpload("imageSamples", e.target.files)}
+                                  className="hidden"
+                                  id="image-upload-additional"
+                                />
+                                <label htmlFor="image-upload-additional">
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="cursor-pointer"
+                                    asChild
+                                  >
+                                    <span className="flex items-center gap-2">
+                                      <Upload className="h-4 w-4" />
+                                      이미지 변경
+                                    </span>
+                                  </Button>
+                                </label>
+                              </div>
+                            </div>
+                            
+                            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                              {imagePreviewUrls.map((url, index) => (
+                                <div key={index} className="relative group">
+                                  <div className="aspect-square rounded-lg overflow-hidden border-2 border-gray-200 hover:border-blue-400 transition-colors">
+                                    <img
+                                      src={url}
+                                      alt={`미리보기 ${index + 1}`}
+                                      className="w-full h-full object-cover"
+                                    />
+                                  </div>
+                                  <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <Button
+                                  type="button"
+                                  size="icon"
+                                  variant="destructive"
+                                  className="h-6 w-6"
+                                  onClick={() => {
+                                    // 해당 이미지 제거
+                                    const newFiles = files.imageSamples?.filter((_, i) => i !== index) || []
+                                    const newUrls = imagePreviewUrls.filter((_, i) => i !== index)
+                                    setFiles(prev => ({ ...prev, imageSamples: newFiles }))
+                                    setImagePreviewUrls(newUrls)
+                                    // 업로드된 이미지 URL도 제거
+                                    setFormData(prev => ({ ...prev, uploadedImageUrl: undefined }))
+                                    // 기존 URL 해제
+                                    URL.revokeObjectURL(url)
+                                  }}
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                </Button>
+                                  </div>
+                                  <p className="text-xs text-gray-500 mt-1 text-center truncate">
+                                    {files.imageSamples?.[index]?.name || `이미지 ${index + 1}`}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </TabsContent>
 
@@ -1008,7 +1160,7 @@ export default function CreateModelPage() {
                         </Select>
                       </div>
                       <div>
-                        <Label htmlFor="hairStyle">헤어스타일</Label>
+                        <Label htmlFor="hairStyle">헤어스타일 *</Label>
                         <Input
                           id="hairStyle"
                           placeholder="예: 긴 생머리, 숏컷, 웨이브 머리, 포니테일"
@@ -1018,7 +1170,7 @@ export default function CreateModelPage() {
                         <p className="text-xs text-gray-500 mt-1">💡 원하는 헤어스타일을 자세히 설명해주세요</p>
                       </div>
                       <div>
-                        <Label htmlFor="mood">분위기/스타일</Label>
+                        <Label htmlFor="mood">분위기/스타일 *</Label>
                         <Input
                           id="mood"
                           placeholder="예: 밝고 친근한, 세련되고 우아한, 캐주얼하고 편안한"
@@ -1043,7 +1195,22 @@ export default function CreateModelPage() {
             >
               취소
             </Button>
-            <Button type="submit" disabled={isLoading} className="bg-blue-600 hover:bg-blue-700 text-white">
+            <Button 
+              type="submit" 
+              disabled={
+                isLoading || 
+                !formData.name.trim() || // 이름*
+                !formData.description.trim() || // 설명*
+                formData.gender === "none" || !formData.gender || // 성별*
+                formData.huggingFaceToken === "none" || !formData.huggingFaceToken || // 허깅페이스 토큰*
+                !formData.personality.trim() || // 성격*
+                (!formData.tone.trim() && formData.customTones.length === 0) || // 말투*
+                // 이미지: 업로드 또는 생성 중 하나는 필수
+                (formData.imageMethod === "upload" && (!files.imageSamples || files.imageSamples.length === 0)) ||
+                (formData.imageMethod === "prompt" && (!formData.hairStyle.trim() || !formData.mood.trim()))
+              } 
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+            >
               {isLoading ? '생성 중...' : '생성하기'}
             </Button>
           </div>

@@ -20,6 +20,9 @@ from .influencer import (
 # 게시글 관련 모델들
 from .board import Board
 
+# 음성 관련 모델들
+from .voice import VoiceBase, GeneratedVoice
+
 # vLLM에서 공유하는 Enum들 import
 try:
     import sys
@@ -58,5 +61,7 @@ __all__ = [
     "InfluencerAPI",
     "APICallAggregation",
     "Board",
+    "VoiceBase",
+    "GeneratedVoice",
     "FineTuningStatus"
 ]

@@ -17,7 +17,7 @@ from app.api.v1.endpoints import (
     admin,
     chatbot,  # 챗봇 활성화
     comfyui,
-    mcp,  # MCP 어댑터
+    tts,
 )
 from app.api.v1 import images
 from app.api.v1.endpoints.public import mbti as public_mbti
@@ -85,11 +85,6 @@ api_router.include_router(admin.router, prefix="/admin", tags=["Administrator"])
 # ComfyUI 이미지 생성 API
 api_router.include_router(comfyui.router, prefix="/comfyui", tags=["ComfyUI"])
 
-# MCP 어댑터 API
-api_router.include_router(mcp.router, prefix="/mcp", tags=["MCP"])
-
-
-
 # 워크플로우 전용 라우터 (프론트엔드 호환성)
 from fastapi import APIRouter as FastAPIRouter
 
@@ -117,3 +112,6 @@ api_router.include_router(workflow_only_router, prefix="/workflows", tags=["Work
 
 # 이미지 관리 API
 api_router.include_router(images.router, prefix="/images", tags=["Images"])
+
+# TTS API
+api_router.include_router(tts.router, prefix="/tts", tags=["TTS"])

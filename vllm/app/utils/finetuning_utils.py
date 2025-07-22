@@ -6,7 +6,9 @@ from typing import List, Dict, Any
 logger = logging.getLogger(__name__)
 
 # MBTI 데이터셋 로드
-MBTI_DATASET_PATH = "/workspace/SKN11-FINAL-4Team/vllm/pipeline/mbti_personality_dataset.json"
+# 현재 파일 위치를 기준으로 상대 경로 설정
+current_dir = os.path.dirname(os.path.abspath(__file__))
+MBTI_DATASET_PATH = os.path.join(current_dir, "..", "..", "pipeline", "mbti_personality_dataset.json")
 MBTI_PERSONALITIES = {}
 
 try:
@@ -68,38 +70,58 @@ def create_system_message(influencer_name: str, personality: str, style_info: st
 
 def convert_qa_data_for_finetuning(qa_data: List[Dict], influencer_name: str, 
                                  personality: str, style_info: str = "") -> List[Dict]:
-    """QA 데이터를 파인튜닝용 형식으로 변환 (VLLM 서버용)"""
+    """QA 데이터를 파인튜닝용 형식으로 변환 (멀티턴 대화 지원)"""
     finetuning_data = []
 
-    logger.info(f"convert_qa_data_for_finetuning: Received {len(qa_data)} QA pairs.")
+    logger.info(f"convert_qa_data_for_finetuning: Received {len(qa_data)} items.")
     if not qa_data:
         logger.warning("convert_qa_data_for_finetuning: qa_data is empty.")
         return []
 
     # 시스템 메시지 생성
     system_message = create_system_message(influencer_name, personality, style_info)
-    print(qa_data)
-    for i, qa_pair in enumerate(qa_data):
-        question = qa_pair.get('question', '').strip()
-        answer = qa_pair.get('answer', '').strip()
-
-        if not question:
-            logger.warning(f"convert_qa_data_for_finetuning: QA pair {i} has empty question: {qa_pair}")
-        if not answer:
-            logger.warning(f"convert_qa_data_for_finetuning: QA pair {i} has empty answer: {qa_pair}")
-
-        if question and answer:
-            # EXAONE 모델용 채팅 형식으로 변환
-            formatted_data = {
-                "messages": [
-                    {"role": "system", "content": system_message},
-                    {"role": "user", "content": question},
-                    {"role": "assistant", "content": answer}
-                ]
-            }
-            finetuning_data.append(formatted_data)
+    
+    for i, item in enumerate(qa_data):
+        # 멀티턴 대화 형식인지 확인 (리스트로 전달된 경우)
+        if isinstance(item, list):
+            # 멀티턴 대화를 하나의 대화 세션으로 변환
+            messages = [{"role": "system", "content": system_message}]
+            
+            for turn in item:
+                question = turn.get('q', '').strip()
+                answer = turn.get('a', '').strip()
+                
+                if question and answer:
+                    messages.append({"role": "user", "content": question})
+                    messages.append({"role": "assistant", "content": answer})
+                else:
+                    logger.warning(f"convert_qa_data_for_finetuning: Turn in conversation {i} has empty question or answer: {turn}")
+            
+            if len(messages) > 1:  # 시스템 메시지 외에 대화가 있는 경우만 추가
+                formatted_data = {"messages": messages}
+                finetuning_data.append(formatted_data)
         else:
-            logger.warning(f"convert_qa_data_for_finetuning: Skipping invalid QA pair {i}: {qa_pair}")
+            # 기존 단일 QA 형식 처리
+            question = item.get('question', '').strip()
+            answer = item.get('answer', '').strip()
+
+            if not question:
+                logger.warning(f"convert_qa_data_for_finetuning: QA pair {i} has empty question: {item}")
+            if not answer:
+                logger.warning(f"convert_qa_data_for_finetuning: QA pair {i} has empty answer: {item}")
+
+            if question and answer:
+                # EXAONE 모델용 채팅 형식으로 변환
+                formatted_data = {
+                    "messages": [
+                        {"role": "system", "content": system_message},
+                        {"role": "user", "content": question},
+                        {"role": "assistant", "content": answer}
+                    ]
+                }
+                finetuning_data.append(formatted_data)
+            else:
+                logger.warning(f"convert_qa_data_for_finetuning: Skipping invalid QA pair {i}: {item}")
 
     logger.info(f"QA 데이터 변환 완료: {len(qa_data)}개 → {len(finetuning_data)}개")
     return finetuning_data

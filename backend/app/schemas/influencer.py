@@ -35,6 +35,7 @@ class StylePresetBase(BaseModel):
     influencer_style: str
     influencer_personality: str
     influencer_speech: str
+    influencer_description: Optional[str] = None
 
 
 class StylePresetCreate(StylePresetBase):
@@ -54,6 +55,13 @@ class StylePresetUpdate(BaseModel):
 
 class StylePreset(StylePresetBase, TimestampSchema):
     style_preset_id: str
+
+
+class StylePresetWithMBTI(StylePreset):
+    """MBTI 정보가 포함된 스타일 프리셋 스키마"""
+    mbti_name: Optional[str] = None
+    mbti_traits: Optional[str] = None
+    mbti_speech: Optional[str] = None
 
 
 # AIInfluencer 스키마
