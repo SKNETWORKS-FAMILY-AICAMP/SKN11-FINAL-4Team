@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, Suspense } from 'react'
+import { useEffect, useState, Suspense, useRef } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { BackendAuthService } from '@/lib/backend-auth'
 import { useAuth } from '@/hooks/use-auth'
@@ -8,12 +8,19 @@ import { useAuth } from '@/hooks/use-auth'
 function NaverCallbackContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
-  const { login } = useAuth()
+  const { loginWithUserInfo } = useAuth()
   const [status, setStatus] = useState<'processing' | 'success' | 'error'>('processing')
   const [errorMessage, setErrorMessage] = useState<string>('')
+  const isProcessingRef = useRef(false)
 
   useEffect(() => {
     const processAuth = async () => {
+      // 중복 실행 방지 (useRef 사용)
+      if (isProcessingRef.current) {
+        console.log('이미 처리 중입니다. 중복 실행 방지')
+        return
+      }
+      
       const code = searchParams.get('code')
       const error = searchParams.get('error')
       const state = searchParams.get('state')
@@ -36,6 +43,8 @@ function NaverCallbackContent() {
         }, 3000)
         return
       }
+
+      isProcessingRef.current = true
 
       try {
         // 먼저 Naver에서 토큰 교환
@@ -82,8 +91,8 @@ function NaverCallbackContent() {
           picture: user.profile_image || ''
         })
 
-        // AuthContext의 login 함수를 사용하여 인증 상태 업데이트
-        await login(backendResponse.access_token)
+        // AuthContext의 loginWithUserInfo 함수를 사용하여 인증 상태 업데이트 (사용자 정보 포함)
+        await loginWithUserInfo(backendResponse.access_token, backendResponse.user)
         
         // localStorage에서 소셜 인증 관련 데이터 정리
         localStorage.removeItem('social_auth_return_url')
@@ -104,7 +113,7 @@ function NaverCallbackContent() {
     }
 
     processAuth()
-  }, [searchParams, router])
+  }, []) // 빈 의존성 배열로 마운트 시 한 번만 실행
 
   return (
     <div className="flex items-center justify-center min-h-screen">

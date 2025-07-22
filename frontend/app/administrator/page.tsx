@@ -8,11 +8,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { User, Save, ShieldCheck, ShieldX, Plus, Trash2, Users, Eye, EyeOff, Key, Loader2, FileText, Upload, Download } from "lucide-react"
+import { User, Save, ShieldCheck, ShieldX, Plus, Trash2, Users, Eye, EyeOff, Key, Loader2, FileText, Upload, Download, Settings, ChevronDown, ChevronUp } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { AlertDialog, AlertDialogTrigger, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogCancel, AlertDialogAction } from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
+
+
 import { useToast } from "@/hooks/use-toast"
 import { AdminService, type AdminTeam, type AdminUser, type AdminHFToken, type AdminCreateHFTokenRequest } from "@/lib/services/admin.service"
 
@@ -59,6 +60,12 @@ export default function AdministratorPage() {
   const [loadingDocuments, setLoadingDocuments] = useState(false)
   const [uploadingDocument, setUploadingDocument] = useState(false)
   const [selectedFiles, setSelectedFiles] = useState<File[]>([])
+  
+  // RAG 고급 설정 관련 상태들
+  const [showAdvancedSettings, setShowAdvancedSettings] = useState(false)
+  const [chunkSize, setChunkSize] = useState(1000)
+  const [chunkOverlap, setChunkOverlap] = useState(200)
+  const [topK, setTopK] = useState(5)
 
   // API에서 데이터 로드
   useEffect(() => {
@@ -467,7 +474,7 @@ export default function AdministratorPage() {
       case "documents":
         return { 
           title: "문서 관리", 
-          icon: <FileText className="h-5 w-5 text-blue-600" />,
+          icon: <FileText className="h-5 w-5 text-green-600" />,
           description: "RAG 챗봇에서 사용할 문서를 업로드하고 관리할 수 있습니다"
         }
       default:
@@ -524,494 +531,495 @@ export default function AdministratorPage() {
 
           {/* 메인 콘텐츠 */}
           {!loading && !error && (
-            <>
-              <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-                <TabsContent value="group">
-                  <Card>
-                    <CardHeader>
-                      <TabsList className="w-full grid grid-cols-3">
-                        <TabsTrigger value="group">권한 그룹 관리</TabsTrigger>
-                        <TabsTrigger value="hf">허깅페이스 토큰 관리</TabsTrigger>
-                        <TabsTrigger value="documents">문서 관리</TabsTrigger>
-                      </TabsList>
-                    </CardHeader>
-                    <CardContent>
-                      {/* 새 그룹 추가 섹션 */}
-                      <div className="mb-6 pb-6 border-b">
-                        <h4 className="font-medium text-gray-900 mb-4">새 그룹 추가</h4>
-                        <div className="flex gap-3 items-end">
-                          <div className="flex-1 max-w-xs">
-                            <Label htmlFor="new-group-name">그룹 이름</Label>
-                            <Input
-                              id="new-group-name"
-                              placeholder="예: 마케터, 개발자"
-                              value={newGroupName}
-                              onChange={e => setNewGroupName(e.target.value)}
-                            />
-                          </div>
-                          <Button onClick={handleAddGroup} disabled={!newGroupName.trim() || groupNameExists} className="bg-blue-600 hover:bg-blue-700 text-white">
-                            <Plus className="h-4 w-4 mr-1" />
-                            그룹 추가
-                          </Button>
-                        </div>
-                        {groupNameExists && (
-                          <div className="text-xs text-red-600 mt-1">이미 사용 중인 그룹 이름입니다.</div>
-                        )}
-                      </div>
-                      <div className="grid grid-cols-1 lg:grid-cols-8 gap-6">
-                        {/* 전체 사용자 목록 */}
-                        <Card style={{ height: '1080px', display: 'flex', flexDirection: 'column' }} className="lg:col-span-3">
-                          <CardHeader className="pb-3 pt-6" style={{ flexShrink: 0 }}>
-                            <CardTitle className="text-base font-semibold flex items-center gap-2">
-                              <Users className="h-4 w-4" />
-                              전체 사용자
-                            </CardTitle>
-                            {/* 사용자 검색 필터 */}
-                            <div className="mt-3">
-                              <Input
-                                placeholder="이름 또는 이메일로 검색"
-                                value={searchTerm}
-                                onChange={e => setSearchTerm(e.target.value)}
-                                className="max-w-xs"
-                              />
-                            </div>
-                          </CardHeader>
-                          <CardContent
-                            className="transition-colors"
-                            style={{ flex: 1, overflow: 'hidden' }}
-                          >
-                            <div className="space-y-4 h-full overflow-y-auto custom-scrollbar border border-gray-200 rounded-lg shadow-inner px-2 py-2">
-                              {allUsers
-                                .filter(user =>
-                                  user.user_name.includes(searchTerm) || user.email.includes(searchTerm)
-                                )
-                                .sort((a, b) => {
-                                  // 팀에 속하지 않는 사용자를 최상단으로 정렬
-                                  const aInTeam = teams.some(team => team.users?.some(u => u.user_id === a.user_id))
-                                  const bInTeam = teams.some(team => team.users?.some(u => u.user_id === b.user_id))
-
-                                  if (!aInTeam && bInTeam) return -1
-                                  if (aInTeam && !bInTeam) return 1
-                                  return 0
-                                })
-                                .map(user => {
-                                  // 팀에 속하지 않는 사용자인지 확인
-                                  const isNotInTeam = !teams.some(team => team.users?.some(u => u.user_id === user.user_id))
-
-                                  return (
-                                    <div
-                                      key={user.user_id}
-                                      draggable
-                                      onDragStart={(e) => handleDragStart(e, user)}
-                                      onDragEnd={handleDragEnd}
-                                      className="flex items-center gap-3 p-4 rounded-lg transition-all w-full min-h-[70px] hover:bg-blue-50 hover:shadow-md hover:scale-[1.02] border border-transparent hover:border-blue-200"
-                                    >
-                                      <Avatar className="h-8 w-8 flex-shrink-0">
-                                        <AvatarFallback className="bg-gray-200 text-gray-600 text-xs">
-                                          {user.user_name.charAt(0)}
-                                        </AvatarFallback>
-                                      </Avatar>
-                                      <div className="flex-1 min-w-0 flex flex-col justify-center">
-                                        <p className={`font-medium text-sm truncate ${isNotInTeam ? 'text-orange-600' : ''}`} title={user.user_name}>
-                                          {user.user_name}
-                                        </p>
-                                        <p className="text-xs text-gray-500 truncate">{user.email}</p>
-                                        {isNotInTeam && (
-                                          <p className="text-xs text-orange-500 font-medium">팀 미소속</p>
-                                        )}
-                                      </div>
-                                      <div className="flex items-center gap-1 flex-shrink-0">
-                                        <Button
-                                          variant="ghost"
-                                          size="sm"
-                                          onClick={(e) => {
-                                            e.stopPropagation()
-                                            handleUserDetail(user)
-                                          }}
-                                          className="h-6 w-6 p-0"
-                                        >
-                                          <Eye className="h-3 w-3" />
-                                        </Button>
-                                        <Button
-                                          variant="ghost"
-                                          size="sm"
-                                          onClick={(e) => {
-                                            e.stopPropagation()
-                                            handleUserTeamAssignment(user)
-                                          }}
-                                          className="h-6 w-6 p-0"
-                                        >
-                                          <Users className="h-3 w-3" />
-                                        </Button>
-
-                                      </div>
-                                    </div>
-                                  )
-                                })}
-                              {allUsers
-                                .filter(user =>
-                                  user.user_name.includes(searchTerm) || user.email.includes(searchTerm)
-                                ).length === 0 && (
-                                  <div className="text-center py-8 text-gray-500">
-                                    <Users className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                                    <p className="text-sm">할당되지 않은 사용자가 없습니다.</p>
-                                  </div>
-                                )}
-                            </div>
-                          </CardContent>
-                        </Card>
-
-                        {/* 권한 그룹들 */}
-                        <div className="lg:col-span-5">
-                          <Card style={{ height: '1080px', display: 'flex', flexDirection: 'column' }}>
-                            <CardHeader className="pb-3 pt-6" style={{ flexShrink: 0 }}>
-                              <CardTitle className="text-base font-semibold flex items-center gap-2">
-                                <Users className="h-4 w-4" />
-                                전체 팀
-                              </CardTitle>
-                              {/* 팀 검색 필터 */}
-                              <div className="mt-3">
+            <div className="w-full max-w-5xl mx-auto">
+              <Card className="shadow">
+                <CardHeader className="pb-0 pt-0 px-0">
+                  <div className="flex">
+                    <button
+                      onClick={() => setActiveTab("group")}
+                      className={`flex-1 py-3 rounded-tl-lg border-b-0 text-base font-semibold transition-all duration-200 focus:outline-none border-r
+                        ${activeTab === "group"
+                          ? "bg-white text-blue-600 border-x border-t border-blue-600 z-10"
+                          : "bg-gray-100 text-gray-500 border-x border-t border-b border-gray-200 hover:text-blue-600"}
+                      `}
+                    >
+                      <Users className="inline-block mr-1 h-4 w-4 align-text-bottom" />
+                      권한 그룹 관리
+                    </button>
+                    <button
+                      onClick={() => setActiveTab("hf")}
+                      className={`flex-1 py-3 border-b-0 text-base font-semibold transition-all duration-200 focus:outline-none border-r
+                        ${activeTab === "hf"
+                          ? "bg-white text-yellow-600 border-x border-t border-yellow-500 z-10"
+                          : "bg-gray-100 text-gray-500 border-x border-t border-b border-gray-200 hover:text-yellow-600"}
+                      `}
+                    >
+                      <Key className="inline-block mr-1 h-4 w-4 align-text-bottom" />
+                      허깅페이스 토큰
+                    </button>
+                    <button
+                      onClick={() => setActiveTab("documents")}
+                      className={`flex-1 py-3 rounded-tr-lg border-b-0 text-base font-semibold transition-all duration-200 focus:outline-none
+                        ${activeTab === "documents"
+                          ? "bg-white text-green-600 border-x border-t border-green-500 z-10"
+                          : "bg-gray-100 text-gray-500 border-x border-t border-b border-gray-200 hover:text-green-600"}
+                      `}
+                    >
+                      <FileText className="inline-block mr-1 h-4 w-4 align-text-bottom" />
+                      문서 관리
+                    </button>
+                  </div>
+                </CardHeader>
+                <CardContent className="border-t-0 bg-white p-6 rounded-b-lg">
+                  {activeTab === "group" && (
+                    <>
+                      {/* 그룹 관리 카드 내용 */}
+                      <Card>
+                        <CardHeader>
+                          <CardTitle className="flex items-center gap-2">
+                            <Users className="h-5 w-5 text-blue-600" />
+                            권한 그룹 관리
+                          </CardTitle>
+                          <CardDescription>
+                            사용자를 드래그하여 그룹에 추가하거나 제거할 수 있습니다
+                          </CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                          {/* 새 그룹 추가 섹션 */}
+                          <div className="mb-6 pb-6 border-b">
+                            <h4 className="font-medium text-gray-900 mb-4">새 그룹 추가</h4>
+                            <div className="flex gap-3 items-end">
+                              <div className="flex-1 max-w-xs">
+                                <Label htmlFor="new-group-name">그룹 이름</Label>
                                 <Input
-                                  placeholder="팀 이름으로 검색..."
-                                  value={teamSearchTerm}
-                                  onChange={e => setTeamSearchTerm(e.target.value)}
-                                  className="max-w-xs"
+                                  id="new-group-name"
+                                  placeholder="예: 마케터, 개발자"
+                                  value={newGroupName}
+                                  onChange={e => setNewGroupName(e.target.value)}
                                 />
                               </div>
-                            </CardHeader>
-                            <CardContent
-                              className="transition-colors"
-                              style={{ flex: 1, overflow: 'hidden' }}
-                            >
-                              {/* 팀 리스트 스크롤 컨테이너 */}
-                              <div className="h-full overflow-y-auto custom-scrollbar space-y-4 py-2 px-2 border border-gray-200 rounded-lg shadow-inner">
-                                {teams
-                                  .filter(team => 
-                                    team.group_name.toLowerCase().includes(teamSearchTerm.toLowerCase()) ||
-                                    team.group_description?.toLowerCase().includes(teamSearchTerm.toLowerCase())
-                                  )
-                                  .map(team => (
-                                    <Card
-                                      key={team.group_id}
-                                      onDragOver={(e) => handleDragOver(e, team.group_id)}
-                                      onDragLeave={handleDragLeave}
-                                      onDrop={(e) => handleDrop(e, team.group_id)}
-                                      className={`transition-all duration-300 ${dragOverTeam === team.group_id ? 'ring-2 ring-blue-500 bg-blue-50 border-blue-300 shadow-lg' : ''}`}
-                                    >
-                                      <CardHeader className="pb-2">
-                                        <div className="flex items-center justify-between">
-                                          <div className="flex items-center gap-3">
-                                            <div className={`w-3 h-3 rounded-full ${team.group_id === 0 ? 'bg-red-500' :
-                                              team.group_name === 'Editor' ? 'bg-blue-500' : 'bg-green-500'
-                                              }`}></div>
-                                            <div>
-                                              <CardTitle className="text-sm font-semibold">{team.group_name}</CardTitle>
-                                              <p className="text-xs text-gray-500">
-                                                {team.group_description || `${team.users?.length || 0}명의 사용자`}
-                                              </p>
-                                            </div>
-                                          </div>
-                                          <div className="flex items-center gap-2">
-                                            <Badge variant="secondary" className="text-xs">
-                                              {team.users?.length || 0}명
-                                            </Badge>
-                                            {team.group_id !== 1 && (
-                                              <AlertDialog>
-                                                <AlertDialogTrigger asChild>
-                                                  <Button
-                                                    size="icon"
-                                                    variant="ghost"
-                                                    className="h-6 w-6"
-                                                  >
-                                                    <Trash2 className="h-3 w-3 text-red-500" />
-                                                  </Button>
-                                                </AlertDialogTrigger>
-                                                <AlertDialogContent>
-                                                  <AlertDialogHeader>
-                                                    <AlertDialogTitle>팀 삭제 확인</AlertDialogTitle>
-                                                    <AlertDialogDescription>
-                                                      정말 '{team.group_name}' 팀을 삭제하시겠습니까?
-                                                      {team.users && team.users.length > 0 && (
-                                                        <span className="block mt-2 text-red-600 font-medium">
-                                                          ⚠️ 이 팀에는 {team.users.length}명의 사용자가 있습니다.
-                                                          삭제하기 전에 모든 사용자를 다른 팀으로 이동해주세요.
-                                                        </span>
-                                                      )}
-                                                    </AlertDialogDescription>
-                                                  </AlertDialogHeader>
-                                                  <AlertDialogFooter>
-                                                    <AlertDialogCancel>취소</AlertDialogCancel>
-                                                    <AlertDialogAction
-                                                      onClick={() => handleDeleteGroup(team.group_id)}
-                                                      className="bg-red-600 hover:bg-red-700"
-                                                    >
-                                                      삭제
-                                                    </AlertDialogAction>
-                                                  </AlertDialogFooter>
-                                                </AlertDialogContent>
-                                              </AlertDialog>
+                              <Button onClick={handleAddGroup} disabled={!newGroupName.trim() || groupNameExists} className="bg-blue-600 hover:bg-blue-700 text-white">
+                                <Plus className="h-4 w-4 mr-1" />
+                                그룹 추가
+                              </Button>
+                            </div>
+                            {groupNameExists && (
+                              <div className="text-xs text-red-600 mt-1">이미 사용 중인 그룹 이름입니다.</div>
+                            )}
+                          </div>
+                          <div className="grid grid-cols-1 lg:grid-cols-8 gap-6">
+                            {/* 전체 사용자 목록 */}
+                            <Card style={{ height: '1080px', display: 'flex', flexDirection: 'column' }} className="lg:col-span-3">
+                              <CardHeader className="pb-3 pt-6" style={{ flexShrink: 0 }}>
+                                <CardTitle className="text-base font-semibold flex items-center gap-2">
+                                  <Users className="h-4 w-4" />
+                                  전체 사용자
+                                </CardTitle>
+                                {/* 사용자 검색 필터 */}
+                                <div className="mt-3">
+                                  <Input
+                                    placeholder="이름 또는 이메일로 검색"
+                                    value={searchTerm}
+                                    onChange={e => setSearchTerm(e.target.value)}
+                                    className="max-w-xs"
+                                  />
+                                </div>
+                              </CardHeader>
+                              <CardContent
+                                className="transition-colors"
+                                style={{ flex: 1, overflow: 'hidden' }}
+                              >
+                                <div className="space-y-4 h-full overflow-y-auto custom-scrollbar border border-gray-200 rounded-lg shadow-inner px-2 py-2">
+                                  {allUsers
+                                    .filter(user =>
+                                      user.user_name.includes(searchTerm) || user.email.includes(searchTerm)
+                                    )
+                                    .sort((a, b) => {
+                                      // 팀에 속하지 않는 사용자를 최상단으로 정렬
+                                      const aInTeam = teams.some(team => team.users?.some(u => u.user_id === a.user_id))
+                                      const bInTeam = teams.some(team => team.users?.some(u => u.user_id === b.user_id))
+
+                                      if (!aInTeam && bInTeam) return -1
+                                      if (aInTeam && !bInTeam) return 1
+                                      return 0
+                                    })
+                                    .map(user => {
+                                      // 팀에 속하지 않는 사용자인지 확인
+                                      const isNotInTeam = !teams.some(team => team.users?.some(u => u.user_id === user.user_id))
+
+                                      return (
+                                        <div
+                                          key={user.user_id}
+                                          draggable
+                                          onDragStart={(e) => handleDragStart(e, user)}
+                                          onDragEnd={handleDragEnd}
+                                          className="flex items-center gap-3 p-4 rounded-lg transition-all w-full min-h-[70px] hover:bg-blue-50 hover:shadow-md hover:scale-[1.02] border border-transparent hover:border-blue-200"
+                                        >
+                                          <Avatar className="h-8 w-8 flex-shrink-0">
+                                            <AvatarFallback className="bg-gray-200 text-gray-600 text-xs">
+                                              {user.user_name.charAt(0)}
+                                            </AvatarFallback>
+                                          </Avatar>
+                                          <div className="flex-1 min-w-0 flex flex-col justify-center">
+                                            <p className={`font-medium text-sm truncate ${isNotInTeam ? 'text-orange-600' : ''}`} title={user.user_name}>
+                                              {user.user_name}
+                                            </p>
+                                            <p className="text-xs text-gray-500 truncate">{user.email}</p>
+                                            {isNotInTeam && (
+                                              <p className="text-xs text-orange-500 font-medium">팀 미소속</p>
                                             )}
                                           </div>
-                                        </div>
-                                      </CardHeader>
-                                      <CardContent
-                                        className={`transition-colors`}
-                                      >
-                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
-                                          {(team.users || []).map(user => (
-                                            <div
-                                              key={user.user_id}
-                                              className="flex items-center gap-2 p-3 rounded-lg transition-all w-full h-full min-h-[50px] hover:bg-white hover:shadow-sm border border-gray-100"
-                                              style={{ userSelect: 'none' }}
+                                          <div className="flex items-center gap-1 flex-shrink-0">
+                                            <Button
+                                              variant="ghost"
+                                              size="sm"
+                                              onClick={(e) => {
+                                                e.stopPropagation()
+                                                handleUserDetail(user)
+                                              }}
+                                              className="h-6 w-6 p-0"
                                             >
-                                              <Avatar className="h-6 w-6 flex-shrink-0">
-                                                <AvatarFallback className="bg-blue-100 text-blue-600 text-xs">
-                                                  {user.user_name.charAt(0)}
-                                                </AvatarFallback>
-                                              </Avatar>
-                                              <div className="flex-1 min-w-0 flex flex-col justify-center">
-                                                <p className="font-medium text-xs truncate">{user.user_name}</p>
-                                                <p className="text-xs text-gray-500 truncate">{user.email}</p>
-                                              </div>
-                                              <div className="flex items-center gap-1 flex-shrink-0">
-                                                <AlertDialog>
-                                                  <AlertDialogTrigger asChild>
-                                                    <Button
-                                                      variant="ghost"
-                                                      size="sm"
-                                                      onClick={e => e.stopPropagation()}
-                                                      className="h-6 w-6 p-0 text-orange-500 hover:text-orange-700"
-                                                      title="팀에서 제거"
-                                                    >
-                                                      <ShieldX className="h-3 w-3" />
-                                                    </Button>
-                                                  </AlertDialogTrigger>
-                                                  <AlertDialogContent>
-                                                    <AlertDialogHeader>
-                                                      <AlertDialogTitle>팀에서 사용자 제거</AlertDialogTitle>
-                                                      <AlertDialogDescription>
-                                                        정말 이 사용자를 현재 팀에서 제거하시겠습니까?
-                                                      </AlertDialogDescription>
-                                                    </AlertDialogHeader>
-                                                    <AlertDialogFooter>
-                                                      <AlertDialogCancel>취소</AlertDialogCancel>
-                                                      <AlertDialogAction
-                                                        onClick={() => handleRemoveUserFromTeam(user.user_id, team.group_id)}
-                                                        className="bg-orange-600 hover:bg-orange-700"
-                                                      >
-                                                        제거
-                                                      </AlertDialogAction>
-                                                    </AlertDialogFooter>
-                                                  </AlertDialogContent>
-                                                </AlertDialog>
-                                              </div>
-                                            </div>
-                                          ))}
-                                          {(!team.users || team.users.length === 0) && (
-                                            <div className="col-span-2 text-center py-4 text-gray-400 border-2 border-dashed border-gray-200 rounded-lg">
-                                              <p className="text-sm">사용자가 없습니다</p>
-                                            </div>
-                                          )}
-                                        </div>
-                                      </CardContent>
-                                    </Card>
-                                  ))}
-                                
-                                {/* 검색 결과가 없을 때 */}
-                                {teams.filter(team => 
-                                  team.group_name.toLowerCase().includes(teamSearchTerm.toLowerCase()) ||
-                                  team.group_description?.toLowerCase().includes(teamSearchTerm.toLowerCase())
-                                ).length === 0 && teamSearchTerm && (
-                                  <div className="text-center py-8 text-gray-500">
-                                    <Users className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                                    <p className="text-sm">검색 결과가 없습니다.</p>
-                                    <p className="text-xs text-gray-400 mt-1">다른 검색어를 시도해보세요.</p>
-                                  </div>
-                                )}
-                              </div>
-                            </CardContent>
-                          </Card>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </TabsContent>
-                <TabsContent value="hf">
-                  <Card className="mb-0">
-                    <CardHeader>
-                      <TabsList className="w-full grid grid-cols-3">
-                        <TabsTrigger value="group">권한 그룹 관리</TabsTrigger>
-                        <TabsTrigger value="hf">허깅페이스 토큰 관리</TabsTrigger>
-                        <TabsTrigger value="documents">문서 관리</TabsTrigger>
-                      </TabsList>
-                    </CardHeader>
-                    <CardContent>
-                      {/* 새 토큰 추가 섹션 */}
-                      <div className="mb-6 pb-6 border-b">
-                        <h4 className="font-medium text-gray-900 mb-4">새 토큰 추가</h4>
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 items-end">
-                          <div>
-                            <Label htmlFor="new-token-alias">별칭</Label>
-                            <Input
-                              id="new-token-alias"
-                              placeholder="예: 서비스용, 개발용"
-                              value={inputAlias}
-                              onChange={e => setInputAlias(e.target.value)}
-                              disabled={creatingToken}
-                            />
-                          </div>
-                          <div>
-                            <Label htmlFor="new-token-username">허깅페이스 사용자명</Label>
-                            <Input
-                              id="new-token-username"
-                              placeholder="허깅페이스 계정명"
-                              value={inputUsername}
-                              onChange={e => setInputUsername(e.target.value)}
-                              disabled={creatingToken}
-                            />
-                          </div>
-                          <div>
-                            <Label htmlFor="new-token-value">토큰</Label>
-                            <Input
-                              id="new-token-value"
-                              type="password"
-                              placeholder="hf_..."
-                              value={inputToken}
-                              onChange={e => setInputToken(e.target.value)}
-                              disabled={creatingToken}
-                            />
-                          </div>
-                          <div>
-                            <Label htmlFor="team-select">팀 할당 (선택사항)</Label>
-                            <select
-                              id="team-select"
-                              className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                              value={selectedTeamForToken || ""}
-                              onChange={e => setSelectedTeamForToken(e.target.value ? Number(e.target.value) : null)}
-                              disabled={creatingToken}
-                            >
-                              <option value="">할당하지 않음</option>
-                              {teams.map(team => (
-                                <option key={team.group_id} value={team.group_id}>
-                                  {team.group_name}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        </div>
-                        <div className="flex justify-end mt-4">
-                          <Button
-                            onClick={handleCreateHFToken}
-                            disabled={!inputAlias.trim() || !inputToken.trim() || !inputUsername.trim() || aliasExists || creatingToken}
-                            className="bg-blue-600 hover:bg-blue-700 text-white"
-                          >
-                            {creatingToken ? (
-                              <>
-                                <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                                생성 중...
-                              </>
-                            ) : (
-                              <>
-                                <Plus className="h-4 w-4 mr-1" />
-                                토큰 생성
-                              </>
-                            )}
-                          </Button>
-                        </div>
-                        {aliasExists && (
-                          <div className="text-xs text-red-600 mt-1">이미 사용 중인 별칭입니다.</div>
-                        )}
-                        {usernameExists && (
-                          <div className="text-xs text-red-600 mt-1">이미 등록된 사용자명입니다.</div>
-                        )}
-                      </div>
-                      {/* 토큰 리스트 */}
-                      {loadingTokens ? (
-                        <div className="flex items-center justify-center py-12">
-                          <div className="text-center">
-                            <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4 text-blue-600" />
-                            <p className="text-gray-600">토큰을 불러오는 중...</p>
-                          </div>
-                        </div>
-                      ) : hfTokens.length === 0 ? (
-                        <div className="text-center py-8 text-gray-400">
-                          <Key className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                          <p className="text-sm">등록된 토큰이 없습니다. 새 토큰을 추가해보세요.</p>
-                        </div>
-                      ) : (
-                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                          {/* 할당되지 않은 토큰들 */}
-                          <Card className="shadow-sm transition-all">
-                            <CardHeader className="pb-3">
-                              <CardTitle className="text-base font-semibold flex items-center gap-2">
-                                <Key className="h-4 w-4 text-yellow-600" />
-                                할당되지 않은 토큰 ({hfTokens.filter(t => !t.group_id).length})
-                              </CardTitle>
-                            </CardHeader>
-                            <CardContent className="transition-colors" style={{ minHeight: '200px' }}>
-                              <div className="text-xs text-gray-500 mb-2">
-                                토큰을 <span className="font-semibold text-blue-600">클릭</span>하여 상세 정보를 확인하세요.
-                              </div>
-                              <div className="space-y-2 mt-4">
-                                {hfTokens
-                                  .filter(token => !token.group_id)
-                                  .map((token) => (
-                                    <div
-                                      key={token.hf_manage_id}
-                                      className="flex items-center gap-3 p-4 rounded-lg transition-all w-full min-h-[50px] bg-yellow-50 border border-yellow-200 hover:bg-yellow-100 cursor-pointer"
-                                      onClick={() => {
-                                        setSelectedTokenDetail(token);
-                                        setIsTokenDetailOpen(true);
-                                      }}
-                                    >
-                                      <div className="flex-1 min-w-0">
-                                        <div className="font-medium text-yellow-800 truncate">{token.hf_token_nickname}</div>
-                                        <div className="text-xs text-gray-500 truncate">사용자: {token.hf_user_name}</div>
-                                        {token.created_at && (
-                                          <div className="text-xs text-gray-400">
-                                            생성일: {new Date(token.created_at).toLocaleDateString('ko-KR')}
+                                              <Eye className="h-3 w-3" />
+                                            </Button>
+                                            <Button
+                                              variant="ghost"
+                                              size="sm"
+                                              onClick={(e) => {
+                                                e.stopPropagation()
+                                                handleUserTeamAssignment(user)
+                                              }}
+                                              className="h-6 w-6 p-0"
+                                            >
+                                              <Users className="h-3 w-3" />
+                                            </Button>
+
                                           </div>
-                                        )}
+                                        </div>
+                                      )
+                                    })}
+                                  {allUsers
+                                    .filter(user =>
+                                      user.user_name.includes(searchTerm) || user.email.includes(searchTerm)
+                                    ).length === 0 && (
+                                      <div className="text-center py-8 text-gray-500">
+                                        <Users className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                                        <p className="text-sm">할당되지 않은 사용자가 없습니다.</p>
                                       </div>
-                                    </div>
-                                  ))}
-                                {hfTokens.filter(t => !t.group_id).length === 0 && (
-                                  <div className="text-center py-4 text-gray-400">
-                                    <p className="text-sm">할당되지 않은 토큰이 없습니다.</p>
+                                    )}
+                                </div>
+                              </CardContent>
+                            </Card>
+
+                            {/* 권한 그룹들 */}
+                            <div className="lg:col-span-5">
+                              <Card style={{ height: '1080px', display: 'flex', flexDirection: 'column' }}>
+                                <CardHeader className="pb-3 pt-6" style={{ flexShrink: 0 }}>
+                                  <CardTitle className="text-base font-semibold flex items-center gap-2">
+                                    <Users className="h-4 w-4" />
+                                    전체 팀
+                                  </CardTitle>
+                                  {/* 팀 검색 필터 */}
+                                  <div className="mt-3">
+                                    <Input
+                                      placeholder="팀 이름으로 검색..."
+                                      value={teamSearchTerm}
+                                      onChange={e => setTeamSearchTerm(e.target.value)}
+                                      className="max-w-xs"
+                                    />
                                   </div>
-                                )}
+                                </CardHeader>
+                                <CardContent
+                                  className="transition-colors"
+                                  style={{ flex: 1, overflow: 'hidden' }}
+                                >
+                                  {/* 팀 리스트 스크롤 컨테이너 */}
+                                  <div className="h-full overflow-y-auto custom-scrollbar space-y-4 py-2 px-2 border border-gray-200 rounded-lg shadow-inner">
+                                    {teams
+                                      .filter(team => 
+                                        team.group_name.toLowerCase().includes(teamSearchTerm.toLowerCase()) ||
+                                        team.group_description?.toLowerCase().includes(teamSearchTerm.toLowerCase())
+                                      )
+                                      .map(team => (
+                                        <Card
+                                          key={team.group_id}
+                                          onDragOver={(e) => handleDragOver(e, team.group_id)}
+                                          onDragLeave={handleDragLeave}
+                                          onDrop={(e) => handleDrop(e, team.group_id)}
+                                          className={`transition-all duration-300 ${dragOverTeam === team.group_id ? 'ring-2 ring-blue-500 bg-blue-50 border-blue-300 shadow-lg' : ''}`}
+                                        >
+                                          <CardHeader className="pb-2">
+                                            <div className="flex items-center justify-between">
+                                              <div className="flex items-center gap-3">
+                                                <div className={`w-3 h-3 rounded-full ${team.group_id === 0 ? 'bg-red-500' :
+                                                  team.group_name === 'Editor' ? 'bg-blue-500' : 'bg-green-500'
+                                                  }`}></div>
+                                                <div>
+                                                  <CardTitle className="text-sm font-semibold">{team.group_name}</CardTitle>
+                                                  <p className="text-xs text-gray-500">
+                                                    {team.group_description || `${team.users?.length || 0}명의 사용자`}
+                                                  </p>
+                                                </div>
+                                              </div>
+                                              <div className="flex items-center gap-2">
+                                                <Badge variant="secondary" className="text-xs">
+                                                  {team.users?.length || 0}명
+                                                </Badge>
+                                                {team.group_id !== 1 && (
+                                                  <AlertDialog>
+                                                    <AlertDialogTrigger asChild>
+                                                      <Button
+                                                        size="icon"
+                                                        variant="ghost"
+                                                        className="h-6 w-6"
+                                                      >
+                                                        <Trash2 className="h-3 w-3 text-red-500" />
+                                                      </Button>
+                                                    </AlertDialogTrigger>
+                                                    <AlertDialogContent>
+                                                      <AlertDialogHeader>
+                                                        <AlertDialogTitle>팀 삭제 확인</AlertDialogTitle>
+                                                        <AlertDialogDescription>
+                                                          정말 '{team.group_name}' 팀을 삭제하시겠습니까?
+                                                          {team.users && team.users.length > 0 && (
+                                                            <span className="block mt-2 text-red-600 font-medium">
+                                                              ⚠️ 이 팀에는 {team.users.length}명의 사용자가 있습니다.
+                                                              삭제하기 전에 모든 사용자를 다른 팀으로 이동해주세요.
+                                                            </span>
+                                                          )}
+                                                        </AlertDialogDescription>
+                                                      </AlertDialogHeader>
+                                                      <AlertDialogFooter>
+                                                        <AlertDialogCancel>취소</AlertDialogCancel>
+                                                        <AlertDialogAction
+                                                          onClick={() => handleDeleteGroup(team.group_id)}
+                                                          className="bg-red-600 hover:bg-red-700"
+                                                        >
+                                                          삭제
+                                                        </AlertDialogAction>
+                                                      </AlertDialogFooter>
+                                                    </AlertDialogContent>
+                                                  </AlertDialog>
+                                                )}
+                                              </div>
+                                            </div>
+                                          </CardHeader>
+                                          <CardContent
+                                            className={`transition-colors`}
+                                          >
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
+                                              {(team.users || []).map(user => (
+                                                <div
+                                                  key={user.user_id}
+                                                  className="flex items-center gap-2 p-3 rounded-lg transition-all w-full h-full min-h-[50px] hover:bg-white hover:shadow-sm border border-gray-100"
+                                                  style={{ userSelect: 'none' }}
+                                                >
+                                                  <Avatar className="h-6 w-6 flex-shrink-0">
+                                                    <AvatarFallback className="bg-blue-100 text-blue-600 text-xs">
+                                                      {user.user_name.charAt(0)}
+                                                    </AvatarFallback>
+                                                  </Avatar>
+                                                  <div className="flex-1 min-w-0 flex flex-col justify-center">
+                                                    <p className="font-medium text-xs truncate">{user.user_name}</p>
+                                                    <p className="text-xs text-gray-500 truncate">{user.email}</p>
+                                                  </div>
+                                                  <div className="flex items-center gap-1 flex-shrink-0">
+                                                    <AlertDialog>
+                                                      <AlertDialogTrigger asChild>
+                                                        <Button
+                                                          variant="ghost"
+                                                          size="sm"
+                                                          onClick={e => e.stopPropagation()}
+                                                          className="h-6 w-6 p-0 text-orange-500 hover:text-orange-700"
+                                                          title="팀에서 제거"
+                                                        >
+                                                          <ShieldX className="h-3 w-3" />
+                                                        </Button>
+                                                      </AlertDialogTrigger>
+                                                      <AlertDialogContent>
+                                                        <AlertDialogHeader>
+                                                          <AlertDialogTitle>팀에서 사용자 제거</AlertDialogTitle>
+                                                          <AlertDialogDescription>
+                                                            정말 이 사용자를 현재 팀에서 제거하시겠습니까?
+                                                          </AlertDialogDescription>
+                                                        </AlertDialogHeader>
+                                                        <AlertDialogFooter>
+                                                          <AlertDialogCancel>취소</AlertDialogCancel>
+                                                          <AlertDialogAction
+                                                            onClick={() => handleRemoveUserFromTeam(user.user_id, team.group_id)}
+                                                            className="bg-orange-600 hover:bg-orange-700"
+                                                          >
+                                                            제거
+                                                          </AlertDialogAction>
+                                                        </AlertDialogFooter>
+                                                      </AlertDialogContent>
+                                                    </AlertDialog>
+                                                  </div>
+                                                </div>
+                                              ))}
+                                              {(!team.users || team.users.length === 0) && (
+                                                <div className="col-span-2 text-center py-4 text-gray-400 border-2 border-dashed border-gray-200 rounded-lg">
+                                                  <p className="text-sm">사용자가 없습니다</p>
+                                                </div>
+                                              )}
+                                            </div>
+                                          </CardContent>
+                                        </Card>
+                                      ))}
+                                    
+                                    {/* 검색 결과가 없을 때 */}
+                                    {teams.filter(team => 
+                                      team.group_name.toLowerCase().includes(teamSearchTerm.toLowerCase()) ||
+                                      team.group_description?.toLowerCase().includes(teamSearchTerm.toLowerCase())
+                                    ).length === 0 && teamSearchTerm && (
+                                      <div className="text-center py-8 text-gray-500">
+                                        <Users className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                                        <p className="text-sm">검색 결과가 없습니다.</p>
+                                        <p className="text-xs text-gray-400 mt-1">다른 검색어를 시도해보세요.</p>
+                                      </div>
+                                    )}
+                                  </div>
+                                </CardContent>
+                              </Card>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    </>
+                  )}
+                  {activeTab === "hf" && (
+                    <>
+                      {/* 허깅페이스 토큰 카드 내용 */}
+                      <Card>
+                        <CardHeader>
+                          <CardTitle className="flex items-center gap-2">
+                            <Key className="h-5 w-5 text-yellow-600" />
+                            허깅페이스 토큰 관리
+                          </CardTitle>
+                          <CardDescription>
+                            AI 모델 사용을 위한 토큰을 관리하세요
+                          </CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                          {/* 새 토큰 추가 섹션 */}
+                          <div className="mb-6 pb-6 border-b">
+                            <h4 className="font-medium text-gray-900 mb-4">새 토큰 추가</h4>
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 items-end">
+                              <div>
+                                <Label htmlFor="new-token-alias">별칭</Label>
+                                <Input
+                                  id="new-token-alias"
+                                  placeholder="예: 서비스용, 개발용"
+                                  value={inputAlias}
+                                  onChange={e => setInputAlias(e.target.value)}
+                                  disabled={creatingToken}
+                                />
                               </div>
-                            </CardContent>
-                          </Card>
-
-                          {/* 팀별 할당된 토큰들 */}
-                          <div className="lg:col-span-2 space-y-4">
-                            {teams.map(team => {
-                              const teamTokens = hfTokens.filter(t => t.group_id === team.group_id)
-                              if (teamTokens.length === 0) return null
-
-                              return (
-                                <Card key={team.group_id} className="shadow-sm">
-                                  <CardHeader className="pb-3">
-                                    <CardTitle className="text-base font-semibold flex items-center gap-2">
-                                      <div className={`w-3 h-3 rounded-full ${team.group_id === 1 ? 'bg-red-500' : 'bg-green-500'
-                                        }`}></div>
-                                      {team.group_name} ({teamTokens.length}개 토큰)
-                                    </CardTitle>
-                                  </CardHeader>
-                                  <CardContent>
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                      {teamTokens.map((token) => (
+                              <div>
+                                <Label htmlFor="new-token-username">허깅페이스 사용자명</Label>
+                                <Input
+                                  id="new-token-username"
+                                  placeholder="허깅페이스 계정명"
+                                  value={inputUsername}
+                                  onChange={e => setInputUsername(e.target.value)}
+                                  disabled={creatingToken}
+                                />
+                              </div>
+                              <div>
+                                <Label htmlFor="new-token-value">토큰</Label>
+                                <Input
+                                  id="new-token-value"
+                                  type="password"
+                                  placeholder="hf_..."
+                                  value={inputToken}
+                                  onChange={e => setInputToken(e.target.value)}
+                                  disabled={creatingToken}
+                                />
+                              </div>
+                              <div>
+                                <Label htmlFor="team-select">팀 할당 (선택사항)</Label>
+                                <select
+                                  id="team-select"
+                                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                                  value={selectedTeamForToken || ""}
+                                  onChange={e => setSelectedTeamForToken(e.target.value ? Number(e.target.value) : null)}
+                                  disabled={creatingToken}
+                                >
+                                  <option value="">할당하지 않음</option>
+                                  {teams.map(team => (
+                                    <option key={team.group_id} value={team.group_id}>
+                                      {team.group_name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            </div>
+                            <div className="flex justify-end mt-4">
+                              <Button
+                                onClick={handleCreateHFToken}
+                                disabled={!inputAlias.trim() || !inputToken.trim() || !inputUsername.trim() || aliasExists || creatingToken}
+                                className="bg-blue-600 hover:bg-blue-700 text-white"
+                              >
+                                {creatingToken ? (
+                                  <>
+                                    <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                                    생성 중...
+                                  </>
+                                ) : (
+                                  <>
+                                    <Plus className="h-4 w-4 mr-1" />
+                                    토큰 생성
+                                  </>
+                                )}
+                              </Button>
+                            </div>
+                            {aliasExists && (
+                              <div className="text-xs text-red-600 mt-1">이미 사용 중인 별칭입니다.</div>
+                            )}
+                            {usernameExists && (
+                              <div className="text-xs text-red-600 mt-1">이미 등록된 사용자명입니다.</div>
+                            )}
+                          </div>
+                          {/* 토큰 리스트 */}
+                          {loadingTokens ? (
+                            <div className="flex items-center justify-center py-12">
+                              <div className="text-center">
+                                <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4 text-blue-600" />
+                                <p className="text-gray-600">토큰을 불러오는 중...</p>
+                              </div>
+                            </div>
+                          ) : hfTokens.length === 0 ? (
+                            <div className="text-center py-8 text-gray-400">
+                              <Key className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                              <p className="text-sm">등록된 토큰이 없습니다. 새 토큰을 추가해보세요.</p>
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                              {/* 할당되지 않은 토큰들 */}
+                              <Card className="shadow-sm transition-all">
+                                <CardHeader className="pb-3">
+                                  <CardTitle className="text-base font-semibold flex items-center gap-2">
+                                    <Key className="h-4 w-4 text-yellow-600" />
+                                    할당되지 않은 토큰 ({hfTokens.filter(t => !t.group_id).length})
+                                  </CardTitle>
+                                </CardHeader>
+                                <CardContent className="transition-colors" style={{ minHeight: '200px' }}>
+                                  <div className="text-xs text-gray-500 mb-2">
+                                    토큰을 <span className="font-semibold text-blue-600">클릭</span>하여 상세 정보를 확인하세요.
+                                  </div>
+                                  <div className="space-y-2 mt-4">
+                                    {hfTokens
+                                      .filter(token => !token.group_id)
+                                      .map((token) => (
                                         <div
                                           key={token.hf_manage_id}
-                                          className="flex items-center gap-2 p-3 rounded-lg bg-blue-50 border border-blue-200 hover:bg-blue-100 cursor-pointer"
+                                          className="flex items-center gap-3 p-4 rounded-lg transition-all w-full min-h-[50px] bg-yellow-50 border border-yellow-200 hover:bg-yellow-100 cursor-pointer"
                                           onClick={() => {
                                             setSelectedTokenDetail(token);
                                             setIsTokenDetailOpen(true);
                                           }}
                                         >
                                           <div className="flex-1 min-w-0">
-                                            <div className="font-medium text-blue-800 text-sm truncate">{token.hf_token_nickname}</div>
+                                            <div className="font-medium text-yellow-800 truncate">{token.hf_token_nickname}</div>
                                             <div className="text-xs text-gray-500 truncate">사용자: {token.hf_user_name}</div>
                                             {token.created_at && (
                                               <div className="text-xs text-gray-400">
@@ -1021,303 +1029,481 @@ export default function AdministratorPage() {
                                           </div>
                                         </div>
                                       ))}
-                                    </div>
-                                  </CardContent>
-                                </Card>
-                              )
-                            })}
-
-                            {hfTokens.filter(t => t.group_id).length === 0 && (
-                              <div className="text-center py-8 text-gray-400">
-                                <Key className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                                <p className="text-sm">팀에 할당된 토큰이 없습니다.</p>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                </TabsContent>
-
-                {/* 문서 관리 탭 */}
-                <TabsContent value="documents">
-                  <Card>
-                    <CardHeader>
-                      <TabsList className="w-full grid grid-cols-3">
-                        <TabsTrigger value="group">권한 그룹 관리</TabsTrigger>
-                        <TabsTrigger value="hf">허깅페이스 토큰 관리</TabsTrigger>
-                        <TabsTrigger value="documents">문서 관리</TabsTrigger>
-                      </TabsList>
-                    </CardHeader>
-                    <CardContent>
-                      {/* 문서 업로드 섹션 */}
-                      <div className="mb-6 pb-6 border-b">
-                        <h4 className="font-medium text-gray-900 mb-4">문서 업로드</h4>
-
-                        {/* 드래그 앤 드롭 영역 */}
-                        <div
-                          className={`relative group transition-all duration-300`}
-                        >
-                          <div className={`
-                            relative overflow-hidden rounded-xl border-2 border-dashed transition-all duration-300
-                            ${selectedFiles.length > 0
-                              ? "border-blue-500 bg-gradient-to-br from-blue-50 to-indigo-50 shadow-lg shadow-blue-100"
-                              : "border-gray-300 bg-gradient-to-br from-gray-50 to-white hover:border-blue-400 hover:bg-gradient-to-br hover:from-blue-50 hover:to-indigo-50"
-                            }
-                          `}>
-                            {/* 배경 패턴 */}
-                            <div className="absolute inset-0 opacity-5">
-                              <div className="absolute top-4 left-4 w-8 h-8 border-2 border-gray-400 rounded-lg"></div>
-                              <div className="absolute top-12 right-8 w-6 h-6 border-2 border-gray-400 rounded-full"></div>
-                              <div className="absolute bottom-8 left-12 w-4 h-4 border-2 border-gray-400 rotate-45"></div>
-                              <div className="absolute bottom-16 right-4 w-10 h-10 border-2 border-gray-400 rounded-lg"></div>
-                            </div>
-
-                            <div className="relative p-12 text-center">
-                              {/* 아이콘 영역 */}
-                              <div className={`
-                                relative mx-auto mb-6 w-20 h-20 rounded-full flex items-center justify-center transition-all duration-300
-                                ${selectedFiles.length > 0
-                                  ? "bg-blue-100 shadow-lg shadow-blue-200"
-                                  : "bg-gray-100 group-hover:bg-blue-100 group-hover:shadow-lg group-hover:shadow-blue-200"
-                                }
-                              `}>
-                                <Upload className={`
-                                  h-8 w-8 transition-all duration-300
-                                  ${selectedFiles.length > 0
-                                    ? "text-blue-600 scale-110"
-                                    : "text-gray-500 group-hover:text-blue-600 group-hover:scale-110"
-                                  }
-                                `} />
-                                {/* 애니메이션 효과 */}
-                                {selectedFiles.length > 0 && (
-                                  <div className="absolute inset-0 rounded-full border-2 border-blue-300 animate-ping"></div>
-                                )}
-                              </div>
-
-                              {/* 텍스트 영역 */}
-                              <div className="space-y-3">
-                                <h3 className={`
-                                  text-xl font-semibold transition-colors duration-300
-                                  ${selectedFiles.length > 0 ? "text-blue-700" : "text-gray-800 group-hover:text-blue-700"}
-                                `}>
-                                  {selectedFiles.length > 0 ? "여기에 놓으세요!" : "문서 업로드"}
-                                </h3>
-                                <p className={`
-                                  text-sm transition-colors duration-300 max-w-md mx-auto
-                                  ${selectedFiles.length > 0 ? "text-blue-600" : "text-gray-600 group-hover:text-blue-600"}
-                                `}>
-                                  RAG 챗봇 학습용 문서들을 드래그하여 놓거나 클릭하여 선택하세요
-                                </p>
-                                <p className="text-xs text-gray-500">
-                                  지원 형식: PDF, DOCX, TXT (여러 파일 선택 가능)
-                                </p>
-                              </div>
-
-                              {/* 파일 선택 버튼 */}
-                              <div className="mt-6">
-                                <input
-                                  type="file"
-                                  accept=".pdf,.docx,.txt"
-                                  multiple
-                                  onChange={(e) => {
-                                    const files = Array.from(e.target.files || [])
-                                    setSelectedFiles(prev => [...prev, ...files])
-                                  }}
-                                  className="hidden"
-                                  id="document-upload"
-                                />
-                                <label htmlFor="document-upload">
-                                  <Button
-                                    className={`
-                                      transition-all duration-300 cursor-pointer
-                                      ${selectedFiles.length > 0
-                                        ? "bg-blue-600 hover:bg-blue-700 text-white shadow-lg"
-                                        : "bg-white hover:bg-blue-50 text-gray-700 border-gray-300 hover:border-blue-400 hover:text-blue-700 shadow-sm hover:shadow-md"
-                                      }
-                                    `}
-                                    asChild
-                                  >
-                                    <span className="flex items-center gap-2">
-                                      <Upload className="h-4 w-4" />
-                                      파일 선택
-                                    </span>
-                                  </Button>
-                                </label>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* 선택된 파일 목록 */}
-                        {selectedFiles.length > 0 && (
-                          <div className="mt-4">
-                            <h5 className="font-medium text-gray-900 mb-2">선택된 파일 ({selectedFiles.length}개)</h5>
-                            <div className="space-y-2">
-                              {selectedFiles.map((file, index) => (
-                                <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                                  <div className="flex items-center gap-3">
-                                    <FileText className="h-5 w-5 text-gray-500" />
-                                    <div>
-                                      <p className="font-medium text-sm">{file.name}</p>
-                                      <p className="text-xs text-gray-500">
-                                        {(file.size / 1024 / 1024).toFixed(2)} MB
-                                      </p>
-                                    </div>
+                                    {hfTokens.filter(t => !t.group_id).length === 0 && (
+                                      <div className="text-center py-4 text-gray-400">
+                                        <p className="text-sm">할당되지 않은 토큰이 없습니다.</p>
+                                      </div>
+                                    )}
                                   </div>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => {
-                                      setSelectedFiles(prev => prev.filter((_, i) => i !== index))
-                                    }}
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
-                                </div>
-                              ))}
-                            </div>
-                            <div className="flex gap-2 mt-4">
-                              <Button
-                                onClick={() => setSelectedFiles([])}
-                                variant="outline"
-                                size="sm"
-                              >
-                                모든 파일 제거
-                              </Button>
-                              <Button
-                                onClick={() => {
-                                  // TODO: 실제 업로드 로직 구현
-                                  console.log('업로드할 파일들:', selectedFiles)
-                                  setUploadingDocument(true)
-                                  setTimeout(() => {
-                                    setUploadingDocument(false)
-                                    setSelectedFiles([])
-                                    toast({
-                                      title: "업로드 완료",
-                                      description: `${selectedFiles.length}개의 문서가 성공적으로 업로드되었습니다.`,
-                                      variant: "default",
-                                    })
-                                  }, 2000)
-                                }}
-                                disabled={selectedFiles.length === 0 || uploadingDocument}
-                                className="bg-blue-600 hover:bg-blue-700 text-white"
-                              >
-                                {uploadingDocument ? (
-                                  <>
-                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                    업로드 중...
-                                  </>
-                                ) : (
-                                  <>
-                                    <Upload className="h-4 w-4 mr-2" />
-                                    업로드 ({selectedFiles.length}개)
-                                  </>
+                                </CardContent>
+                              </Card>
+
+                              {/* 팀별 할당된 토큰들 */}
+                              <div className="lg:col-span-2 space-y-4">
+                                {teams.map(team => {
+                                  const teamTokens = hfTokens.filter(t => t.group_id === team.group_id)
+                                  if (teamTokens.length === 0) return null
+
+                                  return (
+                                    <Card key={team.group_id} className="shadow-sm">
+                                      <CardHeader className="pb-3">
+                                        <CardTitle className="text-base font-semibold flex items-center gap-2">
+                                          <div className={`w-3 h-3 rounded-full ${team.group_id === 1 ? 'bg-red-500' : 'bg-green-500'
+                                            }`}></div>
+                                          {team.group_name} ({teamTokens.length}개 토큰)
+                                        </CardTitle>
+                                      </CardHeader>
+                                      <CardContent>
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                          {teamTokens.map((token) => (
+                                            <div
+                                              key={token.hf_manage_id}
+                                              className="flex items-center gap-2 p-3 rounded-lg bg-blue-50 border border-blue-200 hover:bg-blue-100 cursor-pointer"
+                                              onClick={() => {
+                                                setSelectedTokenDetail(token);
+                                                setIsTokenDetailOpen(true);
+                                              }}
+                                            >
+                                              <div className="flex-1 min-w-0">
+                                                <div className="font-medium text-blue-800 text-sm truncate">{token.hf_token_nickname}</div>
+                                                <div className="text-xs text-gray-500 truncate">사용자: {token.hf_user_name}</div>
+                                                {token.created_at && (
+                                                  <div className="text-xs text-gray-400">
+                                                    생성일: {new Date(token.created_at).toLocaleDateString('ko-KR')}
+                                                  </div>
+                                                )}
+                                              </div>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </CardContent>
+                                    </Card>
+                                  )
+                                })}
+
+                                {hfTokens.filter(t => t.group_id).length === 0 && (
+                                  <div className="text-center py-8 text-gray-400">
+                                    <Key className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                                    <p className="text-sm">팀에 할당된 토큰이 없습니다.</p>
+                                  </div>
                                 )}
-                              </Button>
+                              </div>
                             </div>
-                          </div>
-                        )}
-                      </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    </>
+                  )}
+                  {activeTab === "documents" && (
+                    <>
+                      {/* 문서 관리 카드 내용 */}
+                      <Card>
+                        <CardHeader>
+                          <CardTitle className="flex items-center gap-2">
+                            <FileText className="h-5 w-5 text-green-600" />
+                            문서 관리
+                          </CardTitle>
+                          <CardDescription>
+                            RAG 챗봇에서 사용할 문서를 업로드하고 관리할 수 있습니다
+                          </CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                          {/* 문서 업로드 섹션 */}
+                          <div className="mb-6 pb-6 border-b">
+                            <h4 className="font-medium text-gray-900 mb-4">문서 업로드</h4>
 
-                      {/* 문서 목록 섹션 */}
-                      <div>
-                        <div className="flex items-center justify-between mb-4">
-                          <h4 className="font-medium text-gray-900">업로드된 문서</h4>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              // TODO: 문서 목록 새로고침
-                              setLoadingDocuments(true)
-                              setTimeout(() => {
-                                setLoadingDocuments(false)
-                                // 임시 데이터
-                                setDocuments([
-                                  { id: 1, name: '회사_정책서.pdf', size: '2.5 MB', uploaded_at: '2024-01-15', status: 'processed' },
-                                  { id: 2, name: '제품_매뉴얼.docx', size: '1.8 MB', uploaded_at: '2024-01-14', status: 'processing' },
-                                  { id: 3, name: 'FAQ.txt', size: '0.3 MB', uploaded_at: '2024-01-13', status: 'processed' },
-                                ])
-                              }, 1000)
-                            }}
-                            disabled={loadingDocuments}
-                          >
-                            {loadingDocuments ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              '새로고침'
-                            )}
-                          </Button>
-                        </div>
+                            {/* 드래그 앤 드롭 영역 */}
+                            <div
+                              className={`relative group transition-all duration-300`}
+                              onDragOver={(e) => {
+                                e.preventDefault()
+                                e.stopPropagation()
+                              }}
+                              onDrop={(e) => {
+                                e.preventDefault()
+                                e.stopPropagation()
+                                const files = Array.from(e.dataTransfer.files)
+                                // PDF 파일만 필터링
+                                const pdfFiles = files.filter(file => file.type === 'application/pdf')
+                                setSelectedFiles(prev => [...prev, ...pdfFiles])
+                              }}
+                            >
+                              <div 
+                                className={`
+                                  relative overflow-hidden rounded-xl border-2 border-dashed transition-all duration-300
+                                  ${selectedFiles.length > 0
+                                    ? "border-blue-500 bg-gradient-to-br from-blue-50 to-indigo-50 shadow-lg shadow-blue-100"
+                                    : "border-gray-300 bg-gradient-to-br from-gray-50 to-white hover:border-blue-400 hover:bg-gradient-to-br hover:from-blue-50 hover:to-indigo-50"
+                                  }
+                                `}
+                                onDragEnter={(e) => {
+                                  e.preventDefault()
+                                  e.stopPropagation()
+                                }}
+                                onDragLeave={(e) => {
+                                  e.preventDefault()
+                                  e.stopPropagation()
+                                }}
+                              >
+                                {/* 배경 패턴 */}
+                                <div className="absolute inset-0 opacity-5">
+                                  <div className="absolute top-4 left-4 w-8 h-8 border-2 border-gray-400 rounded-lg"></div>
+                                  <div className="absolute top-12 right-8 w-6 h-6 border-2 border-gray-400 rounded-full"></div>
+                                  <div className="absolute bottom-8 left-12 w-4 h-4 border-2 border-gray-400 rotate-45"></div>
+                                  <div className="absolute bottom-16 right-4 w-10 h-10 border-2 border-gray-400 rounded-lg"></div>
+                                </div>
 
-                        {documents.length === 0 ? (
-                          <div className="text-center py-12">
-                            <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                            <p className="text-lg font-medium text-gray-900 mb-2">업로드된 문서가 없습니다</p>
-                            <p className="text-gray-600">위에서 문서를 업로드해보세요</p>
-                          </div>
-                        ) : (
-                          <div className="space-y-3">
-                            {documents.map((doc) => (
-                              <div key={doc.id} className="flex items-center justify-between p-4 border rounded-lg">
-                                <div className="flex items-center gap-3">
-                                  <FileText className="h-5 w-5 text-gray-500" />
-                                  <div>
-                                    <p className="font-medium">{doc.name}</p>
-                                    <p className="text-sm text-gray-500">
-                                      {doc.size} • {doc.uploaded_at}
+                                <div className="relative p-12 text-center">
+                                  {/* 아이콘 영역 */}
+                                  <div className={`
+                                    relative mx-auto mb-6 w-20 h-20 rounded-full flex items-center justify-center transition-all duration-300
+                                    ${selectedFiles.length > 0
+                                      ? "bg-blue-100 shadow-lg shadow-blue-200"
+                                      : "bg-gray-100 group-hover:bg-blue-100 group-hover:shadow-lg group-hover:shadow-blue-200"
+                                    }
+                                  `}>
+                                    <Upload className={`
+                                      h-8 w-8 transition-all duration-300
+                                      ${selectedFiles.length > 0
+                                        ? "text-blue-600 scale-110"
+                                        : "text-gray-500 group-hover:text-blue-600 group-hover:scale-110"
+                                      }
+                                    `} />
+                                    {/* 애니메이션 효과 */}
+                                    {selectedFiles.length > 0 && (
+                                      <div className="absolute inset-0 rounded-full border-2 border-blue-300 animate-ping"></div>
+                                    )}
+                                  </div>
+
+                                  {/* 텍스트 영역 */}
+                                  <div className="space-y-3">
+                                    <h3 className={`
+                                      text-xl font-semibold transition-colors duration-300
+                                      ${selectedFiles.length > 0 ? "text-blue-700" : "text-gray-800 group-hover:text-blue-700"}
+                                    `}>
+                                      {selectedFiles.length > 0 ? "여기에 놓으세요!" : "문서 업로드"}
+                                    </h3>
+                                    <p className={`
+                                      text-sm transition-colors duration-300 max-w-md mx-auto
+                                      ${selectedFiles.length > 0 ? "text-blue-600" : "text-gray-600 group-hover:text-blue-600"}
+                                    `}>
+                                      RAG 챗봇 학습용 문서들을 드래그하여 놓거나 클릭하여 선택하세요
+                                    </p>
+                                    <p className="text-xs text-gray-500">
+                                      지원 형식: PDF (여러 파일 선택 가능)
                                     </p>
                                   </div>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <Badge
-                                    variant={doc.status === 'processed' ? 'default' : 'secondary'}
-                                    className="text-xs"
-                                  >
-                                    {doc.status === 'processed' ? '처리 완료' : '처리 중'}
-                                  </Badge>
-                                  <AlertDialog>
-                                    <AlertDialogTrigger asChild>
-                                      <Button variant="ghost" size="sm">
-                                        <Trash2 className="h-4 w-4" />
+
+                                  {/* 파일 선택 버튼 */}
+                                  <div className="mt-6">
+                                    <input
+                                      type="file"
+                                      accept=".pdf"
+                                      multiple
+                                      onChange={(e) => {
+                                        const files = Array.from(e.target.files || [])
+                                        // PDF 파일만 필터링
+                                        const pdfFiles = files.filter(file => file.type === 'application/pdf')
+                                        setSelectedFiles(prev => [...prev, ...pdfFiles])
+                                      }}
+                                      className="hidden"
+                                      id="document-upload"
+                                    />
+                                    <label htmlFor="document-upload">
+                                      <Button
+                                        className={`
+                                          transition-all duration-300 cursor-pointer
+                                          ${selectedFiles.length > 0
+                                            ? "bg-blue-600 hover:bg-blue-700 text-white shadow-lg"
+                                            : "bg-white hover:bg-blue-50 text-gray-700 border-gray-300 hover:border-blue-400 hover:text-blue-700 shadow-sm hover:shadow-md"
+                                          }
+                                        `}
+                                        asChild
+                                      >
+                                        <span className="flex items-center gap-2">
+                                          <Upload className="h-4 w-4" />
+                                          파일 선택
+                                        </span>
                                       </Button>
-                                    </AlertDialogTrigger>
-                                    <AlertDialogContent>
-                                      <AlertDialogHeader>
-                                        <AlertDialogTitle>문서 삭제</AlertDialogTitle>
-                                        <AlertDialogDescription>
-                                          정말 이 문서를 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.
-                                        </AlertDialogDescription>
-                                      </AlertDialogHeader>
-                                      <AlertDialogFooter>
-                                        <AlertDialogCancel>취소</AlertDialogCancel>
-                                        <AlertDialogAction
-                                          onClick={() => {
-                                            setDocuments(prev => prev.filter(d => d.id !== doc.id))
-                                            toast({
-                                              title: "문서 삭제 완료",
-                                              description: `${doc.name}이(가) 삭제되었습니다.`,
-                                              variant: "default",
-                                            })
-                                          }}
-                                          className="bg-red-600 hover:bg-red-700"
-                                        >
-                                          삭제
-                                        </AlertDialogAction>
-                                      </AlertDialogFooter>
-                                    </AlertDialogContent>
-                                  </AlertDialog>
+                                    </label>
+                                  </div>
                                 </div>
                               </div>
-                            ))}
+                            </div>
+
+                            {/* 선택된 파일 목록 */}
+                            {selectedFiles.length > 0 && (
+                              <div className="mt-4">
+                                <h5 className="font-medium text-gray-900 mb-2">선택된 파일 ({selectedFiles.length}개)</h5>
+                                <div className="space-y-2">
+                                  {selectedFiles.map((file, index) => (
+                                    <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                                      <div className="flex items-center gap-3">
+                                        <FileText className="h-5 w-5 text-gray-500" />
+                                        <div>
+                                          <p className="font-medium text-sm">{file.name}</p>
+                                          <p className="text-xs text-gray-500">
+                                            {(file.size / 1024 / 1024).toFixed(2)} MB
+                                          </p>
+                                        </div>
+                                      </div>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => {
+                                          setSelectedFiles(prev => prev.filter((_, i) => i !== index))
+                                        }}
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                      </Button>
+                                    </div>
+                                  ))}
+                                </div>
+
+                                {/* RAG 고급 설정 토글 */}
+                                <div className="mt-6 border-t pt-4">
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={() => setShowAdvancedSettings(!showAdvancedSettings)}
+                                    className="w-full flex items-center justify-between"
+                                  >
+                                    <div className="flex items-center gap-2">
+                                      <Settings className="h-4 w-4" />
+                                      <span className="font-medium">RAG 임베딩 고급 설정</span>
+                                    </div>
+                                    {showAdvancedSettings ? (
+                                      <ChevronUp className="h-4 w-4" />
+                                    ) : (
+                                      <ChevronDown className="h-4 w-4" />
+                                    )}
+                                  </Button>
+
+                                  {/* 고급 설정 패널 */}
+                                  {showAdvancedSettings && (
+                                    <div className="mt-4 p-4 bg-gray-50 rounded-lg border">
+                                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                        {/* 청크 크기 설정 */}
+                                        <div>
+                                          <Label htmlFor="chunk-size" className="text-sm font-medium">
+                                            청크 크기
+                                          </Label>
+                                          <Input
+                                            id="chunk-size"
+                                            type="number"
+                                            value={chunkSize}
+                                            onChange={(e) => setChunkSize(Number(e.target.value))}
+                                            min="100"
+                                            max="4000"
+                                            step="100"
+                                            className="mt-1"
+                                          />
+                                          <p className="text-xs text-gray-500 mt-1">
+                                            문서를 나눌 청크의 크기 (100-4000)
+                                          </p>
+                                        </div>
+
+                                        {/* 청크 오버랩 설정 */}
+                                        <div>
+                                          <Label htmlFor="chunk-overlap" className="text-sm font-medium">
+                                            청크 오버랩
+                                          </Label>
+                                          <Input
+                                            id="chunk-overlap"
+                                            type="number"
+                                            value={chunkOverlap}
+                                            onChange={(e) => setChunkOverlap(Number(e.target.value))}
+                                            min="0"
+                                            max={chunkSize}
+                                            step="50"
+                                            className="mt-1"
+                                          />
+                                          <p className="text-xs text-gray-500 mt-1">
+                                            연속된 청크 간의 겹치는 부분 (0-{chunkSize})
+                                          </p>
+                                        </div>
+
+                                        {/* Top-K 설정 */}
+                                        <div>
+                                          <Label htmlFor="top-k" className="text-sm font-medium">
+                                            Top-K
+                                          </Label>
+                                          <Input
+                                            id="top-k"
+                                            type="number"
+                                            value={topK}
+                                            onChange={(e) => setTopK(Number(e.target.value))}
+                                            min="1"
+                                            max="20"
+                                            step="1"
+                                            className="mt-1"
+                                          />
+                                          <p className="text-xs text-gray-500 mt-1">
+                                            검색할 관련 문서 수 (1-20)
+                                          </p>
+                                        </div>
+                                      </div>
+
+                                      {/* 설정 요약 */}
+                                      <div className="mt-4 p-3 bg-blue-50 rounded border border-blue-200">
+                                        <h6 className="text-sm font-medium text-blue-900 mb-2">현재 설정 요약</h6>
+                                        <div className="text-xs text-blue-800 space-y-1">
+                                          <p>• 청크 크기: {chunkSize} 토큰</p>
+                                          <p>• 청크 오버랩: {chunkOverlap} 토큰</p>
+                                          <p>• Top-K: {topK}</p>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+
+                                <div className="flex gap-2 mt-4">
+                                  <Button
+                                    onClick={() => setSelectedFiles([])}
+                                    variant="outline"
+                                    size="sm"
+                                  >
+                                    모든 파일 제거
+                                  </Button>
+                                  <Button
+                                    onClick={() => {
+                                      // TODO: 실제 업로드 로직 구현 (RAG 설정 포함)
+                                      console.log('업로드할 파일들:', selectedFiles)
+                                      console.log('RAG 설정:', {
+                                        chunkSize,
+                                        chunkOverlap,
+                                        topK
+                                      })
+                                      setUploadingDocument(true)
+                                      setTimeout(() => {
+                                        setUploadingDocument(false)
+                                        setSelectedFiles([])
+                                        toast({
+                                          title: "업로드 완료",
+                                          description: `${selectedFiles.length}개의 문서가 성공적으로 업로드되었습니다.`,
+                                          variant: "default",
+                                        })
+                                      }, 2000)
+                                    }}
+                                    disabled={selectedFiles.length === 0 || uploadingDocument}
+                                    className="bg-blue-600 hover:bg-blue-700 text-white"
+                                  >
+                                    {uploadingDocument ? (
+                                      <>
+                                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                        업로드 중...
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Upload className="h-4 w-4 mr-2" />
+                                        업로드 ({selectedFiles.length}개)
+                                      </>
+                                    )}
+                                  </Button>
+                                </div>
+                              </div>
+                            )}
                           </div>
-                        )}
-                      </div>
-                    </CardContent>
-                  </Card>
-                </TabsContent>
-              </Tabs>
+
+                          {/* 문서 목록 섹션 */}
+                          <div>
+                            <div className="flex items-center justify-between mb-4">
+                              <h4 className="font-medium text-gray-900">업로드된 문서</h4>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  // TODO: 문서 목록 새로고침
+                                  setLoadingDocuments(true)
+                                  setTimeout(() => {
+                                    setLoadingDocuments(false)
+                                    // 임시 데이터
+                                    setDocuments([
+                                      { id: 1, name: '회사_정책서.pdf', size: '2.5 MB', uploaded_at: '2024-01-15', status: 'processed' },
+                                      { id: 2, name: '제품_매뉴얼.docx', size: '1.8 MB', uploaded_at: '2024-01-14', status: 'processing' },
+                                      { id: 3, name: 'FAQ.txt', size: '0.3 MB', uploaded_at: '2024-01-13', status: 'processed' },
+                                    ])
+                                  }, 1000)
+                                }}
+                                disabled={loadingDocuments}
+                              >
+                                {loadingDocuments ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  '새로고침'
+                                )}
+                              </Button>
+                            </div>
+
+                            {documents.length === 0 ? (
+                              <div className="text-center py-12">
+                                <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                                <p className="text-lg font-medium text-gray-900 mb-2">업로드된 문서가 없습니다</p>
+                                <p className="text-gray-600">위에서 문서를 업로드해보세요</p>
+                              </div>
+                            ) : (
+                              <div className="space-y-3">
+                                {documents.map((doc) => (
+                                  <div key={doc.id} className="flex items-center justify-between p-4 border rounded-lg">
+                                    <div className="flex items-center gap-3">
+                                      <FileText className="h-5 w-5 text-gray-500" />
+                                      <div>
+                                        <p className="font-medium">{doc.name}</p>
+                                        <p className="text-sm text-gray-500">
+                                          {doc.size} • {doc.uploaded_at}
+                                        </p>
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <Badge
+                                        variant={doc.status === 'processed' ? 'default' : 'secondary'}
+                                        className="text-xs"
+                                      >
+                                        {doc.status === 'processed' ? '처리 완료' : '처리 중'}
+                                      </Badge>
+                                      <AlertDialog>
+                                        <AlertDialogTrigger asChild>
+                                          <Button variant="ghost" size="sm">
+                                            <Trash2 className="h-4 w-4" />
+                                          </Button>
+                                        </AlertDialogTrigger>
+                                        <AlertDialogContent>
+                                          <AlertDialogHeader>
+                                            <AlertDialogTitle>문서 삭제</AlertDialogTitle>
+                                            <AlertDialogDescription>
+                                              정말 이 문서를 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.
+                                            </AlertDialogDescription>
+                                          </AlertDialogHeader>
+                                          <AlertDialogFooter>
+                                            <AlertDialogCancel>취소</AlertDialogCancel>
+                                            <AlertDialogAction
+                                              onClick={() => {
+                                                setDocuments(prev => prev.filter(d => d.id !== doc.id))
+                                                toast({
+                                                  title: "문서 삭제 완료",
+                                                  description: `${doc.name}이(가) 삭제되었습니다.`,
+                                                  variant: "default",
+                                                })
+                                              }}
+                                              className="bg-red-600 hover:bg-red-700"
+                                            >
+                                              삭제
+                                            </AlertDialogAction>
+                                          </AlertDialogFooter>
+                                        </AlertDialogContent>
+                                      </AlertDialog>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    </>
+                  )}
+                </CardContent>
+              </Card>
               <div className="h-8" />
               {/* 그룹 상세/사용자 관리 (모달로 이동) */}
               <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
@@ -1838,7 +2024,7 @@ export default function AdministratorPage() {
                   )}
                 </DialogContent>
               </Dialog>
-            </>
+            </div>
           )}
         </div>
       </div>

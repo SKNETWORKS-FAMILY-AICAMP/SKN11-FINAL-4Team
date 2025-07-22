@@ -8,6 +8,7 @@ import {BackendAuthService} from '@/lib/backend-auth'
 
 interface AuthContextType extends AuthState {
   login: (token: string) => void
+  loginWithUserInfo: (token: string, user: any) => void
   logout: () => void
   hasPermission: (resource: string, action: string) => boolean
   hasGroup: (groupName: string) => boolean
@@ -149,9 +150,32 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   }, [])
 
+  const loginWithUserInfo = useCallback(async (token: string, user: any) => {
+    try {
+      tokenUtils.setToken(token)
+      
+      // 소셜 로그인에서는 이미 사용자 정보를 받았으므로 verifyToken 호출하지 않음
+      setAuthState({
+        user,
+        token,
+        isAuthenticated: true,
+        isLoading: false
+      })
+    } catch (error) {
+      console.error('Login with user info failed:', error)
+      // 로그인 실패 시에만 토큰 제거
+      const errorStatus = (error as any)?.status
+      if (errorStatus === 401 || errorStatus === 403) {
+        tokenUtils.removeToken()
+      }
+      throw error
+    }
+  }, [])
+
   const contextValue: AuthContextType = {
     ...authState,
     login,
+    loginWithUserInfo,
     logout,
     hasPermission: (resource: string, action: string) => hasPermission(authState.user, resource, action),
     hasGroup: (groupName: string) => hasGroup(authState.user, groupName),
