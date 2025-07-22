@@ -77,8 +77,11 @@ def load_model_and_tokenizer(model_name="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct"):
     print("모델과 토크나이저 로딩 중...")
     
     # GPU 할당 확인 - execute_finetuning에서 이미 CUDA_VISIBLE_DEVICES가 설정됨
-    cuda_visible_devices = f"cuda:{os.environ.get('CUDA_VISIBLE_DEVICES', '0')}"
-    print(f"파인튜닝에 GPU {cuda_visible_devices} 사용 (execute_finetuning에서 설정됨)")
+    # CUDA_VISIBLE_DEVICES가 설정되면 PyTorch는 지정된 GPU만 볼 수 있고, 
+    # 그 GPU를 항상 0번으로 인식합니다
+    cuda_visible_devices = os.environ.get('CUDA_VISIBLE_DEVICES', '0')
+    print(f"CUDA_VISIBLE_DEVICES={cuda_visible_devices} 설정됨")
+    print(f"PyTorch는 이 GPU를 cuda:0으로 인식합니다")
     
     # GPU 상태 로깅
     from pipeline.gpu_utils import log_gpu_status
@@ -92,12 +95,12 @@ def load_model_and_tokenizer(model_name="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct"):
         tokenizer.pad_token = tokenizer.eos_token
         tokenizer.pad_token_id = tokenizer.eos_token_id
     
-    # 모델 로드 - gradient checkpointing 문제 해결을 위한 수정된 설정
+    # 모델 로드 - CUDA_VISIBLE_DEVICES가 설정되었으므로 cuda:0 사용
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
         torch_dtype=torch.bfloat16,
         trust_remote_code=True,
-        device_map=cuda_visible_devices,
+        device_map="cuda:0",  # CUDA_VISIBLE_DEVICES 설정 후에는 항상 0번
         use_cache=False,  # 그래디언트 체크포인팅과 호환성을 위해
     )
     

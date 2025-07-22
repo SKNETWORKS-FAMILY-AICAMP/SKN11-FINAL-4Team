@@ -146,11 +146,20 @@ async def execute_finetuning(task_id: str):
         # GPU 선택 로직 추가
         gpu_manager = await get_gpu_manager()
         
+        # 환경 변수에서 파인튜닝 GPU ID 가져오기 (기본값: 1)
+        finetuning_gpu_id = int(os.getenv('FINETUNING_GPU_ID', '1'))
+        
         # 모든 GPU의 정보를 가져옴
         all_gpu_info = await gpu_manager.get_all_gpus_info()
         
-        # 가장 여유 있는 GPU 선택
-        selected_gpu = gpu_manager.get_least_utilized_gpu(all_gpu_info)
+        # 파인튜닝용 GPU 선택 (환경 변수에서 지정하거나 가장 여유 있는 GPU)
+        if finetuning_gpu_id < gpu_manager.gpu_count and all_gpu_info.get(finetuning_gpu_id, {}).get('available', False):
+            selected_gpu = finetuning_gpu_id
+            logger.info(f"환경 변수에서 지정된 GPU {selected_gpu} 사용")
+        else:
+            # 지정된 GPU를 사용할 수 없으면 가장 여유 있는 GPU 선택
+            selected_gpu = gpu_manager.get_least_utilized_gpu(all_gpu_info)
+            logger.warning(f"지정된 GPU {finetuning_gpu_id}를 사용할 수 없어 GPU {selected_gpu} 선택")
         
         logger.info(f"🖥️ GPU 상태:")
         for gpu_id, info in all_gpu_info.items():
@@ -271,8 +280,9 @@ async def finetuning_worker():
         task_id = await finetuning_queue.get()
         logger.info(f"⚙️ 큐에서 파인튜닝 작업 시작: {task_id}")
         
-        # GPU 메모리 확인
-        available_memory = await get_available_gpu_memory_mb(device_id=1)
+        # GPU 메모리 확인 (파인튜닝용 GPU)
+        finetuning_gpu_id = int(os.getenv('FINETUNING_GPU_ID', '1'))
+        available_memory = await get_available_gpu_memory_mb(device_id=finetuning_gpu_id)
         if available_memory != -1 and available_memory < MIN_GPU_MEMORY_MB:
             logger.warning(f"⚠️ GPU 메모리 부족 ({available_memory}MB). 최소 {MIN_GPU_MEMORY_MB}MB 필요. 작업 {task_id}를 다시 큐에 넣습니다.")
             await finetuning_queue.put(task_id) # 작업을 다시 큐에 넣음
