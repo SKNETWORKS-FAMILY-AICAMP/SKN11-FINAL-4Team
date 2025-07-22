@@ -27,7 +27,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import { Plus, Search, Edit, Trash2, Eye, Calendar, User, Filter, X, Copy, ExternalLink, Heart, MessageCircle, MoreHorizontal, UploadCloud, Instagram, Users, BarChart3, Bookmark, Play } from "lucide-react"
+import { Plus, Search, Edit, Eye, Calendar, User, Filter, X, Copy, ExternalLink, Heart, MessageCircle, MoreHorizontal, UploadCloud, Instagram, Users, BarChart3, Bookmark, Play } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import apiClient from "@/lib/api"
 import { useToast } from "@/hooks/use-toast"
@@ -266,30 +266,7 @@ function PostListContent() {
     return matchesSearch && matchesStatus && matchesModel && matchesPlatform
   })
 
-  const handleDeletePost = async (postId: string | undefined) => {
-    if (!postId) return
 
-    // 삭제할 게시글 정보 찾기
-    const postToDelete = posts.find((post) => (post.id || post.board_id) === postId)
-    const postTitle = postToDelete?.title || postToDelete?.board_topic || "게시글"
-
-    try {
-      await apiClient.delete(`/api/v1/boards/${postId}`)
-      setPosts((prev) => prev.filter((post) => (post.id || post.board_id) !== postId))
-
-      toast({
-        title: "🗑️ 게시글 삭제 완료",
-        description: `"${postTitle}" 게시글이 성공적으로 삭제되었습니다.`,
-        variant: "default",
-      })
-    } catch (error) {
-      toast({
-        title: "❌ 게시글 삭제 실패",
-        description: `"${postTitle}" 게시글 삭제 중 오류가 발생했습니다.`,
-        variant: "destructive",
-      })
-    }
-  }
 
   const handlePublishPost = async (postId: string | undefined) => {
     if (!postId) return
@@ -929,7 +906,7 @@ function PostListContent() {
                 key={post.id}
                 post={post}
                 onView={handleViewPost}
-                onDelete={handleDeletePost}
+
                 onPublish={handlePublishPost}
                 onInstagramUpload={handleInstagramUpload}
                 showActions={false}
@@ -942,8 +919,17 @@ function PostListContent() {
 
         {!loading && filteredPosts.length === 0 && (
           <div className="text-center py-12">
-            <p className="text-gray-500 text-lg">검색 결과가 없습니다.</p>
-            <p className="text-gray-400 mt-2">다른 검색어를 시도해보세요.</p>
+            {searchTerm || statusFilter !== "all" || modelFilter !== "all" || platformFilter.length > 0 ? (
+              <>
+                <p className="text-gray-500 text-lg">검색 결과가 없습니다.</p>
+                <p className="text-gray-400 mt-2">다른 검색어를 시도해보세요.</p>
+              </>
+            ) : (
+              <>
+                <p className="text-gray-500 text-lg">생성된 게시글이 없습니다.</p>
+                <p className="text-gray-400 mt-2">새로운 게시글을 생성해보세요.</p>
+              </>
+            )}
           </div>
         )}
 
@@ -996,15 +982,7 @@ function PostListContent() {
                     <span>인스타그램 보기</span>
                   </Button>
                 )}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleDeletePost(selectedPost?.id || selectedPost?.board_id)}
-                  className="flex items-center space-x-1 text-red-600 hover:text-red-700 hover:bg-red-50"
-                >
-                  <Trash2 className="h-4 w-4" />
-                  <span>삭제</span>
-                </Button>
+
               </div>
             </DialogHeader>
 
