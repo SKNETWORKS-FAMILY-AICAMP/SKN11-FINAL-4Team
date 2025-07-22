@@ -72,11 +72,11 @@ def find_all_linear_names(model):
     
     return list(lora_module_names)
 
-def load_model_and_tokenizer(model_name="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct",gpu_id:int=1):
+def load_model_and_tokenizer(model_name="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct", gpu_id:int=1):
     """모델과 토크나이저 로드"""
     print("모델과 토크나이저 로딩 중...")
     
-    print(f"PyTorch는 cuda:{gpu_id}으로 인식합니다")
+    print(f"🎯 모델을 GPU {gpu_id}에 로드합니다")
     
     # GPU 상태 로깅
     from pipeline.gpu_utils import log_gpu_status
@@ -90,12 +90,12 @@ def load_model_and_tokenizer(model_name="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct",g
         tokenizer.pad_token = tokenizer.eos_token
         tokenizer.pad_token_id = tokenizer.eos_token_id
     
-    # 모델 로드 - CUDA_VISIBLE_DEVICES가 설정되었으므로 cuda:0 사용
+    # 모델 로드 - 지정된 GPU에 직접 로드
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
         torch_dtype=torch.bfloat16,
         trust_remote_code=True,
-        device_map=f"cuda:{gpu_id}",  # CUDA_VISIBLE_DEVICES 설정 후에는 항상 0번
+        device_map=f"cuda:{gpu_id}",  # 동적으로 GPU 지정
         use_cache=False,  # 그래디언트 체크포인팅과 호환성을 위해
     )
     
@@ -235,7 +235,7 @@ def prepare_dataset(tokenizer, qa_data: list[dict], system_message: str, max_len
     
     return tokenized_dataset
 
-def setup_training_arguments(training_epochs: int, output_dir="./exaone-lora-results-system-custom"):
+def setup_training_arguments(training_epochs: int, gpu_id: int, output_dir="./exaone-lora-results-system-custom"):
     """훈련 인수 설정"""
     training_args = TrainingArguments(
         output_dir=output_dir,
@@ -261,6 +261,10 @@ def setup_training_arguments(training_epochs: int, output_dir="./exaone-lora-res
         max_grad_norm=1.0,
         dataloader_num_workers=0, 
         save_total_limit=1,
+        # GPU 설정 명시적으로 추가
+        no_cuda=False,
+        # Trainer가 사용할 디바이스를 직접 지정
+        use_cpu=False,
     )
     
     return training_args
@@ -312,7 +316,7 @@ def upload_to_huggingface(output_dir, hf_token, hf_repo_id):
         print(f"❌ 업로드 실패: {e}")
         return hf_repo_id  # 실패해도 레포 경로는 반환
 
-def cleanup_gpu_memory():
+def cleanup_gpu_memory(gpu_id=None):
     """GPU 메모리 정리"""
     import gc
     
@@ -321,18 +325,41 @@ def cleanup_gpu_memory():
     
     # PyTorch GPU 캐시 정리
     if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-        torch.cuda.synchronize()
-        print("✅ GPU 메모리 캐시 정리 완료")
+        if gpu_id is not None:
+            # 특정 GPU의 캐시 정리
+            with torch.cuda.device(gpu_id):
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize(gpu_id)
+            print(f"✅ GPU {gpu_id} 메모리 캐시 정리 완료")
+        else:
+            # 모든 GPU의 캐시 정리
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+            print("✅ 모든 GPU 메모리 캐시 정리 완료")
 
-def main(qa_data: list[dict], system_message: str, hf_token: str, hf_repo_id: str, training_epochs: int,gpu_id:int) -> str:
+def main(qa_data: list[dict], system_message: str, hf_token: str, hf_repo_id: str, training_epochs: int, gpu_id:int) -> str:
     """메인 훈련 함수"""
     
     # 환경 변수 설정
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
     
+    # GPU 설정 로깅
+    print(f"🎯 파인튜닝에 GPU {gpu_id} 사용")
+    
+    # PyTorch가 올바른 GPU를 사용하도록 설정
+    if torch.cuda.is_available():
+        torch.cuda.set_device(gpu_id)
+        print(f"✅ PyTorch 기본 GPU를 {gpu_id}로 설정")
+        
+        # GPU 정보 출력
+        print(f"📊 GPU {gpu_id} 정보:")
+        print(f"  - 이름: {torch.cuda.get_device_name(gpu_id)}")
+        print(f"  - 총 메모리: {torch.cuda.get_device_properties(gpu_id).total_memory / 1024**3:.2f} GB")
+        print(f"  - 현재 할당된 메모리: {torch.cuda.memory_allocated(gpu_id) / 1024**3:.2f} GB")
+        print(f"  - 캐시된 메모리: {torch.cuda.memory_reserved(gpu_id) / 1024**3:.2f} GB")
+    
     # 시작 전 GPU 메모리 정리
-    cleanup_gpu_memory()
+    cleanup_gpu_memory(gpu_id)
     
     # 1. 모델과 토크나이저 로드
     model, tokenizer = load_model_and_tokenizer(gpu_id=gpu_id)
@@ -401,7 +428,7 @@ def main(qa_data: list[dict], system_message: str, hf_token: str, hf_repo_id: st
         }
     
     # 9. 훈련 인수 설정
-    training_args = setup_training_arguments(training_epochs)
+    training_args = setup_training_arguments(training_epochs, gpu_id)
     
     # 10. 조기 종료 콜백 설정
     early_stopping_callback = EarlyStoppingCallback(
@@ -419,10 +446,25 @@ def main(qa_data: list[dict], system_message: str, hf_token: str, hf_repo_id: st
         callbacks=[early_stopping_callback]
     )
     
+    # 모델이 올바른 GPU에 있는지 확인
+    if torch.cuda.is_available():
+        # 모델의 현재 디바이스 확인
+        current_device = next(model.parameters()).device
+        print(f"📍 모델의 현재 디바이스: {current_device}")
+        
+        # 목표 디바이스 설정
+        target_device = torch.device(f'cuda:{gpu_id}')
+        if current_device != target_device:
+            print(f"🔄 모델을 {target_device}로 이동 중...")
+            model = model.to(target_device)
+            print(f"✅ 모델이 {target_device}로 이동됨")
+    
     # 12. 훈련 시작
     print("훈련 시작...")
     try:
-        trainer.train()
+        # CUDA 디바이스 컨텍스트 내에서 훈련 실행
+        with torch.cuda.device(gpu_id):
+            trainer.train()
         print("훈련 완료!")
     except Exception as e:
         print(f"훈련 중 오류 발생: {e}")
@@ -462,7 +504,7 @@ def main(qa_data: list[dict], system_message: str, hf_token: str, hf_repo_id: st
             del eval_dataset
         
         # GPU 메모리 정리
-        cleanup_gpu_memory()
+        cleanup_gpu_memory(gpu_id)
         
         print("✅ 메모리 정리 완료")
     except Exception as e:

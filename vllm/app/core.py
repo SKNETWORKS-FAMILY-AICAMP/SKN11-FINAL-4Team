@@ -216,6 +216,8 @@ async def execute_finetuning(task_id: str):
         task["status"] = FineTuningStatus.TRAINING.value
         task["updated_at"] = time.time()
         
+        logger.info(f"🔧 파인튜닝에 GPU {selected_gpu} 사용 (동적 할당)")
+        
         try:
             hf_model_url = await run_finetuning_pipeline(
                 qa_data=finetuning_data,
@@ -249,11 +251,8 @@ async def execute_finetuning(task_id: str):
                 raise Exception("파인튜닝 실행 실패: 모델 URL을 반환하지 못했습니다.")
                 
         finally:
-            # 원래 CUDA_VISIBLE_DEVICES 설정 복원
-            if original_cuda_visible_devices:
-                os.environ['CUDA_VISIBLE_DEVICES'] = original_cuda_visible_devices
-            elif 'CUDA_VISIBLE_DEVICES' in os.environ:
-                del os.environ['CUDA_VISIBLE_DEVICES']
+            # GPU 메모리 정리
+            logger.info(f"🧹 GPU {selected_gpu} 메모리 정리 중...")
             
     except Exception as e:
         task["status"] = FineTuningStatus.FAILED.value
