@@ -72,16 +72,11 @@ def find_all_linear_names(model):
     
     return list(lora_module_names)
 
-def load_model_and_tokenizer(model_name="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct"):
+def load_model_and_tokenizer(model_name="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct",gpu_id:int=1):
     """모델과 토크나이저 로드"""
     print("모델과 토크나이저 로딩 중...")
     
-    # GPU 할당 확인 - execute_finetuning에서 이미 CUDA_VISIBLE_DEVICES가 설정됨
-    # CUDA_VISIBLE_DEVICES가 설정되면 PyTorch는 지정된 GPU만 볼 수 있고, 
-    # 그 GPU를 항상 0번으로 인식합니다
-    cuda_visible_devices = os.environ.get('CUDA_VISIBLE_DEVICES', '0')
-    print(f"CUDA_VISIBLE_DEVICES={cuda_visible_devices} 설정됨")
-    print(f"PyTorch는 이 GPU를 cuda:0으로 인식합니다")
+    print(f"PyTorch는 cuda:{gpu_id}으로 인식합니다")
     
     # GPU 상태 로깅
     from pipeline.gpu_utils import log_gpu_status
@@ -100,7 +95,7 @@ def load_model_and_tokenizer(model_name="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct"):
         model_name,
         torch_dtype=torch.bfloat16,
         trust_remote_code=True,
-        device_map="cuda:0",  # CUDA_VISIBLE_DEVICES 설정 후에는 항상 0번
+        device_map=f"cuda:{gpu_id}",  # CUDA_VISIBLE_DEVICES 설정 후에는 항상 0번
         use_cache=False,  # 그래디언트 체크포인팅과 호환성을 위해
     )
     
@@ -330,7 +325,7 @@ def cleanup_gpu_memory():
         torch.cuda.synchronize()
         print("✅ GPU 메모리 캐시 정리 완료")
 
-def main(qa_data: list[dict], system_message: str, hf_token: str, hf_repo_id: str, training_epochs: int) -> str:
+def main(qa_data: list[dict], system_message: str, hf_token: str, hf_repo_id: str, training_epochs: int,gpu_id:int) -> str:
     """메인 훈련 함수"""
     
     # 환경 변수 설정
@@ -340,7 +335,7 @@ def main(qa_data: list[dict], system_message: str, hf_token: str, hf_repo_id: st
     cleanup_gpu_memory()
     
     # 1. 모델과 토크나이저 로드
-    model, tokenizer = load_model_and_tokenizer()
+    model, tokenizer = load_model_and_tokenizer(gpu_id=gpu_id)
     
     # 2. 모델 구조 확인
     print("모델 구조 확인 중...")

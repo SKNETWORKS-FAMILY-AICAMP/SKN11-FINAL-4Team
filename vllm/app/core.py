@@ -103,7 +103,7 @@ async def send_finetuning_webhook(task_id: str, status: str, hf_model_url: Optio
         logger.error(f"❌ 파인튜닝 웹훅 전송 중 알 수 없는 오류: {task_id}, {e}")
 
 async def run_finetuning_pipeline(qa_data: List[Dict], system_message: str, 
-                                hf_token: str, hf_repo_id: str, training_epochs: int) -> Optional[str]:
+                                hf_token: str, hf_repo_id: str, training_epochs: int,gpu_id:int) -> Optional[str]:
     """파인튜닝 파이프라인 실행"""
     try:
         logger.info(f"🔄 파인튜닝 파이프라인 실행: {hf_repo_id}")
@@ -118,7 +118,8 @@ async def run_finetuning_pipeline(qa_data: List[Dict], system_message: str,
             system_message=system_message,
             hf_token=hf_token,
             hf_repo_id=hf_repo_id,
-            training_epochs=training_epochs
+            training_epochs=training_epochs,
+            gpu_id=gpu_id
         )
         
         if hf_model_url:
@@ -215,17 +216,14 @@ async def execute_finetuning(task_id: str):
         task["status"] = FineTuningStatus.TRAINING.value
         task["updated_at"] = time.time()
         
-        # 선택된 GPU를 환경 변수로 설정
-        original_cuda_visible_devices = os.environ.get('CUDA_VISIBLE_DEVICES', '')
-        os.environ['CUDA_VISIBLE_DEVICES'] = str(selected_gpu)
-        
         try:
             hf_model_url = await run_finetuning_pipeline(
                 qa_data=finetuning_data,
                 system_message=system_message,
                 hf_token=task["hf_token"],
                 hf_repo_id=task["hf_repo_id"],
-                training_epochs=task["training_epochs"]
+                training_epochs=task["training_epochs"],
+                gpu_id=selected_gpu
             )
             
             if hf_model_url:
