@@ -17,14 +17,6 @@ import os
 import logging
 
 logger = logging.getLogger(__name__)
-
-# GPU 설정 확인
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(f"Using device: {device}")
-
-# Hugging Face 토큰 및 repo_id 설정 (환경 변수에서 가져오기)
-
-
 class ExaoneDataPreprocessor:
     def __init__(self, tokenizer, max_length=2048):
         self.tokenizer = tokenizer
@@ -85,7 +77,7 @@ def load_model_and_tokenizer(model_name="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct"):
     print("모델과 토크나이저 로딩 중...")
     
     # GPU 할당 확인 - execute_finetuning에서 이미 CUDA_VISIBLE_DEVICES가 설정됨
-    cuda_visible_devices = os.environ.get('CUDA_VISIBLE_DEVICES', '0')
+    cuda_visible_devices = f"cuda:{os.environ.get('CUDA_VISIBLE_DEVICES', '0')}"
     print(f"파인튜닝에 GPU {cuda_visible_devices} 사용 (execute_finetuning에서 설정됨)")
     
     # GPU 상태 로깅
@@ -105,7 +97,7 @@ def load_model_and_tokenizer(model_name="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct"):
         model_name,
         torch_dtype=torch.bfloat16,
         trust_remote_code=True,
-        device_map=f"cuda:{cuda_visible_devices}",
+        device_map=cuda_visible_devices,
         use_cache=False,  # 그래디언트 체크포인팅과 호환성을 위해
     )
     
@@ -426,7 +418,7 @@ def main(qa_data: list[dict], system_message: str, hf_token: str, hf_repo_id: st
         train_dataset=train_dataset_split,
         eval_dataset=eval_dataset,
         data_collator=data_collator,
-        callbacks=[early_stopping_callback],
+        callbacks=[early_stopping_callback]
     )
     
     # 12. 훈련 시작
