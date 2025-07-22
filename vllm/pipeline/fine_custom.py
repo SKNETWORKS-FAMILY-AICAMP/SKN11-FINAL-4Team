@@ -92,8 +92,6 @@ def load_model_and_tokenizer(model_name="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct"):
     from pipeline.gpu_utils import log_gpu_status
     log_gpu_status()
     
-    device_map = "auto"  # 단일 GPU에서 auto는 전체 모델을 해당 GPU에 로드
-    
     # 토크나이저 로드
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     
@@ -107,7 +105,7 @@ def load_model_and_tokenizer(model_name="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct"):
         model_name,
         torch_dtype=torch.bfloat16,
         trust_remote_code=True,
-        device_map=device_map,
+        device_map=cuda_visible_devices,
         use_cache=False,  # 그래디언트 체크포인팅과 호환성을 위해
     )
     
