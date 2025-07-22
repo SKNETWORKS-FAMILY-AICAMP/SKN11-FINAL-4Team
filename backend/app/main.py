@@ -17,6 +17,7 @@ from app.api.v1.api import api_router
 from app.services.startup_service import run_startup_tasks
 from app.services.batch_monitor import start_batch_monitoring, stop_batch_monitoring
 from app.services.scheduler_service import scheduler_service
+from app.services.mcp_server_manager import mcp_server_manager
 
 # 로깅 설정
 if settings.DEBUG:
@@ -57,6 +58,13 @@ async def lifespan(app: FastAPI):
     """애플리케이션 생명주기 관리"""
     # 시작 시 실행
     logger.info("🚀 Starting AIMEX API Server...")
+
+    # MCP 서버 자동 실행
+    try:
+        await mcp_server_manager.start_all_servers()
+        logger.info("✅ MCP 서버 자동 실행 완료")
+    except Exception as e:
+        logger.error(f"❌ MCP 서버 자동 실행 실패: {e}")
 
     # 데이터베이스 연결 테스트
     if not test_database_connection():

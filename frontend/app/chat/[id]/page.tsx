@@ -9,6 +9,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { tokenUtils } from "@/lib/auth"
 import { ModelService } from "@/lib/services/model.service"
+import MCPService, { MCPChatResponse } from '@/lib/services/mcp.service'
 
 import {
   Send,
@@ -104,18 +105,18 @@ export default function ChatPage() {
       setIsLoading(false); // 응답 수신 시 로딩 상태 해제
       try {
         const data = JSON.parse(event.data);
-        
+
         if (data.type === "token") {
           // 스트리밍 토큰 처리
           setMessages(prev => {
             const newMessages = [...prev];
             const lastMessage = newMessages[newMessages.length - 1];
-            
+
             if (lastMessage && lastMessage.sender === "bot" && lastMessage.isStreaming) {
               // 기존 스트리밍 메시지에 토큰 추가 (중복 제거)
               const newContent = data.content;
               const currentContent = lastMessage.content;
-              
+
               // 중복 제거: 새로운 토큰이 기존 내용의 끝과 중복되지 않는지 확인
               if (!currentContent.endsWith(newContent)) {
                 lastMessage.content += newContent;
@@ -130,7 +131,7 @@ export default function ChatPage() {
                 isStreaming: true
               });
             }
-            
+
             return newMessages;
           });
         } else if (data.type === "complete") {
@@ -218,8 +219,7 @@ export default function ChatPage() {
 
   // 메시지 전송
   const sendMessage = async () => {
-
-    if (!inputMessage.trim() || isLoading || connectionStatus !== 'connected') return;
+    if (!inputMessage.trim() || isLoading) return;
 
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -231,52 +231,81 @@ export default function ChatPage() {
     const currentMessage = inputMessage;
     setInputMessage("");
     setIsLoading(true);
-    
-    // WebSocket 모드
-    if (connectionStatus !== 'connected') {
 
-      setIsLoading(false);
-      setMessages(prev => [...prev, {
-        id: (Date.now() + 1).toString(),
-        content: "서버와의 연결이 끊어졌습니다. 재연결 버튼을 눌러주세요.",
-        sender: "bot",
-        timestamp: new Date(),
-      }]);
-
-      return;
+    // 1. MCP REST 우선 시도
+    let mcpResult: string | null = null;
+    try {
+      const mcpResponse: MCPChatResponse = await MCPService.processMessage({ message: currentMessage });
+      if (mcpResponse && mcpResponse.response && mcpResponse.response.trim()) {
+        mcpResult = mcpResponse.response.trim();
+      }
+    } catch (error: any) {
+      // MCP 오류는 fallback으로 처리
     }
-    
-    // 타임아웃 설정 (30초)
-    timeoutRef.current = setTimeout(() => {
+
+    // 2. MCP 결과가 있으면, 그 결과를 LLM(WebSocket) 프롬프트로 넣어 답변 생성
+    if (mcpResult && connectionStatus === 'connected' && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      try {
+        // MCP 결과를 LLM에 프롬프트로 넣어 자연스러운 답변 생성 요청
+        const prompt = `사용자 질문: ${currentMessage}\n도구 결과: ${mcpResult}\n위 정보를 바탕으로, 친근하고 자연스럽게 답변해 주세요.`;
+        wsRef.current.send(prompt);
+        // 타임아웃 설정 (30초)
+        timeoutRef.current = setTimeout(() => {
+          setIsLoading(false);
+          setMessages(prev => [...prev, {
+            id: (Date.now() + 1).toString(),
+            content: "응답 시간이 초과되었습니다. 다시 시도해주세요.",
+            sender: "bot",
+            timestamp: new Date(),
+          }]);
+        }, 30000);
+        return;
+      } catch (error) {
         setIsLoading(false);
         setMessages(prev => [...prev, {
           id: (Date.now() + 1).toString(),
-          content: "응답 시간이 초과되었습니다. 다시 시도해주세요.",
+          content: "메시지 전송에 실패했습니다. 다시 시도해주세요.",
           sender: "bot",
           timestamp: new Date(),
         }]);
-    }, 30000);
-    
-    try {
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(currentMessage);
-      } else {
-        throw new Error("WebSocket이 연결되지 않았습니다.");
+        return;
       }
-    } catch (error) {
-      console.error("메시지 전송 오류:", error);
-      setIsLoading(false);
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-        timeoutRef.current = null;
-      }
-      setMessages(prev => [...prev, {
-        id: (Date.now() + 1).toString(),
-        content: "메시지 전송에 실패했습니다. 다시 시도해주세요.",
-        sender: "bot",
-        timestamp: new Date(),
-      }]);
     }
+
+    // 3. MCP 결과가 없으면 WebSocket LLM fallback (기존 질문 그대로)
+    if (connectionStatus === 'connected' && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      try {
+        wsRef.current.send(currentMessage);
+        // 타임아웃 설정 (30초)
+        timeoutRef.current = setTimeout(() => {
+          setIsLoading(false);
+          setMessages(prev => [...prev, {
+            id: (Date.now() + 1).toString(),
+            content: "응답 시간이 초과되었습니다. 다시 시도해주세요.",
+            sender: "bot",
+            timestamp: new Date(),
+          }]);
+        }, 30000);
+      } catch (error) {
+        setIsLoading(false);
+        setMessages(prev => [...prev, {
+          id: (Date.now() + 1).toString(),
+          content: "메시지 전송에 실패했습니다. 다시 시도해주세요.",
+          sender: "bot",
+          timestamp: new Date(),
+        }]);
+      }
+      return;
+    }
+
+    // 4. WebSocket도 불가하면 연결 오류 메시지
+    setIsLoading(false);
+    setMessages(prev => [...prev, {
+      id: (Date.now() + 1).toString(),
+      content: "서버와의 연결이 끊어졌습니다. 재연결 버튼을 눌러주세요.",
+      sender: "bot",
+      timestamp: new Date(),
+    }]);
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
