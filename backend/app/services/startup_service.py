@@ -488,6 +488,7 @@ class StartupService:
 
                 # 각 인플루언서의 어댑터 로드
                 for influencer in influencers_with_models:
+                    print(influencer.group_id)
                     try:
                         # HF 토큰 정보 가져오기
                         hf_token_record = (
