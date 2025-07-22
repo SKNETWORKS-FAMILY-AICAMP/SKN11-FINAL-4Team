@@ -25,27 +25,19 @@ dotenv.load_dotenv()
 logger = logging.getLogger(__name__)
 
 async def get_available_gpu_memory_mb() -> int:
-    """nvidia-smi를 사용하여 사용 가능한 GPU 메모리 (MB)를 반환합니다."""
+    """PyTorch를 사용하여 사용 가능한 GPU 메모리 (MB)를 반환합니다."""
     try:
-        # nvidia-smi 명령 실행
-        process = await asyncio.create_subprocess_shell(
-            "nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        stdout, stderr = await process.communicate()
-
-        if process.returncode != 0:
-            logger.error(f"nvidia-smi 실행 오류: {stderr.decode().strip()}")
-            return 0
-
-        # 출력 파싱
-        output = stdout.decode().strip()
-        free_memory_mb = int(output.split('\n')[0])
-        return free_memory_mb
-    except FileNotFoundError:
-        logger.warning("nvidia-smi를 찾을 수 없습니다. GPU 메모리 확인을 건너뜁니다.")
-        return -1 # -1은 GPU를 찾을 수 없음을 의미
+        gpu_manager = await get_gpu_manager()
+        
+        # Get memory info for the first GPU (default)
+        gpu_info = await gpu_manager.get_gpu_info(device_id=0)
+        
+        if not gpu_info["available"]:
+            logger.warning("GPU를 사용할 수 없습니다.")
+            return -1  # -1은 GPU를 찾을 수 없음을 의미
+            
+        return gpu_info["free"]
+        
     except Exception as e:
         logger.error(f"GPU 메모리 확인 중 오류 발생: {e}")
         return 0
@@ -163,7 +155,10 @@ async def execute_finetuning(task_id: str):
         
         logger.info(f"🖥️ GPU 상태:")
         for gpu_id, info in all_gpu_info.items():
-            logger.info(f"  GPU {gpu_id}: {info['used']}MB/{info['total']}MB ({info.get('utilization', 0):.1f}%)")
+            if info.get('available', False):
+                logger.info(f"  GPU {gpu_id} ({info.get('name', 'Unknown')}): "
+                          f"{info['used']}MB/{info['total']}MB ({info.get('utilization', 0):.1f}%), "
+                          f"Compute: {info.get('compute_capability', 'N/A')}")
         
         logger.info(f"✅ 파인튜닝에 GPU {selected_gpu} 선택 (사용률: {all_gpu_info[selected_gpu].get('utilization', 0):.1f}%)")
         
