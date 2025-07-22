@@ -62,20 +62,12 @@ def create_influencer(db: Session, user_id: str, influencer_data: AIInfluencerCr
     from app.services.influencers.style_presets import create_style_preset
     from app.schemas.influencer import StylePresetCreate
 
-    # 스타일 프리셋 처리
     style_preset_id = influencer_data.style_preset_id
-    logger.debug(f"선택된 프리셋 ID: {style_preset_id}")
-
-    # 프리셋 ID가 제공되지 않은 경우, 직접 입력된 정보로 프리셋을 생성하거나 직접 필드를 사용
     if not style_preset_id:
-        # 성격과 말투가 모두 제공된 경우에만 새로운 StylePreset을 생성
         if influencer_data.personality and influencer_data.tone:
-            logger.info("📝 프리셋이 선택되지 않아 직접 입력된 정보로 자동 생성합니다")
 
-            # 데이터 매핑 유틸리티 사용
             age_group = DataMapper.map_age_to_group(influencer_data.age)
 
-            # 프리셋 생성
             preset_data = StylePresetCreate(
                 style_preset_name=f"{influencer_data.influencer_name}_자동생성프리셋",
                 influencer_type=DataMapper.map_model_type_to_db(
@@ -87,34 +79,26 @@ def create_influencer(db: Session, user_id: str, influencer_data: AIInfluencerCr
                 influencer_style=influencer_data.mood or "자연스럽고 편안한",
                 influencer_personality=influencer_data.personality,
                 influencer_speech=influencer_data.tone,
+                influencer_description=influencer_data.influencer_description or f"{influencer_data.influencer_name}의 AI 인플루언서",
             )
 
             style_preset = create_style_preset(db, preset_data)
             style_preset_id = style_preset.style_preset_id
-            logger.info(f"✅ 자동 프리셋 생성 완료: {style_preset_id}")
         else:
-            logger.info(
-                "⚠️ 프리셋이 선택되지 않았고, 성격/말투 정보도 없어 프리셋을 생성하지 않습니다."
-            )
             style_preset_id = None  # 명시적으로 None으로 설정
     else:
-        logger.info(f"🎯 기존 프리셋 사용: {style_preset_id}")
-        # 기존 프리셋 존재 확인
         style_preset = (
             db.query(StylePreset)
             .filter(StylePreset.style_preset_id == style_preset_id)
             .first()
         )
         if not style_preset:
-            logger.error(f"❌ 프리셋을 찾을 수 없음: {style_preset_id}")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Style preset not found"
             )
 
-    # MBTI 처리
     mbti_id = influencer_data.mbti_id
     if influencer_data.mbti and not mbti_id:
-        # MBTI 문자열로부터 ID 찾기
         mbti_record = (
             db.query(ModelMBTI)
             .filter(ModelMBTI.mbti_name == influencer_data.mbti)
@@ -123,14 +107,11 @@ def create_influencer(db: Session, user_id: str, influencer_data: AIInfluencerCr
         if mbti_record:
             mbti_id = mbti_record.mbti_id
 
-    # MBTI 존재 확인 (선택사항)
     if mbti_id:
         mbti = db.query(ModelMBTI).filter(ModelMBTI.mbti_id == mbti_id).first()
         if not mbti:
-            # MBTI가 없으면 None으로 설정
             mbti_id = None
 
-    # 허깅페이스 토큰 ID 검증 (빈 문자열이나 "none"인 경우 None으로 처리)
     hf_manage_id = influencer_data.hf_manage_id
     if hf_manage_id in ["", "none", None]:
         hf_manage_id = None

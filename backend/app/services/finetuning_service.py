@@ -17,6 +17,7 @@ from app.services.s3_service import get_s3_service
 from app.services.vllm_client import get_vllm_client, vllm_health_check
 from app.core.encryption import decrypt_sensitive_data
 from app.services.hf_token_resolver import get_token_for_influencer
+from app.core.config import settings
 from app.models.influencer import AIInfluencer
 from app.utils.finetuning_utils import (
     create_system_message,
