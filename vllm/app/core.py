@@ -125,9 +125,10 @@ async def run_finetuning_pipeline(qa_data: List[Dict], system_message: str,
         
         try:
             # 파인튜닝 서브프로세스 실행
+            script_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "pipeline", "finetuning_subprocess.py")
             cmd = [
                 sys.executable,  # Python 인터프리터
-                "pipeline/finetuning_subprocess.py",
+                script_path,
                 "--gpu-id", str(gpu_id),
                 "--qa-data", qa_file_path,
                 "--system-message", system_message,
@@ -139,11 +140,15 @@ async def run_finetuning_pipeline(qa_data: List[Dict], system_message: str,
             
             logger.info(f"🚀 서브프로세스 실행: {' '.join(cmd[:3])}...")
             
+            # 작업 디렉토리 설정
+            cwd = os.path.dirname(os.path.dirname(__file__))
+            
             # 프로세스 실행
             process = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+                stderr=asyncio.subprocess.PIPE,
+                cwd=cwd
             )
             
             # 프로세스 완료 대기
@@ -155,8 +160,12 @@ async def run_finetuning_pipeline(qa_data: List[Dict], system_message: str,
                 logger.warning(f"⚠️ 서브프로세스 에러:\n{stderr.decode()}")
             
             # 결과 파일 읽기
-            with open(result_file_path, 'r', encoding='utf-8') as f:
-                result = json.load(f)
+            if os.path.exists(result_file_path):
+                with open(result_file_path, 'r', encoding='utf-8') as f:
+                    result = json.load(f)
+            else:
+                # 파일이 없으면 실패로 처리
+                raise Exception(f"서브프로세스가 결과 파일을 생성하지 못했습니다. 프로세스 종료 코드: {process.returncode}")
             
             if result["success"]:
                 logger.info(f"✅ 파인튜닝 파이프라인 실행 완료: {hf_repo_id}")

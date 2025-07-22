@@ -8,6 +8,11 @@ import json
 import argparse
 import logging
 
+# 현재 스크립트의 디렉토리를 기준으로 상위 디렉토리를 Python 경로에 추가
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+sys.path.insert(0, parent_dir)
+
 # 환경 변수 설정을 맨 처음에 수행
 def setup_gpu_environment(gpu_id):
     """GPU 환경 변수를 설정합니다."""
