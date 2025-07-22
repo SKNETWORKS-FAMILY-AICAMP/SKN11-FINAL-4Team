@@ -105,7 +105,7 @@ def load_model_and_tokenizer(model_name="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct"):
         model_name,
         torch_dtype=torch.bfloat16,
         trust_remote_code=True,
-        device_map=cuda_visible_devices,
+        device_map=f"cuda:{cuda_visible_devices}",
         use_cache=False,  # 그래디언트 체크포인팅과 호환성을 위해
     )
     
