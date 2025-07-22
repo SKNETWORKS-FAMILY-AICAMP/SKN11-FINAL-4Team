@@ -352,34 +352,27 @@ def main(qa_data: list[dict], system_message: str, hf_token: str, hf_repo_id: st
     
     # 환경 변수 설정
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
-    # CUDA 기본 디바이스 환경 변수 설정
-    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-    os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
     
     # GPU 설정 로깅
     print(f"🎯 파인튜닝에 GPU {gpu_id} 사용")
-    print(f"📊 CUDA_VISIBLE_DEVICES 설정: {os.environ['CUDA_VISIBLE_DEVICES']}")
-    
-    # 이제 PyTorch는 지정된 GPU만 볼 수 있으므로 cuda:0을 사용
-    cuda_device_id = 0
     
     # PyTorch가 올바른 GPU를 사용하도록 설정
     if torch.cuda.is_available():
-        torch.cuda.set_device(cuda_device_id)
-        print(f"✅ PyTorch는 cuda:{cuda_device_id}를 사용 (물리적 GPU {gpu_id})")
+        torch.cuda.set_device(gpu_id)
+        print(f"✅ PyTorch 기본 GPU를 {gpu_id}로 설정")
         
-        # GPU 정보 출력 (이제 cuda:0만 볼 수 있음)
-        print(f"📊 GPU 정보 (물리적 GPU {gpu_id}):")
-        print(f"  - 이름: {torch.cuda.get_device_name(0)}")
-        print(f"  - 총 메모리: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.2f} GB")
-        print(f"  - 현재 할당된 메모리: {torch.cuda.memory_allocated(0) / 1024**3:.2f} GB")
-        print(f"  - 캐시된 메모리: {torch.cuda.memory_reserved(0) / 1024**3:.2f} GB")
+        # GPU 정보 출력
+        print(f"📊 GPU {gpu_id} 정보:")
+        print(f"  - 이름: {torch.cuda.get_device_name(gpu_id)}")
+        print(f"  - 총 메모리: {torch.cuda.get_device_properties(gpu_id).total_memory / 1024**3:.2f} GB")
+        print(f"  - 현재 할당된 메모리: {torch.cuda.memory_allocated(gpu_id) / 1024**3:.2f} GB")
+        print(f"  - 캐시된 메모리: {torch.cuda.memory_reserved(gpu_id) / 1024**3:.2f} GB")
     
-    # 시작 전 GPU 메모리 정리 (이제 cuda:0만 볼 수 있음)
-    cleanup_gpu_memory(0)
+    # 시작 전 GPU 메모리 정리
+    cleanup_gpu_memory(gpu_id)
     
-    # 1. 모델과 토크나이저 로드 (이제 cuda:0 사용)
-    model, tokenizer = load_model_and_tokenizer(gpu_id=0)
+    # 1. 모델과 토크나이저 로드
+    model, tokenizer = load_model_and_tokenizer(gpu_id=gpu_id)
     
     # 2. 모델 구조 확인
     print("모델 구조 확인 중...")

@@ -3,6 +3,7 @@ os.environ["VLLM_USE_V1"] = "0" # vLLM v1 어텐션 백엔드 비활성화
 import asyncio
 import logging
 import time
+import sys
 from typing import Optional, Dict, Any, List
 
 import httpx
@@ -103,30 +104,73 @@ async def send_finetuning_webhook(task_id: str, status: str, hf_model_url: Optio
         logger.error(f"❌ 파인튜닝 웹훅 전송 중 알 수 없는 오류: {task_id}, {e}")
 
 async def run_finetuning_pipeline(qa_data: List[Dict], system_message: str, 
-                                hf_token: str, hf_repo_id: str, training_epochs: int,gpu_id:int) -> Optional[str]:
-    """파인튜닝 파이프라인 실행"""
+                                hf_token: str, hf_repo_id: str, training_epochs: int, gpu_id:int) -> Optional[str]:
+    """파인튜닝 파이프라인 실행 (별도 프로세스)"""
+    import subprocess
+    import tempfile
+    import json
+    
     try:
         logger.info(f"🔄 파인튜닝 파이프라인 실행: {hf_repo_id}")
         logger.info(f"🔍 파이프라인 QA 데이터: 개수={len(qa_data)}")
-        if qa_data:
-            logger.info(f"🔍 파이프라인 첫 번째 데이터: {qa_data[0]}")
+        logger.info(f"🎯 GPU {gpu_id}에서 별도 프로세스로 실행")
         
-        # fine_custom.py의 main 함수를 별도의 스레드에서 실행
-        hf_model_url = await asyncio.to_thread(
-            fine_custom.main,
-            qa_data=qa_data,
-            system_message=system_message,
-            hf_token=hf_token,
-            hf_repo_id=hf_repo_id,
-            training_epochs=training_epochs,
-            gpu_id=gpu_id
-        )
+        # 임시 파일 생성
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as qa_file:
+            json.dump(qa_data, qa_file, ensure_ascii=False, indent=2)
+            qa_file_path = qa_file.name
         
-        if hf_model_url:
-            logger.info(f"✅ 파인튜닝 파이프라인 실행 완료: {hf_repo_id}")
-            return hf_model_url
-        else:
-            raise Exception("파인튜닝 실행 실패: 모델 URL을 반환하지 못했습니다.")
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as result_file:
+            result_file_path = result_file.name
+        
+        try:
+            # 파인튜닝 서브프로세스 실행
+            cmd = [
+                sys.executable,  # Python 인터프리터
+                "pipeline/finetuning_subprocess.py",
+                "--gpu-id", str(gpu_id),
+                "--qa-data", qa_file_path,
+                "--system-message", system_message,
+                "--hf-token", hf_token,
+                "--hf-repo-id", hf_repo_id,
+                "--training-epochs", str(training_epochs),
+                "--output-file", result_file_path
+            ]
+            
+            logger.info(f"🚀 서브프로세스 실행: {' '.join(cmd[:3])}...")
+            
+            # 프로세스 실행
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            
+            # 프로세스 완료 대기
+            stdout, stderr = await process.communicate()
+            
+            if stdout:
+                logger.info(f"📋 서브프로세스 출력:\n{stdout.decode()}")
+            if stderr:
+                logger.warning(f"⚠️ 서브프로세스 에러:\n{stderr.decode()}")
+            
+            # 결과 파일 읽기
+            with open(result_file_path, 'r', encoding='utf-8') as f:
+                result = json.load(f)
+            
+            if result["success"]:
+                logger.info(f"✅ 파인튜닝 파이프라인 실행 완료: {hf_repo_id}")
+                return result["hf_model_url"]
+            else:
+                raise Exception(f"파인튜닝 실행 실패: {result.get('error', 'Unknown error')}")
+                
+        finally:
+            # 임시 파일 삭제
+            for path in [qa_file_path, result_file_path]:
+                try:
+                    os.unlink(path)
+                except:
+                    pass
             
     except Exception as e:
         logger.error(f"❌ 파인튜닝 파이프라인 실행 실패: {e}")
