@@ -502,3 +502,20 @@ async def set_custom_template_as_default(request: dict):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to set custom template: {str(e)}")
+
+@router.get("/runpod/pod-status/{pod_id}")
+async def get_runpod_pod_status(pod_id: str):
+    """RunPod pod 상태 및 public ip/port 조회"""
+    try:
+        from app.services.runpod_service import get_runpod_service
+        runpod_service = get_runpod_service()
+        pod_status = await runpod_service.get_pod_status(pod_id)
+        return {
+            "success": True,
+            "pod_id": pod_status.pod_id,
+            "status": pod_status.status,
+            "runtime": pod_status.runtime,
+            "endpoint_url": pod_status.endpoint_url
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"RunPod pod 상태 조회 실패: {str(e)}")

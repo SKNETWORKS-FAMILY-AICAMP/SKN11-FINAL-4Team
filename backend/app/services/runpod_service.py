@@ -5,7 +5,6 @@ ComfyUI가 설치된 서버 인스턴스를 동적으로 생성/관리
 
 import asyncio
 import aiohttp
-import json
 import logging
 from typing import Dict, Optional, Any
 from pydantic import BaseModel
@@ -94,7 +93,7 @@ class RunPodService:
                         "templateId": self.template_id,  # 커스텀 템플릿 ID 사용
                         "ports": "8188/http,7860/http,22/tcp",  # 추가 포트
                         "env": [
-                            {"key": "RUNPOD_AI_API_KEY", "value": "your-api-key"},
+                            {"key": "RUNPOD_AI_API_KEY", "value": settings.RUNPOD_API_KEY},
                             {"key": "COMFYUI_FLAGS", "value": "--listen 0.0.0.0 --port 8188"},
                             {"key": "AUTO_DOWNLOAD_MODELS", "value": "true"}
                         ]
@@ -395,8 +394,6 @@ class RunPodService:
                     return response.status == 200
         except:
             return False
-    
-
 
 # 싱글톤 패턴
 _runpod_service_instance = None

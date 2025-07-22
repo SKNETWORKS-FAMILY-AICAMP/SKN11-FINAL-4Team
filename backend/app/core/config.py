@@ -64,7 +64,8 @@ class Settings(BaseSettings):
     RUNPOD_TEMPLATE_ID: str = os.getenv("RUNPOD_TEMPLATE_ID", "")  # ComfyUI 템플릿 ID
     RUNPOD_CUSTOM_TEMPLATE_ID: str = os.getenv(
         "RUNPOD_CUSTOM_TEMPLATE_ID", ""
-    )  # 커스텀 노드 템플릿 ID
+    ) 
+    # 커스텀 노드 템플릿 ID
     RUNPOD_GPU_TYPE: str = os.getenv("RUNPOD_GPU_TYPE", "NVIDIA RTX 5090")
     RUNPOD_MAX_WORKERS: int = int(os.getenv("RUNPOD_MAX_WORKERS", "1"))
     RUNPOD_IDLE_TIMEOUT: int = int(os.getenv("RUNPOD_IDLE_TIMEOUT", "300"))  # 5분
