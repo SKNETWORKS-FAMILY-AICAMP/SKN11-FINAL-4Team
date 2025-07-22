@@ -63,9 +63,6 @@ class LangChainToneGenerator:
         # 어투 요약 체인
         self.summary_chain = self.summary_prompt | self.llm | self.json_parser
         
-        # 🚀 최적화된 병렬 처리 체인 - 3개 어투를 완전 병렬로 처리
-        self.optimized_parallel_chain = self._create_optimized_parallel_chain()
-        
         logger.info("✅ LangChain Tone Generator 초기화 완료")
     
     def _parse_summary_response(self, response) -> Dict[str, str]:
@@ -116,33 +113,25 @@ class LangChainToneGenerator:
                 "description": "AI가 생성한 독특한 말투"
             }
     
-    def _create_optimized_parallel_chain(self):
+    def _create_optimized_parallel_chain(self, system_prompts: List[str]):
         """최적화된 병렬 처리 체인 생성 - 한 번의 실행으로 모든 처리 완료"""
         
         # 3개 어투를 완전 병렬로 처리하는 최상위 체인
         return RunnableParallel(
-            말투1=self._create_complete_tone_chain(1),
-            말투2=self._create_complete_tone_chain(2),
-            말투3=self._create_complete_tone_chain(3)
+            말투1=self._create_complete_tone_chain(1, system_prompts[0]),
+            말투2=self._create_complete_tone_chain(2, system_prompts[1]),
+            말투3=self._create_complete_tone_chain(3, system_prompts[2])
         )
     
-    def _create_complete_tone_chain(self, tone_num: int):
+    def _create_complete_tone_chain(self, tone_num: int, system_prompt: str):
         """단일 어투에 대한 완전한 처리 체인 (응답 + 요약)"""
-        
-        # 어투별 지시사항
-        tone_instructions = self._get_tone_instructions()
         
         # 시스템 프롬프트 생성을 위한 전처리
         def prepare_prompt_data(data):
             """프롬프트 데이터 준비"""
             prompt_data = data.copy()
-            prompt_data["tone_instruction"] = tone_instructions[tone_num]
+            prompt_data["system_prompt"] = system_prompt
             return prompt_data
-        
-        # 시스템 프롬프트 생성
-        def generate_system_prompt(data):
-            """완전한 시스템 프롬프트 생성"""
-            return self._get_tone_system_prompt().format(**data)
         
         # 메시지 생성
         def create_messages(data):
@@ -184,11 +173,7 @@ class LangChainToneGenerator:
         return (
             # 1. 프롬프트 데이터 준비
             RunnableLambda(prepare_prompt_data)
-            # 2. 시스템 프롬프트 생성
-            | RunnablePassthrough.assign(
-                system_prompt=RunnableLambda(generate_system_prompt)
-            )
-            # 3. 응답과 요약을 병렬로 처리
+            # 2. 응답과 요약을 병렬로 처리
             | RunnableParallel(
                 # 응답 생성 브랜치
                 response=(
@@ -362,7 +347,8 @@ class LangChainToneGenerator:
     async def generate_3_tones_single_request(
         self,
         character_data: Dict[str, Any],
-        question: str
+        question: str,
+        system_prompts: List[str]
     ) -> Dict[str, List[Dict[str, Any]]]:
         """
         🚀 단일 요청으로 3가지 다른 어투 생성
@@ -371,6 +357,7 @@ class LangChainToneGenerator:
         Args:
             character_data: 캐릭터 정보
             question: 질문
+            system_prompts: 시스템 프롬프트 리스트
             
         Returns:
             어투별 응답 딕셔너리
@@ -389,9 +376,42 @@ class LangChainToneGenerator:
         }
         
         try:
+            # 전달받은 시스템 프롬프트들을 조합한 메시지 생성
+            combined_system_prompt = f"""당신은 주어진 3가지 다른 말투 스타일로 응답을 생성하는 전문가입니다.
+
+각각의 말투 스타일은 다음과 같습니다:
+
+[말투1]
+{system_prompts[0]}
+
+[말투2]
+{system_prompts[1]}
+
+[말투3]
+{system_prompts[2]}
+
+주어진 질문에 대해 위 3가지 말투로 각각 답변하고, 다음 JSON 형식으로 정확히 출력하세요:
+{{
+    "말투1": {{
+        "text": "첫 번째 말투로 작성한 답변",
+        "hashtags": "#특징1 #특징2 #특징3",
+        "description": "이 말투의 특징을 설명하는 한 문장 (반드시 '말투'로 끝남)"
+    }},
+    "말투2": {{
+        "text": "두 번째 말투로 작성한 답변",
+        "hashtags": "#특징4 #특징5 #특징6",
+        "description": "이 말투의 특징을 설명하는 한 문장 (반드시 '말투'로 끝남)"
+    }},
+    "말투3": {{
+        "text": "세 번째 말투로 작성한 답변",
+        "hashtags": "#특징7 #특징8 #특징9",
+        "description": "이 말투의 특징을 설명하는 한 문장 (반드시 '말투'로 끝남)"
+    }}
+}}"""
+            
             # 단일 프롬프트로 3가지 어투 생성
             single_prompt = ChatPromptTemplate.from_messages([
-                ("system", self._get_single_request_system_prompt()),
+                ("system", combined_system_prompt),
                 ("user", "{question}")
             ])
             
@@ -412,8 +432,9 @@ class LangChainToneGenerator:
                 
                 # 결과 포맷팅
                 responses = {}
-                for tone_key, tone_data in result.items():
+                for i, (tone_key, tone_data) in enumerate(result.items()):
                     responses[tone_key] = [{
+                        "system_prompt": system_prompts[i] if i < len(system_prompts) else f"말투{i+1} 시스템 프롬프트",
                         "text": tone_data.get("text", ""),
                         "hashtags": tone_data.get("hashtags", f"#{tone_key}"),
                         "description": tone_data.get("description", f"{tone_key} 스타일의 말투")
@@ -430,12 +451,13 @@ class LangChainToneGenerator:
         except Exception as e:
             logger.error(f"❌ 단일 요청 어투 생성 실패: {e}")
             # 폴백: 기존 병렬 방식 사용
-            return await self.generate_3_tones_parallel(character_data, question)
+            return await self.generate_3_tones_parallel(character_data, question, system_prompts)
 
     async def generate_3_tones_parallel(
         self,
         character_data: Dict[str, Any],
-        question: str
+        question: str,
+        system_prompts: List[str]
     ) -> Dict[str, List[Dict[str, Any]]]:
         """
         🚀 최적화된 LangChain 체인 기반 3개 어투 병렬 생성
@@ -465,8 +487,11 @@ class LangChainToneGenerator:
             # 🚀 최적화된 단일 체인 실행 - 응답과 요약을 한번에!
             start_time = asyncio.get_event_loop().time()
             
+            # 시스템 프롬프트와 함께 최적화된 병렬 체인 생성
+            optimized_chain = self._create_optimized_parallel_chain(system_prompts)
+            
             # 병렬 체인 실행 (각 체인이 응답과 요약을 동시에 처리)
-            parallel_results = await self.optimized_parallel_chain.ainvoke(base_input)
+            parallel_results = await optimized_chain.ainvoke(base_input)
             
             end_time = asyncio.get_event_loop().time()
             generation_time = end_time - start_time
