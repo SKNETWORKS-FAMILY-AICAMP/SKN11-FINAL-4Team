@@ -90,9 +90,12 @@ class TorchGPUManager:
                 "temperature": temperature,
                 "power_draw": power_draw,
                 "compute_capability": f"{props.major}.{props.minor}",
-                "multi_processor_count": props.multi_processor_count,
-                "max_threads_per_block": props.max_threads_per_block
+                "multi_processor_count": props.multi_processor_count
             }
+            
+            # Add optional properties if they exist
+            if hasattr(props, 'max_threads_per_block'):
+                gpu_info["max_threads_per_block"] = props.max_threads_per_block
             
             # Update cache
             self._memory_cache[cache_key] = (gpu_info, current_time)
