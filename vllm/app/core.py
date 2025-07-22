@@ -24,13 +24,12 @@ dotenv.load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-async def get_available_gpu_memory_mb() -> int:
+async def get_available_gpu_memory_mb(device_id: int = 0) -> int:
     """PyTorch를 사용하여 사용 가능한 GPU 메모리 (MB)를 반환합니다."""
     try:
         gpu_manager = await get_gpu_manager()
         
-        # Get memory info for the first GPU (default)
-        gpu_info = await gpu_manager.get_gpu_info(device_id=0)
+        gpu_info = await gpu_manager.get_gpu_info(device_id=device_id)
         
         if not gpu_info["available"]:
             logger.warning("GPU를 사용할 수 없습니다.")
@@ -273,7 +272,7 @@ async def finetuning_worker():
         logger.info(f"⚙️ 큐에서 파인튜닝 작업 시작: {task_id}")
         
         # GPU 메모리 확인
-        available_memory = await get_available_gpu_memory_mb()
+        available_memory = await get_available_gpu_memory_mb(device_id=1)
         if available_memory != -1 and available_memory < MIN_GPU_MEMORY_MB:
             logger.warning(f"⚠️ GPU 메모리 부족 ({available_memory}MB). 최소 {MIN_GPU_MEMORY_MB}MB 필요. 작업 {task_id}를 다시 큐에 넣습니다.")
             await finetuning_queue.put(task_id) # 작업을 다시 큐에 넣음
