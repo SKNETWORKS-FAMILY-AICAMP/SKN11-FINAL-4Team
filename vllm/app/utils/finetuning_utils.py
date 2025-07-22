@@ -6,7 +6,9 @@ from typing import List, Dict, Any
 logger = logging.getLogger(__name__)
 
 # MBTI 데이터셋 로드
-MBTI_DATASET_PATH = "/workspace/SKN11-FINAL-4Team/vllm/pipeline/mbti_personality_dataset.json"
+# 현재 파일 위치를 기준으로 상대 경로 설정
+current_dir = os.path.dirname(os.path.abspath(__file__))
+MBTI_DATASET_PATH = os.path.join(current_dir, "..", "..", "pipeline", "mbti_personality_dataset.json")
 MBTI_PERSONALITIES = {}
 
 try:
