@@ -1235,8 +1235,9 @@ export default function ImageGeneratorPage() {
                                         {(() => {
                                           const main = STYLE_CATEGORIES.find((m: any) => m.id === selectedMainCategory)
                                           const cat = main?.subcategories?.find((c: any) => c.id === selectedCategory)
-                                          if (cat && Array.isArray(cat.subcategories)) {
-                                            return cat.subcategories.map((sub: { id: string; name: string; styles: { id: string; name: string }[] }) => (
+                                          // 사람인 경우에만 subcategories가 있음
+                                          if (selectedMainCategory === "person" && cat && Array.isArray((cat as any).subcategories)) {
+                                            return (cat as any).subcategories.map((sub: { id: string; name: string; styles: { id: string; name: string }[] }) => (
                                               <button
                                                 key={sub.id}
                                                 onClick={() => handleSubcategorySelect(sub.id)}
@@ -1275,7 +1276,7 @@ export default function ImageGeneratorPage() {
                                         {(() => {
                                           const main = STYLE_CATEGORIES.find((m: any) => m.id === selectedMainCategory)
                                           const cat = main?.subcategories?.find((c: any) => c.id === selectedCategory)
-                                          const sub = cat?.subcategories?.find((s: any) => s.id === selectedSubcategory)
+                                          const sub = (cat as any)?.subcategories?.find((s: any) => s.id === selectedSubcategory)
                                           if (sub && Array.isArray(sub.styles)) {
                                             return sub.styles.map((style: { id: string; name: string }) => (
                                               <button
