@@ -125,9 +125,8 @@ class ToneGenerationService:
                 if tone_responses and len(tone_responses) > 0:
                     tone_response = tone_responses[0]  # 첫 번째 응답 사용
                     
-                    tone_info = tone_response.get("tone_info", {})
-                    tone_description = tone_info.get("description", tone_name)
-                    hashtags = tone_info.get("hashtags", f"#{tone_name} #말투")
+                    tone_description = tone_response.get("description", tone_name)
+                    hashtags = tone_response.get("hashtags", f"#{tone_name} #말투")
                     system_prompt = tone_response.get("system_prompt", f"당신은 {tone_name} 말투로 대화하는 AI입니다.")
                     
                     conversation_examples.append({

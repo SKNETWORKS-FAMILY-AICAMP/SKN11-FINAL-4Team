@@ -136,6 +136,7 @@ async def generate_character_qa_fast(request: Dict[str, Any]):
         # 단일 요청으로 3가지 어투 생성 (더 차별화된 결과)
         try:
             responses = await tone_generator.generate_3_tones_single_request(
+                character_data=character_data,
                 question=question,
                 system_prompts=system_prompts
             )
@@ -155,6 +156,7 @@ async def generate_character_qa_fast(request: Dict[str, Any]):
             
             # 결과 정리
             responses = {}
+            print('tone_results',tone_results)
             for i, result in enumerate(tone_results):
                 tone_name = f"말투{i+1}"
                 if isinstance(result, Exception):
