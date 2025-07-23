@@ -102,7 +102,7 @@ def load_model_and_tokenizer(model_name="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct", 
         raise RuntimeError(f"Failed to set GPU device {gpu_id}")
     
     # 토크나이저 로드
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    tokenizer = AutoTokenizer.from_pretrained(model_name).to(f'cuda:{gpu_id}')
     
     # 패딩 토큰 설정 (필요한 경우)
     if tokenizer.pad_token is None:
@@ -118,12 +118,9 @@ def load_model_and_tokenizer(model_name="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct", 
             device_map=None,  # device_map을 사용하지 않음
             use_cache=False,  # 그래디언트 체크포인팅과 호환성을 위해
             low_cpu_mem_usage=True,  # CPU 메모리 사용량 최소화
-        )
+        ).to(f'cuda:{gpu_id}')
         
-        # 모델을 지정된 GPU로 이동
-        device = torch.device(f'cuda:{gpu_id}')
-        model = model.to(device)
-        print(f"✅ 모델을 {device}로 이동 완료")
+        print(f"✅ 모델을 {f'cuda:{gpu_id}'}로 이동 완료")
     
     # gradient checkpointing을 여기서 먼저 활성화
     model.gradient_checkpointing_enable()
@@ -471,22 +468,30 @@ def main(qa_data: list[dict], system_message: str, hf_token: str, hf_repo_id: st
             batch["attention_mask"].append(attention_mask)
             batch["labels"].append(padded_labels)
         
-        # 텐서로 변환 - 올바른 GPU에 생성
-        device = torch.device(f'cuda:{actual_gpu_id}')
+        # 텐서로 변환 - Trainer가 자동으로 올바른 디바이스로 이동시킴
         return {
-            "input_ids": torch.tensor(batch["input_ids"], dtype=torch.long, device=device),
-            "attention_mask": torch.tensor(batch["attention_mask"], dtype=torch.long, device=device),
-            "labels": torch.tensor(batch["labels"], dtype=torch.long, device=device)
+            "input_ids": torch.tensor(batch["input_ids"], dtype=torch.long),
+            "attention_mask": torch.tensor(batch["attention_mask"], dtype=torch.long),
+            "labels": torch.tensor(batch["labels"], dtype=torch.long)
         }
     
     # 9. 훈련 인수 설정
-    training_args = setup_training_arguments(training_epochs, gpu_id)
+    training_args = setup_training_arguments(training_epochs, actual_gpu_id)
     
     # 10. 조기 종료 콜백 설정
     early_stopping_callback = EarlyStoppingCallback(
         early_stopping_patience=2,  # 2 epoch 동안 개선이 없으면 종료
         early_stopping_threshold=0.01  # 최소 개선 임계값
     )
+    
+    # Trainer 초기화 전에 CUDA_VISIBLE_DEVICES 설정
+    # 이렇게 하면 Trainer가 올바른 GPU를 사용함
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(actual_gpu_id)
+    
+    # CUDA_VISIBLE_DEVICES 설정 후에는 GPU 0으로 재매핑되므로 모델을 cuda:0으로 이동
+    if torch.cuda.is_available():
+        model = model.to('cuda:0')
+        print(f"✅ CUDA_VISIBLE_DEVICES={actual_gpu_id} 설정 후 모델을 cuda:0으로 이동")
     
     # 11. Trainer 초기화
     trainer = Trainer(
