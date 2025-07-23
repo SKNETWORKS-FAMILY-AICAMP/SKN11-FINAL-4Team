@@ -22,6 +22,7 @@ async def start_finetuning_endpoint(request: FineTuningRequest):
             "task_id": task_id,
             "influencer_id": request.influencer_id,
             "influencer_name": request.influencer_name,
+            "system_prompt": request.system_prompt,
             "personality": request.personality,
             "qa_data": request.qa_data,
             "hf_repo_id": request.hf_repo_id,

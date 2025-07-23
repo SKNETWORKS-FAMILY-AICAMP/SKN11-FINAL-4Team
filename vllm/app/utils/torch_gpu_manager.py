@@ -31,6 +31,7 @@ class TorchGPUManager:
         """Get comprehensive GPU information for a specific device"""
         try:
             if not self.gpu_available or device_id >= self.gpu_count:
+                logger.error(f"GPU {device_id} is not available")
                 return {
                     "available": False,
                     "name": "N/A",
@@ -308,10 +309,8 @@ async def get_torch_gpu_manager() -> TorchGPUManager:
     async with _torch_gpu_manager_lock:
         if _torch_gpu_manager is None:
             _torch_gpu_manager = TorchGPUManager()
-            # Start monitoring task
             asyncio.create_task(_torch_gpu_manager.monitor_memory_usage())
             
-            # Initial GPU test
             if _torch_gpu_manager.gpu_available:
                 for i in range(_torch_gpu_manager.gpu_count):
                     await _torch_gpu_manager.test_gpu_tensor(i, size=100)

@@ -200,20 +200,9 @@ async def execute_finetuning(task_id: str):
         # GPU 선택 로직 추가
         gpu_manager = await get_gpu_manager()
         
-        # 환경 변수에서 파인튜닝 GPU ID 가져오기 (기본값: 1)
-        finetuning_gpu_id = int(os.getenv('FINETUNING_GPU_ID', '1'))
+        selected_gpu = 1
         
-        # 모든 GPU의 정보를 가져옴
         all_gpu_info = await gpu_manager.get_all_gpus_info()
-        
-        # 파인튜닝용 GPU 선택 (환경 변수에서 지정하거나 가장 여유 있는 GPU)
-        if finetuning_gpu_id < gpu_manager.gpu_count and all_gpu_info.get(finetuning_gpu_id, {}).get('available', False):
-            selected_gpu = finetuning_gpu_id
-            logger.info(f"환경 변수에서 지정된 GPU {selected_gpu} 사용")
-        else:
-            # 지정된 GPU를 사용할 수 없으면 가장 여유 있는 GPU 선택
-            selected_gpu = gpu_manager.get_least_utilized_gpu(all_gpu_info)
-            logger.warning(f"지정된 GPU {finetuning_gpu_id}를 사용할 수 없어 GPU {selected_gpu} 선택")
         
         logger.info(f"🖥️ GPU 상태:")
         for gpu_id, info in all_gpu_info.items():
@@ -233,12 +222,8 @@ async def execute_finetuning(task_id: str):
         task["updated_at"] = time.time()
         
         # 시스템 메시지 생성
-        system_message = create_system_message(
-            task["influencer_name"], 
-            task["personality"], 
-            task["style_info"]
-        )
-        
+        system_message = task["system_prompt"]
+        print(system_message)
         # QA 데이터 형식 확인 및 변환
         qa_data = task["qa_data"]
         is_converted = task.get("is_converted", False)
@@ -324,20 +309,20 @@ async def execute_finetuning(task_id: str):
 
 async def finetuning_worker():
     """파인튜닝 작업을 큐에서 가져와 처리하는 워커"""
-    MIN_GPU_MEMORY_MB = 1024 * 10 # 10GB (예시 값, 실제 필요한 메모리에 따라 조정)
+    MIN_GPU_MEMORY_MB = 1024 * 10
 
     while True:
         task_id = await finetuning_queue.get()
         logger.info(f"⚙️ 큐에서 파인튜닝 작업 시작: {task_id}")
         
-        # GPU 메모리 확인 (파인튜닝용 GPU)
-        finetuning_gpu_id = int(os.getenv('FINETUNING_GPU_ID', '1'))
+        finetuning_gpu_id = 1
         available_memory = await get_available_gpu_memory_mb(device_id=finetuning_gpu_id)
+        logger.info(f"GPU {finetuning_gpu_id} 메모리 확인: {available_memory}MB")
         if available_memory != -1 and available_memory < MIN_GPU_MEMORY_MB:
             logger.warning(f"⚠️ GPU 메모리 부족 ({available_memory}MB). 최소 {MIN_GPU_MEMORY_MB}MB 필요. 작업 {task_id}를 다시 큐에 넣습니다.")
-            await finetuning_queue.put(task_id) # 작업을 다시 큐에 넣음
+            await finetuning_queue.put(task_id) 
             finetuning_queue.task_done()
-            await asyncio.sleep(60) # 1분 대기 후 다시 시도
+            await asyncio.sleep(60) 
             continue
 
         try:
@@ -378,27 +363,16 @@ async def initialize_vllm_engine():
         
         # vLLM 엔진 초기화 (GPU 필요하므로 실패할 수 있음)
         try:
-            # tensor_parallel_size 설정 (환경변수 또는 기본값)
-            tensor_parallel_size = int(os.getenv('VLLM_TENSOR_PARALLEL_SIZE', '1'))
-            
-            # vLLM이 사용할 GPU ID 설정
-            if tensor_parallel_size > 1:
-                # multi-GPU 사용 시 처음 N개 GPU 사용
-                vllm_gpu_ids = ','.join(str(i) for i in range(tensor_parallel_size))
-                os.environ['VLLM_GPU_IDS'] = vllm_gpu_ids
-                logger.info(f"vLLM multi-GPU 모드: GPU {vllm_gpu_ids} 사용")
-            else:
-                # 단일 GPU 사용
-                vllm_gpu_id = os.getenv('VLLM_GPU_ID', '0')
-                os.environ['VLLM_GPU_IDS'] = vllm_gpu_id
-                logger.info(f"vLLM 단일 GPU 모드: GPU {vllm_gpu_id} 사용")
-            
-            # Get dynamic GPU memory allocation
+            tensor_parallel_size = 1
+        
+            vllm_gpu_id = 0
+            logger.info(f"vLLM 단일 GPU 모드: GPU {vllm_gpu_id} 사용")
+        
             gpu_manager = await get_gpu_manager()
             gpu_memory_fraction = await gpu_manager.calculate_optimal_memory_fraction(
                 device_id=0,
-                reserve_mb=2048,  # Reserve 2GB for other processes
-                max_fraction=0.85  # Maximum 85% usage
+                reserve_mb=2048,
+                max_fraction=0.85
             )
             
             engine_args = AsyncEngineArgs(
