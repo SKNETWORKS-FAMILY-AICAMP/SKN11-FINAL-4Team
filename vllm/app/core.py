@@ -279,13 +279,18 @@ async def initialize_vllm_engine():
         
         # vLLM 엔진 초기화 (GPU 필요하므로 실패할 수 있음)
         try:
+            # GPU 1번으로 고정
+            import torch
+            torch.cuda.set_device(1)
+            os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+            
             tensor_parallel_size = 1
         
-            vllm_gpu_id = 0
-            logger.info(f"vLLM 단일 GPU 모드: GPU {vllm_gpu_id} 사용")
+            vllm_gpu_id = 1
+            logger.info(f"vLLM 단일 GPU 모드: GPU {vllm_gpu_id} 사용 (고정)")
         
             # GPU 메모리 fraction을 고정값으로 설정
-            gpu_memory_fraction = 0.85
+            gpu_memory_fraction = 0.5
             
             engine_args = AsyncEngineArgs(
                 model="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct",
