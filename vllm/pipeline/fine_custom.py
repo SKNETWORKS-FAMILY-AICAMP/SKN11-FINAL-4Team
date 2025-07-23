@@ -387,7 +387,7 @@ def main(qa_data: list[dict], system_message: str, hf_token: str, hf_repo_id: st
     cleanup_gpu_memory(actual_gpu_id)
     
     # 1. 모델과 토크나이저 로드
-    model, tokenizer = load_model_and_tokenizer(gpu_manager=gpu_manager, gpu_id=0)
+    model, tokenizer = load_model_and_tokenizer(gpu_manager=gpu_manager, gpu_id=actual_gpu_id)
     
     # 2. 모델 구조 확인
     print("모델 구조 확인 중...")
