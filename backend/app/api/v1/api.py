@@ -17,6 +17,7 @@ from app.api.v1.endpoints import (
     chatbot,  # 챗봇 활성화
     comfyui,
     tts,
+    content_enhancement,
     image_generator,  # 새로운 이미지 생성 API
     user_sessions,  # 새로운 사용자 세션 API
     image_generation,  # 새로운 통합 이미지 생성 API
