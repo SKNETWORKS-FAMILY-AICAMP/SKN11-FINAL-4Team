@@ -105,81 +105,57 @@ async def send_finetuning_webhook(task_id: str, status: str, hf_model_url: Optio
 
 async def run_finetuning_pipeline(qa_data: List[Dict], system_message: str, 
                                 hf_token: str, hf_repo_id: str, training_epochs: int, gpu_id:int) -> Optional[str]:
-    """파인튜닝 파이프라인 실행 (별도 프로세스)"""
-    import subprocess
-    import tempfile
-    import json
+    """파인튜닝 파이프라인 실행 (직접 실행)"""
+    import torch
+    import gc
     
     try:
         logger.info(f"🔄 파인튜닝 파이프라인 실행: {hf_repo_id}")
         logger.info(f"🔍 파이프라인 QA 데이터: 개수={len(qa_data)}")
-        logger.info(f"🎯 GPU {gpu_id}에서 별도 프로세스로 실행")
+        logger.info(f"🎯 GPU {gpu_id}에서 직접 실행")
         
-        # 임시 파일 생성
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as qa_file:
-            json.dump(qa_data, qa_file, ensure_ascii=False, indent=2)
-            qa_file_path = qa_file.name
+        # GPU 환경 설정
+        original_cuda_visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES", None)
+        os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+        os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+        os.environ["TOKENIZERS_PARALLELISM"] = "false"
         
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as result_file:
-            result_file_path = result_file.name
+        logger.info(f"✅ CUDA_VISIBLE_DEVICES를 {gpu_id}로 설정 완료")
         
         try:
-            # 파인튜닝 서브프로세스 실행
-            script_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "pipeline", "finetuning_subprocess.py")
-            cmd = [
-                sys.executable,  # Python 인터프리터
-                script_path,
-                "--gpu-id", str(gpu_id),
-                "--qa-data", qa_file_path,
-                "--system-message", system_message,
-                "--hf-token", hf_token,
-                "--hf-repo-id", hf_repo_id,
-                "--training-epochs", str(training_epochs),
-                "--output-file", result_file_path
-            ]
+            # GPU 상태 확인
+            logger.info(f"🔍 PyTorch가 볼 수 있는 GPU 수: {torch.cuda.device_count()}")
+            if torch.cuda.is_available():
+                logger.info(f"✅ GPU 사용 가능: {torch.cuda.get_device_name(0)}")
+                logger.info(f"📊 GPU 메모리: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.2f} GB")
             
-            logger.info(f"🚀 서브프로세스 실행: {' '.join(cmd[:3])}...")
-            
-            # 작업 디렉토리 설정
-            cwd = os.path.dirname(os.path.dirname(__file__))
-            
-            # 프로세스 실행
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=cwd
+            # fine_custom.main을 직접 호출
+            # GPU 환경이 이미 설정되었으므로 0번 GPU 사용
+            hf_model_url = await asyncio.to_thread(
+                fine_custom.main,
+                qa_data=qa_data,
+                system_message=system_message,
+                hf_token=hf_token,
+                hf_repo_id=hf_repo_id,
+                training_epochs=training_epochs,
+                gpu_id=0  # CUDA_VISIBLE_DEVICES 설정 후에는 항상 0
             )
             
-            # 프로세스 완료 대기
-            stdout, stderr = await process.communicate()
+            logger.info(f"✅ 파인튜닝 파이프라인 실행 완료: {hf_repo_id}")
+            return hf_model_url
             
-            if stdout:
-                logger.info(f"📋 서브프로세스 출력:\n{stdout.decode()}")
-            if stderr:
-                logger.warning(f"⚠️ 서브프로세스 에러:\n{stderr.decode()}")
-            
-            # 결과 파일 읽기
-            if os.path.exists(result_file_path):
-                with open(result_file_path, 'r', encoding='utf-8') as f:
-                    result = json.load(f)
-            else:
-                # 파일이 없으면 실패로 처리
-                raise Exception(f"서브프로세스가 결과 파일을 생성하지 못했습니다. 프로세스 종료 코드: {process.returncode}")
-            
-            if result["success"]:
-                logger.info(f"✅ 파인튜닝 파이프라인 실행 완료: {hf_repo_id}")
-                return result["hf_model_url"]
-            else:
-                raise Exception(f"파인튜닝 실행 실패: {result.get('error', 'Unknown error')}")
-                
         finally:
-            # 임시 파일 삭제
-            for path in [qa_file_path, result_file_path]:
-                try:
-                    os.unlink(path)
-                except:
-                    pass
+            # GPU 메모리 정리
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                logger.info("🧹 GPU 메모리 정리 완료")
+            
+            # 원래 환경 변수 복원
+            if original_cuda_visible_devices is not None:
+                os.environ["CUDA_VISIBLE_DEVICES"] = original_cuda_visible_devices
+            else:
+                os.environ.pop("CUDA_VISIBLE_DEVICES", None)
             
     except Exception as e:
         logger.error(f"❌ 파인튜닝 파이프라인 실행 실패: {e}")
