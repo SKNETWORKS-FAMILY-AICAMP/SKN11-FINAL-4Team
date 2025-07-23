@@ -330,17 +330,12 @@ def main(qa_data: list[dict], system_message: str, hf_token: str, hf_repo_id: st
     # 1. 모델과 토크나이저 로드
     model, tokenizer = load_model_and_tokenizer()
     
-    # 2. 모델 구조 확인
-    print("모델 구조 확인 중...")
-    print(f"모델 타입: {type(model)}")
-    print(f"모델 디바이스: {model.device}")
+    
     # 3. LoRA 설정 및 적용
     lora_config = setup_lora_config(model)
     model = get_peft_model(model, lora_config)
     
-    # PEFT 적용 후 모델을 다시 올바른 GPU로 이동
-    model = model.to(device)
-    print(f"모델이 올라간 디바이스: {next(model.parameters()).device}")
+    # PEFT 적용 후 디바이스 확인 (device_map="auto"로 이미 할당됨)
     # 7. 데이터셋 준비
     train_dataset = prepare_dataset(tokenizer, qa_data, system_message)
     print(f"훈련 데이터셋 크기: {len(train_dataset)}")
@@ -386,11 +381,11 @@ def main(qa_data: list[dict], system_message: str, hf_token: str, hf_repo_id: st
             batch["attention_mask"].append(attention_mask)
             batch["labels"].append(padded_labels)
         
-        # 텐서를 생성할 때 올바른 디바이스로 직접 생성
+        # 텐서 생성 (Trainer가 자동으로 올바른 디바이스로 이동시킴)
         return {
-            "input_ids": torch.tensor(batch["input_ids"], dtype=torch.long, device=device),
-            "attention_mask": torch.tensor(batch["attention_mask"], dtype=torch.long, device=device),
-            "labels": torch.tensor(batch["labels"], dtype=torch.long, device=device)
+            "input_ids": torch.tensor(batch["input_ids"], dtype=torch.long),
+            "attention_mask": torch.tensor(batch["attention_mask"], dtype=torch.long),
+            "labels": torch.tensor(batch["labels"], dtype=torch.long)
         }
     print("여기는 오고 안되는거야? ")
     # 9. 훈련 인수 설정
@@ -401,11 +396,6 @@ def main(qa_data: list[dict], system_message: str, hf_token: str, hf_repo_id: st
         early_stopping_patience=2,  # 2 epoch 동안 개선이 없으면 종료
         early_stopping_threshold=0.01  # 최소 개선 임계값
     )
-    print("여기는 오고 안되는거야? 2")
-    
-    
-    print("여기는 오고 안되는거야? 3")
-    print("torch.cuda.current_device(): ",torch.cuda.current_device())
     # 11. Trainer 초기화
     trainer = Trainer(
         model=model,
@@ -415,11 +405,7 @@ def main(qa_data: list[dict], system_message: str, hf_token: str, hf_repo_id: st
         data_collator=data_collator,
         callbacks=[early_stopping_callback]
     )
-    print("여기는 오고 안되는거야? 4")
-    # 12. 훈련 시작
-    print("훈련 시작...")
-    print(f"현재 CUDA 디바이스: {torch.cuda.current_device()}")
-    print(f"모델 디바이스: {next(model.parameters()).device}")
+    
     try:
         trainer.train()
         print("훈련 완료!")
