@@ -279,15 +279,10 @@ async def initialize_vllm_engine():
         
         # vLLM 엔진 초기화 (GPU 필요하므로 실패할 수 있음)
         try:
-            # GPU 1번으로 고정
-            import torch
-            torch.cuda.set_device(1)
-            os.environ["CUDA_VISIBLE_DEVICES"] = "1"
-            
             tensor_parallel_size = 1
         
-            vllm_gpu_id = 1
-            logger.info(f"vLLM 단일 GPU 모드: GPU {vllm_gpu_id} 사용 (고정)")
+            # vLLM은 자동으로 GPU 할당 (보통 0번 GPU 사용)
+            logger.info(f"vLLM GPU 자동 할당 모드")
         
             # GPU 메모리 fraction을 고정값으로 설정
             gpu_memory_fraction = 0.5

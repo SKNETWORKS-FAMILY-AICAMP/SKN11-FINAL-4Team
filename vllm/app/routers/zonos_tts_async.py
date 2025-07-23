@@ -186,11 +186,12 @@ def initialize_zonos_model():
         # 환경 변수에서 TTS GPU ID 가져오기 (기본값: 1)
         tts_gpu_id = int(os.getenv('TTS_GPU_ID', '1'))
         
-        # GPU 설정 - device_map 자동 할당으로 변경
+        # GPU 설정 - GPU 1번 고정
         if torch.cuda.is_available():
-            device = torch.device("cuda")  # 자동으로 사용 가능한 GPU 선택
-            logger.info(f"🔧 Zonos 모델 초기화 중... (디바이스: cuda, 자동 할당)")
-            logger.info(f"✅ GPU 자동 할당 (사용 가능한 GPU 수: {torch.cuda.device_count()})")
+            torch.cuda.set_device(1)  # GPU 1번으로 고정
+            device = torch.device("cuda:1")  # GPU 1번 명시
+            logger.info(f"🔧 Zonos 모델 초기화 중... (디바이스: cuda:1, 고정)")
+            logger.info(f"✅ GPU 1번 고정 할당 (전체 GPU 수: {torch.cuda.device_count()})")
         else:
             device = torch.device("cpu")
             logger.warning("⚠️ CUDA를 사용할 수 없습니다. CPU를 사용합니다.")
