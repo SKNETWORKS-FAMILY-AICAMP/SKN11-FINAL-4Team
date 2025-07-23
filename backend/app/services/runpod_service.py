@@ -19,7 +19,7 @@ class RunPodPodRequest(BaseModel):
     template_id: str
     gpu_type: str = "NVIDIA RTX A6000"
     gpu_count: int = 1
-    container_disk_in_gb: int = 50
+    container_disk_in_gb: int = 20
     volume_in_gb: int = 0
     ports: str = "8188/http"  # ComfyUI 기본 포트
     env: Dict[str, str] = {}
@@ -58,9 +58,9 @@ class RunPodService:
         # GPU 재시도 로직 (EU-RO-1 지역에서 실제 가용한 GPU만)
         gpu_chain = [
             "NVIDIA GeForce RTX 4090",        # 1순위: 고성능 (24GB)
-            "NVIDIA RTX 4000 Ada Generation", # 2순위: 워크스테이션급 (20GB)
-            "NVIDIA RTX A4500",               # 3순위: 워크스테이션 (20GB) 
-            "NVIDIA RTX 2000 Ada Generation", # 4순위: 효율적 성능 (16GB)
+            "NVIDIA RTX A6000",               # 2순위: 워크스테이션급 (48GB)
+            "NVIDIA RTX A5000",               # 3순위: 워크스테이션 (24GB)
+            "NVIDIA A40",                     # 4순위: 데이터센터급 (48GB)
         ]
         
         for attempt in range(4):  # RTX 4090 → RTX 4000 Ada → A4500 → RTX 2000 Ada
@@ -98,7 +98,7 @@ class RunPodService:
                             "bidPerGpu": 0.3,  # 시간당 최대 비용 (USD)
                             "gpuCount": 1,
                             "volumeInGb": 200,  # Volume Disk 200GB
-                            "volumeId": settings.RUNPOD_VOLUME_ID,
+                            "volumeKey": settings.RUNPOD_VOLUME_ID,
                             "volumeMountPath": "/workspace",  # 볼륨 마운트 경로 지정
                             "containerDiskInGb": 20,  # Container Disk 20GB
                             "minVcpuCount": 4,
@@ -144,7 +144,7 @@ class RunPodService:
                             "bidPerGpu": 0.2,  # 시간당 최대 비용 (USD)
                             "gpuCount": 1,
                             "volumeInGb": 200,
-                            "volumeId": settings.RUNPOD_VOLUME_ID,
+                            "volumeKey": settings.RUNPOD_VOLUME_ID,
                             "containerDiskInGb": 50,
                             "minVcpuCount": 2,
                             "minMemoryInGb": 15,

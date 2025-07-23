@@ -9,7 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-
+import { Input } from "@/components/ui/input"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 
 import { Separator } from "@/components/ui/separator"
@@ -179,7 +179,6 @@ export default function ImageGeneratorPage() {
 
   // 모델 선택 기능 제거 - 워크플로우에 정의된 모델 자동 사용
   const [selectedWorkflow, setSelectedWorkflow] = useState<string>("")
-  const [selectedSize, setSelectedSize] = useState<string>("")
 
   const [selectedStyle, setSelectedStyle] = useState<string>("realistic")
   const [selectedSize, setSelectedSize] = useState<string>("square")
@@ -427,9 +426,6 @@ export default function ImageGeneratorPage() {
       landscape: selectedLandscape,
       width: selectedSizeData?.width || 512,
       height: selectedSizeData?.height || 512,
-      steps,
-      cfg_scale: cfgScale,
-      seed: seed === -1 ? undefined : seed,
       workflow_id: selectedWorkflow || 'basic_txt2img',
     })
 
@@ -447,7 +443,7 @@ export default function ImageGeneratorPage() {
         },
         body: JSON.stringify({
 
-          prompt: optimizedPrompt, // 최적화된 프롬프트 사용
+          prompt: getCombinedPromptKeywords(), // 최적화된 프롬프트 사용
           // 커스텀 템플릿에서는 부정 프롬프트 사용하지 않음
           style: selectedStyle,
           width: selectedSizeData?.width || 512,
@@ -458,12 +454,8 @@ export default function ImageGeneratorPage() {
       console.log('Request body:', {
         prompt: getCombinedPromptKeywords(),
         workflow_type: selectedWorkflow || 'basic_txt2img',
-        negative_prompt: '',
         width: selectedSizeData?.width || 1024,
         height: selectedSizeData?.height || 1024,
-        steps,
-        cfg_scale: cfgScale,
-        seed: seed === -1 ? null : seed,
       })
 
       // 프론트엔드 로그: 응답 상태
@@ -495,7 +487,7 @@ export default function ImageGeneratorPage() {
           }
           
           const newImage: GeneratedImage = {
-            id: jobId || Date.now().toString(),
+            id: data.storage_id || Date.now().toString(),
             prompt,
             width: selectedSizeData?.width || 512,
             height: selectedSizeData?.height || 512,
@@ -504,15 +496,15 @@ export default function ImageGeneratorPage() {
             status: 'completed'
           }
           
-          setImages(prev => [generatedImage, ...prev])
-          setPreviewImage(generatedImage)
+          setImages(prev => [newImage, ...prev])
+          setPreviewImage(newImage)
           setShowImageModal(true)
           setPrompt("")
 
           return
-        }
+        }, 2000);
         
-        if (!jobId) {
+        if (!data.storage_id) {
           console.error('No job ID received from backend')
           setIsGenerating(false)
           return
@@ -533,7 +525,7 @@ export default function ImageGeneratorPage() {
               return
             }
             
-            const progressResponse = await fetch(`/api/comfyui/progress/${jobId}`)
+            const progressResponse = await fetch(`/api/comfyui/progress/${data.storage_id}`)
             
             if (!progressResponse.ok) {
               console.error('Progress check failed:', progressResponse.status)
@@ -552,7 +544,7 @@ export default function ImageGeneratorPage() {
                 
                 // 새로운 이미지를 목록에 추가
                 const newImage: GeneratedImage = {
-                  id: progressData.image_id || jobId,
+                  id: progressData.image_id || data.storage_id,
                   prompt,
                   width: selectedSizeData?.width || 512,
                   height: selectedSizeData?.height || 512,
@@ -953,13 +945,8 @@ export default function ImageGeneratorPage() {
         const newTestImage: GeneratedImage = {
           id: `img_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
           prompt: previewImage?.prompt || prompt,
-          negative_prompt: '',
-          model: 'test-model',
           width: selectedSizeData?.width || 512,
           height: selectedSizeData?.height || 512,
-          steps,
-          cfg_scale: cfgScale,
-          seed: Math.floor(Math.random() * 1000000),
           image_url: 'https://picsum.photos/512/512?random=' + Date.now(), // 새로운 랜덤 이미지
           created_at: new Date().toISOString(),
           status: 'completed'
@@ -1732,10 +1719,6 @@ export default function ImageGeneratorPage() {
 
                                 <div className="space-y-2 text-sm flex-grow">
                                   <div className="flex justify-between">
-                                    <span className="text-gray-600">워크플로우:</span>
-                                    <span className="font-medium">{Array.isArray(workflows) ? workflows.find(w => w.id === selectedWorkflow)?.name || '기본' : '기본'}</span>
-                                  </div>
-                                  <div className="flex justify-between">
                                     <span className="text-gray-600">스타일:</span>
                                     <span className="font-medium">선택된 스타일</span>
                                   </div>
@@ -1759,11 +1742,11 @@ export default function ImageGeneratorPage() {
                                         <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                                         생성 중...
                                       </>
-                    ) : clientSessionTime !== null && clientSessionTime <= 0 ? (
-                      <>
-                        <RefreshCw className="h-4 w-4 mr-2" />
-                        세션 재시작 후 생성 가능
-                      </>
+                                      ) : clientSessionTime !== null && clientSessionTime <= 0 ? (
+                                        <>
+                                          <RefreshCw className="h-4 w-4 mr-2" />
+                                          세션 재시작 후 생성 가능
+                                        </>
                                     ) : (
                                       <>
                                         <Wand2 className="h-4 w-4 mr-2" />
@@ -2347,9 +2330,9 @@ export default function ImageGeneratorPage() {
                       <Filter className="h-4 w-4" />
                       필터
                       {galleryFilter !== "all" && (
-                        <Badge variant="secondary" className="ml-1">
-                          1
-                        </Badge>
+                        <span className="text-gray-600">
+                          {galleryFilter}
+                        </span>
                       )}
                     </Button>
                   </DialogTrigger>
@@ -2486,7 +2469,7 @@ export default function ImageGeneratorPage() {
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                     <div>
                       <span className="text-gray-500">모델:</span>
-                      <p className="font-medium">{previewImage.model}</p>
+                      <p className="font-medium">{previewImage.prompt}</p>
                     </div>
                     <div>
                       <span className="text-gray-500">크기:</span>
@@ -2708,7 +2691,7 @@ export default function ImageGeneratorPage() {
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                     <div>
                       <span className="text-gray-500">모델:</span>
-                      <p className="font-medium">{previewImage.model}</p>
+                      <p className="font-medium">{previewImage.prompt}</p>
                     </div>
                     <div>
                       <span className="text-gray-500">크기:</span>
@@ -2743,7 +2726,6 @@ export default function ImageGeneratorPage() {
             ) : null}
           </DialogContent>
         </Dialog>
-
       </div>
   )
 }
