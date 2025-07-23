@@ -103,8 +103,8 @@ const COMMON_TYPES = [
 const LANDSCAPE_OPTIONS = [
   { id: 'nature', name: '자연' },
   { id: 'city', name: '도시' },
-  { id: 'sea', name: '바다' },
-  { id: 'mountain', name: '산' },
+  { id: 'space', name: '우주' },
+  { id: 'digital', name: '디지털' },
 ]
 
 // 프롬프트 키워드 매핑
@@ -301,7 +301,8 @@ export default function ImageGeneratorPage() {
         return
       }
       
-      const response = await fetch('https://localhost:8000/api/v1/user-sessions/create', {
+      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
+      const response = await fetch(`${backendUrl}/api/v1/user-sessions/create`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -337,7 +338,8 @@ export default function ImageGeneratorPage() {
         return
       }
       
-      const response = await fetch('https://localhost:8000/api/v1/user-sessions/status', {
+      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
+      const response = await fetch(`${backendUrl}/api/v1/user-sessions/status`, {
         headers: {
           'Authorization': `Bearer ${currentToken}`,
         }
@@ -399,40 +401,20 @@ export default function ImageGeneratorPage() {
   }, [])
   const lastPointRef = useRef<{x: number, y: number} | null>(null)
 
-  // 모델 목록 가져오기 제거 - 워크플로우에 정의된 모델 자동 사용
-
-  // 워크플로우 목록 가져오기
-  useEffect(() => {
-    const fetchWorkflows = async () => {
-      try {
-        const response = await fetch('/api/comfyui/workflows')
-        const data = await response.json()
-        if (data.success) {
-          // workflows가 배열인지 확인
-          const workflowsArray = Array.isArray(data.workflows) ? data.workflows : []
-          setWorkflows(workflowsArray)
-          if (workflowsArray.length > 0) {
-            setSelectedWorkflow(workflowsArray[0].id)
-          } else {
-            // 워크플로우가 없으면 기본 워크플로우 설정
-            setSelectedWorkflow('basic_txt2img')
-          }
-        }
-      } catch (error) {
-        console.error('Failed to fetch workflows:', error)
-        // 에러 발생 시 빈 배열로 설정하고 기본 워크플로우 설정
-        setWorkflows([])
-        setSelectedWorkflow('custom_workflow')
-      }
-    }
-
-    fetchWorkflows()
-  }, [])
-
   // 생성된 이미지 목록 가져오기
   const fetchImages = async () => {
     try {
-      const response = await fetch('/api/comfyui/images')
+      const token = localStorage.getItem('access_token')
+      if (!token) {
+        console.error('No access token found')
+        return
+      }
+
+      const response = await fetch('/api/image-generation/my-images', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      })
       const data = await response.json()
       if (data.success) {
         setImages(data.images)
@@ -469,30 +451,41 @@ export default function ImageGeneratorPage() {
       cfg_scale: cfgScale,
       seed: seed === -1 ? undefined : seed,
       workflow_id: selectedWorkflow || 'basic_txt2img',
-      pod_id: "njs86v2wjo4q1b"
     })
 
     try {
-      const response = await fetch('/api/comfyui/generate', {
+      const token = localStorage.getItem('access_token')
+      if (!token) {
+        throw new Error('No access token found')
+      }
+
+      const response = await fetch('/api/image-generation/generate', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
         },
         body: JSON.stringify({
-          prompt,
-          style: selectedMainCategory,
-          category: selectedCategory,
-          subcategory: selectedSubcategory,
-          detailStyle: selectedDetailStyle,
-          landscape: selectedLandscape,
-          width: selectedSizeData?.width || 512,
-          height: selectedSizeData?.height || 512,
+          prompt: getCombinedPromptKeywords(),
+          workflow_type: selectedWorkflow || 'basic_txt2img',
+          negative_prompt: '',
+          width: selectedSizeData?.width || 1024,
+          height: selectedSizeData?.height || 1024,
           steps,
           cfg_scale: cfgScale,
-          seed: seed === -1 ? undefined : seed,
-          workflow_id: selectedWorkflow || 'basic_txt2img',
-          pod_id: "njs86v2wjo4q1b"
+          seed: seed === -1 ? null : seed,
         })
+      })
+
+      console.log('Request body:', {
+        prompt: getCombinedPromptKeywords(),
+        workflow_type: selectedWorkflow || 'basic_txt2img',
+        negative_prompt: '',
+        width: selectedSizeData?.width || 1024,
+        height: selectedSizeData?.height || 1024,
+        steps,
+        cfg_scale: cfgScale,
+        seed: seed === -1 ? null : seed,
       })
 
       // 프론트엔드 로그: 응답 상태
@@ -518,16 +511,16 @@ export default function ImageGeneratorPage() {
           setGenerationProgress(100)
           
           const generatedImage: GeneratedImage = {
-            id: `img_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            id: data.storage_id || `img_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
             prompt: prompt,
             negative_prompt: '',
             model: selectedWorkflow || 'basic_txt2img',
-            width: selectedSizeData?.width || 512,
-            height: selectedSizeData?.height || 512,
+            width: selectedSizeData?.width || 1024,
+            height: selectedSizeData?.height || 1024,
             steps,
             cfg_scale: cfgScale,
             seed: seed === -1 ? Math.floor(Math.random() * 1000000) : seed,
-            image_url: data.image_url || 'https://picsum.photos/512/512?random=' + Date.now(),
+            image_url: data.s3_url || 'https://picsum.photos/512/512?random=' + Date.now(),
             created_at: new Date().toISOString(),
             status: 'completed'
           }
@@ -548,12 +541,21 @@ export default function ImageGeneratorPage() {
     }
   }
 
-  const handleDeleteImage = async (imageId: string) => {
+  const handleDeleteImage = async (storage_id: string) => {
     try {
-      await fetch(`/api/comfyui/images/${imageId}`, {
-        method: 'DELETE'
+      const token = localStorage.getItem('access_token')
+      if (!token) {
+        console.error('No access token found')
+        return
+      }
+
+      await fetch(`/api/image-generation/images/${storage_id}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
       })
-      setImages(prev => prev.filter(img => img.id !== imageId))
+      setImages(prev => prev.filter(img => img.id !== storage_id))
     } catch (error) {
       console.error('Failed to delete image:', error)
     }

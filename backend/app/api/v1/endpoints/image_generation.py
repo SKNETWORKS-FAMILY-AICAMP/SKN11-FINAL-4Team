@@ -90,11 +90,17 @@ async def generate_image(
         if not user_id:
             raise HTTPException(status_code=401, detail="사용자 ID를 찾을 수 없습니다.")
         
-        logger.info(f"Starting image generation for user {user_id}, prompt: {request.prompt[:50]}...")
+        logger.info(f"Starting image generation for user {user_id}")
+        logger.info(f"Request data: prompt='{request.prompt[:50]}...', workflow_type='{request.workflow_type}', width={request.width}, height={request.height}, steps={request.steps}, cfg_scale={request.cfg_scale}, seed={request.seed}")
         
         # 1. 사용자 및 그룹 정보 조회
         user = await _get_user_with_groups(user_id, db)
-        if not user or not user.teams:
+        logger.info(f"User lookup result for {user_id}: user={user is not None}, teams={len(user.teams) if user and user.teams else 0}")
+        
+        if not user:
+            raise HTTPException(status_code=400, detail="사용자를 찾을 수 없습니다.")
+        
+        if not user.teams:
             raise HTTPException(status_code=400, detail="사용자가 그룹에 속해있지 않습니다.")
         
         # 첫 번째 그룹을 기본 그룹으로 사용
@@ -354,12 +360,23 @@ async def _get_user_with_groups(user_id: str, db: AsyncSession) -> Optional[User
     from sqlalchemy.orm import selectinload
     
     try:
+        logger.info(f"Looking up user with ID: {user_id}")
         result = await db.execute(
             select(User)
             .options(selectinload(User.teams))
             .where(User.user_id == user_id)
         )
-        return result.scalar_one_or_none()
+        user = result.scalar_one_or_none()
+        
+        if user:
+            logger.info(f"Found user: {user.user_id}, teams count: {len(user.teams) if user.teams else 0}")
+            if user.teams:
+                for team in user.teams:
+                    logger.info(f"Team: group_id={team.group_id}, group_name={team.group_name}")
+        else:
+            logger.warning(f"User not found: {user_id}")
+        
+        return user
     except Exception as e:
         logger.error(f"Failed to get user with groups {user_id}: {e}")
         return None

@@ -73,27 +73,73 @@ def create_user_session(
     1 user = 1 RunPod 제한 적용
     """
     try:
+        logger.info(f"세션 생성 요청 수신: {request}")
+        logger.info(f"현재 사용자: {current_user}")
+        
         user_id = current_user.get("sub")
         if not user_id:
+            logger.error("현재 사용자에서 사용자 ID를 찾을 수 없음")
             raise HTTPException(status_code=401, detail="사용자 ID를 찾을 수 없습니다.")
         
-        logger.info(f"Creating session for user {user_id}")
+        logger.info(f"사용자 {user_id}의 세션 생성 시작")
         
         # 사용자 세션 서비스로 세션 생성
         user_session_service = get_user_session_service()
+        logger.info("사용자 세션 서비스 획득 완료")
+        
         # background_tasks를 서비스에 전달
         success = user_session_service.create_session(user_id, db, background_tasks)
+        logger.info(f"세션 생성 결과: {success}")
         
         if not success:
+            logger.error("세션 생성 실패")
             raise HTTPException(status_code=500, detail="세션 생성에 실패했습니다.")
         
         # 생성된 세션 상태 반환
-        return get_user_session_status(current_user, db)
+        logger.info("세션 상태 조회 중")
+        session_status = user_session_service.get_session_status_sync(user_id, db)
+        if not session_status:
+            return SessionStatusResponse(
+                success=True,
+                has_session=False,
+                message="활성 세션이 없습니다."
+            )
+        # 상태 메시지 생성
+        if session_status["pod_status"] == "starting":
+            message = "Pod가 시작 중입니다. 잠시만 기다려주세요."
+        elif session_status["pod_status"] == "ready":
+            if session_status["session_remaining_seconds"]:
+                message = f"세션이 준비되었습니다. {session_status['session_remaining_seconds']}초 남았습니다."
+            else:
+                message = "세션이 준비되었습니다."
+        elif session_status["pod_status"] == "processing":
+            if session_status["processing_remaining_seconds"]:
+                message = f"이미지 생성 중입니다. {session_status['processing_remaining_seconds']}초 남았습니다."
+            else:
+                message = "이미지 생성 중입니다."
+        elif session_status["pod_status"] == "failed":
+            message = "지금 사용가능한 자원이 없습니다. 잠시 후 다시 시도해 주세요."
+        else:
+            message = f"Pod 상태: {session_status['pod_status']}"
+        return SessionStatusResponse(
+            success=True,
+            has_session=True,
+            pod_id=session_status["pod_id"],
+            pod_status=session_status["pod_status"],
+            session_created_at=session_status["session_created_at"].isoformat() if session_status["session_created_at"] else None,
+            session_expires_at=session_status["session_expires_at"].isoformat() if session_status["session_expires_at"] else None,
+            processing_expires_at=session_status["processing_expires_at"].isoformat() if session_status["processing_expires_at"] else None,
+            total_generations=session_status["total_generations"],
+            session_remaining_seconds=session_status["session_remaining_seconds"],
+            processing_remaining_seconds=session_status["processing_remaining_seconds"],
+            message=message
+        )
         
     except HTTPException:
+        logger.error("HTTP 예외 발생", exc_info=True)
         raise
     except Exception as e:
-        logger.error(f"Failed to create session for user {user_id}: {e}")
+        logger.error(f"사용자 {user_id}의 세션 생성 실패: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"세션 생성 중 오류 발생: {str(e)}")
 
 
@@ -112,7 +158,7 @@ def get_user_session_status(
         
         # 사용자 세션 서비스로 상태 조회
         user_session_service = get_user_session_service()
-        session_status = user_session_service.get_session_status(user_id, db)
+        session_status = user_session_service.get_session_status_sync(user_id, db)
         
         if not session_status:
             return SessionStatusResponse(
@@ -178,7 +224,7 @@ def start_image_generation(
         
         # 사용자 세션 서비스로 이미지 생성 시작
         user_session_service = get_user_session_service()
-        success = user_session_service.start_image_generation(user_id, db)
+        success = user_session_service.start_image_generation_sync(user_id, db)
         
         if not success:
             raise HTTPException(

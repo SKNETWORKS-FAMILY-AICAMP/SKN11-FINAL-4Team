@@ -77,27 +77,35 @@ class UserSessionService:
             bool: 세션 생성 요청 성공 여부
         """
         try:
+            logger.info(f"사용자 {user_id}의 세션 생성 시작")
+            
             # 동시 요청 방지를 위해 사용자 레코드에 lock 설정
+            logger.info(f"사용자 {user_id}의 데이터베이스 쿼리 실행")
             result = db.execute(
                 select(User).where(User.user_id == user_id).with_for_update()
             )
             user = result.scalar_one_or_none()
+            logger.info(f"데이터베이스 쿼리 결과: {user is not None}")
             
             if not user:
-                logger.error(f"User not found: {user_id}")
+                logger.error(f"사용자를 찾을 수 없음: {user_id}")
                 return False
+
+            logger.info(f"사용자 발견: {user.user_id}, 현재 Pod 상태: {user.pod_status}")
 
             # 활성 세션 재확인 (lock된 상태에서)
             if self._has_active_session(user):
-                logger.info(f"User {user_id} already has active session")
+                logger.info(f"사용자 {user_id}가 이미 활성 세션을 보유함")
                 self._update_session_activity(user, db)
                 return True
 
             if user.current_pod_id:
+                logger.info(f"사용자 {user_id}의 기존 세션 종료")
                 self._terminate_current_session(user, db, background_tasks)
 
             # 백그라운드에서 실제 Pod 생성 및 상태 업데이트
-            background_tasks.add_task(self._create_pod_and_update_db, user_id, db)
+            logger.info(f"사용자 {user_id}의 Pod 생성 백그라운드 작업 추가")
+            background_tasks.add_task(self._create_pod_and_update_db_sync, user_id, db)
 
             # 먼저 DB에 starting 상태를 기록하여 즉각적인 피드백 제공
             now = datetime.now(timezone.utc)
@@ -105,17 +113,22 @@ class UserSessionService:
             user.session_created_at = now
             user.session_expires_at = now + timedelta(minutes=15)
             user.current_pod_id = "pending" # 임시 ID
+            
+            logger.info(f"사용자 {user_id}의 세션 생성 데이터베이스 커밋")
             db.commit()
             
-            logger.info(f"Session creation task started for user {user_id}")
+            logger.info(f"사용자 {user_id}의 세션 생성 작업 시작됨")
             return True
 
         except Exception as e:
-            logger.error(f"Failed to start session creation for user {user_id}: {e}")
-            db.rollback()
+            logger.error(f"사용자 {user_id}의 세션 생성 시작 실패: {e}", exc_info=True)
+            try:
+                db.rollback()
+            except:
+                pass
             return False
     
-    def start_image_generation(self, user_id: str, db: Session) -> bool:
+    async def start_image_generation(self, user_id: str, db: AsyncSession) -> bool:
         """
         이미지 생성 시작 - 10분 타이머 시작
         
@@ -127,7 +140,52 @@ class UserSessionService:
             bool: 시작 성공 여부
         """
         try:
-            user = self._get_user(user_id, db)
+            user = await self._get_user(user_id, db)
+            if not user:
+                logger.error(f"User not found: {user_id}")
+                return False
+            
+            # 활성 세션 확인
+            if not self._has_active_session(user):
+                logger.error(f"No active session for user {user_id}")
+                return False
+            
+            # Pod가 준비되지 않았으면 대기
+            if user.pod_status != "ready":
+                logger.warning(f"Pod not ready for user {user_id}, status: {user.pod_status}")
+                return False
+            
+            # processing 상태로 변경 및 10분 타이머 시작
+            now = datetime.now(timezone.utc)
+            processing_expires_at = now + timedelta(minutes=10)
+            
+            user.pod_status = "processing"
+            user.processing_expires_at = processing_expires_at
+            user.total_generations += 1
+            
+            await db.commit()
+            
+            logger.info(f"Started image generation for user {user_id}, expires: {processing_expires_at}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to start image generation for user {user_id}: {e}")
+            return False
+
+    def start_image_generation_sync(self, user_id: str, db: Session) -> bool:
+        """
+        이미지 생성 시작 - 10분 타이머 시작 (동기)
+        
+        Args:
+            user_id: 사용자 ID
+            db: 데이터베이스 세션
+            
+        Returns:
+            bool: 시작 성공 여부
+        """
+        try:
+            result = db.execute(select(User).where(User.user_id == user_id))
+            user = result.scalar_one_or_none()
             if not user:
                 logger.error(f"User not found: {user_id}")
                 return False
@@ -159,7 +217,7 @@ class UserSessionService:
             logger.error(f"Failed to start image generation for user {user_id}: {e}")
             return False
     
-    def complete_image_generation(self, user_id: str, db: Session) -> bool:
+    async def complete_image_generation(self, user_id: str, db: AsyncSession) -> bool:
         """
         이미지 생성 완료 - 상태를 ready로 리셋하고 10분 타이머 연장
         
@@ -171,7 +229,7 @@ class UserSessionService:
             bool: 완료 처리 성공 여부
         """
         try:
-            user = self._get_user(user_id, db)
+            user = await self._get_user(user_id, db)
             if not user:
                 logger.error(f"User not found: {user_id}")
                 return False
@@ -189,7 +247,7 @@ class UserSessionService:
             user.processing_expires_at = None
             user.session_expires_at = new_session_expires
             
-            db.commit()
+            await db.commit()
             
             logger.info(f"Completed image generation for user {user_id}, session extended to: {new_session_expires}")
             return True
@@ -198,9 +256,9 @@ class UserSessionService:
             logger.error(f"Failed to complete image generation for user {user_id}: {e}")
             return False
     
-    def get_session_status(self, user_id: str, db: Session) -> Optional[Dict[str, Any]]:
+    async def get_session_status(self, user_id: str, db: AsyncSession) -> Optional[Dict[str, Any]]:
         """
-        세션 상태 조회
+        세션 상태 조회 (비동기)
         
         Args:
             user_id: 사용자 ID
@@ -210,7 +268,54 @@ class UserSessionService:
             Dict: 세션 상태 정보 또는 None
         """
         try:
-            user = self._get_user(user_id, db)
+            user = await self._get_user(user_id, db)
+            if not user:
+                return None
+            
+            now = datetime.now(timezone.utc)
+            
+            # 세션이 없으면 None 반환
+            if not user.current_pod_id or user.pod_status == "none":
+                return None
+            
+            # 만료 상태 확인 (타임존 안전 비교)
+            session_expired = safe_datetime_compare(now, user.session_expires_at)
+            processing_expired = safe_datetime_compare(now, user.processing_expires_at)
+            
+            # 만료된 세션은 자동 정리
+            if session_expired or processing_expired:
+                self._terminate_current_session(user, db)
+                return None
+            
+            return {
+                "pod_id": user.current_pod_id,
+                "pod_status": user.pod_status,
+                "session_created_at": user.session_created_at,
+                "session_expires_at": user.session_expires_at,
+                "processing_expires_at": user.processing_expires_at,
+                "total_generations": user.total_generations,
+                "session_remaining_seconds": int((ensure_timezone_aware(user.session_expires_at) - now).total_seconds()) if user.session_expires_at else None,
+                "processing_remaining_seconds": int((ensure_timezone_aware(user.processing_expires_at) - now).total_seconds()) if user.processing_expires_at else None
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to get session status for user {user_id}: {e}")
+            return None
+
+    def get_session_status_sync(self, user_id: str, db: Session) -> Optional[Dict[str, Any]]:
+        """
+        세션 상태 조회 (동기)
+        
+        Args:
+            user_id: 사용자 ID
+            db: 데이터베이스 세션
+            
+        Returns:
+            Dict: 세션 상태 정보 또는 None
+        """
+        try:
+            result = db.execute(select(User).where(User.user_id == user_id))
+            user = result.scalar_one_or_none()
             if not user:
                 return None
             
@@ -318,10 +423,10 @@ class UserSessionService:
             logger.error(f"Failed to cleanup expired sessions: {e}")
             return 0
     
-    def _get_user(self, user_id: str, db: Session) -> Optional[User]:
+    async def _get_user(self, user_id: str, db: AsyncSession) -> Optional[User]:
         """사용자 조회"""
         try:
-            result = db.execute(select(User).where(User.user_id == user_id))
+            result = await db.execute(select(User).where(User.user_id == user_id))
             return result.scalar_one_or_none()
         except Exception as e:
             logger.error(f"Failed to get user {user_id}: {e}")
@@ -395,29 +500,51 @@ class UserSessionService:
             raise
 
     async def _create_pod_and_update_db(self, user_id: str, db: Session):
-        """백그라운드에서 Pod 생성 및 DB 업데이트"""
+        """백그라운드에서 Pod 생성 및 DB 업데이트 (비동기)"""
         try:
             logger.info(f"Background task: Creating RunPod for user {user_id}")
             pod_response = await self.runpod_service.create_pod(request_id=user_id)
             
             if pod_response and pod_response.pod_id:
                 logger.info(f"Background task: RunPod created for user {user_id} with pod_id {pod_response.pod_id}")
-                user = self._get_user(user_id, db)
+                user = await self._get_user(user_id, db)
                 if user:
                     user.current_pod_id = pod_response.pod_id
                     user.pod_status = pod_response.status.lower() # 'STARTING' -> 'starting'
-                    db.commit()
+                    await db.commit()
                     logger.info(f"DB updated for user {user_id} with new pod info.")
             else:
                 raise Exception("Pod creation failed or returned no ID")
 
         except Exception as e:
             logger.error(f"Background task failed for user {user_id}: {e}")
-            user = self._get_user(user_id, db)
+            user = await self._get_user(user_id, db)
             if user:
                 user.pod_status = "failed"
                 user.current_pod_id = None
-                db.commit()
+                await db.commit()
+
+    def _create_pod_and_update_db_sync(self, user_id: str, db: Session):
+        """백그라운드에서 Pod 생성 및 DB 업데이트 (동기)"""
+        try:
+            import asyncio
+            import threading
+            
+            def run_async():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    loop.run_until_complete(self._create_pod_and_update_db(user_id, db))
+                finally:
+                    loop.close()
+            
+            thread = threading.Thread(target=run_async)
+            thread.daemon = True
+            thread.start()
+            logger.info(f"Started background thread for pod creation for user {user_id}")
+            
+        except Exception as e:
+            logger.error(f"Failed to start background pod creation for user {user_id}: {e}")
     
     def _wait_for_pod_ready(self, user_id: str, pod_id: str, db: Session):
         """Pod 준비 완료 대기 (임시로 비활성화)"""

@@ -52,10 +52,14 @@ class SessionStatusResponse(BaseModel):
 async def start_session(current_user = Depends(get_current_user)):
     """이미지 생성 세션 시작"""
     try:
+        user_id = current_user.get("sub")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="사용자 ID를 찾을 수 없습니다.")
+        
         session_manager = get_memory_session_manager()
         session = await session_manager.get_or_create_session(
-            current_user.user_id,
-            current_user.teams[0].team_id if current_user.teams else 1
+            user_id,
+            1  # 기본 팀 ID
         )
         
         if session:
@@ -82,8 +86,12 @@ async def start_session(current_user = Depends(get_current_user)):
 async def get_session_status(current_user = Depends(get_current_user)):
     """현재 세션 상태 조회"""
     try:
+        user_id = current_user.get("sub")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="사용자 ID를 찾을 수 없습니다.")
+        
         session_manager = get_memory_session_manager()
-        session = await session_manager.get_session_by_user(current_user.user_id)
+        session = await session_manager.get_session_by_user(user_id)
         
         if session and session.is_active():
             return SessionStatusResponse(
@@ -112,14 +120,18 @@ async def generate_image(
 ):
     """이미지 생성 요청"""
     try:
+        user_id = current_user.get("sub")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="사용자 ID를 찾을 수 없습니다.")
+        
         service = get_integrated_image_generation_service()
         
         # 시드 처리
         seed = None if request.seed == -1 else request.seed
         
         generation_request = ImageGenerationRequest(
-            user_id=current_user.user_id,
-            team_id=current_user.teams[0].team_id if current_user.teams else 1,
+            user_id=user_id,
+            team_id=1,  # 기본 팀 ID
             original_prompt=request.prompt,
             style_preset=request.style,
             width=request.width,
