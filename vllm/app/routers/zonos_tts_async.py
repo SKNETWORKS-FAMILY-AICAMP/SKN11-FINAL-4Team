@@ -26,12 +26,30 @@ router = APIRouter()
 # Zonos 모델 전역 변수
 zonos_model = None
 device = None
+zonos_initialization_attempted = False  # 초기화 시도 추적
 
-# 비동기 작업 상태 추적
+# 비동기 작업 상태 추적 (Legacy - will be migrated to cache manager)
 task_status: Dict[str, Dict[str, Any]] = {}
 
-# ThreadPoolExecutor for CPU-bound tasks
-executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+# ThreadPoolExecutor for CPU-bound tasks (managed)
+executor = None
+executor_lock = asyncio.Lock()
+
+async def get_executor():
+    """Get or create ThreadPoolExecutor instance (thread-safe)"""
+    global executor
+    async with executor_lock:
+        if executor is None:
+            executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+    return executor
+
+async def shutdown_executor():
+    """Properly shutdown the ThreadPoolExecutor"""
+    global executor
+    async with executor_lock:
+        if executor is not None:
+            executor.shutdown(wait=True)
+            executor = None
 
 # 웹훅 URL 설정 (환경 변수에서 가져오거나 기본값 사용)
 # 백엔드가 HTTPS로 실행되고 있으므로 HTTPS 사용
@@ -150,8 +168,20 @@ class TaskStatusResponse(BaseModel):
     updated_at: str
 
 def initialize_zonos_model():
-    """Zonos 모델 초기화"""
-    global zonos_model, device
+    """Zonos 모델 초기화 (싱글톤 패턴)"""
+    global zonos_model, device, zonos_initialization_attempted
+    
+    # 이미 초기화 시도했으면 스킵 (성공 여부와 관계없이)
+    if zonos_initialization_attempted:
+        if zonos_model is not None:
+            logger.info("ℹ️ Zonos 모델이 이미 초기화되어 있습니다.")
+        else:
+            logger.info("ℹ️ Zonos 모델 초기화가 이미 시도되었습니다.")
+        return zonos_model is not None
+    
+    # 초기화 시도 플래그 설정
+    zonos_initialization_attempted = True
+    
     try:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         logger.info(f"🔧 Zonos 모델 초기화 중... (디바이스: {device})")
@@ -161,6 +191,7 @@ def initialize_zonos_model():
         return True
     except Exception as e:
         logger.error(f"❌ Zonos 모델 초기화 실패: {e}")
+        zonos_model = None  # 실패 시 None으로 설정
         return False
 
 @router.on_event("startup")
@@ -306,7 +337,7 @@ async def process_tts_task(
         s3_info = None
         if request.upload_to_s3:
             try:
-                s3_manager = get_async_s3_manager()
+                s3_manager = await get_async_s3_manager()
                 if not s3_manager.bucket_name:
                     logger.error("S3 bucket name is not configured")
                     raise ValueError("S3 bucket name is not configured")
@@ -395,8 +426,12 @@ async def generate_tts_async(
     request: ZonosTTSRequest
 ):
     """비동기 TTS 생성 (JSON 전용)"""
+    # 모델이 초기화되지 않았으면 다시 시도
     if zonos_model is None:
-        raise HTTPException(status_code=500, detail="Zonos 모델이 초기화되지 않았습니다.")
+        logger.warning("⚠️ Zonos 모델이 초기화되지 않았습니다. 초기화 시도 중...")
+        success = await asyncio.get_event_loop().run_in_executor(executor, initialize_zonos_model)
+        if not success:
+            raise HTTPException(status_code=500, detail="Zonos 모델 초기화에 실패했습니다. 서버 로그를 확인하세요.")
     
     # 작업 ID 생성
     task_id = str(uuid.uuid4())
@@ -531,8 +566,12 @@ async def generate_tts_with_voice_async(
     request: ZonosTTSWithVoiceRequest
 ):
     """음성 클로닝을 사용한 비동기 TTS 생성 (Base64 인코딩된 음성 데이터 사용)"""
+    # 모델이 초기화되지 않았으면 다시 시도
     if zonos_model is None:
-        raise HTTPException(status_code=500, detail="Zonos 모델이 초기화되지 않았습니다.")
+        logger.warning("⚠️ Zonos 모델이 초기화되지 않았습니다. 초기화 시도 중...")
+        success = await asyncio.get_event_loop().run_in_executor(executor, initialize_zonos_model)
+        if not success:
+            raise HTTPException(status_code=500, detail="Zonos 모델 초기화에 실패했습니다. 서버 로그를 확인하세요.")
     
     # 작업 ID 생성
     task_id = str(uuid.uuid4())
@@ -618,7 +657,7 @@ async def process_tts_with_voice_task(task_id: str, request: ZonosTTSWithVoiceRe
         s3_info = None
         if request.upload_to_s3:
             try:
-                s3_manager = get_async_s3_manager()
+                s3_manager = await get_async_s3_manager()
                 if not s3_manager.bucket_name:
                     logger.error("S3 bucket name is not configured")
                     raise ValueError("S3 bucket name is not configured")
@@ -836,7 +875,7 @@ async def configure_s3(request: S3ConfigRequest):
 async def get_s3_status():
     """S3 연결 상태 확인"""
     try:
-        s3_manager = get_async_s3_manager()
+        s3_manager = await get_async_s3_manager()
         await s3_manager.validate_connection()
         
         return {
@@ -870,8 +909,8 @@ async def cleanup_old_tasks():
                 if task.get("result") and task["result"].get("audio_path"):
                     try:
                         Path(task["result"]["audio_path"]).unlink()
-                    except:
-                        pass
+                    except (OSError, IOError) as e:
+                        logger.warning(f"Failed to delete audio file {task['result']['audio_path']}: {e}")
                 del task_status[task_id]
                 
             if tasks_to_delete:

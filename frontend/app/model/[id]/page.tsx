@@ -3471,7 +3471,7 @@ function ModelDetailContent() {
             </div>
           </DialogContent>
         </Dialog>
-            
+
         <Dialog open={!!voiceToDelete} onOpenChange={(open) => !open && setVoiceToDelete(null)}>
           <DialogContent className="sm:max-w-[425px]">
             <DialogHeader>

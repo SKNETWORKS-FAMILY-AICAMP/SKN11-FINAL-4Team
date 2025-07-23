@@ -452,40 +452,54 @@ export default function ImageGeneratorPage() {
     setIsGenerating(true)
     setGenerationProgress(0)
 
-    // 선택된 스타일 키워드들을 가져와서 프롬프트와 결합
-    const styleKeywords = getCombinedPromptKeywords()
-    const finalPrompt = styleKeywords ? `${prompt}, ${styleKeywords}` : prompt
+    // 선택값을 명시적으로 전달
+    const selectedSizeData = PRESET_SIZES.find(size => size.id === selectedSize)
 
-    console.log('Final prompt with keywords:', finalPrompt) // 디버깅용
+    // 프론트엔드 로그: 요청 파라미터
+    console.log('[이미지 생성 요청] 파라미터:', {
+      prompt,
+      style: selectedMainCategory,
+      category: selectedCategory,
+      subcategory: selectedSubcategory,
+      detailStyle: selectedDetailStyle,
+      landscape: selectedLandscape,
+      width: selectedSizeData?.width || 512,
+      height: selectedSizeData?.height || 512,
+      steps,
+      cfg_scale: cfgScale,
+      seed: seed === -1 ? undefined : seed,
+      workflow_id: selectedWorkflow || 'basic_txt2img',
+      pod_id: "njs86v2wjo4q1b"
+    })
 
     try {
-      const selectedSizeData = PRESET_SIZES.find(size => size.id === selectedSize)
-      
-      // ComfyUI API 호출
       const response = await fetch('/api/comfyui/generate', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          prompt: finalPrompt,
-          negative_prompt: '',
+          prompt,
+          style: selectedMainCategory,
+          category: selectedCategory,
+          subcategory: selectedSubcategory,
+          detailStyle: selectedDetailStyle,
+          landscape: selectedLandscape,
           width: selectedSizeData?.width || 512,
           height: selectedSizeData?.height || 512,
           steps,
           cfg_scale: cfgScale,
           seed: seed === -1 ? undefined : seed,
-          style: 'realistic', // 기본 스타일
-          workflow_id: selectedWorkflow || 'basic_txt2img'
+          workflow_id: selectedWorkflow || 'basic_txt2img',
+          pod_id: "njs86v2wjo4q1b"
         })
       })
 
-      if (!response.ok) {
-        throw new Error('이미지 생성에 실패했습니다.')
-      }
-
+      // 프론트엔드 로그: 응답 상태
+      console.log('[이미지 생성 응답] status:', response.status)
       const data = await response.json()
-      
+      console.log('[이미지 생성 응답] data:', data)
+
       if (data.success) {
         // 진행률 시뮬레이션 (실제로는 백엔드에서 진행률을 받아와야 함)
         const progressInterval = setInterval(() => {
@@ -505,7 +519,7 @@ export default function ImageGeneratorPage() {
           
           const generatedImage: GeneratedImage = {
             id: `img_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-            prompt: finalPrompt,
+            prompt: prompt,
             negative_prompt: '',
             model: selectedWorkflow || 'basic_txt2img',
             width: selectedSizeData?.width || 512,
@@ -527,7 +541,7 @@ export default function ImageGeneratorPage() {
         throw new Error(data.error || '이미지 생성에 실패했습니다.')
       }
     } catch (error) {
-      console.error('Image generation error:', error)
+      console.error('[이미지 생성 에러]', error)
       setIsGenerating(false)
       setGenerationProgress(0)
       alert('이미지 생성에 실패했습니다: ' + (error instanceof Error ? error.message : '알 수 없는 오류'))

@@ -90,25 +90,48 @@ async def list_finetuning_tasks():
 async def get_gpu_status():
     """GPU 상태 조회"""
     try:
+        from app.utils.gpu_manager import get_gpu_manager
         from pipeline.gpu_utils import get_gpu_info, log_gpu_status
         
         # GPU 상태 로깅
         log_gpu_status()
         
-        # GPU 정보 가져오기
-        gpu_info = get_gpu_info()
+        # GPU Manager를 통한 상세 정보 조회
+        gpu_manager = await get_gpu_manager()
+        detailed_gpu_info = await gpu_manager.get_all_gpus_info()
         
-        # 현재 진행 중인 파인튜닝 작업 수
-        active_tasks = sum(1 for task in core.finetuning_tasks.values() 
-                          if task["status"] in ["training", "preparing_data", "uploading"])
+        # 가장 여유 있는 GPU 찾기
+        least_utilized_gpu = gpu_manager.get_least_utilized_gpu(detailed_gpu_info)
+        
+        # 기존 GPU 정보도 가져오기 (호환성 유지)
+        basic_gpu_info = get_gpu_info()
+        
+        # 현재 진행 중인 파인튜닝 작업 정보
+        active_tasks = []
+        for task_id, task in core.finetuning_tasks.items():
+            if task["status"] in ["training", "preparing_data", "uploading"]:
+                active_tasks.append({
+                    "task_id": task_id,
+                    "status": task["status"],
+                    "selected_gpu": task.get("selected_gpu", "N/A"),
+                    "gpu_info_at_start": task.get("gpu_info_at_start", {})
+                })
         
         # 대기 중인 작업 수
         pending_tasks = sum(1 for task in core.finetuning_tasks.values() 
                            if task["status"] == "pending")
         
         return {
-            "gpu_info": gpu_info,
-            "active_finetuning_tasks": active_tasks,
+            "basic_gpu_info": basic_gpu_info,
+            "detailed_gpu_info": detailed_gpu_info,
+            "least_utilized_gpu": {
+                "gpu_id": least_utilized_gpu,
+                "info": detailed_gpu_info[least_utilized_gpu]
+            },
+            "active_finetuning_tasks": {
+                "count": len(active_tasks),
+                "tasks": active_tasks
+            },
             "pending_finetuning_tasks": pending_tasks,
             "queue_size": core.finetuning_queue.qsize() if core.finetuning_queue else 0
         }

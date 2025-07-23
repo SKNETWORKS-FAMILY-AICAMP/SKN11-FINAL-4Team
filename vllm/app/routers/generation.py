@@ -37,7 +37,7 @@ async def generate_response_endpoint(request: GenerateRequest):
             request.influencer_name
         )
         
-        logger.info(f"🔍 생성된 프롬프트 (처음 200자): {formatted_prompt[:200]}...")
+        logger.info(f"🔍 생성된 프롬프트 (처음 200자): {formatted_prompt}...")
         
         # 샘플링 파라미터 설정
         sampling_params = SamplingParams(
@@ -170,12 +170,14 @@ async def generate_response_stream_endpoint(request: GenerateRequest):
             if request.model_id:
                 try:
                     if request.model_id not in core.loaded_adapters:
-                        yield f"data: {json.dumps({'error': f'어댑터 \'{request.model_id}\'가 로드되지 않았습니다.'})}\n\n"
+                        error_msg = f"어댑터 '{request.model_id}'가 로드되지 않았습니다."
+                        yield f"data: {json.dumps({'error': error_msg})}\n\n"
                         return
                     
                     adapter_info = core.loaded_adapters[request.model_id]
                     if not adapter_info or "lora_int_id" not in adapter_info or "hf_repo_name" not in adapter_info:
-                        yield f"data: {json.dumps({'error': f'어댑터 \'{request.model_id}\'의 정보가 불완전합니다.'})}\n\n"
+                        error_msg = f"어댑터 '{request.model_id}'의 정보가 불완전합니다."
+                        yield f"data: {json.dumps({'error': error_msg})}\n\n"
                         return
                     
                     lora_request = LoRARequest(
