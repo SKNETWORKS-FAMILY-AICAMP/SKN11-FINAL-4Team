@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useRef, useMemo, useCallback } from "react"
 import { Navigation } from "@/components/navigation"
+import { useAuth } from "@/hooks/use-auth"
+import { tokenUtils } from "@/lib/auth"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -73,6 +75,21 @@ const PRESET_SIZES = [
   { id: 'landscape', name: '가로형', width: 768, height: 512 },
   { id: 'wide', name: '와이드', width: 1024, height: 512 }
 ]
+
+// 세션 상태 인터페이스 추가
+interface SessionStatus {
+  success: boolean
+  has_session: boolean
+  pod_id?: string
+  pod_status?: string
+  session_created_at?: string
+  session_expires_at?: string
+  processing_expires_at?: string
+  total_generations: number
+  session_remaining_seconds?: number
+  processing_remaining_seconds?: number
+  message: string
+}
 
 // 공통 2단계 유형
 const COMMON_TYPES = [
@@ -187,6 +204,26 @@ export default function ImageGeneratorPage() {
   const [selectedWorkflow, setSelectedWorkflow] = useState<string>("")
   const [selectedSize, setSelectedSize] = useState<string>("")
   
+  // 세션 상태 관리 추가
+  const [sessionStatus, setSessionStatus] = useState<SessionStatus | null>(null)
+  const [sessionLoading, setSessionLoading] = useState(false)
+  
+  // 클라이언트 사이드 카운트다운 상태
+  const [clientSessionTime, setClientSessionTime] = useState<number | null>(null)
+  const [clientProcessingTime, setClientProcessingTime] = useState<number | null>(null)
+  
+  // 인증 상태 추가
+  const { token, isAuthenticated } = useAuth()
+  const [accessToken, setAccessToken] = useState<string | null>(null)
+  
+  // 토큰 초기화
+  useEffect(() => {
+    const storedToken = tokenUtils.getToken()
+    if (storedToken) {
+      setAccessToken(storedToken)
+    }
+  }, [token])
+  
   // 생성 파라미터
   const [prompt, setPrompt] = useState("")
   // 커스텀 템플릿에서는 부정 프롬프트 사용하지 않음
@@ -253,6 +290,113 @@ export default function ImageGeneratorPage() {
   // Canvas refs
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const imageRef = useRef<HTMLImageElement>(null)
+
+  // 세션 관리 함수들
+  const createUserSession = async () => {
+    try {
+      setSessionLoading(true)
+      const currentToken = accessToken || tokenUtils.getToken()
+      if (!currentToken) {
+        console.error('인증 토큰이 없습니다. 로그인이 필요합니다.')
+        return
+      }
+      
+      const response = await fetch('https://localhost:8000/api/v1/user-sessions/create', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${currentToken}`,
+        },
+        body: JSON.stringify({})
+      })
+      
+      if (response.ok) {
+        const data = await response.json()
+        setSessionStatus(data)
+        
+        // 클라이언트 사이드 타이머 업데이트
+        setClientSessionTime(data.session_remaining_seconds || null)
+        setClientProcessingTime(data.processing_remaining_seconds || null)
+        
+        console.log('세션 생성 성공:', data)
+      } else {
+        console.error('세션 생성 실패:', response.statusText)
+      }
+    } catch (error) {
+      console.error('세션 생성 오류:', error)
+    } finally {
+      setSessionLoading(false)
+    }
+  }
+
+  const checkSessionStatus = async () => {
+    try {
+      const currentToken = accessToken || tokenUtils.getToken()
+      if (!currentToken) {
+        console.error('인증 토큰이 없습니다.')
+        return
+      }
+      
+      const response = await fetch('https://localhost:8000/api/v1/user-sessions/status', {
+        headers: {
+          'Authorization': `Bearer ${currentToken}`,
+        }
+      })
+      if (response.ok) {
+        const data = await response.json()
+        setSessionStatus(data)
+        
+        // 클라이언트 사이드 타이머 업데이트
+        setClientSessionTime(data.session_remaining_seconds || null)
+        setClientProcessingTime(data.processing_remaining_seconds || null)
+      }
+    } catch (error) {
+      console.error('세션 상태 확인 오류:', error)
+    }
+  }
+
+  // 페이지 로드 시 세션 생성
+  useEffect(() => {
+    let isActive = true
+    const initializeSession = async () => {
+      if (accessToken && isActive) {
+        await createUserSession()
+      }
+    }
+    initializeSession()
+    return () => { isActive = false }
+  }, [accessToken])
+
+  // 세션 상태 폴링 (5초마다)
+  useEffect(() => {
+    if (!sessionStatus?.has_session) return
+
+    const interval = setInterval(checkSessionStatus, 5000)
+    return () => clearInterval(interval)
+  }, [sessionStatus?.has_session])
+
+  // 클라이언트 사이드 타이머 (1초마다 감소)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setClientSessionTime(prev => {
+        if (prev && prev > 0) {
+          const newValue = prev - 1
+          return newValue <= 0 ? null : newValue
+        }
+        return prev
+      })
+      
+      setClientProcessingTime(prev => {
+        if (prev && prev > 0) {
+          const newValue = prev - 1
+          return newValue <= 0 ? null : newValue
+        }
+        return prev
+      })
+    }, 1000)
+    
+    return () => clearInterval(interval)
+  }, [])
   const lastPointRef = useRef<{x: number, y: number} | null>(null)
 
   // 모델 목록 가져오기 제거 - 워크플로우에 정의된 모델 자동 사용
@@ -1121,6 +1265,65 @@ export default function ImageGeneratorPage() {
                 {/* 이미지 생성 탭 */}
                 {activeTab === "generate" && (
                   <div className="space-y-6">
+                  {/* 세션 상태 카드 */}
+                  {sessionStatus && (
+                    <Card className={`border-2 ${
+                      sessionStatus.pod_status === 'ready' || sessionStatus.pod_status === 'running' ? 'border-blue-300' : 
+                      sessionStatus.pod_status === 'starting' ? 'border-yellow-500' :
+                      sessionStatus.pod_status === 'processing' ? 'border-blue-500' :
+                      sessionStatus.pod_status === 'failed' ? 'border-red-500' :
+                      'border-gray-300'
+                    }`}>
+                      <CardHeader>
+                        <CardTitle className="flex items-center gap-2">
+                          <div className={`w-3 h-3 rounded-full ${
+                            sessionStatus.pod_status === 'ready' || sessionStatus.pod_status === 'running' ? 'bg-blue-500 animate-pulse' :
+                            sessionStatus.pod_status === 'starting' ? 'bg-yellow-500 animate-pulse' :
+                            sessionStatus.pod_status === 'processing' ? 'bg-blue-500 animate-pulse' :
+                            sessionStatus.pod_status === 'failed' ? 'bg-red-500' :
+                            'bg-gray-400'
+                          }`} />
+                          런팟 세션 상태
+                          {sessionLoading && <Loader2 className="h-4 w-4 animate-spin" />}
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <p className="text-sm mb-2">{sessionStatus.message}</p>
+                        {clientSessionTime !== null && clientSessionTime > 0 && (
+                          <p className="text-xs text-gray-600">
+                            세션 시간: {Math.floor(clientSessionTime / 60)}분 {clientSessionTime % 60}초
+                          </p>
+                        )}
+                        {clientProcessingTime !== null && clientProcessingTime > 0 && (
+                          <p className="text-xs text-gray-600">
+                            처리 시간: {Math.floor(clientProcessingTime / 60)}분 {clientProcessingTime % 60}초
+                          </p>
+                        )}
+                        
+                        {/* 세션 시간이 만료되거나 실패한 경우 재시작 버튼 표시 */}
+                        {(sessionStatus.pod_status === 'failed' || (clientSessionTime !== null && clientSessionTime <= 0)) && (
+                          <Button 
+                            onClick={createUserSession} 
+                            className="mt-2" 
+                            size="sm"
+                            disabled={sessionLoading}
+                            variant="outline"
+                          >
+                            {sessionLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+                            세션 재시작
+                          </Button>
+                        )}
+                        
+                        {/* 세션 시간이 만료된 경우 안내 메시지 표시 */}
+                        {clientSessionTime !== null && clientSessionTime <= 0 && sessionStatus.pod_status !== 'failed' && (
+                          <p className="text-xs text-orange-600 mt-2">
+                            ⏰ 세션 시간이 만료되었습니다. 새로운 세션을 시작해주세요.
+                          </p>
+                        )}
+                      </CardContent>
+                    </Card>
+                  )}
+                  
                     <Card>
                       <CardHeader>
                         <CardTitle className="flex items-center gap-2">
@@ -1494,7 +1697,7 @@ export default function ImageGeneratorPage() {
                                 <div className="mt-auto pt-4">
                                   <Button 
                                     onClick={handleGenerateImage}
-                                    disabled={!prompt.trim() || !selectedSize || isGenerating}
+                                    disabled={!prompt.trim() || !selectedSize || isGenerating || (clientSessionTime !== null && clientSessionTime <= 0)}
                                     className="w-full text-white bg-blue-600 hover:bg-blue-700"
                                     size="lg"
                                   >
@@ -1503,6 +1706,11 @@ export default function ImageGeneratorPage() {
                                         <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                                         생성 중...
                                       </>
+                    ) : clientSessionTime !== null && clientSessionTime <= 0 ? (
+                      <>
+                        <RefreshCw className="h-4 w-4 mr-2" />
+                        세션 재시작 후 생성 가능
+                      </>
                                     ) : (
                                       <>
                                         <Wand2 className="h-4 w-4 mr-2" />
