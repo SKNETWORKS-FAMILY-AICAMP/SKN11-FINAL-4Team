@@ -102,7 +102,7 @@ def load_model_and_tokenizer(model_name="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct", 
         raise RuntimeError(f"Failed to set GPU device {gpu_id}")
     
     # 토크나이저 로드
-    tokenizer = AutoTokenizer.from_pretrained(model_name).to(f'cuda:{gpu_id}')
+    tokenizer = AutoTokenizer.from_pretrained(model_name).to(f'cuda:{0}')
     
     # 패딩 토큰 설정 (필요한 경우)
     if tokenizer.pad_token is None:
@@ -110,7 +110,7 @@ def load_model_and_tokenizer(model_name="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct", 
         tokenizer.pad_token_id = tokenizer.eos_token_id
     
     # 모델 로드 - 지정된 GPU로 직접 로드
-    with torch.cuda.device(gpu_id):
+    with torch.cuda.device(0):
         model = AutoModelForCausalLM.from_pretrained(
             model_name,
             torch_dtype=torch.bfloat16,
@@ -118,9 +118,9 @@ def load_model_and_tokenizer(model_name="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct", 
             device_map=None,  # device_map을 사용하지 않음
             use_cache=False,  # 그래디언트 체크포인팅과 호환성을 위해
             low_cpu_mem_usage=True,  # CPU 메모리 사용량 최소화
-        ).to(f'cuda:{gpu_id}')
+        ).to(f'cuda:{0}')
         
-        print(f"✅ 모델을 {f'cuda:{gpu_id}'}로 이동 완료")
+        print(f"✅ 모델을 {f'cuda:{0}'}로 이동 완료")
     
     # gradient checkpointing을 여기서 먼저 활성화
     model.gradient_checkpointing_enable()
@@ -283,11 +283,7 @@ def setup_training_arguments(training_epochs: int, gpu_id: int, output_dir="./ex
         optim="adamw_torch",
         max_grad_norm=1.0,
         dataloader_num_workers=0, 
-        save_total_limit=1,
-        # GPU 설정 명시적으로 추가
-        no_cuda=False,
-        # Trainer가 사용할 디바이스를 직접 지정
-        use_cpu=False,
+        save_total_limit=1, 
     )
     
     return training_args
@@ -394,7 +390,7 @@ def main(qa_data: list[dict], system_message: str, hf_token: str, hf_repo_id: st
     cleanup_gpu_memory(actual_gpu_id)
     
     # 1. 모델과 토크나이저 로드
-    model, tokenizer = load_model_and_tokenizer(gpu_manager=gpu_manager, gpu_id=actual_gpu_id)
+    model, tokenizer = load_model_and_tokenizer(gpu_manager=gpu_manager, gpu_id=0)
     
     # 2. 모델 구조 확인
     print("모델 구조 확인 중...")
@@ -477,15 +473,13 @@ def main(qa_data: list[dict], system_message: str, hf_token: str, hf_repo_id: st
     
     # 9. 훈련 인수 설정
     training_args = setup_training_arguments(training_epochs, actual_gpu_id)
-    
+    print("잘  하고 있나?")
     # 10. 조기 종료 콜백 설정
     early_stopping_callback = EarlyStoppingCallback(
         early_stopping_patience=2,  # 2 epoch 동안 개선이 없으면 종료
         early_stopping_threshold=0.01  # 최소 개선 임계값
     )
     
-    # Trainer 초기화 전에 CUDA_VISIBLE_DEVICES 설정
-    # 이렇게 하면 Trainer가 올바른 GPU를 사용함
     os.environ["CUDA_VISIBLE_DEVICES"] = str(actual_gpu_id)
     
     # CUDA_VISIBLE_DEVICES 설정 후에는 GPU 0으로 재매핑되므로 모델을 cuda:0으로 이동
