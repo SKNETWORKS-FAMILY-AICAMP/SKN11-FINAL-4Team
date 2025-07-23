@@ -129,6 +129,46 @@ class TorchGPUManager:
                 
         except Exception as e:
             logger.error(f"Error clearing GPU cache: {e}")
+    
+    def calculate_optimal_memory_fraction(self, 
+                                        device_id: int = 0,
+                                        reserve_mb: int = 2048,
+                                        max_fraction: float = 0.9) -> float:
+        """
+        Calculate optimal GPU memory fraction based on available memory
+        
+        Args:
+            device_id: GPU device ID
+            reserve_mb: Memory to reserve for other processes (MB)
+            max_fraction: Maximum fraction to use (safety limit)
+            
+        Returns:
+            Optimal memory fraction between 0.3 and max_fraction
+        """
+        gpu_info = self.get_gpu_info(device_id)
+        
+        if not gpu_info["available"] or gpu_info["total"] == 0:
+            logger.warning("No GPU memory available, using default fraction")
+            return 0.5
+        
+        # Calculate available memory for our use
+        available_for_use = gpu_info["free"] - reserve_mb
+        
+        if available_for_use <= 0:
+            logger.warning("Insufficient GPU memory, using minimum fraction")
+            return 0.3
+        
+        # Calculate fraction
+        optimal_fraction = available_for_use / gpu_info["total"]
+        
+        # Clamp between 0.3 and max_fraction
+        optimal_fraction = max(0.3, min(optimal_fraction, max_fraction))
+        
+        logger.info(f"GPU {device_id} ({gpu_info['name']}) Memory - "
+                   f"Total: {gpu_info['total']}MB, Free: {gpu_info['free']}MB, "
+                   f"Optimal fraction: {optimal_fraction:.2f}")
+        
+        return optimal_fraction
 
 
 # Global GPU manager instance

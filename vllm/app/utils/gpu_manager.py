@@ -38,6 +38,20 @@ class AsyncGPUManager:
         """Async wrapper for clear_cache"""
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self._gpu_manager.clear_cache, device_id)
+    
+    async def calculate_optimal_memory_fraction(self, 
+                                              device_id: int = 0,
+                                              reserve_mb: int = 2048,
+                                              max_fraction: float = 0.9) -> float:
+        """Async wrapper for calculate_optimal_memory_fraction"""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None, 
+            self._gpu_manager.calculate_optimal_memory_fraction,
+            device_id,
+            reserve_mb,
+            max_fraction
+        )
 
 # Global async GPU manager instance
 _async_gpu_manager: Optional[AsyncGPUManager] = None
