@@ -114,8 +114,6 @@ async def get_workflow_compat(workflow_id: str):
 
 api_router.include_router(workflow_only_router, prefix="/workflows", tags=["Workflows"])
 
-# TTS API
-api_router.include_router(tts.router, prefix="/tts", tags=["TTS"])
 
 # 기존 복잡한 API들 임시 비활성화 (새로운 간소화된 API들로 대체)
 # api_router.include_router(images.router, prefix="/images", tags=["Images"])
@@ -131,3 +129,6 @@ api_router.include_router(user_sessions.router, prefix="/user-sessions", tags=["
 
 # 통합 이미지 생성 API (세션 + ComfyUI + S3)
 api_router.include_router(image_generation.router, prefix="/image-generation", tags=["Image Generation"])
+
+# TTS API
+api_router.include_router(tts.router, prefix="/tts", tags=["TTS"])
