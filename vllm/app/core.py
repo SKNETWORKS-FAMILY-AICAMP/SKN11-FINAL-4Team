@@ -3,7 +3,6 @@ os.environ["VLLM_USE_V1"] = "0" # vLLM v1 어텐션 백엔드 비활성화
 import asyncio
 import logging
 import time
-import sys
 from typing import Optional, Dict, Any, List
 
 import httpx
@@ -105,57 +104,27 @@ async def send_finetuning_webhook(task_id: str, status: str, hf_model_url: Optio
 
 async def run_finetuning_pipeline(qa_data: List[Dict], system_message: str, 
                                 hf_token: str, hf_repo_id: str, training_epochs: int, gpu_id:int) -> Optional[str]:
-    """파인튜닝 파이프라인 실행 (직접 실행)"""
-    import torch
-    import gc
-    
+    """파인튜닝 파이프라인 직접 실행"""
     try:
         logger.info(f"🔄 파인튜닝 파이프라인 실행: {hf_repo_id}")
         logger.info(f"🔍 파이프라인 QA 데이터: 개수={len(qa_data)}")
         logger.info(f"🎯 GPU {gpu_id}에서 직접 실행")
         
-        # GPU 환경 설정
-        original_cuda_visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES", None)
-        os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-        os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
-        os.environ["TOKENIZERS_PARALLELISM"] = "false"
+        # fine_custom 모듈을 동적으로 import
+        from pipeline import fine_custom
         
-        logger.info(f"✅ CUDA_VISIBLE_DEVICES를 {gpu_id}로 설정 완료")
+        # 직접 fine_custom.main 함수 호출
+        hf_model_url = fine_custom.main(
+            qa_data=qa_data,
+            system_message=system_message,
+            hf_token=hf_token,
+            hf_repo_id=hf_repo_id,
+            training_epochs=training_epochs,
+            gpu_id=gpu_id
+        )
         
-        try:
-            # GPU 상태 확인
-            logger.info(f"🔍 PyTorch가 볼 수 있는 GPU 수: {torch.cuda.device_count()}")
-            if torch.cuda.is_available():
-                logger.info(f"✅ GPU 사용 가능: {torch.cuda.get_device_name(0)}")
-                logger.info(f"📊 GPU 메모리: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.2f} GB")
-            
-            # fine_custom.main을 직접 호출
-            # GPU 환경이 이미 설정되었으므로 0번 GPU 사용
-            hf_model_url = await asyncio.to_thread(
-                fine_custom.main,
-                qa_data=qa_data,
-                system_message=system_message,
-                hf_token=hf_token,
-                hf_repo_id=hf_repo_id,
-                training_epochs=training_epochs,
-                gpu_id=0  # CUDA_VISIBLE_DEVICES 설정 후에는 항상 0
-            )
-            
-            logger.info(f"✅ 파인튜닝 파이프라인 실행 완료: {hf_repo_id}")
-            return hf_model_url
-            
-        finally:
-            # GPU 메모리 정리
-            gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                logger.info("🧹 GPU 메모리 정리 완료")
-            
-            # 원래 환경 변수 복원
-            if original_cuda_visible_devices is not None:
-                os.environ["CUDA_VISIBLE_DEVICES"] = original_cuda_visible_devices
-            else:
-                os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+        logger.info(f"✅ 파인튜닝 파이프라인 실행 완료: {hf_repo_id}")
+        return hf_model_url
             
     except Exception as e:
         logger.error(f"❌ 파인튜닝 파이프라인 실행 실패: {e}")
@@ -176,9 +145,12 @@ async def execute_finetuning(task_id: str):
         # GPU 선택 로직 추가
         gpu_manager = await get_gpu_manager()
         
-        selected_gpu = 1
+        # 가장 여유있는 GPU 동적 선택
+        selected_gpu = gpu_manager.get_least_utilized_gpu()
+        if selected_gpu == -1:
+            raise RuntimeError("No available GPU found for fine-tuning")
         
-        all_gpu_info = await gpu_manager.get_all_gpus_info()
+        all_gpu_info = gpu_manager.get_all_gpus_info()
         
         logger.info(f"🖥️ GPU 상태:")
         for gpu_id, info in all_gpu_info.items():
@@ -291,7 +263,16 @@ async def finetuning_worker():
         task_id = await finetuning_queue.get()
         logger.info(f"⚙️ 큐에서 파인튜닝 작업 시작: {task_id}")
         
-        finetuning_gpu_id = 1
+        # GPU Manager로 가장 여유있는 GPU 선택
+        gpu_manager = await get_gpu_manager()
+        finetuning_gpu_id = gpu_manager.get_least_utilized_gpu()
+        if finetuning_gpu_id == -1:
+            logger.warning(f"⚠️ 사용 가능한 GPU가 없습니다. 작업 {task_id}를 다시 큐에 넣습니다.")
+            await finetuning_queue.put(task_id)
+            finetuning_queue.task_done()
+            await asyncio.sleep(60)
+            continue
+            
         available_memory = await get_available_gpu_memory_mb(device_id=finetuning_gpu_id)
         logger.info(f"GPU {finetuning_gpu_id} 메모리 확인: {available_memory}MB")
         if available_memory != -1 and available_memory < MIN_GPU_MEMORY_MB:
@@ -308,14 +289,13 @@ async def finetuning_worker():
         finally:
             # 작업 완료 후 GPU 메모리 정리
             try:
-                import torch
                 import gc
-                
                 gc.collect()
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-                    torch.cuda.synchronize()
-                    logger.info(f"♾️ 파인튜닝 작업 {task_id} 후 GPU 메모리 정리 완료")
+                
+                # TorchGPUManager를 사용하여 GPU 메모리 정리
+                gpu_manager = await get_gpu_manager()
+                gpu_manager.clear_cache(finetuning_gpu_id)
+                logger.info(f"♾️ 파인튜닝 작업 {task_id} 후 GPU {finetuning_gpu_id} 메모리 정리 완료")
             except Exception as cleanup_error:
                 logger.warning(f"⚠️ GPU 메모리 정리 실패: {cleanup_error}")
             

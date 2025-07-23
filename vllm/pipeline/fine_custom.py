@@ -15,6 +15,9 @@ from datasets import Dataset
 from huggingface_hub import HfApi
 import os
 import logging
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from app.utils.torch_gpu_manager import get_torch_gpu_manager
 
 logger = logging.getLogger(__name__)
 class ExaoneDataPreprocessor:
@@ -72,15 +75,31 @@ def find_all_linear_names(model):
     
     return list(lora_module_names)
 
-def load_model_and_tokenizer(model_name="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct", gpu_id:int=1):
-    """모델과 토크나이저 로드"""
+def load_model_and_tokenizer(model_name="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct", gpu_manager=None, gpu_id:int=None):
+    """모델과 토크나이저 로드 - GPU Manager를 통한 동적 할당"""
     print("모델과 토크나이저 로딩 중...")
     
-    print(f"🎯 모델을 GPU {gpu_id}에 로드합니다")
+    # GPU Manager가 제공되지 않으면 기본 매니저 사용
+    if gpu_manager is None:
+        gpu_manager = get_torch_gpu_manager()
     
-    # GPU 상태 로깅
-    from pipeline.gpu_utils import log_gpu_status
-    log_gpu_status()
+    # GPU ID가 지정되지 않으면 가장 여유있는 GPU 선택
+    if gpu_id is None:
+        gpu_id = gpu_manager.get_least_utilized_gpu()
+        if gpu_id == -1:
+            raise RuntimeError("No available GPU found")
+    
+    # GPU 정보 확인
+    gpu_info = gpu_manager.get_gpu_info(gpu_id)
+    if not gpu_info["available"]:
+        raise RuntimeError(f"GPU {gpu_id} is not available")
+    
+    print(f"🎯 GPU {gpu_id} 사용: {gpu_info['name']}")
+    print(f"💾 메모리: {gpu_info['free']}MB / {gpu_info['total']}MB 사용 가능")
+    
+    # GPU 설정
+    if not gpu_manager.set_device(gpu_id):
+        raise RuntimeError(f"Failed to set GPU device {gpu_id}")
     
     # 토크나이저 로드
     tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -90,10 +109,7 @@ def load_model_and_tokenizer(model_name="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct", 
         tokenizer.pad_token = tokenizer.eos_token
         tokenizer.pad_token_id = tokenizer.eos_token_id
     
-    # 현재 기본 CUDA 디바이스 설정
-    torch.cuda.set_device(gpu_id)
-    
-    # 모델 로드 - CPU에 먼저 로드 후 GPU로 이동
+    # 모델 로드 - 지정된 GPU로 직접 로드
     with torch.cuda.device(gpu_id):
         model = AutoModelForCausalLM.from_pretrained(
             model_name,
@@ -327,64 +343,61 @@ def upload_to_huggingface(output_dir, hf_token, hf_repo_id):
         return hf_repo_id  # 실패해도 레포 경로는 반환
 
 def cleanup_gpu_memory(gpu_id=None):
-    """GPU 메모리 정리"""
+    """GPU 메모리 정리 - TorchGPUManager 사용"""
     import gc
     
     # Python 가비지 컬렉션 강제 실행
     gc.collect()
     
-    # PyTorch GPU 캐시 정리
-    if torch.cuda.is_available():
-        if gpu_id is not None:
-            # 특정 GPU의 캐시 정리
-            with torch.cuda.device(gpu_id):
-                torch.cuda.empty_cache()
-                torch.cuda.synchronize(gpu_id)
-            print(f"✅ GPU {gpu_id} 메모리 캐시 정리 완료")
-        else:
-            # 모든 GPU의 캐시 정리
-            torch.cuda.empty_cache()
-            torch.cuda.synchronize()
-            print("✅ 모든 GPU 메모리 캐시 정리 완료")
+    # TorchGPUManager를 사용하여 GPU 메모리 정리
+    gpu_manager = get_torch_gpu_manager()
+    
+    if gpu_id is not None:
+        gpu_manager.clear_cache(gpu_id)
+        gpu_info = gpu_manager.get_gpu_info(gpu_id)
+        if gpu_info["available"]:
+            print(f"✅ GPU {gpu_id} 메모리 캐시 정리 완료 - 사용: {gpu_info['used']}MB")
+    else:
+        gpu_manager.clear_cache()
+        print("✅ 모든 GPU 메모리 캐시 정리 완료")
 
-def main(qa_data: list[dict], system_message: str, hf_token: str, hf_repo_id: str, training_epochs: int, gpu_id:int) -> str:
-    """메인 훈련 함수"""
+def main(qa_data: list[dict], system_message: str, hf_token: str, hf_repo_id: str, training_epochs: int, gpu_id:int=None) -> str:
+    """메인 훈련 함수 - GPU Manager를 통한 동적 할당"""
     
     # 환경 변수 설정
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
     
-    # GPU 설정 로깅
-    print(f"🎯 파인튜닝 요청 GPU ID: {gpu_id}")
+    # TorchGPUManager 사용
+    gpu_manager = get_torch_gpu_manager()
     
-    # CUDA_VISIBLE_DEVICES가 설정되어 있는지 확인
-    cuda_visible_devices = os.environ.get('CUDA_VISIBLE_DEVICES')
-    if cuda_visible_devices:
-        print(f"📊 CUDA_VISIBLE_DEVICES 설정됨: {cuda_visible_devices}")
-        # CUDA_VISIBLE_DEVICES가 설정되어 있으면 항상 cuda:0 사용
-        actual_gpu_id = 0
-        print(f"✅ CUDA_VISIBLE_DEVICES가 설정되어 있으므로 cuda:{actual_gpu_id} 사용 (물리적 GPU {cuda_visible_devices})")
+    # GPU ID가 지정되지 않으면 가장 여유있는 GPU 선택
+    if gpu_id is None:
+        actual_gpu_id = gpu_manager.get_least_utilized_gpu()
+        if actual_gpu_id == -1:
+            raise RuntimeError("No available GPU found for fine-tuning")
     else:
-        # CUDA_VISIBLE_DEVICES가 설정되어 있지 않으면 요청된 GPU ID 사용
         actual_gpu_id = gpu_id
-        print(f"✅ 직접 GPU {actual_gpu_id} 사용")
     
-    # PyTorch가 올바른 GPU를 사용하도록 설정
-    if torch.cuda.is_available():
-        torch.cuda.set_device(actual_gpu_id)
-        print(f"✅ PyTorch 기본 GPU를 {actual_gpu_id}로 설정")
-        
-        # GPU 정보 출력
-        print(f"📊 GPU 정보:")
-        print(f"  - 이름: {torch.cuda.get_device_name(actual_gpu_id)}")
-        print(f"  - 총 메모리: {torch.cuda.get_device_properties(actual_gpu_id).total_memory / 1024**3:.2f} GB")
-        print(f"  - 현재 할당된 메모리: {torch.cuda.memory_allocated(actual_gpu_id) / 1024**3:.2f} GB")
-        print(f"  - 캐시된 메모리: {torch.cuda.memory_reserved(actual_gpu_id) / 1024**3:.2f} GB")
+    # GPU 정보 확인
+    gpu_info = gpu_manager.get_gpu_info(actual_gpu_id)
+    if not gpu_info["available"]:
+        raise RuntimeError(f"GPU {actual_gpu_id} is not available for fine-tuning")
+    
+    print(f"✅ 파인튜닝을 위해 GPU {actual_gpu_id} 사용")
+    print(f"📊 GPU 정보:")
+    print(f"  - 이름: {gpu_info['name']}")
+    print(f"  - 총 메모리: {gpu_info['total']} MB")
+    print(f"  - 사용 가능: {gpu_info['free']} MB")
+    
+    # GPU 설정
+    if not gpu_manager.set_device(actual_gpu_id):
+        raise RuntimeError(f"Failed to set GPU device {actual_gpu_id}")
     
     # 시작 전 GPU 메모리 정리
     cleanup_gpu_memory(actual_gpu_id)
     
     # 1. 모델과 토크나이저 로드
-    model, tokenizer = load_model_and_tokenizer(gpu_id=actual_gpu_id)
+    model, tokenizer = load_model_and_tokenizer(gpu_manager=gpu_manager, gpu_id=actual_gpu_id)
     
     # 2. 모델 구조 확인
     print("모델 구조 확인 중...")
