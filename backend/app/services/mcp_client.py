@@ -109,7 +109,7 @@ class MCPClientService:
                             logger.info(f"✅ MCP 서버 '{server_name}' stdio 설정 완료")
 
                         elif "url" in config:
-                            # HTTP 기반 서버 - streamable_http 통신
+                            # SSE 기반 서버 - streamable_http 통신
                             client_config[server_name] = {
                                 "url": config["url"],
                                 "transport": "streamable_http",
@@ -119,7 +119,7 @@ class MCPClientService:
                             )
 
                         elif "script" in config and "port" in config:
-                            # 로컬 스크립트 서버 (HTTP 기반) - streamable_http 통신
+                            # 로컬 스크립트 서버 (SSE 기반) - streamable_http 통신
                             # FastMCP는 /mcp/ 엔드포인트를 사용
                             server_url = f"http://localhost:{config['port']}/mcp/"
                             client_config[server_name] = {
@@ -127,7 +127,7 @@ class MCPClientService:
                                 "transport": "streamable_http",
                             }
                             logger.info(
-                                f"✅ MCP 서버 '{server_name}' 로컬 HTTP 설정 완료 (URL: {server_url})"
+                                f"✅ MCP 서버 '{server_name}' 로컬 SSE 설정 완료 (URL: {server_url})"
                             )
 
                     except Exception as e:

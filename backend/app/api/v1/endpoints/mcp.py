@@ -3,6 +3,7 @@
 """
 
 import logging
+import json
 from typing import List, Dict, Any, Optional, Tuple
 from fastapi import APIRouter, HTTPException, status, Depends, Body, Request
 from pydantic import BaseModel, root_validator
@@ -15,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.core.security import get_current_user
 from app.services.openai_service_simple import OpenAIService
+from app.services.mcp_server_service import MCPServerService
 
 # 로깅 설정
 logging.basicConfig(
@@ -461,89 +463,82 @@ async def process_with_mcp_tools(
 
 
 class MCPServerAddRequest(BaseModel):
-    server_url: Optional[str] = None
-    command: Optional[str] = None
-    args: Optional[List[str]] = None
-    transport: Optional[str] = None
+    server_name: str
+    mcp_status: int
+    mcp_config: dict
     description: Optional[str] = None
+    transport: str  # transport 명시적으로 받음
 
     @root_validator(pre=True)
     def validate_and_autofill(cls, values):
-        # command/args만 있으면 transport=stdio 자동 추가
-        if values.get("command") and values.get("args") and not values.get("transport"):
-            values["transport"] = "stdio"
+        # description은 최상위에만 사용, mcp_config 내부에는 넣지 않음
+        if "description" in values.get("mcp_config", {}):
+            values["mcp_config"].pop("description")
+        # transport는 프론트에서 명시적으로 받아서 그대로 사용
+        if "transport" not in values:
+            raise ValueError("transport 필드는 필수입니다.")
+        values["mcp_config"]["transport"] = values["transport"]
         return values
 
 
 @router.post("/servers/add")
-async def add_mcp_server(request: Request):
-    """새로운 MCP 서버를 추가합니다. (HTTP: 쿼리/JSON, STDIO: JSON 전체)"""
+async def add_mcp_server(request: MCPServerAddRequest, db: Session = Depends(get_db)):
+    """새로운 MCP 서버를 데이터베이스에 추가합니다."""
     try:
-        from app.services.mcp_server_manager import mcp_server_manager
+        from app.services.mcp_server_service import MCPServerService
+        from app.services.mcp_server_manager import get_mcp_server_manager
 
-        data = await request.json()
-        # STDIO 방식: {"frankfurtermcp": { ... }} 형태
-        if (
-            isinstance(data, dict)
-            and len(data) == 1
-            and isinstance(list(data.values())[0], dict)
-        ):
-            server_name = list(data.keys())[0]
-            config = data[server_name]
+        mcp_service = MCPServerService(db)
+        mcp_manager = get_mcp_server_manager(db)
 
-            # transport 필드가 없으면 자동으로 stdio 추가
-            if "command" in config and "args" in config and "transport" not in config:
-                config["transport"] = "stdio"
-
-            # description 필드가 없으면 기본값 추가
-            if "description" not in config:
-                config["description"] = f"{server_name} MCP 서버"
-
-            # 서버 설정 추가
-            mcp_server_manager.server_configs[server_name] = config
-
-            # 서버 시작
-            try:
-                await mcp_server_manager._start_server_with_config(server_name, config)
-                logger.info(f"✅ MCP 서버 '{server_name}' 시작 완료")
-
-                # MCP 클라이언트에 동적으로 서버 추가
-                from app.services.mcp_client import get_mcp_client
-
-                mcp_client_service = get_mcp_client()
-
-                # 동적 추가 시도 (실패 시 전체 재초기화)
-                await mcp_client_service.add_server_dynamically(server_name, config)
-                logger.info(f"✅ MCP 클라이언트에 서버 '{server_name}' 추가 완료")
-
-            except Exception as e:
-                logger.error(f"❌ MCP 서버 '{server_name}' 시작 실패: {e}")
-                # 시작 실패해도 설정은 유지 (나중에 수동으로 시작 가능)
-
-            return {
-                "message": f"MCP 서버 {server_name} 추가 완료 (STDIO)",
-                "server_name": server_name,
-                "config": config,
-            }
-        # HTTP 방식: {"server_url": ...} 형태
-        elif "server_url" in data:
-            server_name = data.get("name")
-            if not server_name:
-                raise HTTPException(
-                    status_code=400,
-                    detail="HTTP 방식은 name 필드(서버명)가 필요합니다.",
-                )
-            await mcp_server_manager.add_server(server_name, data["server_url"])
-            return {
-                "message": f"MCP 서버 {server_name} 추가 완료 (HTTP)",
-                "server_name": server_name,
-                "server_url": data["server_url"],
-            }
-        else:
+        # 서버 이름 중복 확인
+        existing_server = mcp_service.get_mcp_server_by_name(request.server_name)
+        if existing_server:
             raise HTTPException(
                 status_code=400,
-                detail='지원하지 않는 형식입니다. STDIO: {"name": {...}}, HTTP: {"name":..., "server_url":...}',
+                detail=f"서버 이름 '{request.server_name}'이 이미 존재합니다.",
             )
+
+        # 데이터베이스에 서버 추가
+        mcp_service.create_mcp_server(
+            request.server_name,
+            request.mcp_status,
+            request.mcp_config,
+            request.description,
+        )
+        logger.info(f"✅ MCP 서버 '{request.server_name}' 데이터베이스에 추가됨")
+
+        # 서버 시작 시도
+        try:
+            await mcp_manager._start_server_with_config(
+                request.server_name, request.mcp_config
+            )
+            logger.info(f"✅ MCP 서버 '{request.server_name}' 시작 완료")
+
+            # MCP 클라이언트에 동적으로 서버 추가
+            from app.services.mcp_client import get_mcp_client
+
+            mcp_client_service = get_mcp_client()
+            await mcp_client_service.add_server_dynamically(
+                request.server_name, request.mcp_config
+            )
+            logger.info(f"✅ MCP 클라이언트에 서버 '{request.server_name}' 추가 완료")
+
+        except Exception as e:
+            logger.error(f"❌ MCP 서버 '{request.server_name}' 시작 실패: {e}")
+            # 서버 시작 실패해도 데이터베이스에는 저장됨
+
+        return {
+            "message": f"MCP 서버 '{request.server_name}' 추가 완료",
+            "server_name": request.server_name,
+            "mcp_status": request.mcp_status,
+            "transport": request.transport,
+            "config": request.mcp_config,
+            "description": request.description,
+        }
+
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"MCP 서버 추가 실패: {e}")
         raise HTTPException(
@@ -553,13 +548,42 @@ async def add_mcp_server(request: Request):
 
 
 @router.delete("/servers/{server_name}")
-async def remove_mcp_server(server_name: str):
-    """MCP 서버를 제거합니다."""
+async def remove_mcp_server(server_name: str, db: Session = Depends(get_db)):
+    """MCP 서버를 데이터베이스에서 제거합니다. (인플루언서와 연결이 없는 경우에만)"""
     try:
-        from app.services.mcp_server_manager import mcp_server_manager
+        from app.services.mcp_server_service import MCPServerService
+        from app.services.mcp_server_manager import get_mcp_server_manager
+        from app.models.influencer import AIInfluencer
 
-        # 서버 제거
-        await mcp_server_manager.remove_server(server_name)
+        mcp_service = MCPServerService(db)
+        mcp_manager = get_mcp_server_manager(db)
+
+        # 데이터베이스에서 서버 조회
+        server = mcp_service.get_mcp_server_by_name(server_name)
+        if not server:
+            raise HTTPException(
+                status_code=404, detail=f"MCP 서버 '{server_name}'를 찾을 수 없습니다."
+            )
+
+        # 인플루언서와의 연결 확인
+        connected_influencers = (
+            db.query(AIInfluencer)
+            .filter(AIInfluencer.mcp_servers.any(mcp_id=server.mcp_id))
+            .all()
+        )
+
+        if connected_influencers:
+            influencer_names = [inf.influencer_name for inf in connected_influencers]
+            raise HTTPException(
+                status_code=400,
+                detail=f"MCP 서버 '{server_name}'는 다음 인플루언서들과 연결되어 있어 제거할 수 없습니다: {', '.join(influencer_names)}",
+            )
+
+        # 서버 중지
+        await mcp_manager.stop_server(server_name)
+
+        # 데이터베이스에서 서버 제거
+        mcp_service.delete_mcp_server(server.mcp_id)
 
         return {
             "message": f"MCP 서버 {server_name} 제거 완료",
@@ -574,13 +598,57 @@ async def remove_mcp_server(server_name: str):
 
 
 @router.get("/servers")
-async def get_mcp_servers():
-    """등록된 MCP 서버 목록을 가져옵니다."""
+async def get_mcp_servers(db: Session = Depends(get_db)):
+    """데이터베이스에서 모든 MCP 서버 목록을 반환합니다."""
     try:
-        from app.services.mcp_server_manager import mcp_server_manager
+        from app.services.mcp_server_service import MCPServerService
+        from app.services.mcp_server_manager import get_mcp_server_manager
 
-        server_status = mcp_server_manager.get_server_status()
-        return {"servers": server_status, "total_count": len(server_status)}
+        mcp_service = MCPServerService(db)
+        mcp_manager = get_mcp_server_manager(db)
+
+        # 데이터베이스에서 모든 서버 조회
+        servers = mcp_service.get_all_mcp_servers()
+
+        # 서버 상태 조회
+        server_status = mcp_manager.get_server_status()
+
+        # 데이터베이스 서버와 상태 정보 결합
+        result = []
+        for server in servers:
+            status_info = server_status.get(server.mcp_name, {})
+
+            # 연결된 인플루언서 확인
+            from app.models.influencer import AIInfluencer
+
+            connected_influencers = (
+                db.query(AIInfluencer)
+                .filter(AIInfluencer.mcp_servers.any(mcp_id=server.mcp_id))
+                .all()
+            )
+
+            result.append(
+                {
+                    "mcp_id": server.mcp_id,
+                    "mcp_name": server.mcp_name,
+                    "mcp_status": server.mcp_status,
+                    "mcp_config": json.loads(server.mcp_config),
+                    "description": server.description,
+                    "running": status_info.get("running", False),
+                    "pid": status_info.get("pid"),
+                    "connected_influencers": [
+                        inf.influencer_name for inf in connected_influencers
+                    ],
+                    "can_delete": len(connected_influencers) == 0,
+                    "created_at": server.created_at,
+                    "updated_at": server.updated_at,
+                }
+            )
+
+        return {
+            "servers": result,
+            "total_count": len(result),
+        }
     except Exception as e:
         logger.error(f"MCP 서버 목록 조회 실패: {e}")
         raise HTTPException(
@@ -805,37 +873,50 @@ async def process_mcp_message(
 async def set_selected_servers(
     influencer_id: str = Body(..., embed=True),
     selected_servers: List[str] = Body(..., embed=True),
+    db: Session = Depends(get_db),
 ):
     """챗봇에서 사용할 선택된 서버 정보를 데이터베이스에 저장합니다."""
     try:
-        from app.services.chat_session_service import ChatSessionService
         from app.services.mcp_server_manager import mcp_server_manager
 
+        # 데이터베이스 기반 MCP 서버 매니저 사용
+        from app.services.mcp_server_manager import get_mcp_server_manager
+
+        mcp_manager = get_mcp_server_manager(db)
+
         # 허용된 서버 목록 검증
-        available_servers = list(mcp_server_manager.server_configs.keys())
+        available_servers = list(mcp_manager.server_configs.keys())
         validated_servers = [
             server for server in selected_servers if server in available_servers
         ]
 
-        # 데이터베이스에 저장
-        success = ChatSessionService.save_selected_servers(
-            influencer_id=influencer_id, selected_servers=validated_servers
-        )
+        # MCP 서버 서비스를 사용하여 데이터베이스에 저장
+        mcp_service = MCPServerService(db)
 
-        if success:
-            logger.info(
-                f"선택된 서버 정보 저장 완료: influencer_id={influencer_id}, servers={validated_servers}"
-            )
-            return {
-                "message": "선택된 서버 정보가 저장되었습니다.",
-                "influencer_id": influencer_id,
-                "selected_servers": validated_servers,
-            }
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="서버 정보 저장에 실패했습니다.",
-            )
+        # 기존 할당된 서버들을 모두 제거
+        existing_servers = mcp_service.get_influencer_mcp_servers(influencer_id)
+        for server in existing_servers:
+            mcp_service.remove_mcp_server_from_influencer(influencer_id, server.mcp_id)
+
+        # 새로 선택된 서버들을 할당 (서버 실행/중지 X)
+        for server_name in validated_servers:
+            server = mcp_service.get_mcp_server_by_name(server_name)
+            if server:
+                # 데이터베이스에 할당
+                mcp_service.assign_mcp_server_to_influencer(
+                    influencer_id, server.mcp_id
+                )
+
+        # (start_server, stop_server 관련 코드 모두 삭제)
+
+        logger.info(
+            f"선택된 서버 정보 저장 완료: influencer_id={influencer_id}, servers={validated_servers}"
+        )
+        return {
+            "message": "선택된 서버 정보가 저장되었습니다.",
+            "influencer_id": influencer_id,
+            "selected_servers": validated_servers,
+        }
 
     except Exception as e:
         logger.error(f"서버 정보 저장 실패: {e}")
@@ -846,13 +927,14 @@ async def set_selected_servers(
 
 
 @router.get("/chat/get-selected-servers/{influencer_id}")
-async def get_selected_servers(influencer_id: str):
+async def get_selected_servers(influencer_id: str, db: Session = Depends(get_db)):
     """챗봇에서 사용할 선택된 서버 정보를 데이터베이스에서 가져옵니다."""
     try:
-        from app.services.chat_session_service import ChatSessionService
+        # MCP 서버 서비스를 사용하여 데이터베이스에서 조회
+        mcp_service = MCPServerService(db)
+        assigned_servers = mcp_service.get_influencer_mcp_servers(influencer_id)
 
-        # 데이터베이스에서 저장된 서버 정보 가져오기
-        selected_servers = ChatSessionService.get_selected_servers(influencer_id)
+        selected_servers = [server.mcp_name for server in assigned_servers]
 
         logger.info(
             f"저장된 서버 정보 조회: influencer_id={influencer_id}, servers={selected_servers}"

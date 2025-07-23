@@ -4,8 +4,10 @@ import logging
 import signal
 import sys
 import os
+import json
 from typing import Dict, List, Optional
 from pathlib import Path
+from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
@@ -13,60 +15,78 @@ logger = logging.getLogger(__name__)
 class MCPServerManager:
     """MCP 서버들을 관리하는 매니저"""
 
-    def __init__(self):
+    def __init__(self, db: Session = None):
         self.processes: Dict[str, subprocess.Popen] = {}
-        self.server_configs = {
-            "math": {
-                "script": "mcp_server/mcp_math_server.py",
-                "transport": "streamable-http",  # stdio → streamable-http로 변경
-                "port": 8003,  # 포트 추가
-                "description": "수학 계산 서버",
-            },
-            "weather": {
-                "script": "mcp_server/mcp_weather_server.py",
-                "transport": "streamable-http",
-                "port": 8005,  # 포트 변경 (8002 → 8005)
-                "description": "날씨 정보 서버",
-            },
-            "exa": {
-                "command": "cmd",
-                "args": [
-                    "/c",
-                    "npx",
-                    "-y",
-                    "@smithery/cli@latest",
-                    "run",
-                    "exa",
-                    "--key",
-                    "424b5510-2224-480b-a976-93ed248876ca",
-                    "--profile",
-                    "controversial-swallow-jyXJrS",
-                ],
-                "transport": "stdio",
-                "description": "Exa Search MCP 서버",
-            },
-            "mcp-server-second-demo": {
-                "command": "cmd",
-                "args": [
-                    "/c",
-                    "npx",
-                    "-y",
-                    "@smithery/cli@latest",
-                    "run",
-                    "@ilkerAdanur/mcp-server-second-demo",
-                    "--key",
-                    "424b5510-2224-480b-a976-93ed248876ca",
-                    "--profile",
-                    "controversial-swallow-jyXJrS",
-                ],
-                "transport": "stdio",
-                "description": "환율 변환 MCP 서버",
-            },
-        }
+        self.server_configs: Dict[str, dict] = {}
+        self.db = db
+        self._load_servers_from_database()
+
+    def _load_servers_from_database(self):
+        """데이터베이스에서 MCP 서버 설정을 로드합니다."""
+        if not self.db:
+            logger.error("데이터베이스 세션이 없습니다. MCP 서버를 로드할 수 없습니다.")
+            self.server_configs = {}
+            return
+
+        try:
+            from app.models.mcp_server import MCPServer
+
+            # 데이터베이스에서 모든 MCP 서버 조회
+            servers = self.db.query(MCPServer).all()
+
+            for server in servers:
+                try:
+                    # JSON 설정을 파싱
+                    config = json.loads(server.mcp_config)
+                    config["description"] = (
+                        server.description or f"{server.mcp_name} 서버"
+                    )
+
+                    # mcp_status에 따라 transport 설정
+                    if server.mcp_status == 0:  # stdio
+                        config["transport"] = "stdio"
+                        logger.info(f"✅ MCP 서버 '{server.mcp_name}' 로드됨 (stdio)")
+                    elif server.mcp_status == 1:  # SSE/외부 URL
+                        config["transport"] = "sse"
+                        logger.info(
+                            f"✅ MCP 서버 '{server.mcp_name}' 로드됨 (SSE/외부 URL)"
+                        )
+                    elif server.mcp_status == 2:  # streamable-http (로컬 스크립트)
+                        config["transport"] = "streamable-http"
+                        logger.info(
+                            f"✅ MCP 서버 '{server.mcp_name}' 로드됨 (streamable-http)"
+                        )
+                    else:
+                        logger.warning(
+                            f"⚠️ MCP 서버 '{server.mcp_name}'의 알 수 없는 상태: {server.mcp_status}"
+                        )
+                        continue
+
+                    self.server_configs[server.mcp_name] = config
+
+                except json.JSONDecodeError as e:
+                    logger.error(f"❌ MCP 서버 '{server.mcp_name}' 설정 파싱 실패: {e}")
+                except Exception as e:
+                    logger.error(f"❌ MCP 서버 '{server.mcp_name}' 로드 실패: {e}")
+
+            logger.info(
+                f"📊 총 {len(self.server_configs)}개의 MCP 서버가 로드되었습니다."
+            )
+
+        except Exception as e:
+            logger.error(f"❌ 데이터베이스에서 MCP 서버 로드 실패: {e}")
+            self.server_configs = {}
+
+    def refresh_servers(self, db: Session):
+        """데이터베이스에서 서버 설정을 새로고침합니다."""
+        self.db = db
+        self.server_configs.clear()
+        self._load_servers_from_database()
+        logger.info("🔄 MCP 서버 설정이 새로고침되었습니다.")
 
     async def start_all_servers(self):
-        """모든 MCP 서버를 시작합니다."""
-        logger.info("MCP 서버들을 시작합니다...")
+        """데이터베이스의 모든 MCP 서버를 시작합니다."""
+        logger.info("데이터베이스의 MCP 서버들을 시작합니다...")
 
         # langchain-mcp-adapters 사용 가능 여부 확인
         try:
@@ -79,16 +99,24 @@ class MCPServerManager:
             logger.warning("⚠️ MCP 서버 시작을 건너뜁니다.")
             return
 
-        # MCP 서버들을 바로 시작
-        logger.info("🚀 MCP 서버들을 바로 시작합니다...")
+        # 데이터베이스에서 서버 설정이 로드되었는지 확인
+        if not self.server_configs:
+            logger.warning("⚠️ 데이터베이스에 MCP 서버가 없습니다.")
+            return
 
+        # MCP 서버들을 바로 시작
+        logger.info(f"🚀 {len(self.server_configs)}개의 MCP 서버를 시작합니다...")
+
+        started_count = 0
         for server_name, config in self.server_configs.items():
             try:
                 await self._start_server_with_config(server_name, config)
+                started_count += 1
+                logger.info(f"✅ {server_name} 서버 시작 완료")
             except Exception as e:
-                logger.error(f"{server_name} 서버 시작 실패: {e}")
+                logger.error(f"❌ {server_name} 서버 시작 실패: {e}")
 
-        logger.info(f"{len(self.processes)}개의 MCP 서버가 시작되었습니다.")
+        logger.info(f"📊 총 {started_count}개의 MCP 서버가 성공적으로 시작되었습니다.")
 
     async def _is_port_in_use(self, port: int) -> bool:
         """포트가 사용 중인지 확인합니다."""
@@ -116,31 +144,37 @@ class MCPServerManager:
             raise
 
     async def _start_server_with_config(self, server_name: str, config: dict):
-        """설정을 사용하여 특정 MCP 서버를 시작합니다."""
+        """설정을 사용하여 특정 MCP 서버를 시작합니다.
 
-        # 명령어 실행 방식의 MCP 서버인 경우 (Exa Search 등)
+        실행 방법:
+        - mcp_status = 0 (stdio): 명령어 실행 방식 (npx, cmd 등)
+        - mcp_status = 1 (SSE로 받아오면): streamable-http 방식 (포트 기반)
+        """
+
+        # 명령어 실행 방식의 MCP 서버인 경우 (stdio - mcp_status = 0)
         if "command" in config and "args" in config:
-            logger.info(f"{server_name} 서버는 명령어 실행 방식 MCP 서버입니다")
+            logger.info(f"🚀 {server_name} 서버는 명령어 실행 방식입니다 (stdio)")
             await self._start_command_mcp_server(server_name, config)
             return
 
-        # 외부 URL 기반 서버인 경우 (websearch 등)
+        # 외부 URL 기반 서버인 경우 (streamable-http - mcp_status = 1)
         if "url" in config and "script" not in config:
             logger.info(
-                f"{server_name} 서버는 외부 HTTP 기반 서버입니다: {config['url']}"
+                f"🌐 {server_name} 서버는 외부 HTTP 기반 서버입니다 (streamable-http): {config['url']}"
             )
             # 외부 HTTP 서버는 프로세스를 시작하지 않고 상태만 등록
             self.processes[server_name] = None  # 외부 서버는 프로세스 없음
-            logger.info(f"{server_name} 외부 HTTP 서버 등록됨")
+            logger.info(f"✅ {server_name} 외부 HTTP 서버 등록됨")
             return
 
-        # 로컬 스크립트 기반 서버인 경우
+        # 로컬 스크립트 기반 서버인 경우 (streamable-http - mcp_status = 1)
         if "script" not in config:
             logger.error(
-                f"{server_name} 서버에 script, url 또는 command가 설정되지 않았습니다."
+                f"❌ {server_name} 서버에 script, url 또는 command가 설정되지 않았습니다."
             )
             return
 
+        # 스크립트 기반 서버 실행 (streamable-http)
         script_path = Path(__file__).parent.parent.parent / config["script"]
 
         if not script_path.exists():
@@ -148,34 +182,24 @@ class MCPServerManager:
             return
 
         try:
-            if config["transport"] == "stdio":
-                # stdio 서버는 백그라운드에서 실행
-                process = subprocess.Popen(
-                    [sys.executable, str(script_path)],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    stdin=subprocess.PIPE,
-                    cwd=Path(__file__).parent.parent.parent,
-                    encoding="utf-8",
-                    errors="replace",
-                )
-
-                # 프로세스가 정상적으로 시작되었는지 확인
-                await asyncio.sleep(2)
-                if process.poll() is None:
-                    self.processes[server_name] = process
-                    logger.info(f"{server_name} 서버 시작됨 (PID: {process.pid})")
-                else:
-                    stdout, stderr = process.communicate()
-                    logger.error(
-                        f"{server_name} 서버 시작 실패:\nstdout: {stdout}\nstderr: {stderr}"
-                    )
-
-            elif config["transport"] == "streamable-http":
+            if config["transport"] == "streamable-http":
+                # 포트 자동 할당 또는 환경변수에서 가져오기
                 port = config.get("port")
                 if port is None:
-                    logger.error(f"{server_name} 서버에 포트가 설정되지 않았습니다.")
-                    return
+                    # 환경변수에서 포트 가져오기
+                    port = os.environ.get("MCP_PORT", 8000)
+                    # 사용 가능한 포트 찾기
+                    base_port = int(port)
+                    for i in range(100):  # 8000-8099 범위에서 사용 가능한 포트 찾기
+                        test_port = base_port + i
+                        if not await self._is_port_in_use(test_port):
+                            port = test_port
+                            break
+                    else:
+                        logger.error(
+                            f"사용 가능한 포트를 찾을 수 없습니다. {server_name} 서버를 건너뜁니다."
+                        )
+                        return
 
                 # 포트가 사용 중인지 확인
                 if await self._is_port_in_use(port):
@@ -456,5 +480,13 @@ class MCPServerManager:
             raise
 
 
-# 전역 MCP 서버 매니저 인스턴스
+# 전역 MCP 서버 매니저 인스턴스 (기본 설정으로 초기화)
 mcp_server_manager = MCPServerManager()
+
+
+def get_mcp_server_manager(db: Session = None) -> MCPServerManager:
+    """데이터베이스 세션과 함께 MCP 서버 매니저를 반환합니다."""
+    if db:
+        # 새로운 데이터베이스 세션으로 매니저 새로고침
+        mcp_server_manager.refresh_servers(db)
+    return mcp_server_manager

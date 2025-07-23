@@ -2,7 +2,7 @@
 
 import { useState, Suspense, useEffect, useRef } from "react"
 import { AlertCircle } from "lucide-react"
-import React from "react"
+import React, { FC } from "react"
 import { useParams, useSearchParams, useRouter } from "next/navigation"
 import Link from "next/link"
 import { Navigation } from "@/components/navigation"
@@ -3079,7 +3079,7 @@ function ModelDetailContent() {
               <Settings className="h-8 w-8 mx-auto mb-2 text-blue-500" />
               <h2 className="text-xl font-bold mb-2">MCP 도구 관리</h2>
               <p className="text-gray-600 mb-6">MCP 서버 및 도구 상태를 확인하고, 챗봇 페이지에서 사용할 MCP 서버를 선택할 수 있습니다.</p>
-              <MCPServerSelector influencerId={model.id} />
+              <MCPServerSelector influencerId={model.id} model={model} />
             </div>
           </TabsContent>
         </Tabs>
@@ -3520,15 +3520,15 @@ function ModelDetailContent() {
 
 // MCPServerSelector 함수 정의를 export default ModelDetailPage 위로 이동
 
-function MCPServerSelector({ influencerId }: { influencerId: string }) {
-  const [servers, setServers] = useState<Record<string, { running: boolean, pid: number | null, config: any }>>({})
+const MCPServerSelector: FC<{ influencerId: string; model: any }> = ({ influencerId, model }) => {
+  const [servers, setServers] = useState<any[]>([]); // 배열로 변경
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<string[]>([])
 
   // MCP 서버 추가 관련 상태
   const [addName, setAddName] = useState('') // HTTP 방식에서만 사용
-  const [addType, setAddType] = useState<'http' | 'stdio'>('http')
+  const [addType, setAddType] = useState<'http' | 'stdio'>('stdio')
   // HTTP 방식
   const [addHttpUrl, setAddHttpUrl] = useState('')
   // STDIO 방식
@@ -3537,20 +3537,30 @@ function MCPServerSelector({ influencerId }: { influencerId: string }) {
   const [addLoading, setAddLoading] = useState(false)
   const [addError, setAddError] = useState<string | null>(null)
   const [addSuccess, setAddSuccess] = useState(false)
+  // MCP 서버 추가 폼 접힘 상태
+  const [addOpen, setAddOpen] = useState(false);
 
   useEffect(() => {
     setLoading(true)
     setError(null)
     MCPService.getServers()
       .then(res => {
-        setServers(res.servers || {})
+        const serverArr = Object.values(res.servers) || [];
+        setServers(serverArr);
+        // 연결된 서버 체크박스 자동 선택
+        if (model && model.name) {
+          const checked = (serverArr as any[])
+            .filter(server => Array.isArray((server as any).connected_influencers) && (server as any).connected_influencers.includes(model.name))
+            .map(server => (server as any).mcp_name);
+          setSelected(checked);
+        }
         setLoading(false)
       })
       .catch(e => {
         setError(e.message || '서버 목록을 불러오지 못했습니다.')
         setLoading(false)
       })
-  }, [addSuccess]) // 서버 추가 성공 시 목록 새로고침
+  }, [addSuccess, model]); // model이 바뀌거나 서버 추가 성공 시 목록 새로고침
 
   const handleToggle = (name: string) => {
     setSelected(prev => prev.includes(name) ? prev.filter(n => n !== name) : [...prev, name])
@@ -3591,11 +3601,18 @@ function MCPServerSelector({ influencerId }: { influencerId: string }) {
     try {
       let serverName = ''
       let config: any = {}
+      let payload: any = {}
       if (addType === 'http') {
         if (!addName.trim()) throw new Error('서버명을 입력하세요.')
         if (!addHttpUrl.trim()) throw new Error('HTTP 서버 URL을 입력하세요.')
         serverName = addName.trim()
-        config.server_url = addHttpUrl.trim()
+        payload = {
+          server_name: serverName,
+          mcp_status: 1,
+          transport: 'sse',
+          mcp_config: { url: addHttpUrl.trim(), transport: 'sse' },
+          description: addDesc.trim()
+        }
       } else {
         if (!addStdioJson.trim()) throw new Error('STDIO 서버 설정 JSON을 입력하세요.')
         let parsed: any
@@ -3608,13 +3625,15 @@ function MCPServerSelector({ influencerId }: { influencerId: string }) {
         if (keys.length !== 1) throw new Error('JSON에 서버명 하나만 포함되어야 합니다.')
         serverName = keys[0]
         config = parsed[serverName]
-
-        // description이 입력되었으면 config에 추가
-        if (addDesc.trim()) {
-          config.description = addDesc.trim()
+        payload = {
+          server_name: serverName,
+          mcp_status: 0,
+          transport: 'stdio',
+          mcp_config: { ...config, transport: 'stdio' },
+          description: addDesc.trim()
         }
       }
-      await MCPService.addServer(serverName, config)
+      await MCPService.addServer(payload)
       setAddSuccess(true)
       setAddName('')
       setAddHttpUrl('')
@@ -3628,74 +3647,105 @@ function MCPServerSelector({ influencerId }: { influencerId: string }) {
     }
   }
 
+  const handleSaveSelection = async () => {
+    if (selected.length === 0) return;
+    try {
+      await apiClient.post('/api/v1/mcp/chat/set-selected-servers', {
+        influencer_id: influencerId,
+        selected_servers: selected,
+      });
+      alert('MCP 서버 설정이 저장되었습니다.');
+    } catch (error) {
+      alert('설정 저장에 실패했습니다.');
+    }
+  };
+
   if (loading) return <div className="py-8 text-gray-400">서버 목록을 불러오는 중...</div>
   if (error) return <div className="py-8 text-red-500">{error}</div>
   const serverNames = Object.keys(servers)
 
   return (
     <div className="max-w-md mx-auto text-left">
-      <div className="mb-6 p-4 border rounded-lg bg-gray-50">
-        <div className="font-semibold mb-2">외부 MCP 서버 추가</div>
-        <div className="flex gap-4 mb-2">
-          <label className="flex items-center gap-1">
-            <input type="radio" checked={addType === 'http'} onChange={() => setAddType('http')} />
-            <span>HTTP 방식</span>
-          </label>
-          <label className="flex items-center gap-1">
-            <input type="radio" checked={addType === 'stdio'} onChange={() => setAddType('stdio')} />
-            <span>STDIO 방식</span>
-          </label>
-        </div>
-        {addType === 'http' ? (
-          <>
-            <Input placeholder="서버명" value={addName} onChange={e => setAddName(e.target.value)} className="mb-2" />
-            <Input placeholder="HTTP 서버 URL (예: http://localhost:9000)" value={addHttpUrl} onChange={e => setAddHttpUrl(e.target.value)} className="mb-2" />
-          </>
-        ) : (
-          <textarea
-            placeholder={`STDIO MCP 서버 설정 JSON 전체를 입력하세요. 예:\n{\n  "frankfurtermcp": {\n    "command": "npx",\n    "args": ["-y", "@smithery/cli@latest", "run", "exa", "--key", "...", "--profile", "..."]\n  }\n}`}
-            value={addStdioJson}
-            onChange={e => setAddStdioJson(e.target.value)}
-            rows={7}
-            className="w-full border rounded p-2 font-mono text-xs mb-2"
-          ></textarea>
+      <div className="mb-6">
+        <button
+          className="w-full flex items-center justify-between p-4 border rounded-lg bg-gray-50 font-semibold hover:bg-gray-100 transition-all mb-2"
+          onClick={() => setAddOpen(v => !v)}
+          type="button"
+        >
+          <span>외부 MCP 서버 추가</span>
+          <span className={`transition-transform ${addOpen ? 'rotate-90' : ''}`}>▶</span>
+        </button>
+        {addOpen && (
+          <div className="p-4 border rounded-lg bg-gray-50 mt-0">
+            <div className="font-semibold mb-2">외부 MCP 서버 추가</div>
+            <div className="flex gap-4 mb-2">
+              <label className="flex items-center gap-1">
+                <input type="radio" checked={addType === 'stdio'} onChange={() => setAddType('stdio')} />
+                <span>STDIO 방식</span>
+              </label>
+              <label className="flex items-center gap-1">
+                <input type="radio" checked={addType === 'http'} onChange={() => setAddType('http')} />
+                <span>SSE 방식</span>
+              </label>
+            </div>
+            {addType === 'http' ? (
+              <>
+                <Input placeholder="서버명" value={addName} onChange={e => setAddName(e.target.value)} className="mb-2" />
+                <Input placeholder="HTTP 서버 URL (예: http://localhost:9000)" value={addHttpUrl} onChange={e => setAddHttpUrl(e.target.value)} className="mb-2" />
+              </>
+            ) : (
+              <textarea
+                placeholder={`STDIO MCP 서버 설정 JSON 전체를 입력하세요. 예:\n{\n  \"frankfurtermcp\": {\n    \"command\": \"npx\",\n    \"args\": [\"-y\", \"@smithery/cli@latest\", \"run\", \"exa\", \"--key\", \"...\", \"--profile\", \"...\"]\n  }\n}`}
+                value={addStdioJson}
+                onChange={e => setAddStdioJson(e.target.value)}
+                rows={7}
+                className="w-full border rounded p-2 font-mono text-xs mb-2"
+              ></textarea>
+            )}
+            <Input placeholder="설명(선택)" value={addDesc} onChange={e => setAddDesc(e.target.value)} className="mb-2" />
+            <Button onClick={handleAddServer} disabled={addLoading} className="w-full mb-1">
+              {addLoading ? '추가 중...' : '서버 추가'}
+            </Button>
+            {addError && <div className="text-red-500 text-sm mt-1">{addError}</div>}
+            {addSuccess && <div className="text-green-600 text-sm mt-1">서버가 추가되었습니다.</div>}
+          </div>
         )}
-        <Input placeholder="설명(선택)" value={addDesc} onChange={e => setAddDesc(e.target.value)} className="mb-2" />
-        <Button onClick={handleAddServer} disabled={addLoading} className="w-full mb-1">
-          {addLoading ? '추가 중...' : '서버 추가'}
-        </Button>
-        {addError && <div className="text-red-500 text-sm mt-1">{addError}</div>}
-        {addSuccess && <div className="text-green-600 text-sm mt-1">서버가 추가되었습니다.</div>}
       </div>
       <div className="mb-4 text-sm text-gray-600">활성화할 MCP 서버를 선택하세요:</div>
       <div className="space-y-2 mb-6">
-        {serverNames.map(name => (
-          <label key={name} className="flex items-center gap-2 p-2 rounded border border-gray-200 hover:bg-gray-50 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={selected.includes(name)}
-              onChange={() => handleToggle(name)}
-              disabled={!servers[name].running}
-              className="accent-blue-600"
-            />
-            <span className={`font-medium ${servers[name].running ? 'text-gray-900' : 'text-gray-400 line-through'}`}>{name}</span>
-            <span className="text-xs text-gray-500">{servers[name].config?.description || ''}</span>
-            {!servers[name].running && <span className="ml-2 text-xs text-red-400">(중지됨)</span>}
-          </label>
-        ))}
+        {servers.map(server => {
+          const name = server.mcp_name;
+          const desc = server.description || server.mcp_config?.description || '';
+          return (
+            <label key={name} className="flex items-center gap-3 p-3 rounded border border-gray-200 hover:bg-gray-50 cursor-pointer transition-all">
+              <input
+                type="checkbox"
+                checked={selected.includes(name)}
+                onChange={() => handleToggle(name)}
+                disabled={!server.running}
+                className="accent-blue-600 mt-1"
+              />
+              <div className="flex flex-col flex-1 min-w-0">
+                <span className={`font-semibold text-base truncate ${server.running ? 'text-gray-900' : 'text-gray-400 line-through'}`}>{name}</span>
+                {desc && <span className="text-xs text-gray-500 mt-0.5 truncate">{desc}</span>}
+              </div>
+              {!server.running && <span className="ml-2 text-xs text-red-400">(중지됨)</span>}
+            </label>
+          )
+        })}
       </div>
       <button
-        className={`w-full py-2 rounded bg-blue-600 text-white font-semibold transition-all ${selected.length === 0 ? 'opacity-50 cursor-not-allowed' : 'hover:bg-blue-700'}`}
-        onClick={handleGoChatbot}
+        className={`w-full py-2 rounded bg-gray-800 text-white font-semibold transition-all ${selected.length === 0 ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-900'}`}
+        onClick={handleSaveSelection}
         disabled={selected.length === 0}
       >
-        선택한 MCP 서버로 챗봇 페이지 이동
+        설정 저장
       </button>
     </div>
   )
 }
 
-export default function ModelDetailPage() {
+const ModelDetailPage: FC = () => {
   return (
     <Suspense fallback={
       <div className="min-h-screen bg-gray-50">
@@ -3719,4 +3769,6 @@ export default function ModelDetailPage() {
     </Suspense>
   )
 }
+
+export default ModelDetailPage;
 

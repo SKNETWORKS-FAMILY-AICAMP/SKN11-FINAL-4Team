@@ -34,21 +34,10 @@ class MCPService {
 
     /**
      * MCP 서버 추가 (HTTP/stdio)
-     * @param name 서버명
-     * @param config { url } 또는 { command, args }
+     * @param payload 전체 서버 추가 JSON 객체
      */
-    static async addServer(name: string, config: { url?: string, command?: string, args?: string[] }): Promise<any> {
-        let body: any = {}
-        if (config.url) {
-            body.server_url = config.url
-            body.name = name
-        } else if (config.command) {
-            // STDIO 방식: 전체 JSON을 body로 전송
-            body = { [name]: config }
-        } else {
-            throw new Error('url 또는 command가 필요합니다.')
-        }
-        return await apiClient.post('/api/v1/mcp/servers/add', body, {
+    static async addServer(payload: any): Promise<any> {
+        return await apiClient.post('/api/v1/mcp/servers/add', payload, {
             requireAuth: false,
             timeout: 30000
         })

@@ -59,10 +59,24 @@ async def lifespan(app: FastAPI):
     # 시작 시 실행
     logger.info("🚀 Starting AIMEX API Server...")
 
-    # MCP 서버 자동 실행
+    # MCP 서버 자동 실행 (데이터베이스에서 로드)
     try:
-        await mcp_server_manager.start_all_servers()
-        logger.info("✅ MCP 서버 자동 실행 완료")
+        from app.database import SessionLocal
+        from app.services.mcp_server_manager import get_mcp_server_manager
+
+        # 데이터베이스 세션 생성
+        db = SessionLocal()
+        try:
+            # 데이터베이스 기반 MCP 서버 매니저 가져오기
+            mcp_manager = get_mcp_server_manager(db)
+
+            # 모든 서버 시작
+            await mcp_manager.start_all_servers()
+            logger.info("✅ 데이터베이스의 모든 MCP 서버 자동 실행 완료")
+
+        finally:
+            db.close()
+
     except Exception as e:
         logger.error(f"❌ MCP 서버 자동 실행 실패: {e}")
 
@@ -97,6 +111,15 @@ async def lifespan(app: FastAPI):
 
     # 종료 시 실행
     logger.info("🛑 Shutting down AIMEX API Server...")
+
+    # MCP 서버들 중지
+    try:
+        from app.services.mcp_server_manager import mcp_server_manager
+
+        await mcp_server_manager.stop_all_servers()
+        logger.info("✅ 모든 MCP 서버가 정상적으로 중지되었습니다")
+    except Exception as e:
+        logger.error(f"❌ MCP 서버 중지 중 오류: {e}")
 
     # 배치 모니터링 중지
     try:
