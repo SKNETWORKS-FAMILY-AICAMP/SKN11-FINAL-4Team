@@ -16,7 +16,7 @@ import os
 import logging
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from app.utils.torch_gpu_manager import get_torch_gpu_manager
+# GPU manager removed - using device_map='auto' instead
 
 logger = logging.getLogger(__name__)
 class ExaoneDataPreprocessor:
@@ -74,8 +74,8 @@ def find_all_linear_names(model):
     
     return list(lora_module_names)
 
-def load_model_and_tokenizer(model_name="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct", gpu_id=1):
-    """모델과 토크나이저 로드 - GPU Manager를 통한 동적 할당"""
+def load_model_and_tokenizer(model_name="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct"):
+    """모델과 토크나이저 로드 - device_map='auto'로 자동 할당"""
     
     # 토크나이저 로드
     tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -89,7 +89,7 @@ def load_model_and_tokenizer(model_name="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct", 
         model_name,
         torch_dtype=torch.bfloat16,
         trust_remote_code=True,
-        device_map=f"cuda:{gpu_id}",
+        device_map="auto",
         use_cache=False,  # 그래디언트 체크포인팅과 호환성을 위해
         low_cpu_mem_usage=True,  # CPU 메모리 사용량 최소화
     )
@@ -230,11 +230,8 @@ def prepare_dataset(tokenizer, qa_data: list[dict], system_message: str, max_len
     
     return tokenized_dataset
 
-def setup_training_arguments(training_epochs: int, output_dir="./exaone-lora-results-system-custom", gpu_id=1):
+def setup_training_arguments(training_epochs: int, output_dir="./exaone-lora-results-system-custom"):
     """훈련 인수 설정"""
-    # CUDA_VISIBLE_DEVICES 환경 변수 설정
-    import os
-    os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
     
     training_args = TrainingArguments(
         output_dir=output_dir,
@@ -311,36 +308,27 @@ def upload_to_huggingface(output_dir, hf_token, hf_repo_id):
         print(f"❌ 업로드 실패: {e}")
         return hf_repo_id  # 실패해도 레포 경로는 반환
 
-def cleanup_gpu_memory(gpu_id=None):
-    """GPU 메모리 정리 - TorchGPUManager 사용"""
+def cleanup_gpu_memory():
+    """GPU 메모리 정리 - PyTorch 직접 사용"""
     import gc
     
     # Python 가비지 컬렉션 강제 실행
     gc.collect()
     
-    # TorchGPUManager를 사용하여 GPU 메모리 정리
-    gpu_manager = get_torch_gpu_manager()
-    
-    if gpu_id is not None:
-        gpu_manager.clear_cache(gpu_id)
-        gpu_info = gpu_manager.get_gpu_info(gpu_id)
-        if gpu_info["available"]:
-            print(f"✅ GPU {gpu_id} 메모리 캐시 정리 완료 - 사용: {gpu_info['used']}MB")
-    else:
-        gpu_manager.clear_cache()
-        print("✅ 모든 GPU 메모리 캐시 정리 완료")
+    # PyTorch로 직접 GPU 메모리 정리
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        print("✅ GPU 메모리 캐시 정리 완료")
 
-def main(qa_data: list[dict], system_message: str, hf_token: str, hf_repo_id: str, training_epochs: int, gpu_id:int=1) -> str:
-    """메인 훈련 함수 - GPU Manager를 통한 동적 할당"""
-    # GPU 디바이스 설정
-    device = torch.device(f'cuda:{gpu_id}')
-    torch.cuda.set_device(gpu_id)
+def main(qa_data: list[dict], system_message: str, hf_token: str, hf_repo_id: str, training_epochs: int, gpu_id:int=None) -> str:
+    """메인 훈련 함수 - device_map='auto'로 자동 할당"""
+    # gpu_id 파라미터는 호환성을 위해 유지하지만 사용하지 않음
     
     # 시작 전 GPU 메모리 정리
-    cleanup_gpu_memory(gpu_id)
+    cleanup_gpu_memory()
     
     # 1. 모델과 토크나이저 로드
-    model, tokenizer = load_model_and_tokenizer(gpu_id=gpu_id)
+    model, tokenizer = load_model_and_tokenizer()
     
     # 2. 모델 구조 확인
     print("모델 구조 확인 중...")
@@ -406,7 +394,7 @@ def main(qa_data: list[dict], system_message: str, hf_token: str, hf_repo_id: st
         }
     print("여기는 오고 안되는거야? ")
     # 9. 훈련 인수 설정
-    training_args = setup_training_arguments(training_epochs, gpu_id=gpu_id)
+    training_args = setup_training_arguments(training_epochs)
     
     # 10. 조기 종료 콜백 설정
     early_stopping_callback = EarlyStoppingCallback(
@@ -473,7 +461,7 @@ def main(qa_data: list[dict], system_message: str, hf_token: str, hf_repo_id: st
             del eval_dataset
         
         # GPU 메모리 정리
-        cleanup_gpu_memory(gpu_id)
+        cleanup_gpu_memory()
         
         print("✅ 메모리 정리 완료")
     except Exception as e:
