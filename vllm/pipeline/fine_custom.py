@@ -345,7 +345,7 @@ def main(qa_data: list[dict], system_message: str, hf_token: str, hf_repo_id: st
     # 2. 모델 구조 확인
     print("모델 구조 확인 중...")
     print(f"모델 타입: {type(model)}")
-    
+    print(f"모델 디바이스: {model.device}")
     # 3. LoRA 설정 및 적용
     lora_config = setup_lora_config(model)
     model = get_peft_model(model, lora_config)
@@ -356,7 +356,6 @@ def main(qa_data: list[dict], system_message: str, hf_token: str, hf_repo_id: st
     # 7. 데이터셋 준비
     train_dataset = prepare_dataset(tokenizer, qa_data, system_message)
     print(f"훈련 데이터셋 크기: {len(train_dataset)}")
-    
     # 데이터셋을 train/eval로 분할 (조기 종료를 위한 validation 데이터 필요)
     train_size = int(0.8 * len(train_dataset))
     eval_size = len(train_dataset) - train_size

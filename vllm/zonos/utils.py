@@ -28,8 +28,18 @@ def pad_weight_(w: nn.Embedding | nn.Linear, multiple: int):
 
 
 def get_device() -> torch.device:
+    import os
+    
     if torch.cuda.is_available():
-        return torch.device(torch.cuda.current_device())
+        # 환경 변수에서 TTS GPU ID 가져오기 (기본값: 1)
+        tts_gpu_id = int(os.getenv('TTS_GPU_ID', '1'))
+        
+        # 지정된 GPU를 사용할 수 있는지 확인
+        if torch.cuda.device_count() > tts_gpu_id:
+            return torch.device(f"cuda:{tts_gpu_id}")
+        else:
+            # 지정된 GPU를 사용할 수 없으면 기본 GPU 사용
+            return torch.device(torch.cuda.current_device())
     # MPS breaks for whatever reason. Uncomment when it's working.
     # if torch.mps.is_available():
     #     return torch.device("mps")

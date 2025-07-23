@@ -183,8 +183,22 @@ def initialize_zonos_model():
     zonos_initialization_attempted = True
     
     try:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        logger.info(f"🔧 Zonos 모델 초기화 중... (디바이스: {device})")
+        # 환경 변수에서 TTS GPU ID 가져오기 (기본값: 1)
+        tts_gpu_id = int(os.getenv('TTS_GPU_ID', '1'))
+        
+        # GPU 설정
+        if torch.cuda.is_available() and torch.cuda.device_count() > tts_gpu_id:
+            device = torch.device(f"cuda:{tts_gpu_id}")
+            torch.cuda.set_device(tts_gpu_id)
+            logger.info(f"🔧 Zonos 모델 초기화 중... (디바이스: {device})")
+            logger.info(f"✅ GPU {tts_gpu_id}번 설정 완료 (사용 가능한 GPU 수: {torch.cuda.device_count()})")
+        elif torch.cuda.is_available():
+            # 지정된 GPU를 사용할 수 없으면 기본 GPU 사용
+            device = torch.device("cuda:0")
+            logger.warning(f"⚠️ GPU {tts_gpu_id}번을 사용할 수 없습니다. GPU 0번을 사용합니다. (사용 가능한 GPU 수: {torch.cuda.device_count()})")
+        else:
+            device = torch.device("cpu")
+            logger.warning("⚠️ CUDA를 사용할 수 없습니다. CPU를 사용합니다.")
         
         zonos_model = Zonos.from_pretrained("Zyphra/Zonos-v0.1-transformer", device=device)
         logger.info("✅ Zonos 모델 초기화 완료")
