@@ -56,174 +56,82 @@ class RunPodService:
     async def create_pod(self, request_id: str) -> RunPodPodResponse:
         """ComfyUI 서버 인스턴스 생성 (GPU 폴백 지원)"""
         
-        # GPU 재시도 로직 (EU-RO-1 지역에서 실제 가용한 GPU만)
+        # GPU 재시도 로직 - 가용성 확인된 모든 GPU 포함 (성공률 극대화)
         gpu_chain = [
-            "NVIDIA GeForce RTX 4090",        # 1순위: 고성능 (24GB)
-            "NVIDIA RTX 4000 Ada Generation", # 2순위: 워크스테이션급 (20GB)
-            "NVIDIA RTX A4500",               # 3순위: 워크스테이션 (20GB) 
-            "NVIDIA RTX 2000 Ada Generation", # 4순위: 효율적 성능 (16GB)
+            # RTX 4090 최우선 사용
+            "NVIDIA GeForce RTX 4090",         # 24GB, $0.20 spot/$0.34 ondemand - 최고 성능
+            
+            # 고성능 대안 GPU들
+            "NVIDIA RTX A6000",                # 48GB, $0.25 spot/$0.33 ondemand
+            "NVIDIA A40",                      # 48GB, $0.24 spot/$0.35 ondemand
+            "NVIDIA RTX A5000",                # 24GB, $0.11 spot/$0.16 ondemand
+            "NVIDIA GeForce RTX 3090",         # 24GB, $0.11 spot/$0.22 ondemand
+            
+            # 중급 성능 GPU들
+            "NVIDIA RTX A4500",                # 20GB, $0.10 spot/$0.19 ondemand
+            "NVIDIA RTX 4000 Ada Generation",  # 20GB, $0.10 spot/$0.20 ondemand
+            "NVIDIA RTX A4000",                # 16GB, $0.09 spot/$0.17 ondemand
+            "NVIDIA GeForce RTX 4080 SUPER",   # 16GB, $0.17 spot/$0.28 ondemand
+            "NVIDIA GeForce RTX 4080",         # 16GB, $0.16 spot/$0.27 ondemand
+            
+            # 경제적 선택 GPU들
+            "NVIDIA GeForce RTX 4070 Ti",      # 12GB, $0.10 spot/$0.19 ondemand
+            "Tesla V100-PCIE-16GB",            # 16GB, $0.10 spot/$0.19 ondemand
+            "NVIDIA GeForce RTX 3080",         # 10GB, $0.09 spot/$0.17 ondemand
+            "NVIDIA GeForce RTX 3070",         # 8GB, $0.07 spot/$0.13 ondemand
         ]
         
-        for attempt in range(4):  # RTX 4090 → RTX 4000 Ada → A4500 → RTX 2000 Ada
+        for attempt in range(min(len(gpu_chain), 15)):  # 최대 15개 GPU 시도
             try:
                 gpu_type = gpu_chain[attempt]
                 
                 logger.info(f"Pod 생성 시도 #{attempt + 1} - GPU: {gpu_type}")
                 
-                # 커스텀 템플릿 사용 여부 확인
-                if self.template_id:
-                    # 커스텀 템플릿을 사용한 Pod 생성
-                    mutation = """
-                    mutation podRentInterruptable($input: PodRentInterruptableInput!) {
-                        podRentInterruptable(input: $input) {
-                            id
-                            desiredStatus
-                            runtime {
-                                uptimeInSeconds
-                                ports {
-                                    ip
-                                    isIpPublic
-                                    privatePort
-                                    publicPort
-                                }
-                            }
-                            machine {
-                                podHostId
-                            }
-                        }
-                    }
-                    """
-                    
-                    variables = {
-                        "input": {
-                            "bidPerGpu": 0.3,  # 시간당 최대 비용 (USD)
-                            "gpuCount": 1,
-                            "volumeInGb": 200,  # Volume Disk 200GB
-                            "volumeId": settings.RUNPOD_VOLUME_ID,
-                            "volumeMountPath": "/workspace",  # 볼륨 마운트 경로 지정
-                            "containerDiskInGb": 20,  # Container Disk 20GB
-                            "minVcpuCount": 4,
-                            "minMemoryInGb": 20,
-                            "gpuTypeId": gpu_type,
-                            "name": f"AIMEX_ComfyUI_Cutom_py312_cu124-{request_id[:8]}",
-                            "templateId": self.template_id,  # 커스텀 템플릿 ID 사용
-                            "ports": "8188/http,7860/http,22/tcp",  # 추가 포트
-                            "dataCenterId": "EU-RO-1",  # EU-RO-1 지역으로 강제 설정
-                            "env": [
-                                {"key": "CUDA_VERSION", "value": "12.4"},
-                                {"key": "RUNPOD_AI_API_KEY", "value": "your-api-key"},
-                                {"key": "COMFYUI_FLAGS", "value": "--listen 0.0.0.0 --port 8188"},
-                                {"key": "AUTO_DOWNLOAD_MODELS", "value": "true"}
-                            ]
-                        }
-                    }
+                # 먼저 Interruptible(Spot) 인스턴스 시도, 실패시 On-Demand 시도
+                pod_data = None
+                for instance_type in ["interruptible", "on_demand"]:
+                    try:
+                        pod_data = await self._create_pod_with_type(gpu_type, request_id, instance_type)
+                        if pod_data:
+                            break
+                    except Exception as type_error:
+                        logger.warning(f"  → {instance_type} 실패: {type_error}")
+                        continue
+                
+                if not pod_data:
+                    if attempt < 3:
+                        logger.warning(f"GPU {gpu_type} 모든 인스턴스 타입 실패 - 다음 GPU로 시도")
+                        continue
+                    else:
+                        raise Exception("모든 GPU 옵션 실패")
+                
+                # Pod 데이터 처리 (기존 로직)
+                endpoint_url = None
+                if pod_data.get("runtime") and pod_data["runtime"].get("ports"):
+                    for port in pod_data["runtime"]["ports"]:
+                        if port["privatePort"] == 8188:
+                            endpoint_url = f"http://{port['ip']}:{port['publicPort']}"
+                            break
+                
+                logger.info(f"✅ RunPod 인스턴스 생성 성공 - GPU: {gpu_type}, Pod ID: {pod_data['id']}")
+                
+                # Pod 생성 후 자동으로 시작
+                pod_id = pod_data["id"]
+                logger.info(f"🚀 Pod {pod_id} 자동 시작 시도...")
+                
+                start_success = await self._start_pod(pod_id)
+                if start_success:
+                    logger.info(f"✅ Pod {pod_id} 자동 시작 성공")
                 else:
-                    # 기본 ComfyUI 이미지 사용 (폴백)
-                    mutation = """
-                mutation podRentInterruptable($input: PodRentInterruptableInput!) {
-                    podRentInterruptable(input: $input) {
-                        id
-                        desiredStatus
-                        runtime {
-                            uptimeInSeconds
-                            ports {
-                                ip
-                                isIpPublic
-                                privatePort
-                                publicPort
-                            }
-                        }
-                        machine {
-                            podHostId
-                        }
-                    }
-                }
-                    """
-                    
-                    variables = {
-                        "input": {
-                            "bidPerGpu": 0.2,  # 시간당 최대 비용 (USD)
-                            "gpuCount": 1,
-                            "volumeInGb": 200,
-                            "volumeId": settings.RUNPOD_VOLUME_ID,
-                            "containerDiskInGb": 50,
-                            "minVcpuCount": 2,
-                            "minMemoryInGb": 15,
-                            "gpuTypeId": gpu_type,
-                            "name": f"comfyui-{request_id[:8]}",
-                            "imageName": settings.AIMEX_DOCKER_IMAGE or "hyunmin94/aimex-comfyui:optimized-v2",  # AIMEX 커스텀 이미지
-                            "dockerArgs": "",
-                            "ports": "8188/http",
-                            "volumeMountPath": "/workspace",
-                            "dataCenterId": "EU-RO-1",  # EU-RO-1 지역으로 강제 설정
-                            "env": [
-                                {"key": "CUDA_VERSION", "value": "12.4"},
-                                {"key": "JUPYTER_PASSWORD", "value": "rp123456789"},
-                                {"key": "ENABLE_TENSORBOARD", "value": "1"}
-                            ]
-                        }
-                    }
+                    logger.warning(f"⚠️ Pod {pod_id} 자동 시작 실패, 수동 시작 필요")
                 
-                headers = {
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {self.api_key}"
-                }
-                
-                async with aiohttp.ClientSession() as session:
-                    payload = {
-                        "query": mutation,
-                        "variables": variables
-                    }
-                    
-                    async with session.post(
-                        self.base_url,
-                        json=payload,
-                        headers=headers,
-                        timeout=aiohttp.ClientTimeout(total=30)
-                    ) as response:
-                        if response.status != 200:
-                            raise Exception(f"RunPod API 호출 실패: {response.status}")
-                        
-                        data = await response.json()
-                        
-                        if "errors" in data:
-                            error_msg = data['errors'][0].get('message', 'Unknown error')
-                            if "no longer any instances available" in error_msg and attempt == 0:
-                                logger.warning(f"GPU {gpu_type} 인스턴스 없음 - 폴백 시도")
-                                continue  # 다음 attempt로 진행
-                            else:
-                                raise Exception(f"RunPod GraphQL 오류: {data['errors']}")
-                        
-                        pod_data = data["data"]["podRentInterruptable"]
-                        
-                        # 엔드포인트 URL 구성
-                        endpoint_url = None
-                        if pod_data.get("runtime") and pod_data["runtime"].get("ports"):
-                            for port in pod_data["runtime"]["ports"]:
-                                if port["privatePort"] == 8188:
-                                    # ComfyUI는 HTTP 프로토콜 사용
-                                    endpoint_url = f"http://{port['ip']}:{port['publicPort']}"
-                                    break
-                        
-                        logger.info(f"✅ RunPod 인스턴스 생성 성공 - GPU: {gpu_type}, Pod ID: {pod_data['id']}")
-                        
-                        # Pod 생성 후 자동으로 시작
-                        pod_id = pod_data["id"]
-                        logger.info(f"🚀 Pod {pod_id} 자동 시작 시도...")
-                        
-                        start_success = await self._start_pod(pod_id)
-                        if start_success:
-                            logger.info(f"✅ Pod {pod_id} 자동 시작 성공")
-                        else:
-                            logger.warning(f"⚠️ Pod {pod_id} 자동 시작 실패, 수동 시작 필요")
-                        
-                        return RunPodPodResponse(
-                            pod_id=pod_id,
-                            status="STARTING" if start_success else pod_data["desiredStatus"],
-                            runtime=pod_data.get("runtime", {}),
-                            endpoint_url=endpoint_url,
-                            cost_per_hour=0.2
-                        )
+                return RunPodPodResponse(
+                    pod_id=pod_id,
+                    status="STARTING" if start_success else pod_data["desiredStatus"],
+                    runtime=pod_data.get("runtime", {}),
+                    endpoint_url=endpoint_url,
+                    cost_per_hour=0.2
+                )
                         
             except Exception as e:
                 if attempt < 3 and "no longer any instances available" in str(e):
@@ -240,6 +148,137 @@ class RunPodService:
         # 모든 시도 실패
         logger.error("모든 GPU 옵션으로 인스턴스 생성 실패")
         raise RuntimeError("지금 사용가능한 자원이 없습니다. 잠시 후 다시 시도해 주세요.")
+    
+    async def _create_pod_with_type(self, gpu_type: str, request_id: str, instance_type: str) -> dict:
+        """특정 인스턴스 타입으로 Pod 생성"""
+        
+        if instance_type == "interruptible":
+            # Spot 인스턴스 (기존 로직)
+            mutation = """
+            mutation podRentInterruptable($input: PodRentInterruptableInput!) {
+                podRentInterruptable(input: $input) {
+                    id
+                    desiredStatus
+                    runtime {
+                        uptimeInSeconds
+                        ports {
+                            ip
+                            isIpPublic
+                            privatePort
+                            publicPort
+                        }
+                    }
+                    machine {
+                        podHostId
+                    }
+                }
+            }
+            """
+            
+            variables = {
+                "input": {
+                    "bidPerGpu": 0.5,  # 시간당 최대 비용 (USD) - 여유있게 설정
+                    "gpuCount": 1,
+                    "volumeInGb": 200,
+                    "volumeKey": settings.RUNPOD_VOLUME_ID,
+                    "containerDiskInGb": 20,
+                    "minVcpuCount": 1,
+                    "minMemoryInGb": 4,
+                    "gpuTypeId": gpu_type,
+                    "name": "AIMEX_ComfyUI_Custom_py312_cu124",
+                    "imageName": "runpod/pytorch:2.1.0-py3.10-cuda12.1.1-devel-ubuntu22.04",
+                    "dockerArgs": "bash -c 'pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121 && git clone https://github.com/comfyanonymous/ComfyUI.git /workspace/ComfyUI && cd /workspace/ComfyUI && pip install -r requirements.txt && python main.py --listen 0.0.0.0 --port 8188'",
+                    "ports": "8188/http",
+                    "volumeMountPath": "/workspace",
+                    "dataCenterId": "EU-RO-1",
+                    "env": [
+                        {"key": "CUDA_VERSION", "value": "12.4"},
+                        {"key": "JUPYTER_PASSWORD", "value": "rp123456789"},
+                        {"key": "ENABLE_TENSORBOARD", "value": "1"},
+                        {"key": "COMFYUI_MODEL_PATH", "value": "/workspace/models"},
+                        {"key": "COMFYUI_OUTPUT_PATH", "value": "/workspace/output"}
+                    ]
+                }
+            }
+        else:  # on_demand
+            # On-Demand 인스턴스 - 새로운 podFindAndDeployOnDemand mutation 사용
+            mutation = """
+            mutation podFindAndDeployOnDemand($input: PodFindAndDeployOnDemandInput!) {
+                podFindAndDeployOnDemand(input: $input) {
+                    id
+                    desiredStatus
+                    runtime {
+                        uptimeInSeconds
+                        ports {
+                            ip
+                            isIpPublic
+                            privatePort
+                            publicPort
+                        }
+                    }
+                    machine {
+                        podHostId
+                    }
+                }
+            }
+            """
+            
+            variables = {
+                "input": {
+                    "cloudType": "ALL",  # ALL, SECURE, COMMUNITY 옵션
+                    "gpuCount": 1,
+                    "volumeInGb": 200,
+                    "volumeKey": settings.RUNPOD_VOLUME_ID,
+                    "containerDiskInGb": 20,
+                    "minVcpuCount": 1,
+                    "minMemoryInGb": 4,
+                    "gpuTypeId": gpu_type,
+                    "name": "AIMEX_ComfyUI_Custom_py312_cu124",
+                    "imageName": "runpod/pytorch:2.1.0-py3.10-cuda12.1.1-devel-ubuntu22.04",
+                    "dockerArgs": "bash -c 'pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121 && git clone https://github.com/comfyanonymous/ComfyUI.git /workspace/ComfyUI && cd /workspace/ComfyUI && pip install -r requirements.txt && python main.py --listen 0.0.0.0 --port 8188'",
+                    "ports": "8188/http",
+                    "volumeMountPath": "/workspace",
+                    "dataCenterId": "EU-RO-1",
+                    "env": [
+                        {"key": "CUDA_VERSION", "value": "12.4"},
+                        {"key": "JUPYTER_PASSWORD", "value": "rp123456789"},
+                        {"key": "ENABLE_TENSORBOARD", "value": "1"},
+                        {"key": "COMFYUI_MODEL_PATH", "value": "/workspace/models"},
+                        {"key": "COMFYUI_OUTPUT_PATH", "value": "/workspace/output"}
+                    ]
+                }
+            }
+        
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}"
+        }
+        
+        async with aiohttp.ClientSession() as session:
+            payload = {
+                "query": mutation,
+                "variables": variables
+            }
+            
+            async with session.post(
+                self.base_url,
+                json=payload,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=30)
+            ) as response:
+                if response.status != 200:
+                    response_text = await response.text()
+                    raise Exception(f"RunPod API 호출 실패: {response.status} - {response_text}")
+                
+                data = await response.json()
+                
+                if "errors" in data:
+                    raise Exception(f"RunPod GraphQL 오류: {data['errors']}")
+                
+                if instance_type == "interruptible":
+                    return data["data"]["podRentInterruptable"]
+                else:
+                    return data["data"]["podFindAndDeployOnDemand"]
     
     async def get_pod_status(self, pod_id: str) -> RunPodPodResponse:
         """Pod 상태 조회"""
@@ -532,50 +571,6 @@ class RunPodService:
         except:
             return False
     
-    async def _get_optimal_gpu_type(self) -> str:
-        """최적의 GPU 타입 선택 (RTX 4090 → RTX A5000 폴백)"""
-        
-        # GPU 가용성 조회
-        try:
-            gpu_availability = await self._check_gpu_availability()
-            
-            # GPU 우선순위: RTX 4090 → A6000 → A5000 → A40
-            gpu_priorities = [
-                ("RTX_4090", "NVIDIA GeForce RTX 4090", "RTX 4090"),
-                ("RTX_A6000", "NVIDIA RTX A6000", "RTX A6000"),
-                ("RTX_A5000", "NVIDIA RTX A5000", "RTX A5000"),
-                ("RTX_A40", "NVIDIA A40", "RTX A40")
-            ]
-            
-            for gpu_key, gpu_id, gpu_name in gpu_priorities:
-                if gpu_availability.get(gpu_key, False):
-                    logger.info(f"{gpu_name} 사용 가능 - 선택됨")
-                    return gpu_id
-            
-            # 모든 GPU 사용 불가
-            available_gpus = [k for k, v in gpu_availability.items() if v]
-            logger.error(f"우선순위 GPU 모두 사용 불가. 가용 GPU: {available_gpus}")
-            raise Exception("현재 이미지를 생성할 자원이 부족합니다. 잠시 후 다시 시도해주세요!")
-            
-        except Exception as e:
-            logger.error(f"GPU 타입 선택 실패: {e}")
-            raise Exception("현재 이미지를 생성할 자원이 부족합니다. 잠시 후 다시 시도해주세요!")
-
-    async def _get_fallback_gpu_type(self, failed_gpu: str) -> str:
-        """실패한 GPU에 대한 폴백 GPU 타입 반환"""
-        # GPU 폴백 체인: RTX 4090 → A6000 → A5000 → A40
-        if "RTX 4090" in failed_gpu:
-            logger.info("RTX 4090 실패 - RTX A6000으로 폴백")
-            return "NVIDIA RTX A6000"
-        elif "RTX A6000" in failed_gpu or "A6000" in failed_gpu:
-            logger.info("RTX A6000 실패 - RTX A5000으로 폴백")
-            return "NVIDIA RTX A5000"
-        elif "RTX A5000" in failed_gpu or "A5000" in failed_gpu:
-            logger.info("RTX A5000 실패 - A40으로 폴백")
-            return "NVIDIA A40"
-        else:
-            logger.info("모든 폴백 GPU 실패 - 옵션 없음")
-            raise Exception("현재 이미지를 생성할 자원이 부족합니다. 잠시 후 다시 시도해주세요!")
     
     async def _check_gpu_availability(self) -> dict:
         """GPU 가용성 확인"""
@@ -652,127 +647,6 @@ class RunPodService:
             logger.error(f"GPU 가용성 조회 중 오류: {e}")
             return {}
     
-    async def debug_all_gpu_types(self) -> dict:
-        """디버깅용: 모든 GPU 타입과 실제 ID 출력"""
-        query = """
-        query {
-            gpuTypes {
-                id
-                displayName
-                memoryInGb
-                secureCloud
-                communityCloud
-                lowestPrice(input: {gpuCount: 1}) {
-                    minimumBidPrice
-                    uninterruptablePrice
-                }
-            }
-        }
-        """
-        
-        try:
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.api_key}"
-            }
-            
-            async with aiohttp.ClientSession() as session:
-                payload = {"query": query}
-                
-                async with session.post(
-                    self.base_url,
-                    json=payload,
-                    headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=10)
-                ) as response:
-                    if response.status != 200:
-                        return {"error": f"Status {response.status}"}
-                    
-                    data = await response.json()
-                    gpu_types = data.get("data", {}).get("gpuTypes", [])
-                    
-                    # RTX 4090 관련 GPU들만 필터링하여 상세 정보 출력
-                    rtx_gpus = {}
-                    for gpu in gpu_types:
-                        display_name = gpu.get("displayName", "")
-                        gpu_id = gpu.get("id", "")
-                        lowest_price = gpu.get("lowestPrice", {})
-                        
-                        # RTX, 4090, A6000, A5000, A40 관련 GPU만 수집
-                        if any(keyword in display_name.upper() for keyword in ["RTX", "4090", "A6000", "A5000", "A40"]):
-                            min_bid_price = lowest_price.get("minimumBidPrice")
-                            uninterruptable_price = lowest_price.get("uninterruptablePrice")
-                            has_price = (
-                                (min_bid_price is not None and min_bid_price > 0) or 
-                                (uninterruptable_price is not None and uninterruptable_price > 0)
-                            )
-                            
-                            rtx_gpus[display_name] = {
-                                "id": gpu_id,
-                                "memory": gpu.get("memoryInGb", 0),
-                                "available": has_price,
-                                "min_bid": min_bid_price,
-                                "uninterruptable": uninterruptable_price
-                            }
-                    
-                    logger.info("=== RTX GPU 디버깅 정보 ===")
-                    for name, info in rtx_gpus.items():
-                        logger.info(f"GPU: {name}")
-                        logger.info(f"  ID: {info['id']}")
-                        logger.info(f"  메모리: {info['memory']}GB")
-                        logger.info(f"  가용: {info['available']}")
-                        logger.info(f"  최소 비용: {info['min_bid']}")
-                        logger.info(f"  고정 비용: {info['uninterruptable']}")
-                        logger.info("---")
-                    
-                    return rtx_gpus
-                    
-        except Exception as e:
-            logger.error(f"GPU 디버깅 정보 조회 중 오류: {e}")
-            return {"error": str(e)}
-
-    async def _get_full_gpu_list(self) -> list:
-        """전체 GPU 목록 조회 (디버깅용)"""
-        query = """
-        query {
-            gpuTypes {
-                id
-                displayName
-                memoryInGb
-                secureCloud
-                communityCloud
-                lowestPrice(input: {gpuCount: 1}) {
-                    minimumBidPrice
-                    uninterruptablePrice
-                }
-            }
-        }
-        """
-        
-        try:
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.api_key}"
-            }
-            
-            async with aiohttp.ClientSession() as session:
-                payload = {"query": query}
-                
-                async with session.post(
-                    self.base_url,
-                    json=payload,
-                    headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=10)
-                ) as response:
-                    if response.status != 200:
-                        return []
-                    
-                    data = await response.json()
-                    return data.get("data", {}).get("gpuTypes", [])
-                    
-        except Exception as e:
-            logger.error(f"GPU 목록 조회 중 오류: {e}")
-            return []
     
 
 
