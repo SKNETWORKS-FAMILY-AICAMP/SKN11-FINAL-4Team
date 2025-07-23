@@ -12,7 +12,6 @@ from app.api.v1.endpoints import (
     instagram,
     instagram_posting,
     model_test,
-    content_enhancement,
     hf_tokens,
     admin,
     chatbot,  # 챗봇 활성화
