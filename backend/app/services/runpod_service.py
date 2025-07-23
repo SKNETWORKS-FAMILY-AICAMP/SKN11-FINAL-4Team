@@ -178,7 +178,7 @@ class RunPodService:
             
             variables = {
                 "input": {
-                    "bidPerGpu": 0.5,  # 시간당 최대 비용 (USD) - 여유있게 설정
+                    "bidPerGpu": 1.0,  # 시간당 최대 비용 (USD) - 여유있게 설정
                     "gpuCount": 1,
                     "volumeInGb": 200,
                     "volumeKey": settings.RUNPOD_VOLUME_ID,
