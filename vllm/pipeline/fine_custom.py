@@ -102,7 +102,7 @@ def load_model_and_tokenizer(model_name="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct", 
         raise RuntimeError(f"Failed to set GPU device {gpu_id}")
     
     # 토크나이저 로드
-    tokenizer = AutoTokenizer.from_pretrained(model_name).to(f'cuda:{0}')
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
     
     # 패딩 토큰 설정 (필요한 경우)
     if tokenizer.pad_token is None:
@@ -110,7 +110,7 @@ def load_model_and_tokenizer(model_name="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct", 
         tokenizer.pad_token_id = tokenizer.eos_token_id
     
     # 모델 로드 - 지정된 GPU로 직접 로드
-    with torch.cuda.device(0):
+    with torch.cuda.device(gpu_id):
         model = AutoModelForCausalLM.from_pretrained(
             model_name,
             torch_dtype=torch.bfloat16,
@@ -118,9 +118,9 @@ def load_model_and_tokenizer(model_name="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct", 
             device_map=None,  # device_map을 사용하지 않음
             use_cache=False,  # 그래디언트 체크포인팅과 호환성을 위해
             low_cpu_mem_usage=True,  # CPU 메모리 사용량 최소화
-        ).to(f'cuda:{0}')
+        ).to(f'cuda:{gpu_id}')
         
-        print(f"✅ 모델을 {f'cuda:{0}'}로 이동 완료")
+        print(f"✅ 모델을 {f'cuda:{gpu_id}'}로 이동 완료")
     
     # gradient checkpointing을 여기서 먼저 활성화
     model.gradient_checkpointing_enable()
@@ -357,9 +357,6 @@ def cleanup_gpu_memory(gpu_id=None):
 def main(qa_data: list[dict], system_message: str, hf_token: str, hf_repo_id: str, training_epochs: int, gpu_id:int=None) -> str:
     """메인 훈련 함수 - GPU Manager를 통한 동적 할당"""
     
-    # 환경 변수 설정
-    os.environ["TOKENIZERS_PARALLELISM"] = "false"
-    
     # TorchGPUManager 사용
     gpu_manager = get_torch_gpu_manager()
     
@@ -403,10 +400,6 @@ def main(qa_data: list[dict], system_message: str, hf_token: str, hf_repo_id: st
     # PEFT 적용 후 모델을 다시 올바른 GPU로 이동
     device = torch.device(f'cuda:{actual_gpu_id}')
     model = model.to(device)
-    print(f"✅ PEFT 모델을 {device}로 이동 완료")
-    
-    # 4. 훈련 가능한 파라미터 출력
-    model.print_trainable_parameters()
     
     # 모델 디바이스 상태 확인
     print("\n🔍 모델 디바이스 상태 확인:")
@@ -464,7 +457,6 @@ def main(qa_data: list[dict], system_message: str, hf_token: str, hf_repo_id: st
             batch["attention_mask"].append(attention_mask)
             batch["labels"].append(padded_labels)
         
-        # 텐서로 변환 - Trainer가 자동으로 올바른 디바이스로 이동시킴
         return {
             "input_ids": torch.tensor(batch["input_ids"], dtype=torch.long),
             "attention_mask": torch.tensor(batch["attention_mask"], dtype=torch.long),
@@ -473,7 +465,7 @@ def main(qa_data: list[dict], system_message: str, hf_token: str, hf_repo_id: st
     
     # 9. 훈련 인수 설정
     training_args = setup_training_arguments(training_epochs, actual_gpu_id)
-    print("잘  하고 있나?")
+    
     # 10. 조기 종료 콜백 설정
     early_stopping_callback = EarlyStoppingCallback(
         early_stopping_patience=2,  # 2 epoch 동안 개선이 없으면 종료
