@@ -12,9 +12,6 @@ import logging
 logger = logging.getLogger(__name__)
 
 from app.services.comfyui_service import get_comfyui_service, ImageGenerationRequest, ImageGenerationResponse
-from app.services.workflow_manager import get_workflow_manager, WorkflowTemplate, WorkflowInput
-from app.services.workflow_config import get_workflow_config
-from app.services.runpod_adapter import get_runpod_adapter
 from app.services.prompt_optimization_service import get_prompt_optimization_service, PromptOptimizationRequest, PromptOptimizationResponse
 
 router = APIRouter()
@@ -22,34 +19,11 @@ router = APIRouter()
 # 요청/응답 모델
 class GenerateImageRequest(BaseModel):
     prompt: str
-    negative_prompt: Optional[str] = None
     width: int = 1024
     height: int = 1024
-    steps: int = 20
-    cfg_scale: float = 7.0
-    seed: Optional[int] = None
     style: str = "realistic"
-    workflow_id: Optional[str] = None  # None이면 기본 커스텀 워크플로우 사용
-    custom_parameters: Optional[Dict[str, Any]] = None
     user_id: Optional[str] = None
-    use_runpod: bool = False  # RunPod 사용 여부
 
-class WorkflowCreateRequest(BaseModel):
-    name: str
-    description: str
-    category: str
-    workflow_json: Dict[str, Any]
-    input_parameters: Dict[str, Any]
-    tags: List[str] = []
-
-class WorkflowUpdateRequest(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    category: Optional[str] = None
-    workflow_json: Optional[Dict[str, Any]] = None
-    input_parameters: Optional[Dict[str, Any]] = None
-    tags: Optional[List[str]] = None
-    is_active: Optional[bool] = None
 
 class OptimizePromptRequest(BaseModel):
     original_prompt: str
@@ -76,9 +50,21 @@ async def generate_image(request: GenerateImageRequest):
         logger.info(f"[이미지 생성 요청] steps: {getattr(request, 'steps', None)}, cfg_scale: {getattr(request, 'cfg_scale', None)}")
         logger.info(f"[이미지 생성 요청] workflow_id: {getattr(request, 'workflow_id', None)}")
         comfyui_service = get_comfyui_service()
-        logger.info(f"[이미지 생성] comfyui_service.generate_image 호출")
-        result = await comfyui_service.generate_image(request)
-        logger.info(f"[이미지 생성 결과] {result.dict() if hasattr(result, 'dict') else result}")
+        
+        # 디버깅을 위한 로그
+        logger.info(f"📥 이미지 생성 요청")
+        
+        # 요청을 서비스 모델로 변환
+        generation_request = ImageGenerationRequest(
+            prompt=request.prompt,
+            width=request.width,
+            height=request.height,
+            style=request.style,
+            user_id=request.user_id
+        )
+        
+        # 이미지 생성 - 기본 설정으로 생성
+        result = await comfyui_service.generate_image(generation_request)
         return result
     except Exception as e:
         logger.error(f"[이미지 생성 오류] {str(e)}")

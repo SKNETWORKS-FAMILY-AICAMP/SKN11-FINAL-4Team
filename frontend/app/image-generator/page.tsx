@@ -6,14 +6,14 @@ import { useAuth } from "@/hooks/use-auth"
 import { tokenUtils } from "@/lib/auth"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 
 import { Separator } from "@/components/ui/separator"
+
 import { Progress } from "@/components/ui/progress"
 import { 
   ImageIcon, 
@@ -23,10 +23,8 @@ import {
   Trash2, 
   Plus, 
   RefreshCw,
-  Settings,
   Upload,
   Loader2,
-  History,
   Sparkles,
   Palette,
   Sliders,
@@ -39,35 +37,14 @@ import {
 interface GeneratedImage {
   id: string
   prompt: string
-  negative_prompt?: string
-  model: string
   width: number
   height: number
-  steps: number
-  cfg_scale: number
-  seed: number
   image_url: string
   created_at: string
   status: 'generating' | 'completed' | 'failed'
   progress?: number
 }
 
-interface ComfyUIModel {
-  id: string
-  name: string
-  type: string
-  description?: string
-}
-
-interface WorkflowTemplate {
-  id: string
-  name: string
-  description: string
-  category: string
-  tags: string[]
-  input_parameters: Record<string, any>
-  is_active: boolean
-}
 
 const PRESET_SIZES = [
   { id: 'square', name: '정사각형', width: 512, height: 512 },
@@ -198,11 +175,15 @@ const STYLE_CATEGORIES = [
 
 export default function ImageGeneratorPage() {
   const [images, setImages] = useState<GeneratedImage[]>([])
-  const [workflows, setWorkflows] = useState<WorkflowTemplate[]>([])
   const [loading, setLoading] = useState(false)
+
   // 모델 선택 기능 제거 - 워크플로우에 정의된 모델 자동 사용
   const [selectedWorkflow, setSelectedWorkflow] = useState<string>("")
   const [selectedSize, setSelectedSize] = useState<string>("")
+
+  const [selectedStyle, setSelectedStyle] = useState<string>("realistic")
+  const [selectedSize, setSelectedSize] = useState<string>("square")
+
   
   // 세션 상태 관리 추가
   const [sessionStatus, setSessionStatus] = useState<SessionStatus | null>(null)
@@ -226,10 +207,7 @@ export default function ImageGeneratorPage() {
   
   // 생성 파라미터
   const [prompt, setPrompt] = useState("")
-  // 커스텀 템플릿에서는 부정 프롬프트 사용하지 않음
-  const [steps, setSteps] = useState(20)
-  const [cfgScale, setCfgScale] = useState(7)
-  const [seed, setSeed] = useState(-1)
+  // 고급 설정 제거 - 간단한 인터페이스만 유지
   
   // UI 상태
   const [activeTab, setActiveTab] = useState("generate")
@@ -399,7 +377,9 @@ export default function ImageGeneratorPage() {
     
     return () => clearInterval(interval)
   }, [])
+
   const lastPointRef = useRef<{x: number, y: number} | null>(null)
+
 
   // 생성된 이미지 목록 가져오기
   const fetchImages = async () => {
@@ -466,14 +446,12 @@ export default function ImageGeneratorPage() {
           'Authorization': `Bearer ${token}`,
         },
         body: JSON.stringify({
-          prompt: getCombinedPromptKeywords(),
-          workflow_type: selectedWorkflow || 'basic_txt2img',
-          negative_prompt: '',
-          width: selectedSizeData?.width || 1024,
-          height: selectedSizeData?.height || 1024,
-          steps,
-          cfg_scale: cfgScale,
-          seed: seed === -1 ? null : seed,
+
+          prompt: optimizedPrompt, // 최적화된 프롬프트 사용
+          // 커스텀 템플릿에서는 부정 프롬프트 사용하지 않음
+          style: selectedStyle,
+          width: selectedSizeData?.width || 512,
+          height: selectedSizeData?.height || 512
         })
       })
 
@@ -510,17 +488,18 @@ export default function ImageGeneratorPage() {
           setIsGenerating(false)
           setGenerationProgress(100)
           
-          const generatedImage: GeneratedImage = {
-            id: data.storage_id || `img_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-            prompt: prompt,
-            negative_prompt: '',
-            model: selectedWorkflow || 'basic_txt2img',
-            width: selectedSizeData?.width || 1024,
-            height: selectedSizeData?.height || 1024,
-            steps,
-            cfg_scale: cfgScale,
-            seed: seed === -1 ? Math.floor(Math.random() * 1000000) : seed,
-            image_url: data.s3_url || 'https://picsum.photos/512/512?random=' + Date.now(),
+          // 1x1 투명 이미지인 경우 placeholder 이미지로 교체
+          let imageUrl = data.image_url
+          if (data.image_url.includes('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==')) {
+            imageUrl = '/api/placeholder-image'
+          }
+          
+          const newImage: GeneratedImage = {
+            id: jobId || Date.now().toString(),
+            prompt,
+            width: selectedSizeData?.width || 512,
+            height: selectedSizeData?.height || 512,
+            image_url: imageUrl,
             created_at: new Date().toISOString(),
             status: 'completed'
           }
@@ -529,9 +508,84 @@ export default function ImageGeneratorPage() {
           setPreviewImage(generatedImage)
           setShowImageModal(true)
           setPrompt("")
-        }, 2000)
-      } else {
-        throw new Error(data.error || '이미지 생성에 실패했습니다.')
+
+          return
+        }
+        
+        if (!jobId) {
+          console.error('No job ID received from backend')
+          setIsGenerating(false)
+          return
+        }
+        
+        let pollCount = 0
+        const maxPollCount = 120 // 최대 2분 (120초)
+        
+        const pollProgress = setInterval(async () => {
+          try {
+            pollCount++
+            
+            // 최대 재시도 횟수 초과 시 중단
+            if (pollCount > maxPollCount) {
+              clearInterval(pollProgress)
+              setIsGenerating(false)
+              console.error('Generation timeout after 2 minutes')
+              return
+            }
+            
+            const progressResponse = await fetch(`/api/comfyui/progress/${jobId}`)
+            
+            if (!progressResponse.ok) {
+              console.error('Progress check failed:', progressResponse.status)
+              return
+            }
+            
+            const progressData = await progressResponse.json()
+            
+            if (progressData.success) {
+              setGenerationProgress(progressData.progress)
+              
+              if (progressData.status === 'completed') {
+                clearInterval(pollProgress)
+                setIsGenerating(false)
+                setGenerationProgress(100)
+                
+                // 새로운 이미지를 목록에 추가
+                const newImage: GeneratedImage = {
+                  id: progressData.image_id || jobId,
+                  prompt,
+                  width: selectedSizeData?.width || 512,
+                  height: selectedSizeData?.height || 512,
+                  image_url: progressData.image_url || '/placeholder-image.jpg',
+                  created_at: new Date().toISOString(),
+                  status: 'completed'
+                }
+                
+                setImages(prev => [newImage, ...prev])
+                setPrompt("")
+              } else if (progressData.status === 'failed') {
+                clearInterval(pollProgress)
+                setIsGenerating(false)
+                console.error('Image generation failed:', progressData.error)
+              }
+            }
+          } catch (error) {
+            console.error('Failed to poll progress:', error)
+            
+            // 연속 실패 시 중단
+            if (pollCount > 10) {
+              clearInterval(pollProgress)
+              setIsGenerating(false)
+              console.error('Too many polling failures, stopping')
+            }
+          }
+        }, 1000)
+        
+        // 타임아웃 설정 (5분)
+        setTimeout(() => {
+          clearInterval(pollProgress)
+          setIsGenerating(false)
+        }, 300000)
       }
     } catch (error) {
       console.error('[이미지 생성 에러]', error)
@@ -846,10 +900,7 @@ export default function ImageGeneratorPage() {
         body: JSON.stringify({
           image: uploadedImageUrl,
           mask: maskData,
-          prompt: inpaintPrompt,
-          model: 'default', // 워크플로우에서 정의된 모델 사용
-          steps,
-          cfg_scale: cfgScale
+          prompt: inpaintPrompt
         })
       })
 

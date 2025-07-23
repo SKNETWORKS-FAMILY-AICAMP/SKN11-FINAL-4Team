@@ -3,17 +3,6 @@
 
 사용자 세션 + ComfyUI + S3 저장을 통합한 이미지 생성 API
 
-새로운 플로우:
-1. 프롬프트 입력 → OpenAI 최적화 (프론트에서 처리)
-2. 세션 확인 및 이미지 생성 시작 (10분 타이머)
-3. ComfyUI 워크플로우 실행
-4. 결과 이미지 S3 저장
-5. URL 반환 및 세션 리셋 (10분 연장)
-
-SOLID 원칙 준수:
-- SRP: 이미지 생성 프로세스 조정만 담당
-- OCP: 새로운 생성 방식 확장 가능
-- DIP: 각 서비스 추상화에 의존
 """
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks

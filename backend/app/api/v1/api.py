@@ -127,8 +127,14 @@ api_router.include_router(image_generator.router, tags=["Image Generator"])
 # 사용자 세션 관리 API (새로운 간소화된 버전)
 api_router.include_router(user_sessions.router, prefix="/user-sessions", tags=["User Sessions"])
 
-# 통합 이미지 생성 API (세션 + ComfyUI + S3)
+# 이미지 생성 API
 api_router.include_router(image_generation.router, prefix="/image-generation", tags=["Image Generation"])
+
+# 통합 이미지 API
+api_router.include_router(unified_images.router, prefix="/api/images", tags=["Unified Images"])
+
+# 통합 이미지 API
+api_router.include_router(unified_images.router, prefix="/api/images", tags=["Unified Images"])
 
 # TTS API
 api_router.include_router(tts.router, prefix="/tts", tags=["TTS"])

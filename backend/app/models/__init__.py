@@ -23,6 +23,10 @@ from .board import Board
 # 음성 관련 모델들
 from .voice import VoiceBase, GeneratedVoice
 
+# 새로운 플로우 모델들
+from .pod_session import PodSession
+from .prompt_processing import PromptProcessingPipeline
+
 # vLLM에서 공유하는 Enum들 import
 try:
     import sys
@@ -63,5 +67,7 @@ __all__ = [
     "Board",
     "VoiceBase",
     "GeneratedVoice",
+    "PodSession",
+    "PromptProcessingPipeline",
     "FineTuningStatus"
 ]

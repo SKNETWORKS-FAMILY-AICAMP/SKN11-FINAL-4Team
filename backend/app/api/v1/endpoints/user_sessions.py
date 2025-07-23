@@ -10,10 +10,6 @@ USER 테이블 기반으로 1 user = 1 RunPod 제한 및 세션 관리
 - 완료시 10분으로 리셋
 - 세션 상태 조회 및 관리
 
-SOLID 원칙 준수:
-- SRP: 사용자 세션 API만 담당
-- OCP: 새로운 세션 기능 확장 가능
-- DIP: 서비스 레이어에 의존
 """
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
