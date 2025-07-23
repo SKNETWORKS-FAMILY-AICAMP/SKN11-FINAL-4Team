@@ -40,23 +40,28 @@ class MCPServerManager:
                     "--key",
                     "424b5510-2224-480b-a976-93ed248876ca",
                     "--profile",
-                    "controversial-swallow-jyXJrS"
+                    "controversial-swallow-jyXJrS",
                 ],
                 "transport": "stdio",
-                "description": "Exa Search MCP 서버"
+                "description": "Exa Search MCP 서버",
             },
-            "currency": {
+            "mcp-server-second-demo": {
                 "command": "cmd",
                 "args": [
                     "/c",
                     "npx",
-                    "mcp-remote",
-                    "https://currency-mcp.wesbos.com/sse"
+                    "-y",
+                    "@smithery/cli@latest",
+                    "run",
+                    "@ilkerAdanur/mcp-server-second-demo",
+                    "--key",
+                    "424b5510-2224-480b-a976-93ed248876ca",
+                    "--profile",
+                    "controversial-swallow-jyXJrS",
                 ],
                 "transport": "stdio",
-                "description": "Currency MCP 서버 (환율 정보)"
+                "description": "환율 변환 MCP 서버",
             },
-            # 실제 구현된 서버만 활성화 (나머지는 주석 처리)
         }
 
     async def start_all_servers(self):

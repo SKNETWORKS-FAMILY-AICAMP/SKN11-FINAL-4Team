@@ -13,6 +13,7 @@ from pathlib import Path
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_mcp_adapters.tools import load_mcp_tools
 import time
+from .mcp_tools_metadata import MCPToolMetadataExtractor
 
 # 로깅 설정
 logging.basicConfig(
@@ -36,6 +37,38 @@ class MCPClientService:
         self.cache_duration = 300  # 5분 캐시
         self._initialized = False
         self._init_lock = asyncio.Lock()
+
+    def reset_initialization(self):
+        """MCP 클라이언트 초기화 상태를 리셋하여 재초기화할 수 있도록 합니다."""
+        self._initialized = False
+        self.mcp_client = None
+        self.tools_cache.clear()
+        self.cache_timestamp.clear()
+        logger.info("🔄 MCP 클라이언트 초기화 상태 리셋 완료")
+
+    async def add_server_dynamically(self, server_name: str, config: dict):
+        """새 서버를 추가하기 위해 MCP 클라이언트를 재초기화합니다."""
+        try:
+            logger.info(
+                f"🔄 새 서버 '{server_name}' 추가를 위해 MCP 클라이언트 재초기화 중..."
+            )
+
+            # 전체 재초기화 (가장 안정적인 방법)
+            self.reset_initialization()
+            await self.initialize_mcp_client()
+
+            logger.info(
+                f"✅ MCP 클라이언트 재초기화 완료 (새 서버 '{server_name}' 포함)"
+            )
+
+        except Exception as e:
+            logger.error(f"서버 '{server_name}' 추가 실패: {e}")
+            # 실패 시에도 재초기화 시도
+            try:
+                self.reset_initialization()
+                await self.initialize_mcp_client()
+            except Exception as retry_e:
+                logger.error(f"재초기화 재시도 실패: {retry_e}")
 
     async def initialize_mcp_client(self, selected_servers: Optional[List[str]] = None):
         """langchain-mcp-adapters를 사용한 MCP 클라이언트 초기화 (한 번만 실행)"""
@@ -118,7 +151,9 @@ class MCPClientService:
                     for server_name in selected_servers:
                         try:
                             await self.get_cached_tools(server_name)
-                            logger.info(f"선택 서버 '{server_name}' 도구 미리 캐시 완료")
+                            logger.info(
+                                f"선택 서버 '{server_name}' 도구 미리 캐시 완료"
+                            )
                         except Exception as e:
                             logger.error(f"❌ '{server_name}' 도구 미리 캐시 실패: {e}")
 
@@ -552,6 +587,172 @@ class MCPClientService:
     async def get_tools_from_server(self, server_name: str) -> List[Dict[str, Any]]:
         """특정 MCP 서버에서 도구 목록을 가져옵니다."""
         return await self.get_tools(server_name)
+
+    # ===== 개선된 메타데이터 추출 메서드들 =====
+
+    async def get_detailed_tools_metadata(self, server_name: str) -> Dict[str, Any]:
+        """상세한 도구 메타데이터를 반환합니다."""
+        try:
+            tools = await self.get_cached_tools(server_name)
+
+            metadata = {
+                "server_name": server_name,
+                "tool_count": len(tools),
+                "tools": [],
+                "extraction_timestamp": time.time(),
+                "server_info": {},
+            }
+
+            # 서버 정보 추가
+            try:
+                from app.services.mcp_server_manager import mcp_server_manager
+
+                server_status = mcp_server_manager.get_server_status()
+                if server_name in server_status:
+                    metadata["server_info"] = server_status[server_name]
+            except Exception as e:
+                logger.warning(f"서버 정보 추가 실패: {e}")
+
+            # 각 도구의 메타데이터 추출
+            for tool in tools:
+                tool_metadata = MCPToolMetadataExtractor.extract_tool_metadata(tool)
+                metadata["tools"].append(tool_metadata)
+
+            logger.info(
+                f"서버 '{server_name}'에서 {len(tools)}개 도구의 메타데이터 추출 완료"
+            )
+            return metadata
+
+        except Exception as e:
+            logger.error(f"도구 메타데이터 추출 실패: {e}")
+            return {
+                "server_name": server_name,
+                "error": str(e),
+                "extraction_timestamp": time.time(),
+            }
+
+    async def list_available_tools_detailed(
+        self, server_name: str
+    ) -> List[Dict[str, Any]]:
+        """상세한 도구 목록을 반환합니다 (API 형식)."""
+        try:
+            metadata = await self.get_detailed_tools_metadata(server_name)
+            return metadata.get("tools", [])
+
+        except Exception as e:
+            logger.error(f"상세 도구 목록 로드 실패: {e}")
+            return []
+
+    async def debug_tool_structure(self, server_name: str) -> Dict[str, Any]:
+        """도구 구조를 디버깅하기 위한 상세 정보를 반환합니다."""
+        try:
+            tools = await self.get_cached_tools(server_name)
+            debug_info = {
+                "server_name": server_name,
+                "tool_count": len(tools),
+                "tools_debug": [],
+            }
+
+            for i, tool in enumerate(tools):
+                tool_debug = {
+                    "index": i,
+                    "tool_type": type(tool).__name__,
+                    "tool_module": getattr(type(tool), "__module__", "unknown"),
+                    "all_attributes": [
+                        attr for attr in dir(tool) if not attr.startswith("_")
+                    ],
+                    "attribute_values": {},
+                }
+
+                # 주요 속성들의 실제 값 확인
+                key_attrs = [
+                    "name",
+                    "description",
+                    "args_schema",
+                    "input_schema",
+                    "tool_name",
+                    "function_name",
+                    "func",
+                    "metadata",
+                ]
+
+                for attr in key_attrs:
+                    if hasattr(tool, attr):
+                        value = getattr(tool, attr)
+                        # 함수 객체는 제외하고 JSON 직렬화 가능한 값만 포함
+                        if not callable(value):
+                            tool_debug["attribute_values"][attr] = {
+                                "type": type(value).__name__,
+                                "value": (
+                                    str(value)[:200] if value else None
+                                ),  # 너무 긴 값은 자름
+                            }
+                        else:
+                            tool_debug["attribute_values"][attr] = {
+                                "type": "function",
+                                "value": f"<function {attr}>",
+                            }
+
+                debug_info["tools_debug"].append(tool_debug)
+
+            return debug_info
+
+        except Exception as e:
+            logger.error(f"도구 구조 디버깅 실패: {e}")
+            return {"error": str(e)}
+
+    async def get_tool_details(
+        self, server_name: str, tool_name: str
+    ) -> Optional[Dict[str, Any]]:
+        """특정 도구의 상세 정보를 가져옵니다."""
+        try:
+            tools = await self.get_cached_tools(server_name)
+
+            for tool in tools:
+                # 도구 이름 확인
+                tool_name_attr = None
+                if hasattr(tool, "name"):
+                    tool_name_attr = tool.name
+                elif hasattr(tool, "tool_name"):
+                    tool_name_attr = tool.tool_name
+                elif hasattr(tool, "function_name"):
+                    tool_name_attr = tool.function_name
+
+                if tool_name_attr == tool_name:
+                    # 상세 메타데이터 추출
+                    tool_metadata = MCPToolMetadataExtractor.extract_tool_metadata(tool)
+                    tool_metadata["server_name"] = server_name
+                    return tool_metadata
+
+            return None
+
+        except Exception as e:
+            logger.error(f"도구 상세 정보 가져오기 실패: {e}")
+            return None
+
+    async def get_all_servers_metadata(self) -> Dict[str, Any]:
+        """모든 서버의 도구 메타데이터를 가져옵니다."""
+        try:
+            from app.services.mcp_server_manager import mcp_server_manager
+
+            server_status = mcp_server_manager.get_server_status()
+
+            all_metadata = {
+                "total_servers": len(server_status),
+                "servers": {},
+                "extraction_timestamp": time.time(),
+            }
+
+            for server_name in server_status.keys():
+                if server_status[server_name].get("running", False):
+                    metadata = await self.get_detailed_tools_metadata(server_name)
+                    all_metadata["servers"][server_name] = metadata
+
+            return all_metadata
+
+        except Exception as e:
+            logger.error(f"모든 서버 메타데이터 가져오기 실패: {e}")
+            return {"error": str(e)}
 
 
 # 전역 MCP 클라이언트 서비스 인스턴스

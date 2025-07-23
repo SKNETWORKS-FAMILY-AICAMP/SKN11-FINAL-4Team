@@ -38,7 +38,7 @@ import {
   MoreHorizontal,
   Bookmark,
   Bot,
-    Clock,
+  Clock,
   Trash2,
   Upload,
   MessageSquare,
@@ -151,7 +151,7 @@ function ModelDetailContent() {
   const [testMessage, setTestMessage] = useState("")
   const [testResponse, setTestResponse] = useState("")
   const [isTestingChatbot, setIsTestingChatbot] = useState(false)
-  
+
   // 음성 관련 상태
   const [voiceText, setVoiceText] = useState("")
   const [isGeneratingVoice, setIsGeneratingVoice] = useState(false)
@@ -468,7 +468,7 @@ function ModelDetailContent() {
     if (token) {
       try {
         const payload = JSON.parse(atob(token.split('.')[1]))
-        
+
       } catch (e) {
       }
     } else {
@@ -513,7 +513,7 @@ function ModelDetailContent() {
             apiKey: response.api_key
           }))
         } catch (generateError: any) {
-          
+
           setApiKeyInfo(null)
         }
       } else {
@@ -606,7 +606,7 @@ function ModelDetailContent() {
     setUploadedImage(null)
     setImagePreview(null)
     setHasImageChanges(false) // 이미지 제거 시 변경 상태 초기화
-    
+
     // 파일 입력 초기화
     const fileInput = document.getElementById('modal-image-upload') as HTMLInputElement
     if (fileInput) {
@@ -844,18 +844,18 @@ function ModelDetailContent() {
     try {
       // 챗봇 옵션 토글 (true -> false, false -> true)
       const newChatbotOption = !model.chatbot_option
-      
+
       // 백엔드 API 호출하여 chatbot_option 업데이트
       await ModelService.updateInfluencer(params.id as string, {
         chatbot_option: newChatbotOption
       })
-      
+
       // 로컬 상태 업데이트
       setModel((prev: any) => ({
         ...prev,
         chatbot_option: newChatbotOption
       }))
-      
+
       if (newChatbotOption) {
         toast({
           title: "챗봇 활성화",
@@ -1024,7 +1024,7 @@ function ModelDetailContent() {
     if (!isModelLoading && model) {
       // 베이스 음성 확인
       checkBaseVoice()
-      
+
       const checkInstagramStatus = async () => {
         try {
           // 모델 데이터에서 Instagram 정보 확인
@@ -1079,15 +1079,15 @@ function ModelDetailContent() {
         previousVoiceStatusRef.current.set(voice.id, voice.status)
       }
     })
-    
+
     const hasPendingVoices = voiceHistory.some(voice => voice.status === 'pending')
-    
+
     if (hasPendingVoices && activeTab === 'voice') {
       const interval = setInterval(async () => {
-        
+
         // 음성 목록 다시 로드
         const response = await apiClient.get<any[]>(`/api/v1/influencers/${params.id}/voices`)
-        
+
         if (Array.isArray(response)) {
           const updatedVoices = response.map((voice: any) => ({
             id: voice.id,
@@ -1098,35 +1098,35 @@ function ModelDetailContent() {
             status: voice.status || 'completed',
             task_id: voice.task_id
           }))
-          
+
           // 새로 완료된 음성 찾기
           const newlyCompletedVoices = updatedVoices.filter(voice => {
             const previousStatus = previousVoiceStatusRef.current.get(voice.id)
             return previousStatus === 'pending' && voice.status === 'completed'
           })
-          
+
           // 새로 실패한 음성 찾기
           const newlyFailedVoices = updatedVoices.filter(voice => {
             const previousStatus = previousVoiceStatusRef.current.get(voice.id)
             return previousStatus === 'pending' && voice.status === 'failed'
           })
-          
+
           // 상태 업데이트
           setVoiceHistory(updatedVoices)
-          
+
           // 알림 표시
           if (newlyCompletedVoices.length > 0) {
             toast({
               title: "음성 생성 완료",
               description: `${newlyCompletedVoices.length}개의 음성이 성공적으로 생성되었습니다.`,
             })
-            
+
             // 첫 번째 완료된 음성 자동 재생 (선택사항)
             if (newlyCompletedVoices[0]?.url) {
               handlePlayVoice(newlyCompletedVoices[0].url)
             }
           }
-          
+
           if (newlyFailedVoices.length > 0) {
             toast({
               title: "음성 생성 실패",
@@ -1136,7 +1136,7 @@ function ModelDetailContent() {
           }
         }
       }, 3000) // 3초마다 확인
-      
+
       return () => clearInterval(interval)
     }
   }, [voiceHistory, activeTab, params.id])
@@ -1740,23 +1740,23 @@ function ModelDetailContent() {
 
       // 베이스 음성 업로드 API 호출
       const response = await apiClient.post<{
-        s3_url: string, 
-        file_name: string, 
-        file_size: number, 
+        s3_url: string,
+        file_name: string,
+        file_size: number,
         message: string,
         original_filename?: string
       }>(`/api/v1/influencers/${params.id}/voice/base`, requestData)
-      
+
       if (response?.s3_url) {
         setBaseVoiceUrl(response.s3_url)
         setHasBaseVoice(true)
         setBaseVoiceFile(null)
-        
+
         // 원본 파일명이 있으면 WAV로 변환되었음을 알림
-        const description = response.original_filename 
+        const description = response.original_filename
           ? `베이스 음성이 WAV 형식으로 변환되어 업로드되었습니다. (원본: ${response.original_filename})`
           : "베이스 음성이 성공적으로 업로드되었습니다."
-        
+
         toast({
           title: "업로드 완료",
           description,
@@ -1806,10 +1806,10 @@ function ModelDetailContent() {
             title: "음성 생성 시작",
             description: "음성 생성 작업이 시작되었습니다. 잠시 후 목록에 표시됩니다.",
           })
-          
+
           // 입력 필드 초기화
           setVoiceText("")
-          
+
           // 잠시 후 음성 목록 새로고침
           setTimeout(() => {
             loadVoiceHistory()
@@ -1825,10 +1825,10 @@ function ModelDetailContent() {
             status: 'completed'
           }
           setVoiceHistory(prev => [newVoice, ...prev])
-          
+
           // 입력 필드 초기화
           setVoiceText("")
-          
+
           toast({
             title: "음성 생성 완료",
             description: "음성이 성공적으로 생성되었습니다.",
@@ -1858,7 +1858,7 @@ function ModelDetailContent() {
         has_voice: boolean,
         message?: string
       }>(`/api/v1/influencers/${params.id}/voice/base`)
-      
+
       if (response && response.has_voice && response.base_voice_url) {
         setBaseVoiceUrl(response.base_voice_url)
         setHasBaseVoice(true)
@@ -1878,7 +1878,7 @@ function ModelDetailContent() {
     setIsLoadingVoiceHistory(true)
     try {
       const response = await apiClient.get<any[]>(`/api/v1/influencers/${params.id}/voices`)
-      
+
       // response가 배열인지 확인 (apiClient는 데이터를 직접 반환)
       if (Array.isArray(response)) {
         // 응답 데이터를 프론트엔드 형식에 맞게 변환
@@ -1891,7 +1891,7 @@ function ModelDetailContent() {
           status: voice.status || 'completed',
           task_id: voice.task_id
         }))
-        
+
         setVoiceHistory(voiceHistory)
       } else if ((response as any)?.data && Array.isArray((response as any).data)) {
         // response.data가 배열인 경우
@@ -1904,7 +1904,7 @@ function ModelDetailContent() {
           status: voice.status || 'completed',
           task_id: voice.task_id
         }))
-        
+
         setVoiceHistory(voiceHistory)
       } else {
         // 빈 배열로 설정
@@ -1940,7 +1940,7 @@ function ModelDetailContent() {
       // 새로운 오디오 재생
       const audio = new Audio(url)
       audioRef.current = audio
-      
+
       audio.play().then(() => {
         setPlayingVoiceUrl(url)
       }).catch((error) => {
@@ -1974,9 +1974,9 @@ function ModelDetailContent() {
       if (!url) {
         throw new Error("음성 파일 URL이 없습니다")
       }
-      
+
       console.log('Download URL:', url)
-      
+
       // 다운로드 시작 알림
       toast({
         title: "다운로드 시작",
@@ -1984,7 +1984,7 @@ function ModelDetailContent() {
       })
 
       const response = await fetch(url)
-      
+
       if (!response.ok) {
         throw new Error(`다운로드 실패: ${response.status}`)
       }
@@ -1992,22 +1992,22 @@ function ModelDetailContent() {
       // 파일 크기 가져오기
       const contentLength = response.headers.get('content-length')
       const total = parseInt(contentLength || '0', 10)
-      
+
       // ReadableStream을 사용해서 데이터 읽기
       const reader = response.body?.getReader()
       if (!reader) throw new Error('스트림을 읽을 수 없습니다')
-      
+
       const chunks: Uint8Array[] = []
       let receivedLength = 0
 
       while (true) {
         const { done, value } = await reader.read()
-        
+
         if (done) break
-        
+
         chunks.push(value)
         receivedLength += value.length
-        
+
         // 진행률 로그 (필요시 UI에 표시 가능)
         if (total) {
           const progress = Math.round((receivedLength / total) * 100)
@@ -2026,22 +2026,22 @@ function ModelDetailContent() {
       // Blob 생성 및 다운로드
       const blob = new Blob([chunksAll], { type: 'audio/mpeg' })
       const downloadUrl = window.URL.createObjectURL(blob)
-      
+
       const link = document.createElement('a')
       link.href = downloadUrl
       link.download = `voice_${id}.mp3`
       document.body.appendChild(link)
       link.click()
-      
+
       // 정리
       document.body.removeChild(link)
       window.URL.revokeObjectURL(downloadUrl)
-      
+
       toast({
         title: "다운로드 완료",
         description: "음성 파일이 다운로드되었습니다.",
       })
-      
+
     } catch (error: any) {
       console.error('다운로드 실패:', error)
       toast({
@@ -2058,15 +2058,15 @@ function ModelDetailContent() {
     try {
       // 올바른 엔드포인트 경로로 수정
       await apiClient.delete(`/api/v1/influencers/voices/${voiceToDelete}`)
-      
+
       // 로컬에서 제거
       setVoiceHistory(prev => prev.filter(v => v.id !== voiceToDelete))
-      
+
       toast({
         title: "삭제 완료",
         description: "음성이 삭제되었습니다.",
       })
-      
+
       setVoiceToDelete(null)
     } catch (error: any) {
       console.error('음성 삭제 실패:', error)
@@ -3035,9 +3035,9 @@ function ModelDetailContent() {
                               <p className="text-sm font-medium text-gray-900 line-clamp-1">{voice.text}</p>
                               <p className="text-xs text-gray-500">
                                 {new Date(voice.createdAt).toLocaleDateString('ko-KR')} •{' '}
-                                {voice.status === 'pending' ? '생성 중...' : 
-                                 voice.status === 'failed' ? '생성 실패' :
-                                 voice.duration ? `${voice.duration}초` : '길이 정보 없음'}
+                                {voice.status === 'pending' ? '생성 중...' :
+                                  voice.status === 'failed' ? '생성 실패' :
+                                    voice.duration ? `${voice.duration}초` : '길이 정보 없음'}
                               </p>
                             </div>
                           </div>
@@ -3325,7 +3325,7 @@ function ModelDetailContent() {
                 <span>프로필 이미지</span>
               </DialogTitle>
             </DialogHeader>
-            
+
             <div className="space-y-6">
               {/* 현재 이미지 표시 */}
               <div className="flex justify-center">
@@ -3420,7 +3420,7 @@ function ModelDetailContent() {
                   >
                     {isUploadingImage ? "업로드 중..." : isUpdating ? "저장 중..." : isModelLoading ? "로딩 중..." : "저장"}
                   </Button>
-                  
+
                   {/* 이미지 제거 버튼 (업로드된 이미지가 있을 때만) */}
                   {uploadedImage && imagePreview && (
                     <Button
@@ -3447,7 +3447,7 @@ function ModelDetailContent() {
                 <span>갤러리에서 이미지 선택</span>
               </DialogTitle>
             </DialogHeader>
-            
+
             <div className="space-y-6">
               {isLoadingGallery ? (
                 <div className="flex items-center justify-center py-12">
@@ -3521,21 +3521,21 @@ function ModelDetailContent() {
 // MCPServerSelector 함수 정의를 export default ModelDetailPage 위로 이동
 
 function MCPServerSelector({ influencerId }: { influencerId: string }) {
-  const [servers, setServers] = useState<Record<string, { running: boolean, pid: number|null, config: any }>>({})
+  const [servers, setServers] = useState<Record<string, { running: boolean, pid: number | null, config: any }>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<string[]>([])
 
   // MCP 서버 추가 관련 상태
   const [addName, setAddName] = useState('') // HTTP 방식에서만 사용
-  const [addType, setAddType] = useState<'http'|'stdio'>('http')
+  const [addType, setAddType] = useState<'http' | 'stdio'>('http')
   // HTTP 방식
   const [addHttpUrl, setAddHttpUrl] = useState('')
   // STDIO 방식
   const [addStdioJson, setAddStdioJson] = useState('')
   const [addDesc, setAddDesc] = useState('')
   const [addLoading, setAddLoading] = useState(false)
-  const [addError, setAddError] = useState<string|null>(null)
+  const [addError, setAddError] = useState<string | null>(null)
   const [addSuccess, setAddSuccess] = useState(false)
 
   useEffect(() => {
@@ -3556,10 +3556,32 @@ function MCPServerSelector({ influencerId }: { influencerId: string }) {
     setSelected(prev => prev.includes(name) ? prev.filter(n => n !== name) : [...prev, name])
   }
 
-  const handleGoChatbot = () => {
+  const handleGoChatbot = async () => {
     if (selected.length === 0) return
-    const query = `selected_mcp=${encodeURIComponent(selected.join(','))}`
-    window.open(`/chat/${influencerId}?${query}`, '_blank')
+
+    try {
+      // 백엔드에 선택된 서버 정보 전송
+      const response = await fetch('/api/v1/mcp/chat/set-selected-servers', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          influencer_id: influencerId,
+          selected_servers: selected
+        })
+      })
+
+      if (response.ok) {
+        console.log('선택된 MCP 서버 정보를 백엔드에 전송 완료:', selected)
+        // 쿼리 스트링 없이 챗봇 페이지로 이동
+        window.open(`/chat/${influencerId}`, '_blank')
+      } else {
+        console.error('서버 정보 전송 실패')
+      }
+    } catch (error) {
+      console.error('서버 정보 전송 중 오류:', error)
+    }
   }
 
   const handleAddServer = async () => {
@@ -3586,6 +3608,11 @@ function MCPServerSelector({ influencerId }: { influencerId: string }) {
         if (keys.length !== 1) throw new Error('JSON에 서버명 하나만 포함되어야 합니다.')
         serverName = keys[0]
         config = parsed[serverName]
+
+        // description이 입력되었으면 config에 추가
+        if (addDesc.trim()) {
+          config.description = addDesc.trim()
+        }
       }
       await MCPService.addServer(serverName, config)
       setAddSuccess(true)
@@ -3611,11 +3638,11 @@ function MCPServerSelector({ influencerId }: { influencerId: string }) {
         <div className="font-semibold mb-2">외부 MCP 서버 추가</div>
         <div className="flex gap-4 mb-2">
           <label className="flex items-center gap-1">
-            <input type="radio" checked={addType==='http'} onChange={()=>setAddType('http')} />
+            <input type="radio" checked={addType === 'http'} onChange={() => setAddType('http')} />
             <span>HTTP 방식</span>
           </label>
           <label className="flex items-center gap-1">
-            <input type="radio" checked={addType==='stdio'} onChange={()=>setAddType('stdio')} />
+            <input type="radio" checked={addType === 'stdio'} onChange={() => setAddType('stdio')} />
             <span>STDIO 방식</span>
           </label>
         </div>

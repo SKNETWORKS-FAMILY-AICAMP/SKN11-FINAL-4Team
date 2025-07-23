@@ -25,8 +25,8 @@ class MCPService {
     /**
      * MCP 서버 목록 조회
      */
-    static async getServers(): Promise<{ servers: Record<string, { running: boolean, pid: number|null, config: any }>, total_count: number }> {
-        return await apiClient.get<{ servers: Record<string, { running: boolean, pid: number|null, config: any }>, total_count: number }>('/api/v1/mcp/servers', {
+    static async getServers(): Promise<{ servers: Record<string, { running: boolean, pid: number | null, config: any }>, total_count: number }> {
+        return await apiClient.get<{ servers: Record<string, { running: boolean, pid: number | null, config: any }>, total_count: number }>('/api/v1/mcp/servers', {
             requireAuth: false,
             timeout: 30000
         })
@@ -41,13 +41,14 @@ class MCPService {
         let body: any = {}
         if (config.url) {
             body.server_url = config.url
+            body.name = name
         } else if (config.command) {
-            body.command = config.command
-            body.args = config.args || []
+            // STDIO 방식: 전체 JSON을 body로 전송
+            body = { [name]: config }
         } else {
             throw new Error('url 또는 command가 필요합니다.')
         }
-        return await apiClient.post(`/api/v1/mcp/servers/${encodeURIComponent(name)}/add`, body, {
+        return await apiClient.post('/api/v1/mcp/servers/add', body, {
             requireAuth: false,
             timeout: 30000
         })

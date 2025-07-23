@@ -86,7 +86,7 @@ api_router.include_router(admin.router, prefix="/admin", tags=["Administrator"])
 # ComfyUI 이미지 생성 API
 api_router.include_router(comfyui.router, prefix="/comfyui", tags=["ComfyUI"])
 
-# MCP 도구 API
+# MCP 도구 API (메타데이터 포함)
 api_router.include_router(mcp.router, prefix="/mcp", tags=["MCP"])
 
 # 워크플로우 전용 라우터 (프론트엔드 호환성)

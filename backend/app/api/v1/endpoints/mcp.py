@@ -37,6 +37,7 @@ class MCPToolProcessor:
         """초기화"""
         try:
             from app.services.mcp_client import mcp_client_service
+
             self.mcp_client_service = mcp_client_service
             # vllm_client 초기화 삭제
             logger.info("MCP 도구 처리기 초기화 완료")
@@ -71,7 +72,7 @@ class MCPToolProcessor:
             logger.info("🧠 OpenAI를 사용한 도구 사용 여부 분석 중...")
             response = await self.openai_service.openai_tool_selection(
                 user_prompt=prompt,
-                system_prompt="당신은 도구 사용 여부를 판단하는 AI입니다. YES 또는 NO로만 답변하세요."
+                system_prompt="당신은 도구 사용 여부를 판단하는 AI입니다. YES 또는 NO로만 답변하세요.",
             )
             response_text = response.strip().upper()
             should_use = "YES" in response_text
@@ -120,6 +121,7 @@ class MCPToolProcessor:
             # 사용 가능한 모든 MCP 서버의 도구들 가져오기
             all_tools = []
             from app.services.mcp_server_manager import mcp_server_manager
+
             server_status = mcp_server_manager.get_server_status()
             if selected_servers:
                 available_servers = [
@@ -247,7 +249,7 @@ class MCPToolProcessor:
             # OpenAI로 도구 선택
             intent_result = await self.openai_service.openai_tool_selection(
                 user_prompt=intent_prompt,
-                system_prompt="당신은 도구 사용 의도를 분석하는 AI입니다. 정확한 도구명과 매개변수를 추출해주세요."
+                system_prompt="당신은 도구 사용 의도를 분석하는 AI입니다. 정확한 도구명과 매개변수를 추출해주세요.",
             )
             intent_text = intent_result
             logger.info(f"📊 도구 사용 의도 분석 결과: {intent_text}")
@@ -281,16 +283,24 @@ class MCPToolProcessor:
                 if tool_name:
                     target_server = None
                     for server_name in available_servers:
-                        server_tools = await self.mcp_client_service.get_tools(server_name)
+                        server_tools = await self.mcp_client_service.get_tools(
+                            server_name
+                        )
                         for tool in server_tools:
-                            tool_actual_name = tool.get("name") if isinstance(tool, dict) else getattr(tool, "name", None)
+                            tool_actual_name = (
+                                tool.get("name")
+                                if isinstance(tool, dict)
+                                else getattr(tool, "name", None)
+                            )
                             if tool_actual_name == tool_name:
                                 target_server = server_name
                                 break
                         if target_server:
                             break
                     if not target_server:
-                        logger.error(f"❌ 도구 '{tool_name}'을 실행할 서버를 찾을 수 없습니다.")
+                        logger.error(
+                            f"❌ 도구 '{tool_name}'을 실행할 서버를 찾을 수 없습니다."
+                        )
                         return None, []
                     logger.info(f"🚀 도구 실행 시작:")
                     logger.info(f"  - 도구 이름: {tool_name}")
@@ -299,13 +309,23 @@ class MCPToolProcessor:
                         target_server, tool_name, parameters
                     )
                     logger.info(f"📥 도구 실행 결과: {result}")
+
                     def get_tool_type(tool_name, all_tools):
                         for tool in all_tools:
-                            tname = tool.get("name") if isinstance(tool, dict) else getattr(tool, "name", None)
-                            ttype = tool.get("type") if isinstance(tool, dict) else getattr(tool, "type", None)
+                            tname = (
+                                tool.get("name")
+                                if isinstance(tool, dict)
+                                else getattr(tool, "name", None)
+                            )
+                            ttype = (
+                                tool.get("type")
+                                if isinstance(tool, dict)
+                                else getattr(tool, "type", None)
+                            )
                             if tname == tool_name:
                                 return ttype or None
                         return None
+
                     tool_type = get_tool_type(tool_name, all_tools)
                     if tool_type == "numeric":
                         parse_prompt = (
@@ -333,7 +353,7 @@ class MCPToolProcessor:
                         )
                     parsed_result = await self.openai_service.openai_tool_selection(
                         user_prompt=parse_prompt,
-                        system_prompt="당신은 정보를 명확하고 정확하게, 가장 적합한 형태로만 전달하는 AI입니다. 불필요한 말은 절대 포함하지 마세요."
+                        system_prompt="당신은 정보를 명확하고 정확하게, 가장 적합한 형태로만 전달하는 AI입니다. 불필요한 말은 절대 포함하지 마세요.",
                     )
                     logger.info(f"📝 파싱된 도구 결과: {parsed_result}")
                     tool_results.append(parsed_result)
@@ -404,7 +424,7 @@ class MCPToolProcessor:
                 )
                 llm_final = await self.openai_service.openai_tool_selection(
                     user_prompt=final_prompt,
-                    system_prompt="당신은 정보를 명확하고 정확하게, 도구 결과를 반드시 포함해서 답변하는 AI입니다. 불필요한 말은 절대 포함하지 마세요."
+                    system_prompt="당신은 정보를 명확하고 정확하게, 도구 결과를 반드시 포함해서 답변하는 AI입니다. 불필요한 말은 절대 포함하지 마세요.",
                 )
                 final_response = llm_final.strip()
                 logger.info(f"🎯 최종 LLM 자연어 답변: {final_response}")
@@ -450,22 +470,56 @@ class MCPServerAddRequest(BaseModel):
     @root_validator(pre=True)
     def validate_and_autofill(cls, values):
         # command/args만 있으면 transport=stdio 자동 추가
-        if values.get('command') and values.get('args') and not values.get('transport'):
-            values['transport'] = 'stdio'
+        if values.get("command") and values.get("args") and not values.get("transport"):
+            values["transport"] = "stdio"
         return values
+
 
 @router.post("/servers/add")
 async def add_mcp_server(request: Request):
     """새로운 MCP 서버를 추가합니다. (HTTP: 쿼리/JSON, STDIO: JSON 전체)"""
     try:
         from app.services.mcp_server_manager import mcp_server_manager
+
         data = await request.json()
         # STDIO 방식: {"frankfurtermcp": { ... }} 형태
-        if isinstance(data, dict) and len(data) == 1 and isinstance(list(data.values())[0], dict):
+        if (
+            isinstance(data, dict)
+            and len(data) == 1
+            and isinstance(list(data.values())[0], dict)
+        ):
             server_name = list(data.keys())[0]
             config = data[server_name]
+
+            # transport 필드가 없으면 자동으로 stdio 추가
+            if "command" in config and "args" in config and "transport" not in config:
+                config["transport"] = "stdio"
+
+            # description 필드가 없으면 기본값 추가
+            if "description" not in config:
+                config["description"] = f"{server_name} MCP 서버"
+
+            # 서버 설정 추가
             mcp_server_manager.server_configs[server_name] = config
-            await mcp_server_manager.start_server(server_name)
+
+            # 서버 시작
+            try:
+                await mcp_server_manager._start_server_with_config(server_name, config)
+                logger.info(f"✅ MCP 서버 '{server_name}' 시작 완료")
+
+                # MCP 클라이언트에 동적으로 서버 추가
+                from app.services.mcp_client import get_mcp_client
+
+                mcp_client_service = get_mcp_client()
+
+                # 동적 추가 시도 (실패 시 전체 재초기화)
+                await mcp_client_service.add_server_dynamically(server_name, config)
+                logger.info(f"✅ MCP 클라이언트에 서버 '{server_name}' 추가 완료")
+
+            except Exception as e:
+                logger.error(f"❌ MCP 서버 '{server_name}' 시작 실패: {e}")
+                # 시작 실패해도 설정은 유지 (나중에 수동으로 시작 가능)
+
             return {
                 "message": f"MCP 서버 {server_name} 추가 완료 (STDIO)",
                 "server_name": server_name,
@@ -475,7 +529,10 @@ async def add_mcp_server(request: Request):
         elif "server_url" in data:
             server_name = data.get("name")
             if not server_name:
-                raise HTTPException(status_code=400, detail="HTTP 방식은 name 필드(서버명)가 필요합니다.")
+                raise HTTPException(
+                    status_code=400,
+                    detail="HTTP 방식은 name 필드(서버명)가 필요합니다.",
+                )
             await mcp_server_manager.add_server(server_name, data["server_url"])
             return {
                 "message": f"MCP 서버 {server_name} 추가 완료 (HTTP)",
@@ -483,7 +540,10 @@ async def add_mcp_server(request: Request):
                 "server_url": data["server_url"],
             }
         else:
-            raise HTTPException(status_code=400, detail="지원하지 않는 형식입니다. STDIO: {\"name\": {...}}, HTTP: {\"name\":..., \"server_url\":...}")
+            raise HTTPException(
+                status_code=400,
+                detail='지원하지 않는 형식입니다. STDIO: {"name": {...}}, HTTP: {"name":..., "server_url":...}',
+            )
     except Exception as e:
         logger.error(f"MCP 서버 추가 실패: {e}")
         raise HTTPException(
@@ -725,7 +785,7 @@ async def unload_vllm_adapter(model_id: str):
 @router.post("/process")
 async def process_mcp_message(
     message: str = Body(..., embed=True),
-    selected_servers: Optional[List[str]] = Body(None, embed=True)
+    selected_servers: Optional[List[str]] = Body(None, embed=True),
 ):
     """
     MCP 챗봇 메시지 처리 엔드포인트
@@ -739,3 +799,70 @@ async def process_mcp_message(
     except Exception as e:
         logger.error(f"MCP 메시지 처리 실패: {e}")
         return {"response": "MCP 처리 중 오류가 발생했습니다.", "tools_used": []}
+
+
+@router.post("/chat/set-selected-servers")
+async def set_selected_servers(
+    influencer_id: str = Body(..., embed=True),
+    selected_servers: List[str] = Body(..., embed=True),
+):
+    """챗봇에서 사용할 선택된 서버 정보를 데이터베이스에 저장합니다."""
+    try:
+        from app.services.chat_session_service import ChatSessionService
+        from app.services.mcp_server_manager import mcp_server_manager
+
+        # 허용된 서버 목록 검증
+        available_servers = list(mcp_server_manager.server_configs.keys())
+        validated_servers = [
+            server for server in selected_servers if server in available_servers
+        ]
+
+        # 데이터베이스에 저장
+        success = ChatSessionService.save_selected_servers(
+            influencer_id=influencer_id, selected_servers=validated_servers
+        )
+
+        if success:
+            logger.info(
+                f"선택된 서버 정보 저장 완료: influencer_id={influencer_id}, servers={validated_servers}"
+            )
+            return {
+                "message": "선택된 서버 정보가 저장되었습니다.",
+                "influencer_id": influencer_id,
+                "selected_servers": validated_servers,
+            }
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="서버 정보 저장에 실패했습니다.",
+            )
+
+    except Exception as e:
+        logger.error(f"서버 정보 저장 실패: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"서버 정보 저장 실패: {str(e)}",
+        )
+
+
+@router.get("/chat/get-selected-servers/{influencer_id}")
+async def get_selected_servers(influencer_id: str):
+    """챗봇에서 사용할 선택된 서버 정보를 데이터베이스에서 가져옵니다."""
+    try:
+        from app.services.chat_session_service import ChatSessionService
+
+        # 데이터베이스에서 저장된 서버 정보 가져오기
+        selected_servers = ChatSessionService.get_selected_servers(influencer_id)
+
+        logger.info(
+            f"저장된 서버 정보 조회: influencer_id={influencer_id}, servers={selected_servers}"
+        )
+
+        return {"influencer_id": influencer_id, "selected_servers": selected_servers}
+
+    except Exception as e:
+        logger.error(f"서버 정보 조회 실패: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"서버 정보 조회 실패: {str(e)}",
+        )
