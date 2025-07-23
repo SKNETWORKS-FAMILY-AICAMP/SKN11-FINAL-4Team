@@ -6,7 +6,7 @@ if __name__ == "__main__":
     uvicorn.run(
         app=app,
         host="0.0.0.0", 
-        port=9000, 
+        port=8000, 
         reload=False, 
         log_level="info",
         ssl_keyfile="../frontend/certificates/key.pem",   # 인증서 키 파일

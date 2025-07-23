@@ -138,10 +138,13 @@ async def optimize_prompt(request: OptimizePromptRequest):
 async def list_workflows(category: Optional[str] = None):
     """워크플로우 목록 조회"""
     try:
+        logger.info(f"📋 워크플로우 목록 조회 요청 (category: {category})")
         workflow_manager = get_workflow_manager()
         workflows = await workflow_manager.list_workflows(category=category)
+        logger.info(f"📋 워크플로우 {len(workflows)}개 조회 완료")
         return {"success": True, "workflows": [w.dict() for w in workflows]}
     except Exception as e:
+        logger.error(f"❌ 워크플로우 목록 조회 실패: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to list workflows: {str(e)}")
 
 @router.get("/workflows/{workflow_id}")
