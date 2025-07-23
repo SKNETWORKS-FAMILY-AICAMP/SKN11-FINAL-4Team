@@ -93,80 +93,17 @@ const createWorkflow = (params: any) => {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { 
-      prompt, 
-      negative_prompt, 
-      model, 
-      style, 
-      width, 
-      height, 
-      steps, 
-      cfg_scale, 
-      seed,
-      workflow_id,
-      custom_parameters 
-    } = body
+    console.log('Next.js 라우트 받은 body:', body)
 
-    if (!prompt) {
-      return NextResponse.json(
-        { success: false, error: 'Prompt is required' },
-        { status: 400 }
-      )
-    }
-
-    // 백엔드 API를 통해 커스텀 워크플로우로 이미지 생성
     const backendUrl = process.env.BACKEND_URL || 'http://localhost:8000'
-    
-    // 스타일에 따른 프롬프트 수정
-    let enhancedPrompt = prompt
-    let enhancedNegativePrompt = negative_prompt || ''
-    
-    switch (style) {
-      case 'realistic':
-        enhancedPrompt = `${prompt}, photorealistic, high quality, detailed, 8k`
-        enhancedNegativePrompt = `${enhancedNegativePrompt}, cartoon, anime, painting, drawing, abstract`.trim()
-        break
-      case 'artistic':
-        enhancedPrompt = `${prompt}, artistic, painting style, masterpiece, fine art`
-        enhancedNegativePrompt = `${enhancedNegativePrompt}, photorealistic, photograph`.trim()
-        break
-      case 'anime':
-        enhancedPrompt = `${prompt}, anime style, manga, illustration, colorful`
-        enhancedNegativePrompt = `${enhancedNegativePrompt}, photorealistic, real person`.trim()
-        break
-      case 'portrait':
-        enhancedPrompt = `${prompt}, portrait, face focus, high quality, detailed face`
-        enhancedNegativePrompt = `${enhancedNegativePrompt}, full body, landscape`.trim()
-        break
-      case 'landscape':
-        enhancedPrompt = `${prompt}, landscape, scenic, wide angle, beautiful scenery`
-        enhancedNegativePrompt = `${enhancedNegativePrompt}, portrait, close up, people`.trim()
-        break
-      case 'abstract':
-        enhancedPrompt = `${prompt}, abstract art, creative, unique, artistic`
-        enhancedNegativePrompt = `${enhancedNegativePrompt}, realistic, photographic`.trim()
-        break
-    }
 
-    // 백엔드로 이미지 생성 요청 (RunPod 사용)
+    // body 전체를 가공 없이 그대로 백엔드로 전달
     const response = await fetch(`${backendUrl}/api/v1/comfyui/generate`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        prompt: enhancedPrompt,
-        negative_prompt: enhancedNegativePrompt,
-        width: width || 1024,
-        height: height || 1024,
-        steps: steps || 20,
-        cfg_scale: cfg_scale || 7.0,
-        seed: seed,
-        style: style,
-        workflow_id: workflow_id || 'basic_txt2img',
-        custom_parameters: custom_parameters || {},
-        use_runpod: true  // RunPod 사용 활성화
-      })
+      body: JSON.stringify(body)
     })
 
     if (!response.ok) {
@@ -176,33 +113,7 @@ export async function POST(request: NextRequest) {
     }
 
     const data = await response.json()
-    
-    // 백엔드 응답에서 job_id 또는 prompt_id 찾기
-    const jobId = data.job_id || data.prompt_id || data.id
-    
-    // 백엔드에서 즉시 완료된 이미지를 반환하는 경우 처리
-    if (data.status === 'completed' && data.images && data.images.length > 0) {
-      return NextResponse.json({
-        success: true,
-        job_id: jobId,
-        status: 'completed',
-        image_url: data.images[0], // base64 이미지 URL
-        message: 'Image generation completed immediately',
-        backend_response: data
-      })
-    }
-    
-    if (!jobId) {
-      console.error('No job ID in backend response:', data)
-      throw new Error('No job ID received from backend')
-    }
-    
-    return NextResponse.json({
-      success: true,
-      job_id: jobId,
-      message: 'Image generation started',
-      backend_response: data
-    })
+    return NextResponse.json(data)
   } catch (error) {
     console.error('Error generating image:', error)
     return NextResponse.json(

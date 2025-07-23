@@ -1818,7 +1818,7 @@ function ModelDetailContent() {
           const newVoice = {
             id: Date.now().toString(),
             text: voiceText,
-            url: response.url || response.s3_url,
+            url: response.audio_url || response.s3_url,
             duration: response.duration,
             createdAt: new Date().toISOString(),
             status: 'completed'
@@ -3470,7 +3470,7 @@ function ModelDetailContent() {
             </div>
           </DialogContent>
         </Dialog>
-            
+
         <Dialog open={!!voiceToDelete} onOpenChange={(open) => !open && setVoiceToDelete(null)}>
           <DialogContent className="sm:max-w-[425px]">
             <DialogHeader>
