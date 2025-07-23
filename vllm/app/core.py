@@ -146,11 +146,11 @@ async def execute_finetuning(task_id: str):
         gpu_manager = await get_gpu_manager()
         
         # 가장 여유있는 GPU 동적 선택
-        selected_gpu = gpu_manager.get_least_utilized_gpu()
+        selected_gpu = await gpu_manager.get_least_utilized_gpu()
         if selected_gpu == -1:
             raise RuntimeError("No available GPU found for fine-tuning")
         
-        all_gpu_info = gpu_manager.get_all_gpus_info()
+        all_gpu_info = await gpu_manager.get_all_gpus_info()
         
         logger.info(f"🖥️ GPU 상태:")
         for gpu_id, info in all_gpu_info.items():
@@ -265,7 +265,7 @@ async def finetuning_worker():
         
         # GPU Manager로 가장 여유있는 GPU 선택
         gpu_manager = await get_gpu_manager()
-        finetuning_gpu_id = gpu_manager.get_least_utilized_gpu()
+        finetuning_gpu_id = await gpu_manager.get_least_utilized_gpu()
         if finetuning_gpu_id == -1:
             logger.warning(f"⚠️ 사용 가능한 GPU가 없습니다. 작업 {task_id}를 다시 큐에 넣습니다.")
             await finetuning_queue.put(task_id)
@@ -294,7 +294,7 @@ async def finetuning_worker():
                 
                 # TorchGPUManager를 사용하여 GPU 메모리 정리
                 gpu_manager = await get_gpu_manager()
-                gpu_manager.clear_cache(finetuning_gpu_id)
+                await gpu_manager.clear_cache(finetuning_gpu_id)
                 logger.info(f"♾️ 파인튜닝 작업 {task_id} 후 GPU {finetuning_gpu_id} 메모리 정리 완료")
             except Exception as cleanup_error:
                 logger.warning(f"⚠️ GPU 메모리 정리 실패: {cleanup_error}")
