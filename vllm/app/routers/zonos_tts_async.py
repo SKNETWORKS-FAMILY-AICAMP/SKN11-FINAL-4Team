@@ -337,7 +337,7 @@ async def process_tts_task(
         s3_info = None
         if request.upload_to_s3:
             try:
-                s3_manager = get_async_s3_manager()
+                s3_manager = await get_async_s3_manager()
                 if not s3_manager.bucket_name:
                     logger.error("S3 bucket name is not configured")
                     raise ValueError("S3 bucket name is not configured")
@@ -657,7 +657,7 @@ async def process_tts_with_voice_task(task_id: str, request: ZonosTTSWithVoiceRe
         s3_info = None
         if request.upload_to_s3:
             try:
-                s3_manager = get_async_s3_manager()
+                s3_manager = await get_async_s3_manager()
                 if not s3_manager.bucket_name:
                     logger.error("S3 bucket name is not configured")
                     raise ValueError("S3 bucket name is not configured")
@@ -875,7 +875,7 @@ async def configure_s3(request: S3ConfigRequest):
 async def get_s3_status():
     """S3 연결 상태 확인"""
     try:
-        s3_manager = get_async_s3_manager()
+        s3_manager = await get_async_s3_manager()
         await s3_manager.validate_connection()
         
         return {
