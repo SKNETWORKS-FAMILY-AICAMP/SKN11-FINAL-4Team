@@ -6,14 +6,9 @@ import { useAuth } from "@/hooks/use-auth"
 import { tokenUtils } from "@/lib/auth"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Separator } from "@/components/ui/separator"
 import { Progress } from "@/components/ui/progress"
 import { 
   ImageIcon, 
@@ -23,47 +18,23 @@ import {
   Trash2, 
   Plus, 
   RefreshCw,
-  Settings,
   Upload,
   Loader2,
-  History,
   Sparkles,
-  Palette,
-  Sliders
+  Palette
 } from "lucide-react"
 
 interface GeneratedImage {
   id: string
   prompt: string
-  negative_prompt?: string
-  model: string
   width: number
   height: number
-  steps: number
-  cfg_scale: number
-  seed: number
   image_url: string
   created_at: string
   status: 'generating' | 'completed' | 'failed'
   progress?: number
 }
 
-interface ComfyUIModel {
-  id: string
-  name: string
-  type: string
-  description?: string
-}
-
-interface WorkflowTemplate {
-  id: string
-  name: string
-  description: string
-  category: string
-  tags: string[]
-  input_parameters: Record<string, any>
-  is_active: boolean
-}
 
 const PRESET_STYLES = [
   { id: 'realistic', name: '사실적', description: '실제 사진과 같은 고품질 이미지' },
@@ -98,10 +69,7 @@ interface SessionStatus {
 
 export default function ImageGeneratorPage() {
   const [images, setImages] = useState<GeneratedImage[]>([])
-  const [workflows, setWorkflows] = useState<WorkflowTemplate[]>([])
   const [loading, setLoading] = useState(false)
-  // 모델 선택 기능 제거 - 워크플로우에 정의된 모델 자동 사용
-  const [selectedWorkflow, setSelectedWorkflow] = useState<string>("")
   const [selectedStyle, setSelectedStyle] = useState<string>("realistic")
   const [selectedSize, setSelectedSize] = useState<string>("square")
   
@@ -127,10 +95,7 @@ export default function ImageGeneratorPage() {
   
   // 생성 파라미터
   const [prompt, setPrompt] = useState("")
-  // 커스텀 템플릿에서는 부정 프롬프트 사용하지 않음
-  const [steps, setSteps] = useState(20)
-  const [cfgScale, setCfgScale] = useState(7)
-  const [seed, setSeed] = useState(-1)
+  // 고급 설정 제거 - 간단한 인터페이스만 유지
   
   // UI 상태
   const [activeTab, setActiveTab] = useState("generate")
@@ -258,33 +223,6 @@ export default function ImageGeneratorPage() {
 
   // 모델 목록 가져오기 제거 - 워크플로우에 정의된 모델 자동 사용
 
-  // 워크플로우 목록 가져오기
-  useEffect(() => {
-    const fetchWorkflows = async () => {
-      try {
-        const response = await fetch('/api/comfyui/workflows')
-        const data = await response.json()
-        if (data.success) {
-          // workflows가 배열인지 확인
-          const workflowsArray = Array.isArray(data.workflows) ? data.workflows : []
-          setWorkflows(workflowsArray)
-          if (workflowsArray.length > 0) {
-            setSelectedWorkflow(workflowsArray[0].id)
-          } else {
-            // 워크플로우가 없으면 기본 워크플로우 설정
-            setSelectedWorkflow('basic_txt2img')
-          }
-        }
-      } catch (error) {
-        console.error('Failed to fetch workflows:', error)
-        // 에러 발생 시 빈 배열로 설정하고 기본 워크플로우 설정
-        setWorkflows([])
-        setSelectedWorkflow('custom_workflow')
-      }
-    }
-
-    fetchWorkflows()
-  }, [])
 
   // 생성된 이미지 목록 가져오기
   useEffect(() => {
@@ -351,11 +289,7 @@ export default function ImageGeneratorPage() {
           // 커스텀 템플릿에서는 부정 프롬프트 사용하지 않음
           style: selectedStyle,
           width: selectedSizeData?.width || 512,
-          height: selectedSizeData?.height || 512,
-          steps,
-          cfg_scale: cfgScale,
-          seed: seed === -1 ? Math.floor(Math.random() * 1000000) : seed,
-          workflow_id: selectedWorkflow
+          height: selectedSizeData?.height || 512
         })
       })
 
@@ -378,13 +312,8 @@ export default function ImageGeneratorPage() {
           const newImage: GeneratedImage = {
             id: jobId || Date.now().toString(),
             prompt,
-            negative_prompt: '',
-            model: 'custom-template',
             width: selectedSizeData?.width || 512,
             height: selectedSizeData?.height || 512,
-            steps,
-            cfg_scale: cfgScale,
-            seed: Math.floor(Math.random() * 1000000),
             image_url: imageUrl,
             created_at: new Date().toISOString(),
             status: 'completed'
@@ -437,13 +366,8 @@ export default function ImageGeneratorPage() {
                 const newImage: GeneratedImage = {
                   id: progressData.image_id || jobId,
                   prompt,
-                  negative_prompt: '', // 커스텀 템플릿에서는 부정 프롬프트 사용하지 않음
-                  model: progressData.model || 'custom', // 백엔드에서 사용된 모델 정보 사용
                   width: selectedSizeData?.width || 512,
                   height: selectedSizeData?.height || 512,
-                  steps,
-                  cfg_scale: cfgScale,
-                  seed: progressData.seed || Math.floor(Math.random() * 1000000),
                   image_url: progressData.image_url || '/placeholder-image.jpg',
                   created_at: new Date().toISOString(),
                   status: 'completed'
@@ -703,10 +627,7 @@ export default function ImageGeneratorPage() {
         body: JSON.stringify({
           image: uploadedImageUrl,
           mask: maskData,
-          prompt: inpaintPrompt,
-          model: 'default', // 워크플로우에서 정의된 모델 사용
-          steps,
-          cfg_scale: cfgScale
+          prompt: inpaintPrompt
         })
       })
 
@@ -890,84 +811,6 @@ export default function ImageGeneratorPage() {
                     </CardContent>
                   </Card>
 
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="flex items-center gap-2">
-                        <Sliders className="h-5 w-5" />
-                        고급 설정
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      <div>
-                        <Label htmlFor="workflow">워크플로우 템플릿</Label>
-                        <Select value={selectedWorkflow} onValueChange={setSelectedWorkflow}>
-                          <SelectTrigger>
-                            <SelectValue placeholder="워크플로우를 선택하세요" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {Array.isArray(workflows) && workflows.length > 0 ? (
-                              workflows.map((workflow) => (
-                                <SelectItem key={workflow.id} value={workflow.id}>
-                                  {workflow.name}
-                                </SelectItem>
-                              ))
-                            ) : (
-                              <SelectItem value="custom_workflow">
-                                커스텀 워크플로우
-                              </SelectItem>
-                            )}
-                          </SelectContent>
-                        </Select>
-                        {selectedWorkflow && (
-                          <p className="text-sm text-gray-600 mt-1">
-                            {Array.isArray(workflows) ? workflows.find(w => w.id === selectedWorkflow)?.description || 
-                             (selectedWorkflow === 'custom_workflow' ? '커스텀 워크플로우가 자동으로 선택되었습니다.' : '') : ''}
-                          </p>
-                        )}
-                      </div>
-                      
-                      {/* 모델 선택 UI 제거 - 커스텀 템플릿에 정의된 모델 자동 사용 */}
-
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div>
-                          <Label htmlFor="steps">스텝 수: {steps}</Label>
-                          <input
-                            id="steps"
-                            type="range"
-                            min="1"
-                            max="100"
-                            value={steps}
-                            onChange={(e) => setSteps(parseInt(e.target.value))}
-                            className="w-full mt-2"
-                          />
-                        </div>
-                        <div>
-                          <Label htmlFor="cfg-scale">CFG Scale: {cfgScale}</Label>
-                          <input
-                            id="cfg-scale"
-                            type="range"
-                            min="1"
-                            max="20"
-                            step="0.5"
-                            value={cfgScale}
-                            onChange={(e) => setCfgScale(parseFloat(e.target.value))}
-                            className="w-full mt-2"
-                          />
-                        </div>
-                        <div>
-                          <Label htmlFor="seed">시드</Label>
-                          <Input
-                            id="seed"
-                            type="number"
-                            value={seed}
-                            onChange={(e) => setSeed(parseInt(e.target.value))}
-                            placeholder="-1 (랜덤)"
-                            className="mt-2"
-                          />
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
                 </div>
 
                 {/* 미리보기 및 생성 버튼 */}
@@ -995,10 +838,6 @@ export default function ImageGeneratorPage() {
                       
                       <div className="space-y-2 text-sm">
                         <div className="flex justify-between">
-                          <span className="text-gray-600">워크플로우:</span>
-                          <span className="font-medium">{Array.isArray(workflows) ? workflows.find(w => w.id === selectedWorkflow)?.name || '기본' : '기본'}</span>
-                        </div>
-                        <div className="flex justify-between">
                           <span className="text-gray-600">스타일:</span>
                           <span className="font-medium">{getSelectedStyleData()?.name}</span>
                         </div>
@@ -1007,10 +846,6 @@ export default function ImageGeneratorPage() {
                           <span className="font-medium">
                             {getSelectedSizeData()?.width} × {getSelectedSizeData()?.height}
                           </span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-gray-600">스텝:</span>
-                          <span className="font-medium">{steps}</span>
                         </div>
                       </div>
                     </CardContent>

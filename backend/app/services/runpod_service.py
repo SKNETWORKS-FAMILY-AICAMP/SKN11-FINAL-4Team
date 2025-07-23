@@ -100,6 +100,7 @@ class RunPodService:
                             "gpuCount": 1,
                             "volumeInGb": 200,  # Volume Disk 200GB
                             "volumeId": settings.RUNPOD_VOLUME_ID,
+                            "volumeMountPath": "/workspace",  # 볼륨 마운트 경로 지정
                             "containerDiskInGb": 20,  # Container Disk 20GB
                             "minVcpuCount": 4,
                             "minMemoryInGb": 20,
@@ -108,7 +109,6 @@ class RunPodService:
                             "templateId": self.template_id,  # 커스텀 템플릿 ID 사용
                             "ports": "8188/http,7860/http,22/tcp",  # 추가 포트
                             "dataCenterId": "EU-RO-1",  # EU-RO-1 지역으로 강제 설정
-                            "startPod": True,  # 생성과 동시에 자동 시작
                             "env": [
                                 {"key": "CUDA_VERSION", "value": "12.4"},
                                 {"key": "RUNPOD_AI_API_KEY", "value": "your-api-key"},
@@ -156,7 +156,6 @@ class RunPodService:
                             "ports": "8188/http",
                             "volumeMountPath": "/workspace",
                             "dataCenterId": "EU-RO-1",  # EU-RO-1 지역으로 강제 설정
-                            "startPod": True,  # 생성과 동시에 자동 시작
                             "env": [
                                 {"key": "CUDA_VERSION", "value": "12.4"},
                                 {"key": "JUPYTER_PASSWORD", "value": "rp123456789"},

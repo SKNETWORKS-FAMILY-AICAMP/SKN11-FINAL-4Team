@@ -4,14 +4,10 @@
  * 요구사항에 따라 이미지 생성 페이지 진입시 자동으로 RunPod 세션을 시작하고
  * 15분 입력 대기, 10분 이미지 생성 타임리밋을 관리
  * 
- * SOLID 원칙:
- * - SRP: Pod 세션 관리만 담당
- * - OCP: 새로운 세션 관리 기능 추가 시 확장 가능
- * - ISP: 클라이언트별 필요한 인터페이스만 노출
  */
 
 import { useEffect, useState, useCallback } from 'react'
-import { useAuth } from '@/contexts/AuthContext'
+import { useAuth } from '@/hooks/use-auth'
 
 interface PodSessionStatus {
   success: boolean

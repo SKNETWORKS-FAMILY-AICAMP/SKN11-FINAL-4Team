@@ -16,12 +16,10 @@ from app.api.v1.endpoints import (
     admin,
     # chatbot,  # 임시 비활성화
     comfyui,
-    image_generator,  # 새로운 이미지 생성 API
-    user_sessions,  # 새로운 사용자 세션 API
-    image_generation,  # 새로운 통합 이미지 생성 API
+    user_sessions,
+    image_generation,
+    unified_images,
 )
-# 기존 복잡한 API들 임시 비활성화 (새로운 간소화된 API 사용)
-# from app.api.v1 import images, pod_sessions, prompt_pipelines, s3_images
 from app.api.v1.endpoints.public import mbti as public_mbti
 
 api_router = APIRouter()
@@ -76,36 +74,11 @@ api_router.include_router(admin.router, prefix="/admin", tags=["Administrator"])
 # ComfyUI 이미지 생성 API
 api_router.include_router(comfyui.router, prefix="/comfyui", tags=["ComfyUI"])
 
-# 워크플로우 전용 라우터 (프론트엔드 호환성)
-from fastapi import APIRouter as FastAPIRouter
-workflow_only_router = FastAPIRouter()
-
-# 워크플로우 관리 엔드포인트만 별도 등록
-@workflow_only_router.get("")
-async def list_workflows_compat(category: str = None):
-    """워크플로우 목록 조회 (호환성)"""
-    from app.api.v1.endpoints.comfyui import list_workflows
-    return await list_workflows(category)
-
-@workflow_only_router.get("/{workflow_id}")
-async def get_workflow_compat(workflow_id: str):
-    """특정 워크플로우 조회 (호환성)"""
-    from app.api.v1.endpoints.comfyui import get_workflow
-    return await get_workflow(workflow_id)
-
-api_router.include_router(workflow_only_router, prefix="/workflows", tags=["Workflows"])
-
-# 기존 복잡한 API들 임시 비활성화 (새로운 간소화된 API들로 대체)
-# api_router.include_router(images.router, prefix="/images", tags=["Images"])
-# api_router.include_router(pod_sessions.router, prefix="/pod-sessions", tags=["Pod Sessions"])
-# api_router.include_router(prompt_pipelines.router, prefix="/prompt-pipelines", tags=["Prompt Processing"])
-# api_router.include_router(s3_images.router, prefix="/s3-images", tags=["S3 Image Storage"])
-
-# 새로운 이미지 생성 API (통합 서비스)
-api_router.include_router(image_generator.router, tags=["Image Generator"])
-
-# 사용자 세션 관리 API (새로운 간소화된 버전)
+# 사용자 세션 관리 API
 api_router.include_router(user_sessions.router, prefix="/user-sessions", tags=["User Sessions"])
 
-# 통합 이미지 생성 API (세션 + ComfyUI + S3)
+# 이미지 생성 API
 api_router.include_router(image_generation.router, prefix="/image-generation", tags=["Image Generation"])
+
+# 통합 이미지 API
+api_router.include_router(unified_images.router, prefix="/api/images", tags=["Unified Images"])
