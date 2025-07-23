@@ -150,6 +150,10 @@ function ModelDetailContent() {
   const [testMessage, setTestMessage] = useState("")
   const [testResponse, setTestResponse] = useState("")
   const [isTestingChatbot, setIsTestingChatbot] = useState(false)
+  const [activeTab, setActiveTab] = useState(() => {
+    // URL 파라미터에서 탭 정보 읽기
+    return searchParams.get('tab') || 'analytics'
+  })
   
   // 음성 관련 상태
   const [voiceText, setVoiceText] = useState("")
@@ -523,10 +527,7 @@ function ModelDetailContent() {
     }
   }
 
-  const [activeTab, setActiveTab] = useState(() => {
-    // URL 파라미터에서 탭 정보 읽기
-    return searchParams.get('tab') || 'analytics'
-  })
+
 
 
   // 이미지 파일 처리 공통 함수
@@ -1818,7 +1819,7 @@ function ModelDetailContent() {
           const newVoice = {
             id: Date.now().toString(),
             text: voiceText,
-            url: response.url || response.s3_url,
+            url: response.audio_url || response.s3_url,
             duration: response.duration,
             createdAt: new Date().toISOString(),
             status: 'completed'
@@ -1884,7 +1885,7 @@ function ModelDetailContent() {
         const voiceHistory = response.map((voice: any) => ({
           id: voice.id,
           text: voice.text,
-          url: voice.url || voice.s3_url,  // url 필드를 우선 사용
+          url: voice.audio_url || voice.s3_url,  // url 필드를 우선 사용
           duration: voice.duration,
           createdAt: voice.createdAt || voice.created_at,  // createdAt 필드를 우선 사용
           status: voice.status || 'completed',
@@ -1897,7 +1898,7 @@ function ModelDetailContent() {
         const voiceHistory = (response as any).data.map((voice: any) => ({
           id: voice.id,
           text: voice.text,
-          url: voice.url || voice.s3_url,
+          url: voice.audio_url || voice.s3_url,
           duration: voice.duration,
           createdAt: voice.createdAt || voice.created_at,
           status: voice.status || 'completed',
@@ -3468,6 +3469,8 @@ function ModelDetailContent() {
                 </div>
               )}
             </div>
+          </DialogContent>
+        </Dialog>
             
         <Dialog open={!!voiceToDelete} onOpenChange={(open) => !open && setVoiceToDelete(null)}>
           <DialogContent className="sm:max-w-[425px]">

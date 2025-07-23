@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "AIMEX API"
     VERSION: str = "1.0.0"
     DEBUG: bool = False
+    BACKEND_URL: str = os.getenv("BACKEND_URL", "http://localhost:8000")
 
     # 데이터베이스 설정
     DATABASE_URL: str
@@ -163,11 +164,6 @@ class Settings(BaseSettings):
     )
     RELOAD: bool = os.getenv("RELOAD", "True").lower() == "true"
     ENABLE_DOCS: bool = os.getenv("ENABLE_DOCS", "True").lower() == "true"
-
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
-        extra = "allow"  # 추가 환경 변수 허용
 
     def validate_settings(self):
         """설정 유효성 검증"""

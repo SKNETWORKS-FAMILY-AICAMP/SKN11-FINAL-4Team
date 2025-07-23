@@ -11,7 +11,7 @@
  */
 
 import { useEffect, useState, useCallback } from 'react'
-import { useAuth } from '@/contexts/AuthContext'
+import { useAuth } from '@/contexts/auth-context'
 
 interface PodSessionStatus {
   success: boolean
