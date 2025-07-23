@@ -3654,9 +3654,15 @@ const MCPServerSelector: FC<{ influencerId: string; model: any }> = ({ influence
         influencer_id: influencerId,
         selected_servers: selected,
       });
-      alert('MCP 서버 설정이 저장되었습니다.');
+      toast({
+        title: 'MCP 서버 설정 저장',
+        description: 'MCP 서버 설정이 저장되었습니다.'
+      });
     } catch (error) {
-      alert('설정 저장에 실패했습니다.');
+      toast({
+        title: 'MCP 서버 설정 저장 실패',
+        description: '설정 저장에 실패했습니다.'
+      });
     }
   };
 

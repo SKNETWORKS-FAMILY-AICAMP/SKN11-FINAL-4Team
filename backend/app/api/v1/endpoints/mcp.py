@@ -179,7 +179,8 @@ class MCPToolProcessor:
                     "❌ 사용 가능한 MCP 도구가 없습니다. 일반 대화로 진행합니다."
                 )
                 logger.info("=" * 50)
-                return None, []  # MCP 사용하지 않고 일반 대화로 전환
+                # 안내 메시지 대신 빈 문자열과 빈 리스트 반환
+                return "", []  # MCP 사용하지 않고 빈 값 반환
 
             logger.info(f"🎯 총 {len(all_tools)}개의 MCP 도구 사용 가능")
 
@@ -488,10 +489,10 @@ async def add_mcp_server(request: MCPServerAddRequest, db: Session = Depends(get
         from app.services.mcp_server_service import MCPServerService
         from app.services.mcp_server_manager import get_mcp_server_manager
 
-        mcp_service = MCPServerService(db)
         mcp_manager = get_mcp_server_manager(db)
 
         # 서버 이름 중복 확인
+        mcp_service = MCPServerService(db)
         existing_server = mcp_service.get_mcp_server_by_name(request.server_name)
         if existing_server:
             raise HTTPException(
@@ -499,7 +500,20 @@ async def add_mcp_server(request: MCPServerAddRequest, db: Session = Depends(get
                 detail=f"서버 이름 '{request.server_name}'이 이미 존재합니다.",
             )
 
-        # 데이터베이스에 서버 추가
+        # 1. 서버 프로세스 실행 시도 (성공해야만 DB에 추가)
+        try:
+            await mcp_manager._start_server_with_config(
+                request.server_name, request.mcp_config
+            )
+        except Exception as e:
+            logger.error(f"❌ MCP 서버 '{request.server_name}' 시작 실패: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"서버 시작 실패로 등록이 취소되었습니다: {e}",
+            )
+        logger.info(f"✅ MCP 서버 '{request.server_name}' 시작 완료")
+
+        # 2. 실행 성공 시 DB에 추가
         mcp_service.create_mcp_server(
             request.server_name,
             request.mcp_status,
@@ -508,42 +522,25 @@ async def add_mcp_server(request: MCPServerAddRequest, db: Session = Depends(get
         )
         logger.info(f"✅ MCP 서버 '{request.server_name}' 데이터베이스에 추가됨")
 
-        # 서버 시작 시도
+        # (이후 클라이언트에 동적 추가 등...)
         try:
-            await mcp_manager._start_server_with_config(
-                request.server_name, request.mcp_config
-            )
-            logger.info(f"✅ MCP 서버 '{request.server_name}' 시작 완료")
-
-            # MCP 클라이언트에 동적으로 서버 추가
             from app.services.mcp_client import get_mcp_client
-
             mcp_client_service = get_mcp_client()
             await mcp_client_service.add_server_dynamically(
                 request.server_name, request.mcp_config
             )
             logger.info(f"✅ MCP 클라이언트에 서버 '{request.server_name}' 추가 완료")
-
         except Exception as e:
-            logger.error(f"❌ MCP 서버 '{request.server_name}' 시작 실패: {e}")
-            # 서버 시작 실패해도 데이터베이스에는 저장됨
+            logger.error(f"❌ MCP 클라이언트에 서버 추가 실패: {e}")
+            # 서버는 이미 실행 중이므로 DB에는 남김
 
-        return {
-            "message": f"MCP 서버 '{request.server_name}' 추가 완료",
-            "server_name": request.server_name,
-            "mcp_status": request.mcp_status,
-            "transport": request.transport,
-            "config": request.mcp_config,
-            "description": request.description,
-        }
+        return {"message": f"MCP 서버 {request.server_name} 등록 및 시작 완료"}
 
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"MCP 서버 추가 실패: {e}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"MCP 서버 추가 실패: {str(e)}",
+            status_code=500,
+            detail=f"MCP 서버 추가 실패: {e}",
         )
 
 
@@ -853,15 +850,20 @@ async def unload_vllm_adapter(model_id: str):
 @router.post("/process")
 async def process_mcp_message(
     message: str = Body(..., embed=True),
-    selected_servers: Optional[List[str]] = Body(None, embed=True),
+    influencer_id: str = Body(..., embed=True),
+    db: Session = Depends(get_db),
 ):
     """
     MCP 챗봇 메시지 처리 엔드포인트
     - message(str): 사용자의 입력 메시지
-    - selected_servers(List[str], optional): 사용할 MCP 서버 목록
+    - influencer_id(str): 인플루언서(모델) ID
     - return: { response: str, tools_used: List[str] }
     """
     try:
+        from app.services.mcp_server_service import MCPServerService
+        mcp_service = MCPServerService(db)
+        assigned_servers = mcp_service.get_influencer_mcp_servers(influencer_id)
+        selected_servers = [server.mcp_name for server in assigned_servers]
         response, tools_used = await process_with_mcp_tools(message, selected_servers)
         return {"response": response, "tools_used": tools_used}
     except Exception as e:
@@ -923,28 +925,4 @@ async def set_selected_servers(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"서버 정보 저장 실패: {str(e)}",
-        )
-
-
-@router.get("/chat/get-selected-servers/{influencer_id}")
-async def get_selected_servers(influencer_id: str, db: Session = Depends(get_db)):
-    """챗봇에서 사용할 선택된 서버 정보를 데이터베이스에서 가져옵니다."""
-    try:
-        # MCP 서버 서비스를 사용하여 데이터베이스에서 조회
-        mcp_service = MCPServerService(db)
-        assigned_servers = mcp_service.get_influencer_mcp_servers(influencer_id)
-
-        selected_servers = [server.mcp_name for server in assigned_servers]
-
-        logger.info(
-            f"저장된 서버 정보 조회: influencer_id={influencer_id}, servers={selected_servers}"
-        )
-
-        return {"influencer_id": influencer_id, "selected_servers": selected_servers}
-
-    except Exception as e:
-        logger.error(f"서버 정보 조회 실패: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"서버 정보 조회 실패: {str(e)}",
         )

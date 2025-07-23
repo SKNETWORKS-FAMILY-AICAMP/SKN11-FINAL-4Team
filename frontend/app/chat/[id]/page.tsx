@@ -54,32 +54,6 @@ export default function ChatPage() {
   const wsRef = useRef<WebSocket | null>(null)
   const timeoutRef = useRef<NodeJS.Timeout | null>(null)
 
-  // 백엔드에서 선택된 MCP 서버 정보 가져오기
-  const getSelectedServers = async (): Promise<string[] | undefined> => {
-    try {
-      const response = await fetch(`/api/v1/mcp/chat/get-selected-servers/${params.id}`)
-      if (response.ok) {
-        const data = await response.json()
-        return data.selected_servers || undefined
-      }
-    } catch (error) {
-      console.error('Error fetching selected MCP servers:', error)
-    }
-    return undefined
-  }
-
-  // 선택된 서버 정보 (백엔드에서 가져오기)
-  const [selectedServers, setSelectedServers] = useState<string[] | undefined>(undefined)
-
-  // 컴포넌트 마운트 시 서버 정보 로드
-  useEffect(() => {
-    const loadSelectedServers = async () => {
-      const servers = await getSelectedServers()
-      setSelectedServers(servers)
-    }
-    loadSelectedServers()
-  }, [params.id])
-
   // 모델 데이터 로드
   const loadModelData = async () => {
     setIsModelLoading(true)
@@ -262,7 +236,7 @@ export default function ChatPage() {
     // 1. MCP REST 우선 시도
     let mcpResult: string | null = null;
     try {
-      const mcpResponse: MCPChatResponse = await MCPService.processMessage({ message: currentMessage, ...(selectedServers ? { selected_servers: selectedServers } : {}) });
+      const mcpResponse: MCPChatResponse = await MCPService.processMessage({ message: currentMessage, influencer_id: model?.id });
       if (mcpResponse && mcpResponse.response && mcpResponse.response.trim()) {
         mcpResult = mcpResponse.response.trim();
       }

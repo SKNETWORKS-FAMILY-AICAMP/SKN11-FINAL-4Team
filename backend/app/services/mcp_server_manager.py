@@ -179,7 +179,7 @@ class MCPServerManager:
 
         if not script_path.exists():
             logger.error(f"스크립트 파일을 찾을 수 없습니다: {script_path}")
-            return
+            raise FileNotFoundError(f"스크립트 파일을 찾을 수 없습니다: {script_path}")
 
         try:
             if config["transport"] == "streamable-http":
@@ -240,9 +240,11 @@ class MCPServerManager:
                     logger.error(
                         f"{server_name} 서버 시작 실패:\nstdout: {stdout}\nstderr: {stderr}"
                     )
+                    raise RuntimeError(f"{server_name} 서버 시작 실패: {stderr}")
 
         except Exception as e:
-            logger.error(f"{server_name} 서버 시작 실패: {e}")
+            logger.error(f"{server_name} 서버 시작 중 예외 발생: {e}")
+            raise
 
     async def _start_command_mcp_server(self, server_name: str, config: dict):
         """명령어 실행 방식의 MCP 서버를 시작합니다."""
@@ -280,9 +282,11 @@ class MCPServerManager:
                 logger.error(
                     f"{server_name} 명령어 실행 MCP 서버 시작 실패:\nstdout: {stdout}\nstderr: {stderr}"
                 )
+                raise RuntimeError(f"{server_name} 명령어 실행 MCP 서버 시작 실패: {stderr}")
 
         except Exception as e:
             logger.error(f"{server_name} 명령어 실행 MCP 서버 시작 실패: {e}")
+            raise
 
     async def _start_external_mcp_server(self, server_name: str, config: dict):
         """외부 MCP 서버를 표준 MCP 프로토콜로 연결합니다."""
