@@ -119,7 +119,8 @@ async def run_finetuning_pipeline(qa_data: List[Dict], system_message: str,
             system_message=system_message,
             hf_token=hf_token,
             hf_repo_id=hf_repo_id,
-            training_epochs=training_epochs
+            training_epochs=training_epochs,
+            gpu_id=1  # GPU 1번 명시적 지정
         )
         
         logger.info(f"✅ 파인튜닝 파이프라인 실행 완료: {hf_repo_id}")
