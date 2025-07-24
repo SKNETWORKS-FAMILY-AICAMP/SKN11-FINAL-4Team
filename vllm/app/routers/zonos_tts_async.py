@@ -233,7 +233,7 @@ def generate_tts_sync(
     cond_dict = make_cond_dict(
         text=text,
         speaker=speaker_embedding,
-        language=language,
+        language='ko',
         speaking_rate=speaking_rate,
         emotion = emotion,
         pitch_std=pitch_std
@@ -321,7 +321,7 @@ async def process_tts_task(
             generate_tts_sync,
             request.text,
             speaker,
-            request.language,
+            'ko',
             request.speaking_rate,
             request.pitch_std,
             request.cfg_scale,
@@ -365,7 +365,7 @@ async def process_tts_task(
                 # S3 메타데이터는 ASCII만 지원하므로 non-ASCII 텍스트는 제외하거나 인코딩
                 metadata = {
                     "text_length": str(len(request.text)),
-                    "language": request.language,
+                    "language": 'ko',
                     "speaking_rate": str(request.speaking_rate),
                     "pitch_std": str(request.pitch_std),
                     "cfg_scale": str(request.cfg_scale),
@@ -659,7 +659,7 @@ async def process_tts_with_voice_task(task_id: str, request: ZonosTTSWithVoiceRe
             _generate_tts_with_voice_sync,
             str(temp_voice_path),
             request.text,
-            request.language,
+            'ko',
             request.speaking_rate,
             request.pitch_std,
             request.cfg_scale,
@@ -685,7 +685,7 @@ async def process_tts_with_voice_task(task_id: str, request: ZonosTTSWithVoiceRe
                 # S3 메타데이터는 ASCII만 지원하므로 non-ASCII 텍스트는 제외하거나 인코딩
                 metadata = {
                     "text_length": str(len(request.text)),
-                    "language": request.language,
+                    "language": 'ko',
                     "speaking_rate": str(request.speaking_rate),
                     "pitch_std": str(request.pitch_std),
                     "generated_by": "zonos-tts-with-voice-async"
@@ -776,7 +776,7 @@ def _generate_tts_with_voice_sync(
     cond_dict = make_cond_dict(
         text=text,
         speaker=speaker,
-        language=language,
+        language='ko',
         speaking_rate=speaking_rate,
         emotion=emotion,
         pitch_std=pitch_std
@@ -819,7 +819,7 @@ async def generate_tts_simple(
     """간단한 TTS 생성 (JSON 요청, 기본 설정 사용)"""
     full_request = ZonosTTSRequest(
         text=request.text,
-        language=request.language,
+        language='ko',
         speaking_rate=request.speaking_rate,
         pitch_std=request.pitch_std,
         cfg_scale=request.cfg_scale,

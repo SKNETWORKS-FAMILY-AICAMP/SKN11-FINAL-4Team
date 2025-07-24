@@ -211,7 +211,7 @@ async def generate_tts_with_voice(
                 json={
                     "text": request.text,
                     "voice_data_base64": request.voice_data_base64,
-                    "language": request.language,
+                    "language": 'ko',
                     "speaking_rate": request.speaking_rate,
                     "pitch_std": request.pitch_std,
                     "cfg_scale": request.cfg_scale,
