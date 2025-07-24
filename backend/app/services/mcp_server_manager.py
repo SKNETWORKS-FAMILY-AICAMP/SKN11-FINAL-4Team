@@ -282,11 +282,14 @@ class MCPServerManager:
                 logger.error(
                     f"{server_name} 명령어 실행 MCP 서버 시작 실패:\nstdout: {stdout}\nstderr: {stderr}"
                 )
-                raise RuntimeError(f"{server_name} 명령어 실행 MCP 서버 시작 실패: {stderr}")
+                raise RuntimeError(
+                    f"{server_name} 명령어 실행 MCP 서버 시작 실패: {stderr}"
+                )
 
         except Exception as e:
-            logger.error(f"{server_name} 명령어 실행 MCP 서버 시작 실패: {e}")
-            raise
+            error_msg = f"{server_name} 명령어 실행 MCP 서버 시작 실패: {str(e)}"
+            logger.error(error_msg)
+            raise RuntimeError(error_msg)
 
     async def _start_external_mcp_server(self, server_name: str, config: dict):
         """외부 MCP 서버를 표준 MCP 프로토콜로 연결합니다."""
@@ -336,7 +339,9 @@ class MCPServerManager:
                 )
 
         except Exception as e:
-            logger.error(f"{server_name} 외부 MCP 서버 시작 실패: {e}")
+            error_msg = f"{server_name} 외부 MCP 서버 시작 실패: {str(e)}"
+            logger.error(error_msg)
+            raise RuntimeError(error_msg)
 
     async def stop_all_servers(self):
         """모든 MCP 서버를 중지합니다."""

@@ -52,13 +52,39 @@ class MCPService {
             // 혹시라도 백엔드가 다르게 응답하면 성공으로 간주
             return { success: true, message: '서버가 추가되었습니다.' };
         } catch (error: any) {
-            // 에러 객체에서 메시지 추출
+            // 에러 객체에서 메시지 추출 (콘솔 출력 없이)
             let msg = '서버 추가에 실패했습니다.';
-            if (error?.response?.data?.message) {
-                msg = error.response.data.message;
+
+            // 디버깅을 위한 임시 로그 (나중에 제거)
+            console.log('🔍 에러 객체 구조:', {
+                error: error,
+                data: error?.data,
+                message: error?.message,
+                response: error?.response,
+                status: error?.status
+            });
+
+            // 모든 가능한 에러 메시지 소스를 확인
+            if (error?.data?.detail) {
+                msg = error.data.detail;
+                console.log('✅ detail에서 메시지 추출:', msg);
+            } else if (error?.data?.message) {
+                msg = error.data.message;
+                console.log('✅ message에서 메시지 추출:', msg);
             } else if (error?.message) {
                 msg = error.message;
+                console.log('✅ error.message에서 메시지 추출:', msg);
+            } else if (error?.response?.data?.detail) {
+                msg = error.response.data.detail;
+                console.log('✅ response.data.detail에서 메시지 추출:', msg);
+            } else if (error?.response?.data?.message) {
+                msg = error.response.data.message;
+                console.log('✅ response.data.message에서 메시지 추출:', msg);
+            } else {
+                console.log('❌ 모든 소스에서 메시지를 찾을 수 없음');
             }
+
+            console.log('🎯 최종 메시지:', msg);
             return { success: false, message: msg };
         }
     }

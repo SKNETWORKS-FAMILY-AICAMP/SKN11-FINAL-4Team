@@ -500,16 +500,23 @@ async def add_mcp_server(request: MCPServerAddRequest, db: Session = Depends(get
                 detail=f"서버 이름 '{request.server_name}'이 이미 존재합니다.",
             )
 
-        # 1. 서버 프로세스 실행 시도 (성공해야만 DB에 추가)
+            # 1. 서버 프로세스 실행 시도 (성공해야만 DB에 추가)
         try:
             await mcp_manager._start_server_with_config(
                 request.server_name, request.mcp_config
             )
         except Exception as e:
-            logger.error(f"❌ MCP 서버 '{request.server_name}' 시작 실패: {e}")
+            # 에러 메시지가 비어있으면 기본 메시지 사용
+            original_error = str(e)
+            if not original_error or original_error.strip() == "":
+                error_msg = "서버 시작 실패로 등록이 취소되었습니다: 알 수 없는 오류"
+            else:
+                error_msg = f"서버 시작 실패로 등록이 취소되었습니다: {original_error}"
+
+            logger.error(f"❌ MCP 서버 '{request.server_name}' 시작 실패: {error_msg}")
             raise HTTPException(
                 status_code=500,
-                detail=f"서버 시작 실패로 등록이 취소되었습니다: {e}",
+                detail=error_msg,
             )
         logger.info(f"✅ MCP 서버 '{request.server_name}' 시작 완료")
 
@@ -525,6 +532,7 @@ async def add_mcp_server(request: MCPServerAddRequest, db: Session = Depends(get
         # (이후 클라이언트에 동적 추가 등...)
         try:
             from app.services.mcp_client import get_mcp_client
+
             mcp_client_service = get_mcp_client()
             await mcp_client_service.add_server_dynamically(
                 request.server_name, request.mcp_config
@@ -537,10 +545,14 @@ async def add_mcp_server(request: MCPServerAddRequest, db: Session = Depends(get
         return {"message": f"MCP 서버 {request.server_name} 등록 및 시작 완료"}
 
     except Exception as e:
-        logger.error(f"MCP 서버 추가 실패: {e}")
+        error_msg = f"MCP 서버 추가 실패: {str(e)}"
+        logger.error(
+            f"❌ MCP 서버 추가 실패 - 에러 타입: {type(e).__name__}, 에러: {e}"
+        )
+        logger.error(f"❌ 에러 상세: {repr(e)}")
         raise HTTPException(
             status_code=500,
-            detail=f"MCP 서버 추가 실패: {e}",
+            detail=error_msg,
         )
 
 
@@ -861,6 +873,7 @@ async def process_mcp_message(
     """
     try:
         from app.services.mcp_server_service import MCPServerService
+
         mcp_service = MCPServerService(db)
         assigned_servers = mcp_service.get_influencer_mcp_servers(influencer_id)
         selected_servers = [server.mcp_name for server in assigned_servers]

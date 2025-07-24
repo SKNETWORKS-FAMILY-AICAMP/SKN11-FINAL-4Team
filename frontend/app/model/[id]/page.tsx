@@ -3521,6 +3521,7 @@ function ModelDetailContent() {
 // MCPServerSelector 함수 정의를 export default ModelDetailPage 위로 이동
 
 const MCPServerSelector: FC<{ influencerId: string; model: any }> = ({ influencerId, model }) => {
+  const { toast } = useToast()
   const [servers, setServers] = useState<any[]>([]); // 배열로 변경
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -3633,15 +3634,34 @@ const MCPServerSelector: FC<{ influencerId: string; model: any }> = ({ influence
           description: addDesc.trim()
         }
       }
-      await MCPService.addServer(payload)
-      setAddSuccess(true)
-      setAddName('')
-      setAddHttpUrl('')
-      setAddStdioJson('')
-      setAddDesc('')
-      setTimeout(() => setAddSuccess(false), 1500)
+      const result = await MCPService.addServer(payload)
+      if (result.success) {
+        setAddSuccess(true)
+        setAddName('')
+        setAddHttpUrl('')
+        setAddStdioJson('')
+        setAddDesc('')
+        toast({
+          title: 'MCP 서버 추가 성공',
+          description: result.message || 'MCP 서버가 성공적으로 추가되었습니다.'
+        })
+        setTimeout(() => setAddSuccess(false), 1500)
+      } else {
+        setAddError(result.message || '서버 추가에 실패했습니다.')
+        toast({
+          title: 'MCP 서버 추가 실패',
+          description: result.message || '서버 추가에 실패했습니다.',
+          variant: 'destructive'
+        })
+      }
     } catch (e: any) {
-      setAddError(e.message || '서버 추가에 실패했습니다.')
+      const errorMessage = e?.message || '서버 추가에 실패했습니다.'
+      setAddError(errorMessage)
+      toast({
+        title: 'MCP 서버 추가 실패',
+        description: errorMessage,
+        variant: 'destructive'
+      })
     } finally {
       setAddLoading(false)
     }
@@ -3713,7 +3733,6 @@ const MCPServerSelector: FC<{ influencerId: string; model: any }> = ({ influence
               {addLoading ? '추가 중...' : '서버 추가'}
             </Button>
             {addError && <div className="text-red-500 text-sm mt-1">{addError}</div>}
-            {addSuccess && <div className="text-green-600 text-sm mt-1">서버가 추가되었습니다.</div>}
           </div>
         )}
       </div>
