@@ -64,16 +64,16 @@ async def lifespan(app: FastAPI):
     # 시작 시 실행
     logger.info("🚀 Starting AIMEX API Server...")
 
-    # MCP 서버 자동 실행 (기본 설정으로 로드)
+    # MCP 서버 자동 실행 (데이터베이스에서 로드)
     try:
         from app.services.mcp_server_manager import get_mcp_server_manager
 
-        # 기본 설정으로 MCP 서버 매니저 가져오기
+        # 데이터베이스 기반 MCP 서버 매니저 가져오기
         mcp_manager = get_mcp_server_manager()
 
         # 모든 서버 시작
         await mcp_manager.start_all_servers()
-        logger.info("✅ 기본 MCP 서버 자동 실행 완료")
+        logger.info("✅ 데이터베이스의 모든 MCP 서버 자동 실행 완료")
 
     except Exception as e:
         logger.error(f"❌ MCP 서버 자동 실행 실패: {e}")

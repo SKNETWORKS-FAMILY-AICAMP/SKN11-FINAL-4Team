@@ -23,63 +23,68 @@ class MCPServerManager:
 
     def _load_servers_from_database(self):
         """데이터베이스에서 MCP 서버 설정을 로드합니다."""
-        if not self.db:
-            logger.error("데이터베이스 세션이 없습니다. MCP 서버를 로드할 수 없습니다.")
-            self.server_configs = {}
-            return
-
         try:
             from app.models.mcp_server import MCPServer
+            from app.database import SessionLocal
 
-            # 데이터베이스에서 모든 MCP 서버 조회
-            servers = self.db.query(MCPServer).all()
+            # 새로운 데이터베이스 세션 생성
+            db = SessionLocal()
+            try:
+                # 데이터베이스에서 모든 MCP 서버 조회
+                servers = db.query(MCPServer).all()
 
-            for server in servers:
-                try:
-                    # JSON 설정을 파싱
-                    config = json.loads(server.mcp_config)
-                    config["description"] = (
-                        server.description or f"{server.mcp_name} 서버"
-                    )
-
-                    # mcp_status에 따라 transport 설정
-                    if server.mcp_status == 0:  # stdio
-                        config["transport"] = "stdio"
-                        logger.info(f"✅ MCP 서버 '{server.mcp_name}' 로드됨 (stdio)")
-                    elif server.mcp_status == 1:  # SSE/외부 URL
-                        config["transport"] = "sse"
-                        logger.info(
-                            f"✅ MCP 서버 '{server.mcp_name}' 로드됨 (SSE/외부 URL)"
+                for server in servers:
+                    try:
+                        # JSON 설정을 파싱
+                        config = json.loads(server.mcp_config)
+                        config["description"] = (
+                            server.description or f"{server.mcp_name} 서버"
                         )
-                    elif server.mcp_status == 2:  # streamable-http (로컬 스크립트)
-                        config["transport"] = "streamable-http"
-                        logger.info(
-                            f"✅ MCP 서버 '{server.mcp_name}' 로드됨 (streamable-http)"
+
+                        # mcp_status에 따라 transport 설정
+                        if server.mcp_status == 0:  # stdio
+                            config["transport"] = "stdio"
+                            logger.info(
+                                f"✅ MCP 서버 '{server.mcp_name}' 로드됨 (stdio)"
+                            )
+                        elif server.mcp_status == 1:  # SSE/외부 URL
+                            config["transport"] = "sse"
+                            logger.info(
+                                f"✅ MCP 서버 '{server.mcp_name}' 로드됨 (SSE/외부 URL)"
+                            )
+                        elif server.mcp_status == 2:  # streamable-http (로컬 스크립트)
+                            config["transport"] = "streamable-http"
+                            logger.info(
+                                f"✅ MCP 서버 '{server.mcp_name}' 로드됨 (streamable-http)"
+                            )
+                        else:
+                            logger.warning(
+                                f"⚠️ MCP 서버 '{server.mcp_name}'의 알 수 없는 상태: {server.mcp_status}"
+                            )
+                            continue
+
+                        self.server_configs[server.mcp_name] = config
+
+                    except json.JSONDecodeError as e:
+                        logger.error(
+                            f"❌ MCP 서버 '{server.mcp_name}' 설정 파싱 실패: {e}"
                         )
-                    else:
-                        logger.warning(
-                            f"⚠️ MCP 서버 '{server.mcp_name}'의 알 수 없는 상태: {server.mcp_status}"
-                        )
-                        continue
+                    except Exception as e:
+                        logger.error(f"❌ MCP 서버 '{server.mcp_name}' 로드 실패: {e}")
 
-                    self.server_configs[server.mcp_name] = config
+                logger.info(
+                    f"📊 총 {len(self.server_configs)}개의 MCP 서버가 로드되었습니다."
+                )
 
-                except json.JSONDecodeError as e:
-                    logger.error(f"❌ MCP 서버 '{server.mcp_name}' 설정 파싱 실패: {e}")
-                except Exception as e:
-                    logger.error(f"❌ MCP 서버 '{server.mcp_name}' 로드 실패: {e}")
-
-            logger.info(
-                f"📊 총 {len(self.server_configs)}개의 MCP 서버가 로드되었습니다."
-            )
+            finally:
+                db.close()
 
         except Exception as e:
             logger.error(f"❌ 데이터베이스에서 MCP 서버 로드 실패: {e}")
             self.server_configs = {}
 
-    def refresh_servers(self, db: Session):
-        """데이터베이스에서 서버 설정을 새로고침합니다."""
-        self.db = db
+    def refresh_servers(self, db: Session = None):
+        """서버 설정을 새로고침합니다."""
         self.server_configs.clear()
         self._load_servers_from_database()
         logger.info("🔄 MCP 서버 설정이 새로고침되었습니다.")
