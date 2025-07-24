@@ -4317,13 +4317,26 @@ const MCPServerSelector: FC<{ influencerId: string; model: any }> = ({
                 />
               </>
             ) : (
-              <textarea
-                placeholder={`STDIO MCP 서버 설정 JSON 전체를 입력하세요. 예:\n{\n  \"frankfurtermcp\": {\n    \"command\": \"npx\",\n    \"args\": [\"-y\", \"@smithery/cli@latest\", \"run\", \"exa\", \"--key\", \"...\", \"--profile\", \"...\"]\n  }\n}`}
-                value={addStdioJson}
-                onChange={(e) => setAddStdioJson(e.target.value)}
-                rows={7}
-                className="w-full border rounded p-2 font-mono text-xs mb-2"
-              ></textarea>
+              <>
+                <div className="mb-2 p-2 bg-blue-50 border border-blue-200 rounded text-xs text-blue-800">
+                  <strong>💡 OS별 명령어 경로 안내:</strong>
+                  <br />
+                  • <strong>Windows:</strong> npx.cmd, node.exe 경로 자동 감지
+                  <br />
+                  • <strong>Mac/Linux:</strong> PATH에서 npx, node 자동 검색
+                  <br />
+                  • <strong>NVM 사용 시:</strong> ~/.nvm/versions/node/*/bin/ 경로 자동 감지
+                  <br />
+                  • <strong>설정 형태:</strong> cmd /c 형태와 직접 npx 형태 모두 지원
+                </div>
+                <textarea
+                  placeholder={`STDIO MCP 서버 설정 JSON 전체를 입력하세요. 예:\n{\n  \"frankfurtermcp\": {\n    \"command\": \"npx\",\n    \"args\": [\"-y\", \"@smithery/cli@latest\", \"run\", \"exa\", \"--key\", \"...\", \"--profile\", \"...\"]\n  }\n}\n\n또는 Windows cmd 형태:\n{\n  \"frankfurtermcp\": {\n    \"command\": \"cmd\",\n    \"args\": [\"/c\", \"npx\", \"-y\", \"@smithery/cli@latest\", \"run\", \"exa\", \"--key\", \"...\", \"--profile\", \"...\"]\n  }\n}`}
+                  value={addStdioJson}
+                  onChange={(e) => setAddStdioJson(e.target.value)}
+                  rows={10}
+                  className="w-full border rounded p-2 font-mono text-xs mb-2"
+                ></textarea>
+              </>
             )}
             <Input
               placeholder="설명(선택)"
