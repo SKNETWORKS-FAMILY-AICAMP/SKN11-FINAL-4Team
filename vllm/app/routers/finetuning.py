@@ -22,6 +22,7 @@ async def start_finetuning_endpoint(request: FineTuningRequest):
             "task_id": task_id,
             "influencer_id": request.influencer_id,
             "influencer_name": request.influencer_name,
+            "system_prompt": request.system_prompt,
             "personality": request.personality,
             "qa_data": request.qa_data,
             "hf_repo_id": request.hf_repo_id,
@@ -90,21 +91,28 @@ async def list_finetuning_tasks():
 async def get_gpu_status():
     """GPU 상태 조회"""
     try:
-        from app.utils.gpu_manager import get_gpu_manager
-        from pipeline.gpu_utils import get_gpu_info, log_gpu_status
+        # GPU manager 제거 - device_map='auto' 사용으로 간소화
+        import torch
         
-        # GPU 상태 로깅
-        log_gpu_status()
+        # PyTorch로 기본 GPU 정보 조회
+        gpu_available = torch.cuda.is_available()
+        gpu_count = torch.cuda.device_count() if gpu_available else 0
         
-        # GPU Manager를 통한 상세 정보 조회
-        gpu_manager = await get_gpu_manager()
-        detailed_gpu_info = await gpu_manager.get_all_gpus_info()
+        basic_gpu_info = {
+            "available": gpu_available,
+            "count": gpu_count,
+            "current_device": torch.cuda.current_device() if gpu_available else None
+        }
         
-        # 가장 여유 있는 GPU 찾기
-        least_utilized_gpu = gpu_manager.get_least_utilized_gpu(detailed_gpu_info)
-        
-        # 기존 GPU 정보도 가져오기 (호환성 유지)
-        basic_gpu_info = get_gpu_info()
+        detailed_gpu_info = {}
+        if gpu_available:
+            for i in range(gpu_count):
+                props = torch.cuda.get_device_properties(i)
+                detailed_gpu_info[i] = {
+                    "name": props.name,
+                    "total": props.total_memory // (1024 * 1024),  # MB
+                    "available": True
+                }
         
         # 현재 진행 중인 파인튜닝 작업 정보
         active_tasks = []
@@ -124,10 +132,7 @@ async def get_gpu_status():
         return {
             "basic_gpu_info": basic_gpu_info,
             "detailed_gpu_info": detailed_gpu_info,
-            "least_utilized_gpu": {
-                "gpu_id": least_utilized_gpu,
-                "info": detailed_gpu_info[least_utilized_gpu]
-            },
+            "device_map": "auto",  # device_map='auto' 사용 중
             "active_finetuning_tasks": {
                 "count": len(active_tasks),
                 "tasks": active_tasks
