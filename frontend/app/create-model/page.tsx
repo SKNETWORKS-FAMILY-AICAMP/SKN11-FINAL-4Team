@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { Navigation } from "@/components/navigation"
 import { Button } from "@/components/ui/button"
@@ -39,6 +39,7 @@ interface FormDataType {
 }
 
 export default function CreateModelPage() {
+  const fetchedRef = useRef(false)
   const [formData, setFormData] = useState<FormDataType>({
     name: "",
     description: "",
@@ -77,6 +78,10 @@ export default function CreateModelPage() {
   const [loadingMbti, setLoadingMbti] = useState(false)
 
   useEffect(() => {
+    // 중복 API 호출 방지
+    if (fetchedRef.current) return;
+    fetchedRef.current = true;
+
     // 실제 API에서 프리셋 데이터 가져오기
     const fetchStylePresets = async () => {
       setLoadingPresets(true);
