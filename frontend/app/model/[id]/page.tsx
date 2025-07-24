@@ -154,6 +154,7 @@ function ModelDetailContent() {
   const router = useRouter();
   const { toast } = useToast();
   const [model, setModel] = useState<any>(null);
+  const [imgError, setImgError] = useState(false);
   const [isModelLoading, setIsModelLoading] = useState(true);
   const [posts, setPosts] = useState<ContentPost[]>([]);
   const [isPostsLoading, setIsPostsLoading] = useState(true);
@@ -491,21 +492,13 @@ function ModelDetailContent() {
 
       // 이미지 URL 처리: S3 키인 경우 URL로 변환
       let processedImageUrl = data.image_url;
-      if (data.image_url && !data.image_url.startsWith("http")) {
-        // S3 키인 경우 직접 URL 생성
-        processedImageUrl = `https://aimex-influencers.s3.ap-northeast-2.amazonaws.com/${data.image_url}`;
-      } else if (data.image_url && data.image_url.startsWith("http")) {
-        // 이미 URL인 경우 그대로 사용
-        processedImageUrl = data.image_url;
-      } else {
-      }
-
+      // presigned URL이므로 추가 가공 없이 그대로 사용
       setModel({
         ...data,
         id: data.influencer_id,
         name: data.influencer_name,
         description: data.influencer_description || "",
-        image_url: processedImageUrl, // 처리된 이미지 URL
+        image_url: processedImageUrl, // 그대로 사용
         createdAt: data.created_at?.split("T")[0] || "",
         apiKey: sampleModel.apiKey, // API 키는 별도 조회
         trainingData: sampleModel.trainingData, // 훈련 데이터는 별도 조회
@@ -748,9 +741,7 @@ function ModelDetailContent() {
           if (response.ok) {
             const result = await response.json();
             imageUrl = result.file_url;
-          } else {
           }
-        } catch (error) {
         } finally {
           setIsUploadingImage(false);
         }
@@ -762,7 +753,6 @@ function ModelDetailContent() {
         influencer_description: model.description,
       };
 
-      // 이미지 URL이 있는 경우 추가
       if (imageUrl) {
         updateData.image_url = imageUrl;
       }
@@ -771,11 +761,21 @@ function ModelDetailContent() {
         params.id?.toString() ?? "",
         updateData,
       );
+
+      // S3 키라면 전체 URL로 변환
+      let fullImageUrl = updatedData.image_url;
+      if (fullImageUrl && !fullImageUrl.startsWith("http")) {
+        fullImageUrl = `https://aimex-influencers.s3.ap-northeast-2.amazonaws.com/${fullImageUrl}`;
+      }
+      if (fullImageUrl) {
+        fullImageUrl += `?t=${Date.now()}`;
+      }
+
       setModel((prev: any) => ({
         ...prev,
         name: updatedData.influencer_name,
         description: updatedData.influencer_description || "",
-        image_url: updatedData.image_url || prev.image_url,
+        image_url: fullImageUrl || prev.image_url,
       }));
 
       // 이미지 업로드 후 상태 초기화
@@ -783,9 +783,9 @@ function ModelDetailContent() {
         setUploadedImage(null);
         setImagePreview(null);
       }
-      setHasImageChanges(false); // 변경 상태 초기화
+      setHasImageChanges(false);
 
-      // 모델 데이터 다시 로드하여 변경사항 반영
+      // 모델 데이터 다시 로드하여 변경사항 반영 (선택적)
       await loadModelData();
 
       // 성공 토스트 표시
@@ -796,12 +796,12 @@ function ModelDetailContent() {
       });
 
       // 페이지 새로고침 없이 UI 업데이트
-      setModel((prev: any) => ({
-        ...prev,
-        name: updatedData.influencer_name,
-        description: updatedData.influencer_description || "",
-        image_url: updatedData.image_url || prev.image_url,
-      }));
+      // setModel((prev: any) => ({
+      //   ...prev,
+      //   name: updatedData.influencer_name,
+      //   description: updatedData.influencer_description || "",
+      //   image_url: updatedData.image_url || prev.image_url,
+      // }));
 
       // 현재 페이지로 리다이렉트 (새로고침)
       let influencerId: string | undefined;
@@ -2282,6 +2282,8 @@ function ModelDetailContent() {
     );
   }
 
+  console.log("[render] model.image_url:", model.image_url);
+
   return (
     <div className="min-h-screen bg-gray-50">
       <Navigation />
@@ -3084,38 +3086,21 @@ function ModelDetailContent() {
                               className="w-full h-full object-cover"
                             />
                           </div>
-                        ) : model?.image_url ? (
+                        ) : model?.image_url && !imgError ? (
                           // 기존 인플루언서 이미지
                           <div className="w-36 h-36 rounded-full overflow-hidden shadow-lg hover:opacity-80 transition-opacity">
                             <img
                               src={model.image_url}
                               alt="Profile"
                               className="w-full h-full object-cover"
-                              onError={(e) => {
-                                // 이미지 로드 실패 시 기본 아이콘 표시
-                                const target = e.target as HTMLImageElement;
-                                target.style.display = "none";
-                                const parent = target.parentElement;
-                                if (parent) {
-                                  parent.innerHTML = `
-                                    <div class="w-36 h-36 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg">
-                                      <div class="w-20 h-20 bg-orange-500 rounded-lg flex items-center justify-center">
-                                        <svg class="h-10 w-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
-                                        </svg>
-                                      </div>
-                                    </div>
-                                  `;
-                                }
-                              }}
+                              key={model.image_url}
+                              onError={() => setImgError(true)}
                             />
                           </div>
                         ) : (
                           // 기본 아이콘
-                          <div className="w-36 h-36 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg hover:opacity-80 transition-opacity">
-                            <div className="w-20 h-20 bg-orange-500 rounded-lg flex items-center justify-center">
-                              <Bot className="h-10 w-10 text-white" />
-                            </div>
+                          <div className="w-36 h-36 rounded-full bg-gray-200 flex items-center justify-center">
+                            <Bot className="h-16 w-16 text-gray-400" />
                           </div>
                         )}
                         {/* 클릭 안내 오버레이 */}
@@ -3865,22 +3850,8 @@ function ModelDetailContent() {
                       src={model.image_url}
                       alt="Profile"
                       className="w-80 h-80 object-cover rounded-lg shadow-lg"
-                      onError={(e) => {
-                        const target = e.target as HTMLImageElement;
-                        target.style.display = "none";
-                        const parent = target.parentElement;
-                        if (parent) {
-                          parent.innerHTML = `
-                            <div class="w-80 h-80 rounded-lg bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg">
-                              <div class="w-40 h-40 bg-orange-500 rounded-lg flex items-center justify-center">
-                                <svg class="h-20 w-20 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
-                                </svg>
-                              </div>
-                            </div>
-                          `;
-                        }
-                      }}
+                      key={model.image_url}
+                      onError={() => setImgError(true)}
                     />
                   </div>
                 ) : (
