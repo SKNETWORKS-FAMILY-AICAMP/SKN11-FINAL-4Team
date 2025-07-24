@@ -177,7 +177,7 @@ async def generate_with_voice(request: TTSWithVoiceRequest):
         
         zonos_model.tts(
             text=request.text,
-            voice_preset="romeo",  # 임시로 기본 음성 사용
+            voice_preset="ko",  # 임시로 기본 음성 사용
             output_path=output_path,
             speed=request.speaking_rate / 22.0  # speaking_rate를 speed로 변환
         )

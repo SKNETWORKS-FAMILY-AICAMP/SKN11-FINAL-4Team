@@ -776,7 +776,7 @@ def _generate_tts_with_voice_sync(
     cond_dict = make_cond_dict(
         text=text,
         speaker=speaker,
-        language='ko',
+        language=language,
         speaking_rate=speaking_rate,
         emotion=emotion,
         pitch_std=pitch_std
