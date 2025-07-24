@@ -308,19 +308,43 @@ async def initialize_vllm_engine():
         try:
             tensor_parallel_size = 1
         
-            # vLLM은 자동으로 GPU 할당 (보통 0번 GPU 사용)
-            logger.info(f"vLLM GPU 자동 할당 모드")
-        
-            # GPU 메모리 fraction을 고정값으로 설정
-            gpu_memory_fraction = 0.5
+            # GPU 설정 및 격리 확인
+            vllm_gpu_id = int(os.getenv('VLLM_GPU_ID', '0'))
             
-            # CUDA 디바이스 설정 확인
+            # CUDA_VISIBLE_DEVICES로 격리된 경우
+            if 'CUDA_VISIBLE_DEVICES' in os.environ:
+                logger.info(f"🔒 GPU 격리 모드 (CUDA_VISIBLE_DEVICES={os.environ['CUDA_VISIBLE_DEVICES']})")
+                # 격리된 환경에서는 항상 device 0 사용
+                visible_devices = os.environ['CUDA_VISIBLE_DEVICES'].split(',')
+                if len(visible_devices) == 1:
+                    logger.info(f"✅ 단일 GPU 격리 환경 - Physical GPU {visible_devices[0]} → Logical GPU 0")
+                else:
+                    logger.info(f"✅ 다중 GPU 격리 환경 - Physical GPUs {visible_devices} → Logical GPUs 0-{len(visible_devices)-1}")
+            else:
+                logger.info(f"🔧 vLLM GPU {vllm_gpu_id} 사용 (격리되지 않은 환경)")
+        
+            # GPU 메모리 fraction 설정
+            gpu_memory_fraction = float(os.getenv('VLLM_GPU_MEMORY_UTILIZATION', '0.5'))
+            logger.info(f"💾 GPU 메모리 사용률: {gpu_memory_fraction * 100}%")
+            
+            # CUDA 디바이스 설정 확인 및 충돌 방지
             import torch
             if torch.cuda.is_available():
-                cuda_device = torch.cuda.current_device()
-                logger.info(f"🖥️ 현재 CUDA 디바이스: {cuda_device}")
-                # 모든 CUDA 디바이스에 대해 동일한 설정 적용
-                torch.cuda.set_device(cuda_device)
+                # 다른 프로세스와의 충돌 방지를 위해 초기화
+                torch.cuda.empty_cache()
+                
+                # 격리된 환경에서는 항상 device 0 사용
+                if 'CUDA_VISIBLE_DEVICES' in os.environ:
+                    cuda_device = 0
+                else:
+                    cuda_device = vllm_gpu_id
+                    
+                try:
+                    torch.cuda.set_device(cuda_device)
+                    logger.info(f"🖥️ CUDA 디바이스 설정 완료: {cuda_device}")
+                except RuntimeError as e:
+                    logger.warning(f"⚠️ CUDA 디바이스 설정 실패: {e}")
+                    logger.info("🔄 기본 디바이스 사용")
             
             engine_args = AsyncEngineArgs(
                 model="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct",
