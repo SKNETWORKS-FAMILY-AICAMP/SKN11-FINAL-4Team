@@ -24,6 +24,8 @@ from app.models.influencer import BatchKey
 from app.core.config import settings
 # Backend 내부 모델 사용
 from app.models.vllm_models import Gender, VLLMCharacterProfile
+from dotenv import load_dotenv
+load_dotenv()
 
 # 하위 호환성을 위한 별칭
 CharacterProfile = VLLMCharacterProfile
@@ -148,7 +150,7 @@ class InfluencerQAGenerator:
         print(f"QA 생성 요청: {num_requests}개 (환경변수 QA_GENERATION_COUNT: {settings.QA_GENERATION_COUNT})")
         
         # VLLM 서버 URL 설정
-        vllm_server_url = getattr(settings, 'VLLM_BASE_URL', 'http://localhost:8001')
+        vllm_server_url = getattr(settings, 'VLLM_BASE_URL', 'http://localhost:8000')
         
         # VLLM 서버에 요청할 캐릭터 프로필 데이터 준비
         character_data = {
