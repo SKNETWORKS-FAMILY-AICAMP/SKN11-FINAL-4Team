@@ -27,7 +27,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import { Plus, Search, Edit, Eye, Calendar, User, Filter, X, Copy, ExternalLink, Heart, MessageCircle, MoreHorizontal, UploadCloud, Instagram, Users, BarChart3, Bookmark, Play } from "lucide-react"
+import { Plus, Search, Edit, Eye, Calendar, User, Filter, X, Copy, ExternalLink, Heart, MessageCircle, MoreHorizontal, UploadCloud, Instagram, Users, BarChart3, Bookmark, Play, ImageIcon } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import apiClient from "@/lib/api"
 import { useToast } from "@/hooks/use-toast"
@@ -486,20 +486,39 @@ function PostListContent() {
             {/* Instagram 이미지/캐러셀 */}
             {post.media && (
               <div className="relative">
-                {post.media.type === "carousel" ? (
-                  <div className="flex overflow-x-auto snap-x snap-mandatory">
-                    {post.media.urls.map((url, index) => (
-                      <img key={index} src={url || "/placeholder.svg"} alt={`Slide ${index + 1}`} className="w-full h-80 object-cover flex-shrink-0 snap-start" />
-                    ))}
-                  </div>
-                ) : (
-                  <img src={post.media.urls[0] || "/placeholder.svg"} alt="Post image" className="w-full h-80 object-cover" />
-                )}
-                {post.media.type === "carousel" && (
-                  <div className="absolute top-2 right-2 bg-black bg-opacity-50 text-white text-xs px-2 py-1 rounded">
-                    1/{post.media.urls.length}
-                  </div>
-                )}
+                {(() => {
+                  // image_url에서 다중 이미지 처리
+                  const imageUrls = post.image_url ? post.image_url.split(",") : post.media.urls
+                  const isCarousel = imageUrls.length > 1
+
+                  if (isCarousel) {
+                    return (
+                      <>
+                        <div className="flex overflow-x-auto snap-x snap-mandatory">
+                          {imageUrls.map((url, index) => (
+                            <img
+                              key={index}
+                              src={url.trim() || "/placeholder.svg"}
+                              alt={`Slide ${index + 1}`}
+                              className="w-full h-80 object-cover flex-shrink-0 snap-start"
+                            />
+                          ))}
+                        </div>
+                        <div className="absolute top-2 right-2 bg-black bg-opacity-50 text-white text-xs px-2 py-1 rounded">
+                          1/{imageUrls.length}
+                        </div>
+                      </>
+                    )
+                  } else {
+                    return (
+                      <img
+                        src={imageUrls[0]?.trim() || "/placeholder.svg"}
+                        alt="Post image"
+                        className="w-full h-80 object-cover"
+                      />
+                    )
+                  }
+                })()}
               </div>
             )}
 

@@ -36,7 +36,7 @@ interface CreatePostFormData {
   board_description: string
   board_platform: number
   board_hashtag: string[]
-  uploaded_image: File | null
+  uploaded_images: File[] // 단일 이미지에서 다중 이미지로 변경
 }
 
 
@@ -62,7 +62,7 @@ export default function CreatePostPage() {
     board_description: "",
     board_platform: 0,
     board_hashtag: [],
-    uploaded_image: null
+    uploaded_images: [] // 단일 이미지에서 다중 이미지로 변경
   })
 
   const [influencers, setInfluencers] = useState<AIInfluencer[]>([])
@@ -97,12 +97,12 @@ export default function CreatePostPage() {
         setLoading(true)
         const data = await ModelService.getInfluencers()
         // 사용 가능하고 인스타그램 계정과 연동된 인플루언서만 필터링
-        const availableInfluencers = data.filter(inf => 
-          inf.learning_status === 1 && 
-          inf.instagram_is_active === true && 
-          inf.instagram_username && 
+        const availableInfluencers = data.filter(inf =>
+          inf.learning_status === 1 &&
+          inf.instagram_is_active === true &&
+          inf.instagram_username &&
           inf.instagram_username.trim() !== '' &&
-          inf.instagram_id && 
+          inf.instagram_id &&
           inf.instagram_id.trim() !== ''
         )
         setInfluencers(availableInfluencers)
@@ -126,16 +126,16 @@ export default function CreatePostPage() {
   }, [])
 
   // 폼 데이터 업데이트
-  const handleInputChange = async (field: keyof CreatePostFormData, value: string | number | boolean | string[] | File | null) => {
+  const handleInputChange = async (field: keyof CreatePostFormData, value: string | number | boolean | string[] | File | File[] | null) => {
     setFormData(prev => ({
       ...prev,
       [field]: value
     }))
 
     // 플랫폼이 Instagram으로 변경되고 이미지가 있는 경우 이미지 재처리
-    if (field === 'board_platform' && value === 0 && formData.uploaded_image) {
+    if (field === 'board_platform' && value === 0 && formData.uploaded_images.length > 0) {
       try {
-        await processImageFile(formData.uploaded_image)
+        await processImageFile(formData.uploaded_images[0])
       } catch (error) {
         console.error('Image reprocessing error:', error)
       }
@@ -176,7 +176,7 @@ export default function CreatePostPage() {
 
   // 모든 필드 입력 여부 검증 (미리보기 버튼용)
   const isFormValid = () => {
-    const hasImage = formData.uploaded_image !== null || imagePreview !== null
+    const hasImage = formData.uploaded_images.length > 0
     const basicFieldsValid = (
       formData.influencer_id.trim() !== '' &&
       formData.board_topic.trim() !== '' &&
@@ -307,7 +307,7 @@ export default function CreatePostPage() {
         img.src = URL.createObjectURL(file)
       }
 
-      handleInputChange('uploaded_image', processedFile)
+      handleInputChange('uploaded_images', [...formData.uploaded_images, processedFile])
 
       // 이미지 미리보기 생성 (패딩 처리된 이미지 사용)
       const reader = new FileReader()
@@ -329,10 +329,27 @@ export default function CreatePostPage() {
   }
 
   // 이미지 업로드 처리
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (file) {
-      await processImageFile(file)
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (files) {
+      // 다중 파일 처리
+      const newImages: File[] = []
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i]
+        if (file.type.startsWith("image/")) {
+          newImages.push(file)
+        }
+      }
+
+      if (newImages.length > 0) {
+        setFormData(prev => ({
+          ...prev,
+          uploaded_images: [...prev.uploaded_images, ...newImages]
+        }))
+        setError("")
+      } else {
+        setError("이미지 파일만 업로드 가능합니다.")
+      }
     }
   }
 
@@ -358,10 +375,11 @@ export default function CreatePostPage() {
   }
 
   // 이미지 제거
-  const removeImage = () => {
-    handleInputChange('uploaded_image', null)
-    setImagePreview(null)
-    setImageInfo(null)
+  const removeImage = (index: number) => {
+    setFormData(prev => ({
+      ...prev,
+      uploaded_images: prev.uploaded_images.filter((_, i) => i !== index)
+    }))
   }
 
   // S3 연결 상태 확인
@@ -401,13 +419,13 @@ export default function CreatePostPage() {
         team_id: selectedInfluencer?.group_id, // group_id를 team_id로 보냄
         user_id: user?.user_id, // 로그인한 유저의 user_id를 body에 포함
       });
-      
+
       const generatedContent = {
         content: res.social_media_content,
         hashtags: res.hashtags,
       };
       setGenerated(generatedContent);
-      
+
       // 생성된 본문으로 바로 말투 변환 실행
       if (generatedContent.content && selectedInfluencer) {
         try {
@@ -490,9 +508,9 @@ export default function CreatePostPage() {
       return
     }
 
-    // 이미지 필수 검증
-    if (!formData.uploaded_image) {
-      setError("이미지를 업로드해주세요.")
+    // 이미지 업로드 검증
+    if (formData.uploaded_images.length === 0) {
+      setError("최소 하나의 이미지를 업로드해주세요.")
       return
     }
 
@@ -545,7 +563,11 @@ export default function CreatePostPage() {
       // 통합 API 사용: 게시글과 이미지를 함께 생성
       const formDataToSend = new FormData()
       formDataToSend.append('board_data', JSON.stringify(boardData))
-      formDataToSend.append('file', formData.uploaded_image)
+
+      // 다중 이미지 추가
+      formData.uploaded_images.forEach((image, index) => {
+        formDataToSend.append("files", image)
+      })
 
       const response = await fetch(`${backendUrl}/api/v1/boards/create-with-image`, {
         method: 'POST',
@@ -736,167 +758,142 @@ export default function CreatePostPage() {
                   <Label htmlFor="image_upload">이미지 파일 업로드</Label>
 
                   {/* 업로드된 이미지가 있을 때 */}
-                  {formData.uploaded_image && imagePreview ? (
+                  {formData.uploaded_images.length > 0 && (
                     <div className="mt-2 border-2 border-gray-200 rounded-lg p-4 bg-gray-50">
                       <div className="flex items-center justify-between mb-2">
-                        <h4 className="font-medium text-gray-900">업로드된 이미지</h4>
+                        <h4 className="text-sm font-medium text-gray-700">
+                          업로드된 이미지 ({formData.uploaded_images.length}개)
+                        </h4>
                         <Button
                           type="button"
                           variant="outline"
                           size="sm"
-                          onClick={removeImage}
+                          onClick={() => setFormData(prev => ({ ...prev, uploaded_images: [] }))}
                           className="text-red-600 hover:text-red-700"
                         >
-                          제거
+                          모두 제거
                         </Button>
                       </div>
-                      <div className="flex justify-center relative">
-                        <img
-                          src={imagePreview}
-                          alt="Uploaded"
-                          className="max-w-full max-h-64 object-cover rounded-lg border"
-                        />
-
-
-                      </div>
-
-                      {/* 이미지 정보 표시 */}
-                      {imageInfo && (
-                        <div className="mt-3 p-3 bg-blue-50 rounded-lg border border-blue-200">
-                          <div className="text-sm text-blue-900">
-                            <div className="flex items-center gap-2 mb-1">
-                              <span className="font-medium">📏 이미지 정보:</span>
-                              {imageInfo.isResized && (
-                                <Badge variant="secondary" className="text-xs">
-                                  Instagram 최적화됨
-                                </Badge>
-                              )}
-                            </div>
-                            <div className="grid grid-cols-2 gap-4 text-xs">
-                              <div>
-                                <span className="font-medium">원본 크기:</span>
-                                <span className="ml-1 text-blue-700">
-                                  {imageInfo.originalSize?.width} × {imageInfo.originalSize?.height}px
-                                </span>
-                              </div>
-                              {imageInfo.isResized && imageInfo.resizedSize && (
-                                <div>
-                                  <span className="font-medium">최적화 크기:</span>
-                                  <span className="ml-1 text-blue-700">
-                                    {imageInfo.resizedSize.width} × {imageInfo.resizedSize.height}px
-                                  </span>
-                                </div>
-                              )}
-                            </div>
-                            {imageInfo.isResized && (
-                              <div className="mt-2 text-xs text-blue-600">
-                                💡 Instagram 요구사항에 맞게 자동으로 비율이 조정되었습니다.
-                                <br />
-                                🎯 중앙 기준 패딩 처리 (픽셀 크기 유지)
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    /* 업로드 영역 */
-                    <div
-                      className={`relative group transition-all duration-300 ${isDragOver
-                        ? "scale-105"
-                        : "hover:scale-[1.02]"
-                        }`}
-                      onDragOver={handleDragOver}
-                      onDragLeave={handleDragLeave}
-                      onDrop={handleDrop}
-                    >
-                      <div className={`
-                        relative overflow-hidden rounded-xl border-2 border-dashed transition-all duration-300
-                        ${isDragOver
-                          ? "border-blue-500 bg-gradient-to-br from-blue-50 to-indigo-50 shadow-lg shadow-blue-100"
-                          : "border-gray-300 bg-gradient-to-br from-gray-50 to-white hover:border-blue-400 hover:bg-gradient-to-br hover:from-blue-50 hover:to-indigo-50"
-                        }
-                      `}>
-                        {/* 배경 패턴 */}
-                        <div className="absolute inset-0 opacity-5">
-                          <div className="absolute top-4 left-4 w-8 h-8 border-2 border-gray-400 rounded-lg"></div>
-                          <div className="absolute top-12 right-8 w-6 h-6 border-2 border-gray-400 rounded-full"></div>
-                          <div className="absolute bottom-8 left-12 w-4 h-4 border-2 border-gray-400 rotate-45"></div>
-                          <div className="absolute bottom-16 right-4 w-10 h-10 border-2 border-gray-400 rounded-lg"></div>
-                        </div>
-
-                        <div className="relative p-12 text-center">
-                          {/* 아이콘 영역 */}
-                          <div className={`
-                            relative mx-auto mb-6 w-20 h-20 rounded-full flex items-center justify-center transition-all duration-300
-                            ${isDragOver
-                              ? "bg-blue-100 shadow-lg shadow-blue-200"
-                              : "bg-gray-100 group-hover:bg-blue-100 group-hover:shadow-lg group-hover:shadow-blue-200"
-                            }
-                          `}>
-                            <Upload className={`
-                              h-8 w-8 transition-all duration-300
-                              ${isDragOver
-                                ? "text-blue-600 scale-110"
-                                : "text-gray-500 group-hover:text-blue-600 group-hover:scale-110"
-                              }
-                            `} />
-                            {/* 애니메이션 효과 */}
-                            {isDragOver && (
-                              <div className="absolute inset-0 rounded-full border-2 border-blue-300 animate-ping"></div>
-                            )}
-                          </div>
-
-                          {/* 텍스트 영역 */}
-                          <div className="space-y-3">
-                            <h3 className={`
-                              text-xl font-semibold transition-colors duration-300
-                              ${isDragOver ? "text-blue-700" : "text-gray-800 group-hover:text-blue-700"}
-                            `}>
-                              {isDragOver ? "여기에 놓으세요!" : "이미지 업로드"}
-                            </h3>
-                            <p className={`
-                              text-sm transition-colors duration-300 max-w-md mx-auto
-                              ${isDragOver ? "text-blue-600" : "text-gray-600 group-hover:text-blue-600"}
-                            `}>
-                              게시글에 사용할 이미지를 드래그하여 놓거나 클릭하여 선택하세요
-                            </p>
-                            <p className="text-xs text-gray-500">
-                              지원 형식: JPG, PNG, GIF, WebP (최대 5MB)
-                            </p>
-                          </div>
-
-                          {/* 파일 선택 버튼 */}
-                          <div className="mt-6">
-                            <input
-                              id="image_upload"
-                              type="file"
-                              accept="image/*"
-                              onChange={handleImageUpload}
-                              className="hidden"
+                      <div className="grid grid-cols-2 gap-3">
+                        {formData.uploaded_images.map((image, index) => (
+                          <div key={index} className="relative">
+                            <img
+                              src={URL.createObjectURL(image)}
+                              alt={`Uploaded ${index + 1}`}
+                              className="max-w-full max-h-32 object-cover rounded-md border"
                             />
-                            <label htmlFor="image_upload">
-                              <Button
-                                className={`
-                                  transition-all duration-300 cursor-pointer
-                                  ${isDragOver
-                                    ? "bg-blue-600 hover:bg-blue-700 text-white shadow-lg"
-                                    : "bg-white hover:bg-blue-50 text-gray-700 border-gray-300 hover:border-blue-400 hover:text-blue-700 shadow-sm hover:shadow-md"
-                                  }
-                                `}
-                                asChild
-                              >
-                                <span className="flex items-center gap-2">
-                                  <Upload className="h-4 w-4" />
-                                  파일 선택
-                                </span>
-                              </Button>
-                            </label>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => removeImage(index)}
+                              className="absolute top-1 right-1 text-red-600 hover:text-red-700 bg-white"
+                            >
+                              ×
+                            </Button>
                           </div>
-                        </div>
+                        ))}
                       </div>
                     </div>
                   )}
+
+                  {/* 업로드 영역 */}
+                  <div
+                    className={`relative group transition-all duration-300 ${isDragOver
+                      ? "scale-105"
+                      : "hover:scale-[1.02]"
+                      }`}
+                    onDragOver={handleDragOver}
+                    onDragLeave={handleDragLeave}
+                    onDrop={handleDrop}
+                  >
+                    <div className={`
+                        relative overflow-hidden rounded-xl border-2 border-dashed transition-all duration-300
+                        ${isDragOver
+                        ? "border-blue-500 bg-gradient-to-br from-blue-50 to-indigo-50 shadow-lg shadow-blue-100"
+                        : "border-gray-300 bg-gradient-to-br from-gray-50 to-white hover:border-blue-400 hover:bg-gradient-to-br hover:from-blue-50 hover:to-indigo-50"
+                      }
+                      `}>
+                      {/* 배경 패턴 */}
+                      <div className="absolute inset-0 opacity-5">
+                        <div className="absolute top-4 left-4 w-8 h-8 border-2 border-gray-400 rounded-lg"></div>
+                        <div className="absolute top-12 right-8 w-6 h-6 border-2 border-gray-400 rounded-full"></div>
+                        <div className="absolute bottom-8 left-12 w-4 h-4 border-2 border-gray-400 rotate-45"></div>
+                        <div className="absolute bottom-16 right-4 w-10 h-10 border-2 border-gray-400 rounded-lg"></div>
+                      </div>
+
+                      <div className="relative p-12 text-center">
+                        {/* 아이콘 영역 */}
+                        <div className={`
+                            relative mx-auto mb-6 w-20 h-20 rounded-full flex items-center justify-center transition-all duration-300
+                            ${isDragOver
+                            ? "bg-blue-100 shadow-lg shadow-blue-200"
+                            : "bg-gray-100 group-hover:bg-blue-100 group-hover:shadow-lg group-hover:shadow-blue-200"
+                          }
+                          `}>
+                          <Upload className={`
+                              h-8 w-8 transition-all duration-300
+                              ${isDragOver
+                              ? "text-blue-600 scale-110"
+                              : "text-gray-500 group-hover:text-blue-600 group-hover:scale-110"
+                            }
+                            `} />
+                          {/* 애니메이션 효과 */}
+                          {isDragOver && (
+                            <div className="absolute inset-0 rounded-full border-2 border-blue-300 animate-ping"></div>
+                          )}
+                        </div>
+
+                        {/* 텍스트 영역 */}
+                        <div className="space-y-3">
+                          <h3 className={`
+                              text-xl font-semibold transition-colors duration-300
+                              ${isDragOver ? "text-blue-700" : "text-gray-800 group-hover:text-blue-700"}
+                            `}>
+                            {isDragOver ? "여기에 놓으세요!" : "이미지 업로드"}
+                          </h3>
+                          <p className={`
+                              text-sm transition-colors duration-300 max-w-md mx-auto
+                              ${isDragOver ? "text-blue-600" : "text-gray-600 group-hover:text-blue-600"}
+                            `}>
+                            게시글에 사용할 이미지를 드래그하여 놓거나 클릭하여 선택하세요
+                          </p>
+                          <p className="text-xs text-gray-500">
+                            지원 형식: JPG, PNG, GIF, WebP (최대 5MB)
+                          </p>
+                        </div>
+
+                        {/* 파일 선택 버튼 */}
+                        <div className="mt-6">
+                          <input
+                            id="image_upload"
+                            type="file"
+                            accept="image/*"
+                            multiple
+                            onChange={handleImageUpload}
+                            className="hidden"
+                          />
+                          <label htmlFor="image_upload">
+                            <Button
+                              className={`
+                                  transition-all duration-300 cursor-pointer
+                                  ${isDragOver
+                                  ? "bg-blue-600 hover:bg-blue-700 text-white shadow-lg"
+                                  : "bg-white hover:bg-blue-50 text-gray-700 border-gray-300 hover:border-blue-400 hover:text-blue-700 shadow-sm hover:shadow-md"
+                                }
+                                `}
+                              asChild
+                            >
+                              <span className="flex items-center gap-2">
+                                <Upload className="h-4 w-4" />
+                                파일 선택
+                              </span>
+                            </Button>
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
                 {/* 게시글 주제 */}

@@ -309,26 +309,41 @@ async def get_boards(
             # 이미지 URL을 S3 presigned URL로 변환
             image_url = board.image_url
             if image_url:
-                if not image_url.startswith("http"):
-                    # S3 키인 경우 presigned URL 생성
-                    try:
-                        from app.services.s3_image_service import get_s3_image_service
+                # 쉼표로 구분된 다중 이미지 처리
+                image_urls = image_url.split(",") if "," in image_url else [image_url]
+                processed_image_urls = []
 
-                        s3_service = get_s3_image_service()
-                        if s3_service.is_available():
-                            # presigned URL 생성 (1시간 유효)
-                            image_url = s3_service.generate_presigned_url(
-                                image_url, expiration=3600
+                for single_image_url in image_urls:
+                    single_image_url = single_image_url.strip()
+                    if not single_image_url.startswith("http"):
+                        # S3 키인 경우 presigned URL 생성
+                        try:
+                            from app.services.s3_image_service import (
+                                get_s3_image_service,
                             )
-                        else:
-                            # S3 서비스가 사용 불가능한 경우 직접 URL 생성
-                            image_url = f"https://aimex-influencers.s3.ap-northeast-2.amazonaws.com/{image_url}"
-                    except Exception as e:
-                        logger.error(
-                            f"Failed to generate presigned URL for board {board.board_id}: {e}"
-                        )
-                        # 실패 시 직접 URL 생성
-                        image_url = f"https://aimex-influencers.s3.ap-northeast-2.amazonaws.com/{image_url}"
+
+                            s3_service = get_s3_image_service()
+                            if s3_service.is_available():
+                                # presigned URL 생성 (1시간 유효)
+                                processed_url = s3_service.generate_presigned_url(
+                                    single_image_url, expiration=3600
+                                )
+                            else:
+                                # S3 서비스가 사용 불가능한 경우 직접 URL 생성
+                                processed_url = f"https://aimex-influencers.s3.ap-northeast-2.amazonaws.com/{single_image_url}"
+                        except Exception as e:
+                            logger.error(
+                                f"Failed to generate presigned URL for board {board.board_id}: {e}"
+                            )
+                            # 실패 시 직접 URL 생성
+                            processed_url = f"https://aimex-influencers.s3.ap-northeast-2.amazonaws.com/{single_image_url}"
+                    else:
+                        processed_url = single_image_url
+
+                    processed_image_urls.append(processed_url)
+
+                # 처리된 이미지 URL들을 쉼표로 구분하여 저장
+                image_url = ",".join(processed_image_urls)
 
             board_dict = {
                 "board_id": board.board_id,
@@ -917,11 +932,11 @@ async def create_board(
 @router.post("/create-with-image", response_model=BoardSchema)
 async def create_board_with_image(
     board_data: str = Form(..., description="게시글 데이터 (JSON 문자열)"),
-    file: UploadFile = File(...),
+    files: List[UploadFile] = File(...),  # 단일 파일에서 다중 파일로 변경
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    """게시글과 이미지를 함께 생성 (원자적 처리)"""
+    """게시글과 다중 이미지를 함께 생성 (원자적 처리)"""
     try:
         user_id = current_user.get("sub")
         if not user_id:
@@ -1028,19 +1043,43 @@ async def create_board_with_image(
                 detail="S3 서비스를 사용할 수 없습니다.",
             )
 
-        file_content = await file.read()
-        s3_key = await s3_service.upload_image(
-            file_content,
-            file.filename or "uploaded_image.png",
-            board_id,
-            created_date=current_kst_time,
-        )
+        # 다중 이미지 업로드
+        uploaded_s3_keys = []
+        for i, file in enumerate(files):
+            try:
+                file_content = await file.read()
+                s3_key = await s3_service.upload_image(
+                    file_content,
+                    file.filename or f"image_{i+1}.png",
+                    board_id,
+                    user_id,
+                    created_date=current_kst_time,
+                )
+                uploaded_s3_keys.append(s3_key)
+                logger.info(f"이미지 {i+1} 업로드 성공: {s3_key}")
+            except Exception as e:
+                logger.error(f"이미지 {i+1} 업로드 실패: {e}")
+                # 개별 이미지 업로드 실패 시에도 계속 진행
+                continue
 
-        # 3. 게시글에 이미지 URL 업데이트
+        if not uploaded_s3_keys:
+            # 모든 이미지 업로드 실패 시 게시글 삭제
+            db.execute(
+                text("DELETE FROM BOARD WHERE board_id = :board_id"),
+                {"board_id": board_id},
+            )
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="모든 이미지 업로드에 실패했습니다.",
+            )
+
+        # 3. 게시글에 이미지 URL 업데이트 (쉼표로 구분)
+        image_url_string = ",".join(uploaded_s3_keys)
         update_sql = text(
             "UPDATE BOARD SET image_url = :image_url WHERE board_id = :board_id"
         )
-        db.execute(update_sql, {"image_url": s3_key, "board_id": board_id})
+        db.execute(update_sql, {"image_url": image_url_string, "board_id": board_id})
         db.commit()
 
         # 4. 생성된 게시글 조회
