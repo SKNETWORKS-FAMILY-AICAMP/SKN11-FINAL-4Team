@@ -266,6 +266,10 @@ async def restart_engine():
     global engine, tokenizer
     logger.info("🔄 엔진 재시작 시작...")
     
+    # 단일 GPU 모드 강제 설정
+    os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+    logger.info("🖥️ CUDA_VISIBLE_DEVICES=0 설정 완료")
+    
     # 기존 엔진 종료
     if engine is not None:
         try:
@@ -317,10 +321,11 @@ async def initialize_vllm_engine():
             # CUDA 디바이스 설정 확인
             import torch
             if torch.cuda.is_available():
-                cuda_device = torch.cuda.current_device()
-                logger.info(f"🖥️ 현재 CUDA 디바이스: {cuda_device}")
-                # 모든 CUDA 디바이스에 대해 동일한 설정 적용
+                # 단일 GPU 모드 강제 설정
+                cuda_device = 0  # 항상 첫 번째 GPU 사용
                 torch.cuda.set_device(cuda_device)
+                os.environ['CUDA_VISIBLE_DEVICES'] = '0'  # 단일 GPU만 사용하도록 강제
+                logger.info(f"🖥️ 단일 GPU 모드: CUDA 디바이스 {cuda_device} 사용")
             
             engine_args = AsyncEngineArgs(
                 model="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct",
@@ -337,6 +342,7 @@ async def initialize_vllm_engine():
                 max_num_batched_tokens=8192,
                 disable_log_requests=True,
                 enforce_eager=True,  # CUDA 그래프 비활성화로 디바이스 문제 방지
+                device="cuda:0",  # 명시적으로 cuda:0 디바이스 지정
             )
             
             engine = AsyncLLMEngine.from_engine_args(engine_args)
