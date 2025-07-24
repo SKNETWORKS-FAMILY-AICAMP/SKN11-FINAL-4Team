@@ -240,21 +240,6 @@ export default function ImageGeneratorPage() {
   // 선택된 수정 방법 상태
   const [selectedMethod, setSelectedMethod] = useState<number>(0)
   
-  // 갤러리 필터 상태
-  const [galleryFilter, setGalleryFilter] = useState<string>("all")
-  const [tempGalleryFilter, setTempGalleryFilter] = useState<string>("all")
-  const [isFilterModalOpen, setIsFilterModalOpen] = useState(false)
-  
-  // 필터링된 이미지 목록
-  const filteredImages = useMemo(() => {
-    if (galleryFilter === "all") {
-      return images
-    }
-    
-    const [width, height] = galleryFilter.split("x").map(Number)
-    return images.filter(image => image.width === width && image.height === height)
-  }, [images, galleryFilter])
-  
   // 드래그 이벤트 핸들러
   const [dragActive, setDragActive] = useState(false)
   const [maskMode, setMaskMode] = useState(false)
@@ -976,10 +961,8 @@ export default function ImageGeneratorPage() {
     setShowDownloadDialog(false)
     setDownloadFileName("")
     setShowGallerySelector(false)
-    setIsFilterModalOpen(false)
     setSelectedImages([])
     setSelectedMethod(0)
-    setGalleryFilter("all")
     setUploadedFile(null)
     setUploadedImageUrl(null)
     setSelectedGalleryImage(null)
@@ -996,17 +979,6 @@ export default function ImageGeneratorPage() {
         ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height)
       }
     }
-  }
-
-  // 필터 관련 함수들
-  const handleApplyFilters = () => {
-    setGalleryFilter(tempGalleryFilter)
-    setIsFilterModalOpen(false)
-  }
-
-  const handleOpenFilterModal = () => {
-    setTempGalleryFilter(galleryFilter)
-    setIsFilterModalOpen(true)
   }
 
   // 갤러리 선택기 닫기
@@ -2323,73 +2295,8 @@ export default function ImageGeneratorPage() {
                 </Button>
               </div>
 
-              <div className="flex items-center gap-2 mb-4">
-                <Dialog open={isFilterModalOpen} onOpenChange={setIsFilterModalOpen}>
-                  <DialogTrigger asChild>
-                    <Button variant="outline" className="flex items-center gap-2" onClick={handleOpenFilterModal}>
-                      <Filter className="h-4 w-4" />
-                      필터
-                      {galleryFilter !== "all" && (
-                        <span className="text-gray-600">
-                          {galleryFilter}
-                        </span>
-                      )}
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent className="max-w-md">
-                    <DialogHeader>
-                      <DialogTitle>크기 필터 설정</DialogTitle>
-                    </DialogHeader>
-                    <div className="space-y-6">
-                      {/* 크기 필터 */}
-                      <div>
-                        <h3 className="font-medium text-sm text-gray-900 mb-3">이미지 크기</h3>
-                        <div className="grid grid-cols-1 gap-2">
-                          <button
-                            onClick={() => setTempGalleryFilter("all")}
-                            className={`text-left px-3 py-2 rounded-md text-sm transition-colors ${tempGalleryFilter === "all"
-                              ? "bg-blue-100 text-blue-700 border border-blue-200"
-                              : "bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-200"
-                              }`}
-                          >
-                            모든 크기
-                          </button>
-                          {PRESET_SIZES.map((size) => (
-                            <button
-                              key={size.id}
-                              onClick={() => setTempGalleryFilter(`${size.width}x${size.height}`)}
-                              className={`text-left px-3 py-2 rounded-md text-sm transition-colors ${tempGalleryFilter === `${size.width}x${size.height}`
-                                ? "bg-blue-100 text-blue-700 border border-blue-200"
-                                : "bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-200"
-                                }`}
-                            >
-                              {size.name} ({size.width} × {size.height})
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                    {/* 적용하기 버튼 */}
-                    <div className="flex justify-end gap-2 pt-4 border-t">
-                      <Button
-                        variant="outline"
-                        onClick={() => setIsFilterModalOpen(false)}
-                      >
-                        취소
-                      </Button>
-                      <Button
-                        onClick={handleApplyFilters}
-                        className="bg-blue-600 hover:bg-blue-700"
-                      >
-                        적용하기
-                      </Button>
-                    </div>
-                  </DialogContent>
-                </Dialog>
-              </div>
-
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                {filteredImages.map((image) => (
+                {images.map((image) => (
                   <Card key={image.id} className="overflow-hidden cursor-pointer hover:shadow-lg transition-shadow" onClick={() => {
                     setPreviewImage(image)
                     setShowGalleryImageModal(true)
@@ -2428,7 +2335,7 @@ export default function ImageGeneratorPage() {
                 ))}
               </div>
 
-              {filteredImages.length === 0 && (
+              {images.length === 0 && (
                 <div className="text-center py-12">
                   <ImageIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
                   <p className="text-lg font-medium text-gray-900 mb-2">생성된 이미지가 없습니다</p>
