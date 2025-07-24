@@ -41,12 +41,6 @@ else:
 
 logger = logging.getLogger(__name__)
 
-# SQLAlchemy 로그 완전 비활성화 (개발/프로덕션 공통)
-logging.getLogger("sqlalchemy.engine").setLevel(logging.CRITICAL)
-logging.getLogger("sqlalchemy.pool").setLevel(logging.CRITICAL)
-logging.getLogger("sqlalchemy.dialects").setLevel(logging.CRITICAL)
-logging.getLogger("sqlalchemy.orm").setLevel(logging.CRITICAL)
-
 # 기타 외부 라이브러리 로그 비활성화
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)

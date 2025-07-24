@@ -15,6 +15,7 @@ export function Navigation() {
   const { user, logout, isAuthenticated } = useAuth()
   const { hasPermission, isAdmin, hasGroup } = usePermission()
 
+  console.log(user)
 
   if (pathname === "/login" || !isAuthenticated) {
     return null
@@ -103,10 +104,10 @@ export function Navigation() {
                   <p className="text-xs text-gray-500">{user?.company}</p>
                   {user?.teams && user.teams.length > 0 && (
                     <div className="flex flex-wrap gap-1 mt-1">
-                      {user.teams.map((team, idx) => (
-                        <span key={`team-${team.group_id}-${idx}`} className="text-xs text-gray-500">
+                      {user.teams.map((team, index) => (
+                        <span key={team.group_id || `team-${index}`} className="text-xs text-gray-500">
                           {team.group_name || `그룹${team.group_id}`}
-                        </span> 
+                        </span>
                       ))}
                     </div>
                   )}
@@ -129,7 +130,6 @@ export function Navigation() {
           </div>
         </div>
       </div>
-
     </nav>
   )
 }

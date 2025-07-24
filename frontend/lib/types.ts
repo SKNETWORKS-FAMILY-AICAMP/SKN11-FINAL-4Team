@@ -120,6 +120,7 @@ export interface JWTPayload {
   company?: string
   groups: string[]
   permissions: string[]
+  teams?: string[] // JWT 토큰에 teams 정보 추가
   instagram?: {
     username?: string
     account_type?: string

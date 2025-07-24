@@ -63,11 +63,32 @@ export const parseJWT = (token: string): JWTPayload => {
   }
 }
 
-export const getUserFromToken = (token: string): User | null => {
+export const getUserFromToken = async (token: string): Promise<User | null> => {
   try {
     const payload = parseJWT(token)
     
-    return {
+    console.log('🔍 JWT Payload:', payload) // 디버깅용 로그
+    
+    // JWT 토큰에 teams 정보가 있으면 실제 팀 정보를 가져오기
+    let teams: any[] = []
+    if (payload.teams && payload.teams.length > 0) {
+      try {
+        const { BackendAuthService } = await import('./backend-auth')
+        const response = await BackendAuthService.getTeamsByNames(payload.teams)
+        teams = response.teams
+        console.log('🏢 실제 팀 정보 조회 완료:', teams)
+      } catch (error) {
+        console.warn('팀 정보 조회 실패, JWT 정보 사용:', error)
+        // 실패시 JWT의 팀 이름을 그대로 사용
+        teams = payload.teams.map((teamName: string) => ({
+          group_id: 0, // 실제 ID를 알 수 없으므로 0 사용
+          group_name: teamName,
+          group_description: undefined
+        }))
+      }
+    }
+    
+    const user = {
       user_id: payload.sub,
       provider_id: payload.sub, // JWT에서는 sub가 provider_id 역할을 함
       provider: payload.provider,
@@ -75,9 +96,14 @@ export const getUserFromToken = (token: string): User | null => {
       email: payload.email || '',
       created_at: undefined,
       updated_at: undefined,
-      teams: [] // JWT에서는 groups가 string[]이므로 빈 배열로 초기화
+      teams: teams
     }
+    
+    console.log('👤 최종 사용자 정보:', user) // 디버깅용 로그
+    
+    return user
   } catch (error) {
+    console.error('Error parsing JWT token:', error)
     return null
   }
 }
