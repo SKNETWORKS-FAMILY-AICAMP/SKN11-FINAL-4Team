@@ -236,7 +236,7 @@ export default function ChatPage() {
     // 1. MCP REST 우선 시도
     let mcpResult: string | null = null;
     try {
-      const mcpResponse: MCPChatResponse = await MCPService.processMessage({ message: currentMessage, influencer_id: model?.id });
+      const mcpResponse: MCPChatResponse = await MCPService.processMessage({ message: currentMessage, influencer_id: model?.id || '' });
       if (mcpResponse && mcpResponse.response && mcpResponse.response.trim()) {
         mcpResult = mcpResponse.response.trim();
       }
