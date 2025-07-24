@@ -3,6 +3,7 @@ export { default as UserService } from './user.service'
 export { default as ModelService } from './model.service'
 export { default as PostService } from './post.service'
 export { default as PermissionService } from './permission.service'
+export { default as MCPService } from './mcp.service'
 
 // Re-export types
 export type {
