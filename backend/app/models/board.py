@@ -43,18 +43,6 @@ class Board(Base, TimestampMixin):
         nullable=False,
         comment="팀 고유 식별자",
     )
-    session_id = Column(
-        String(36),
-        ForeignKey("pod_sessions.session_id"),
-        nullable=True,
-        comment="Pod 세션 ID",
-    )
-    pipeline_id = Column(
-        String(36),
-        ForeignKey("prompt_processing_pipelines.pipeline_id"),
-        nullable=True,
-        comment="프롬프트 처리 파이프라인 ID",
-    )
     group_id = Column(
         Integer,
         nullable=False,
@@ -77,20 +65,12 @@ class Board(Base, TimestampMixin):
     image_url = Column(
         Text, nullable=False, comment="게시글 썸네일 또는 대표 이미지 URL 경로"
     )
-    reservation_at = Column(
-        TIMESTAMP,
-        nullable=True,
-        comment="예약 발행 시간"
-    )
-    published_at = Column(
-        TIMESTAMP,
-        nullable=True,
-        comment="실제 발행 시간"
-    )
+    reservation_at = Column(TIMESTAMP, nullable=True, comment="예약 발행 시간")
+    published_at = Column(TIMESTAMP, nullable=True, comment="실제 발행 시간")
     platform_post_id = Column(
         String(255),
         nullable=True,
-        comment="각 플랫폼에 업로드된 게시글의 post ID (인스타그램, 페이스북, 블로그 등)"
+        comment="각 플랫폼에 업로드된 게시글의 post ID (인스타그램, 페이스북, 블로그 등)",
     )
     # created_at과 updated_at은 TimestampMixin에서 제공됨
 
@@ -106,4 +86,3 @@ class Board(Base, TimestampMixin):
 
     # 관계
     influencer = relationship("AIInfluencer", back_populates="boards")
-
