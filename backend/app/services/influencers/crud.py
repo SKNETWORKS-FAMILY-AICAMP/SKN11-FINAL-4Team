@@ -177,7 +177,6 @@ def create_influencer(db: Session, user_id: str, influencer_data: AIInfluencerCr
         "learning_status": influencer_data.learning_status,
         "influencer_model_repo": influencer_data.influencer_model_repo,
         "chatbot_option": influencer_data.chatbot_option,
-        # AIInfluencer 모델의 직접 필드 채우기
         "influencer_personality": influencer_data.personality,
         "influencer_tone": influencer_data.tone,
         "influencer_age_group": None,  # 초기화 후 아래에서 매핑

@@ -160,8 +160,6 @@ app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
     description="AI Influencer Model Management System API",
-    docs_url="/docs",
-    redoc_url="/redoc",
     lifespan=lifespan,
     # 타임아웃 설정 추가
     timeout=300,  # 5분

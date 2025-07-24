@@ -30,7 +30,9 @@ dotenv.load_dotenv()
 app = FastAPI(
     title="vLLM LoRA Influencer API", 
     version="1.0.0",
-    description="vLLM 엔진을 사용한 LoRA 파인튜닝 및 추론 API"
+    description="vLLM 엔진을 사용한 LoRA 파인튜닝 및 추론 API",
+    docs_url=None,  # Swagger UI 비활성화
+    redoc_url=None  # ReDoc 비활성화
 )
 
 # CORS 설정

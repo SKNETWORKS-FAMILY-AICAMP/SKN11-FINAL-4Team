@@ -391,7 +391,8 @@ class LangChainToneGenerator:
 [말투3]
 {prompt3}
 
-주어진 질문에 대해 위 3가지 말투로 각각 답변하고, 다음 JSON 형식으로 정확히 출력하세요:
+주어진 질문에 대해 위 3가지 말투로 각각 답변하고, 다음 JSON 형식으로 정확히 출력하세요.
+JSON 외에 다른 텍스트는 포함하지 마세요. 반드시 유효한 JSON 형식이어야 합니다:
 {json_format}"""
             
             # JSON 형식을 이중 중괄호로 이스케이프
@@ -438,7 +439,19 @@ class LangChainToneGenerator:
             import re
             json_match = re.search(r'\{[\s\S]*\}', content)
             if json_match:
-                result = json.loads(json_match.group())
+                json_str = json_match.group()
+                # JSON 문자열 정리 (일반적인 문제 해결)
+                json_str = json_str.replace('\n\n', '\n')  # 이중 줄바꿈 제거
+                json_str = re.sub(r',\s*}', '}', json_str)  # 마지막 쉼표 제거
+                json_str = re.sub(r',\s*]', ']', json_str)  # 배열 마지막 쉼표 제거
+                
+                try:
+                    result = json.loads(json_str)
+                except json.JSONDecodeError as e:
+                    logger.error(f"JSON 파싱 오류: {e}")
+                    logger.error(f"원본 응답: {content[:500]}...")  # 디버깅을 위해 첫 500자 로깅
+                    logger.error(f"정리된 JSON: {json_str[:500]}...")
+                    raise
                 
                 # 결과 포맷팅
                 responses = {}
