@@ -126,19 +126,33 @@ def create_influencer(db: Session, user_id: str, influencer_data: AIInfluencerCr
                 status_code=status.HTTP_404_NOT_FOUND, detail="Style preset not found"
             )
 
+    # MBTI 처리: 텍스트로 받은 경우 mbti_id로 변환
     mbti_id = influencer_data.mbti_id
+    
+    # MBTI 텍스트가 있고 mbti_id가 없는 경우
     if influencer_data.mbti and not mbti_id:
+        mbti_text = influencer_data.mbti.upper()  # 대문자로 변환
         mbti_record = (
             db.query(ModelMBTI)
-            .filter(ModelMBTI.mbti_name == influencer_data.mbti)
+            .filter(ModelMBTI.mbti_name == mbti_text)
             .first()
         )
         if mbti_record:
             mbti_id = mbti_record.mbti_id
+            logger.info(f"✅ MBTI 텍스트 '{mbti_text}'를 mbti_id {mbti_id}로 변환")
+        else:
+            logger.warning(f"⚠️ 유효하지 않은 MBTI 타입: {mbti_text}")
+            # 잘못된 MBTI 타입인 경우 에러 발생
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"유효하지 않은 MBTI 타입입니다: {mbti_text}"
+            )
 
+    # mbti_id가 설정된 경우 유효성 검증
     if mbti_id:
         mbti = db.query(ModelMBTI).filter(ModelMBTI.mbti_id == mbti_id).first()
         if not mbti:
+            logger.warning(f"⚠️ 존재하지 않는 mbti_id: {mbti_id}")
             mbti_id = None
 
     hf_manage_id = influencer_data.hf_manage_id
