@@ -3,6 +3,7 @@ os.environ["VLLM_USE_V1"] = "0" # vLLM v1 어텐션 백엔드 비활성화
 import asyncio
 import logging
 import time
+import sys
 from typing import Optional, Dict, Any, List
 
 import httpx
@@ -24,28 +25,19 @@ dotenv.load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-async def get_available_gpu_memory_mb() -> int:
-    """nvidia-smi를 사용하여 사용 가능한 GPU 메모리 (MB)를 반환합니다."""
+async def get_available_gpu_memory_mb(device_id: int = 0) -> int:
+    """PyTorch를 사용하여 사용 가능한 GPU 메모리 (MB)를 반환합니다."""
     try:
-        # nvidia-smi 명령 실행
-        process = await asyncio.create_subprocess_shell(
-            "nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        stdout, stderr = await process.communicate()
-
-        if process.returncode != 0:
-            logger.error(f"nvidia-smi 실행 오류: {stderr.decode().strip()}")
-            return 0
-
-        # 출력 파싱
-        output = stdout.decode().strip()
-        free_memory_mb = int(output.split('\n')[0])
-        return free_memory_mb
-    except FileNotFoundError:
-        logger.warning("nvidia-smi를 찾을 수 없습니다. GPU 메모리 확인을 건너뜁니다.")
-        return -1 # -1은 GPU를 찾을 수 없음을 의미
+        gpu_manager = await get_gpu_manager()
+        
+        gpu_info = await gpu_manager.get_gpu_info(device_id=device_id)
+        
+        if not gpu_info["available"]:
+            logger.warning("GPU를 사용할 수 없습니다.")
+            return -1  # -1은 GPU를 찾을 수 없음을 의미
+            
+        return gpu_info["free"]
+        
     except Exception as e:
         logger.error(f"GPU 메모리 확인 중 오류 발생: {e}")
         return 0
@@ -112,29 +104,82 @@ async def send_finetuning_webhook(task_id: str, status: str, hf_model_url: Optio
         logger.error(f"❌ 파인튜닝 웹훅 전송 중 알 수 없는 오류: {task_id}, {e}")
 
 async def run_finetuning_pipeline(qa_data: List[Dict], system_message: str, 
-                                hf_token: str, hf_repo_id: str, training_epochs: int) -> Optional[str]:
-    """파인튜닝 파이프라인 실행"""
+                                hf_token: str, hf_repo_id: str, training_epochs: int, gpu_id:int) -> Optional[str]:
+    """파인튜닝 파이프라인 실행 (별도 프로세스)"""
+    import subprocess
+    import tempfile
+    import json
+    
     try:
         logger.info(f"🔄 파인튜닝 파이프라인 실행: {hf_repo_id}")
         logger.info(f"🔍 파이프라인 QA 데이터: 개수={len(qa_data)}")
-        if qa_data:
-            logger.info(f"🔍 파이프라인 첫 번째 데이터: {qa_data[0]}")
+        logger.info(f"🎯 GPU {gpu_id}에서 별도 프로세스로 실행")
         
-        # fine_custom.py의 main 함수를 별도의 스레드에서 실행
-        hf_model_url = await asyncio.to_thread(
-            fine_custom.main,
-            qa_data=qa_data,
-            system_message=system_message,
-            hf_token=hf_token,
-            hf_repo_id=hf_repo_id,
-            training_epochs=training_epochs
-        )
+        # 임시 파일 생성
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as qa_file:
+            json.dump(qa_data, qa_file, ensure_ascii=False, indent=2)
+            qa_file_path = qa_file.name
         
-        if hf_model_url:
-            logger.info(f"✅ 파인튜닝 파이프라인 실행 완료: {hf_repo_id}")
-            return hf_model_url
-        else:
-            raise Exception("파인튜닝 실행 실패: 모델 URL을 반환하지 못했습니다.")
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as result_file:
+            result_file_path = result_file.name
+        
+        try:
+            # 파인튜닝 서브프로세스 실행
+            script_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "pipeline", "finetuning_subprocess.py")
+            cmd = [
+                sys.executable,  # Python 인터프리터
+                script_path,
+                "--gpu-id", str(gpu_id),
+                "--qa-data", qa_file_path,
+                "--system-message", system_message,
+                "--hf-token", hf_token,
+                "--hf-repo-id", hf_repo_id,
+                "--training-epochs", str(training_epochs),
+                "--output-file", result_file_path
+            ]
+            
+            logger.info(f"🚀 서브프로세스 실행: {' '.join(cmd[:3])}...")
+            
+            # 작업 디렉토리 설정
+            cwd = os.path.dirname(os.path.dirname(__file__))
+            
+            # 프로세스 실행
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=cwd
+            )
+            
+            # 프로세스 완료 대기
+            stdout, stderr = await process.communicate()
+            
+            if stdout:
+                logger.info(f"📋 서브프로세스 출력:\n{stdout.decode()}")
+            if stderr:
+                logger.warning(f"⚠️ 서브프로세스 에러:\n{stderr.decode()}")
+            
+            # 결과 파일 읽기
+            if os.path.exists(result_file_path):
+                with open(result_file_path, 'r', encoding='utf-8') as f:
+                    result = json.load(f)
+            else:
+                # 파일이 없으면 실패로 처리
+                raise Exception(f"서브프로세스가 결과 파일을 생성하지 못했습니다. 프로세스 종료 코드: {process.returncode}")
+            
+            if result["success"]:
+                logger.info(f"✅ 파인튜닝 파이프라인 실행 완료: {hf_repo_id}")
+                return result["hf_model_url"]
+            else:
+                raise Exception(f"파인튜닝 실행 실패: {result.get('error', 'Unknown error')}")
+                
+        finally:
+            # 임시 파일 삭제
+            for path in [qa_file_path, result_file_path]:
+                try:
+                    os.unlink(path)
+                except:
+                    pass
             
     except Exception as e:
         logger.error(f"❌ 파인튜닝 파이프라인 실행 실패: {e}")
@@ -151,6 +196,37 @@ async def execute_finetuning(task_id: str):
 
     try:
         logger.info(f"🎯 파인튜닝 실행 시작: {task_id}")
+        
+        # GPU 선택 로직 추가
+        gpu_manager = await get_gpu_manager()
+        
+        # 환경 변수에서 파인튜닝 GPU ID 가져오기 (기본값: 1)
+        finetuning_gpu_id = int(os.getenv('FINETUNING_GPU_ID', '1'))
+        
+        # 모든 GPU의 정보를 가져옴
+        all_gpu_info = await gpu_manager.get_all_gpus_info()
+        
+        # 파인튜닝용 GPU 선택 (환경 변수에서 지정하거나 가장 여유 있는 GPU)
+        if finetuning_gpu_id < gpu_manager.gpu_count and all_gpu_info.get(finetuning_gpu_id, {}).get('available', False):
+            selected_gpu = finetuning_gpu_id
+            logger.info(f"환경 변수에서 지정된 GPU {selected_gpu} 사용")
+        else:
+            # 지정된 GPU를 사용할 수 없으면 가장 여유 있는 GPU 선택
+            selected_gpu = gpu_manager.get_least_utilized_gpu(all_gpu_info)
+            logger.warning(f"지정된 GPU {finetuning_gpu_id}를 사용할 수 없어 GPU {selected_gpu} 선택")
+        
+        logger.info(f"🖥️ GPU 상태:")
+        for gpu_id, info in all_gpu_info.items():
+            if info.get('available', False):
+                logger.info(f"  GPU {gpu_id} ({info.get('name', 'Unknown')}): "
+                          f"{info['used']}MB/{info['total']}MB ({info.get('utilization', 0):.1f}%), "
+                          f"Compute: {info.get('compute_capability', 'N/A')}")
+        
+        logger.info(f"✅ 파인튜닝에 GPU {selected_gpu} 선택 (사용률: {all_gpu_info[selected_gpu].get('utilization', 0):.1f}%)")
+        
+        # 선택된 GPU ID를 task에 저장
+        task["selected_gpu"] = selected_gpu
+        task["gpu_info_at_start"] = all_gpu_info[selected_gpu]
         
         # 1. 데이터 준비 단계
         task["status"] = FineTuningStatus.PREPARING_DATA.value
@@ -193,35 +269,43 @@ async def execute_finetuning(task_id: str):
         task["status"] = FineTuningStatus.TRAINING.value
         task["updated_at"] = time.time()
         
-        hf_model_url = await run_finetuning_pipeline(
-            qa_data=finetuning_data,
-            system_message=system_message,
-            hf_token=task["hf_token"],
-            hf_repo_id=task["hf_repo_id"],
-            training_epochs=task["training_epochs"]
-        )
+        logger.info(f"🔧 파인튜닝에 GPU {selected_gpu} 사용 (동적 할당)")
         
-        if hf_model_url:
-            # 3. 완료
-            task["status"] = FineTuningStatus.COMPLETED.value
-            task["hf_model_url"] = hf_model_url
-            task["updated_at"] = time.time()
+        try:
+            hf_model_url = await run_finetuning_pipeline(
+                qa_data=finetuning_data,
+                system_message=system_message,
+                hf_token=task["hf_token"],
+                hf_repo_id=task["hf_repo_id"],
+                training_epochs=task["training_epochs"],
+                gpu_id=selected_gpu
+            )
             
-            logger.info(f"✅ 파인튜닝 완료: {task_id} → {hf_model_url}")
-            
-            # 완료된 모델을 자동으로 로드
-            try:
-                load_request = LoRALoadRequest(
-                    model_id=task["hf_repo_id"],
-                    hf_repo_name=task["hf_repo_id"],
-                    hf_token=task["hf_token"]
-                )
-                await load_lora_adapter(load_request)
-                logger.info(f"🔄 파인튜닝 완료 후 어댑터 자동 로드: {task['hf_repo_id']}")
-            except Exception as e:
-                logger.warning(f"⚠️ 파인튜닝 완료 후 어댑터 자동 로드 실패: {e}")
-        else:
-            raise Exception("파인튜닝 실행 실패: 모델 URL을 반환하지 못했습니다.")
+            if hf_model_url:
+                # 3. 완료
+                task["status"] = FineTuningStatus.COMPLETED.value
+                task["hf_model_url"] = hf_model_url
+                task["updated_at"] = time.time()
+                
+                logger.info(f"✅ 파인튜닝 완료: {task_id} → {hf_model_url}")
+                
+                # 완료된 모델을 자동으로 로드
+                try:
+                    load_request = LoRALoadRequest(
+                        model_id=task["hf_repo_id"],
+                        hf_repo_name=task["hf_repo_id"],
+                        hf_token=task["hf_token"]
+                    )
+                    await load_lora_adapter(load_request)
+                    logger.info(f"🔄 파인튜닝 완료 후 어댑터 자동 로드: {task['hf_repo_id']}")
+                except Exception as e:
+                    logger.warning(f"⚠️ 파인튜닝 완료 후 어댑터 자동 로드 실패: {e}")
+            else:
+                raise Exception("파인튜닝 실행 실패: 모델 URL을 반환하지 못했습니다.")
+                
+        finally:
+            # GPU 메모리 정리
+            logger.info(f"🧹 GPU {selected_gpu} 메모리 정리 중...")
             
     except Exception as e:
         task["status"] = FineTuningStatus.FAILED.value
@@ -246,8 +330,9 @@ async def finetuning_worker():
         task_id = await finetuning_queue.get()
         logger.info(f"⚙️ 큐에서 파인튜닝 작업 시작: {task_id}")
         
-        # GPU 메모리 확인
-        available_memory = await get_available_gpu_memory_mb()
+        # GPU 메모리 확인 (파인튜닝용 GPU)
+        finetuning_gpu_id = int(os.getenv('FINETUNING_GPU_ID', '1'))
+        available_memory = await get_available_gpu_memory_mb(device_id=finetuning_gpu_id)
         if available_memory != -1 and available_memory < MIN_GPU_MEMORY_MB:
             logger.warning(f"⚠️ GPU 메모리 부족 ({available_memory}MB). 최소 {MIN_GPU_MEMORY_MB}MB 필요. 작업 {task_id}를 다시 큐에 넣습니다.")
             await finetuning_queue.put(task_id) # 작업을 다시 큐에 넣음
