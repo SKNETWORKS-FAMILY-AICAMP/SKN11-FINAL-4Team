@@ -1,5 +1,8 @@
 import os
+# 단일 GPU 사용 강제 설정 (서버 시작 시점)
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 os.environ["VLLM_USE_V1"] = "0" # vLLM v1 어텐션 백엔드 비활성화
+os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"  # 멀티프로세스 방식 변경
 import asyncio
 import logging
 import time
@@ -325,12 +328,17 @@ async def initialize_vllm_engine():
                 cuda_device = 0  # 항상 첫 번째 GPU 사용
                 torch.cuda.set_device(cuda_device)
                 os.environ['CUDA_VISIBLE_DEVICES'] = '0'  # 단일 GPU만 사용하도록 강제
+                os.environ['VLLM_WORKER_MULTIPROC_METHOD'] = 'spawn'  # 멀티프로세스 방식 변경
                 logger.info(f"🖥️ 단일 GPU 모드: CUDA 디바이스 {cuda_device} 사용")
+                
+                # 모든 텐서를 cuda:0으로 강제 이동
+                torch.cuda.set_default_device('cuda:0')
             
             engine_args = AsyncEngineArgs(
                 model="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct",
                 max_model_len=2048,
-                tensor_parallel_size=tensor_parallel_size,
+                tensor_parallel_size=1,  # 단일 GPU 사용 명시
+                pipeline_parallel_size=1,  # 파이프라인 병렬화 비활성화
                 trust_remote_code=True,
                 gpu_memory_utilization=gpu_memory_fraction,
                 enable_lora=True,
@@ -343,6 +351,7 @@ async def initialize_vllm_engine():
                 disable_log_requests=True,
                 enforce_eager=True,  # CUDA 그래프 비활성화로 디바이스 문제 방지
                 device="cuda:0",  # 명시적으로 cuda:0 디바이스 지정
+                disable_custom_all_reduce=True,  # 다중 GPU 통신 비활성화
             )
             
             engine = AsyncLLMEngine.from_engine_args(engine_args)
@@ -417,6 +426,13 @@ async def load_lora_adapter(request: LoRALoadRequest):
             raise Exception(f"베이스 모델 정보 확인 실패: {str(e)}")
         
         logger.info("📦 어댑터 정보 객체 생성 중...")
+        
+        # CUDA 디바이스 확인 및 설정
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.set_device(0)
+            logger.info(f"🖥️ LoRA 어댑터 로드 시 CUDA 디바이스 0 사용 설정")
+        
         adapter_info = {
             "model_id": request.model_id,
             "hf_repo_name": request.hf_repo_name,
