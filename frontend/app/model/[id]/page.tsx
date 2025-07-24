@@ -322,9 +322,9 @@ function ModelDetailContent() {
           scheduledAt: board.reservation_at || "",
           hashtags: board.board_hash_tag
             ? board.board_hash_tag
-                .split(" ")
-                .filter((tag: string) => tag.trim())
-                .map((tag: string) => (tag.startsWith("#") ? tag : `#${tag}`))
+              .split(" ")
+              .filter((tag: string) => tag.trim())
+              .map((tag: string) => (tag.startsWith("#") ? tag : `#${tag}`))
             : [],
           media: {
             type: "image" as const,
@@ -534,7 +534,7 @@ function ModelDetailContent() {
     if (token) {
       try {
         const payload = JSON.parse(atob(token.split(".")[1]));
-      } catch (e) {}
+      } catch (e) { }
     } else {
     }
 
@@ -1121,10 +1121,10 @@ function ModelDetailContent() {
                 is_connected: data.connected,
                 instagram_info: data.instagram_username
                   ? {
-                      id: "",
-                      username: data.instagram_username,
-                      account_type: data.instagram_account_type || "",
-                    }
+                    id: "",
+                    username: data.instagram_username,
+                    account_type: data.instagram_account_type || "",
+                  }
                   : undefined,
               });
             } catch (error) {
@@ -1248,11 +1248,11 @@ function ModelDetailContent() {
               scheduledAt: board.reservation_at || "",
               hashtags: board.board_hash_tag
                 ? board.board_hash_tag
-                    .split(" ")
-                    .filter((tag: string) => tag.trim())
-                    .map((tag: string) =>
-                      tag.startsWith("#") ? tag : `#${tag}`,
-                    )
+                  .split(" ")
+                  .filter((tag: string) => tag.trim())
+                  .map((tag: string) =>
+                    tag.startsWith("#") ? tag : `#${tag}`,
+                  )
                 : [],
               media: {
                 type: "image" as const,
@@ -1414,7 +1414,7 @@ function ModelDetailContent() {
       editContent !== (selectedPost.content || "") ||
       editHashtags !== (selectedPost.hashtags?.join(" ") || "") ||
       editScheduledAt !==
-        (selectedPost.scheduledAt ? selectedPost.scheduledAt.slice(0, 16) : "");
+      (selectedPost.scheduledAt ? selectedPost.scheduledAt.slice(0, 16) : "");
 
     if (!hasChanges) {
       setIsEditing(false);
@@ -2814,11 +2814,10 @@ function ModelDetailContent() {
                     <div className="space-y-6">
                       {/* 연동된 계정 정보 */}
                       <div
-                        className={`flex items-start space-x-4 p-4 rounded-lg border-2 ${
-                          instagramStatus.token_expired
-                            ? "bg-yellow-50 border-yellow-200"
-                            : "bg-green-50 border-green-200"
-                        }`}
+                        className={`flex items-start space-x-4 p-4 rounded-lg border-2 ${instagramStatus.token_expired
+                          ? "bg-yellow-50 border-yellow-200"
+                          : "bg-green-50 border-green-200"
+                          }`}
                       >
                         <div className="w-12 h-12 bg-gradient-to-br from-pink-500 to-purple-600 rounded-full flex items-center justify-center shadow-sm">
                           {instagramStatus.instagram_info
@@ -2843,11 +2842,10 @@ function ModelDetailContent() {
                               <CheckCircle className="h-4 w-4 text-green-600" />
                             )}
                             <p
-                              className={`font-medium ${
-                                instagramStatus.token_expired
-                                  ? "text-yellow-900"
-                                  : "text-green-900"
-                              }`}
+                              className={`font-medium ${instagramStatus.token_expired
+                                ? "text-yellow-900"
+                                : "text-green-900"
+                                }`}
                             >
                               {instagramStatus.token_expired
                                 ? "Instagram 계정 재연동 필요"
@@ -2855,11 +2853,10 @@ function ModelDetailContent() {
                             </p>
                           </div>
                           <p
-                            className={`text-sm ${
-                              instagramStatus.token_expired
-                                ? "text-yellow-700"
-                                : "text-green-700"
-                            }`}
+                            className={`text-sm ${instagramStatus.token_expired
+                              ? "text-yellow-700"
+                              : "text-green-700"
+                              }`}
                           >
                             @
                             {instagramStatus.instagram_info?.username ||
@@ -2871,11 +2868,10 @@ function ModelDetailContent() {
                           </p>
                           {instagramStatus.connected_at && (
                             <p
-                              className={`text-xs mt-1 ${
-                                instagramStatus.token_expired
-                                  ? "text-yellow-600"
-                                  : "text-green-600"
-                              }`}
+                              className={`text-xs mt-1 ${instagramStatus.token_expired
+                                ? "text-yellow-600"
+                                : "text-green-600"
+                                }`}
                             >
                               연동일:{" "}
                               {new Date(
@@ -2925,48 +2921,48 @@ function ModelDetailContent() {
                             {(instagramStatus.instagram_info.name ||
                               instagramStatus.instagram_info.biography ||
                               instagramStatus.instagram_info.website) && (
-                              <div className="p-4 bg-white rounded-lg border border-gray-200 space-y-3">
-                                {instagramStatus.instagram_info.name && (
-                                  <div>
-                                    <p className="text-xs text-gray-500 mb-1">
-                                      이름
-                                    </p>
-                                    <p className="text-sm font-medium text-gray-900">
-                                      {instagramStatus.instagram_info.name}
-                                    </p>
-                                  </div>
-                                )}
+                                <div className="p-4 bg-white rounded-lg border border-gray-200 space-y-3">
+                                  {instagramStatus.instagram_info.name && (
+                                    <div>
+                                      <p className="text-xs text-gray-500 mb-1">
+                                        이름
+                                      </p>
+                                      <p className="text-sm font-medium text-gray-900">
+                                        {instagramStatus.instagram_info.name}
+                                      </p>
+                                    </div>
+                                  )}
 
-                                {instagramStatus.instagram_info.biography && (
-                                  <div>
-                                    <p className="text-xs text-gray-500 mb-1">
-                                      소개
-                                    </p>
-                                    <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
-                                      {instagramStatus.instagram_info.biography}
-                                    </p>
-                                  </div>
-                                )}
+                                  {instagramStatus.instagram_info.biography && (
+                                    <div>
+                                      <p className="text-xs text-gray-500 mb-1">
+                                        소개
+                                      </p>
+                                      <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
+                                        {instagramStatus.instagram_info.biography}
+                                      </p>
+                                    </div>
+                                  )}
 
-                                {instagramStatus.instagram_info.website && (
-                                  <div>
-                                    <p className="text-xs text-gray-500 mb-1">
-                                      웹사이트
-                                    </p>
-                                    <a
-                                      href={
-                                        instagramStatus.instagram_info.website
-                                      }
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="text-sm text-blue-600 hover:text-blue-800 underline"
-                                    >
-                                      {instagramStatus.instagram_info.website}
-                                    </a>
-                                  </div>
-                                )}
-                              </div>
-                            )}
+                                  {instagramStatus.instagram_info.website && (
+                                    <div>
+                                      <p className="text-xs text-gray-500 mb-1">
+                                        웹사이트
+                                      </p>
+                                      <a
+                                        href={
+                                          instagramStatus.instagram_info.website
+                                        }
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-sm text-blue-600 hover:text-blue-800 underline"
+                                      >
+                                        {instagramStatus.instagram_info.website}
+                                      </a>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
                           </div>
                         )}
 
@@ -3556,25 +3552,25 @@ function ModelDetailContent() {
               <div className="flex items-center space-x-2">
                 {(selectedPost?.status === "draft" ||
                   selectedPost?.status === "scheduled") && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setIsEditing(!isEditing)}
-                    className="flex items-center space-x-1"
-                  >
-                    {isEditing ? (
-                      <>
-                        <Eye className="h-4 w-4" />
-                        <span>보기 모드</span>
-                      </>
-                    ) : (
-                      <>
-                        <Edit className="h-4 w-4" />
-                        <span>수정 모드</span>
-                      </>
-                    )}
-                  </Button>
-                )}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setIsEditing(!isEditing)}
+                      className="flex items-center space-x-1"
+                    >
+                      {isEditing ? (
+                        <>
+                          <Eye className="h-4 w-4" />
+                          <span>보기 모드</span>
+                        </>
+                      ) : (
+                        <>
+                          <Edit className="h-4 w-4" />
+                          <span>수정 모드</span>
+                        </>
+                      )}
+                    </Button>
+                  )}
                 {isEditing && (
                   <Button
                     onClick={handleEditSave}
@@ -3629,8 +3625,8 @@ function ModelDetailContent() {
                     <div className="flex items-center space-x-2 text-sm text-gray-500 mt-1">
                       <Calendar className="h-4 w-4" />
                       {selectedPost.status === "scheduled" &&
-                      selectedPost.scheduledAt &&
-                      selectedPost.scheduledAt.trim() !== "" ? (
+                        selectedPost.scheduledAt &&
+                        selectedPost.scheduledAt.trim() !== "" ? (
                         <span>
                           예약 발행:{" "}
                           {formatDate(selectedPost.scheduledAt || "")}
@@ -3665,8 +3661,8 @@ function ModelDetailContent() {
                     게시글 내용
                   </h4>
                   {isEditing &&
-                  (selectedPost?.status === "draft" ||
-                    selectedPost?.status === "scheduled") ? (
+                    (selectedPost?.status === "draft" ||
+                      selectedPost?.status === "scheduled") ? (
                     <div className="space-y-4">
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -4044,6 +4040,7 @@ const MCPServerSelector: FC<{ influencerId: string; model: any }> = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
+  const [originalSelected, setOriginalSelected] = useState<string[]>([]);
 
   // MCP 서버 추가 관련 상태
   const [addName, setAddName] = useState(""); // HTTP 방식에서만 사용
@@ -4058,32 +4055,48 @@ const MCPServerSelector: FC<{ influencerId: string; model: any }> = ({
   const [addSuccess, setAddSuccess] = useState(false);
   // MCP 서버 추가 폼 접힘 상태
   const [addOpen, setAddOpen] = useState(false);
+  // MCP 서버 제거 관련 상태
+  const [removingServer, setRemovingServer] = useState<string | null>(null);
+  const [serverToRemove, setServerToRemove] = useState<string | null>(null);
 
-  useEffect(() => {
+  const loadServers = async () => {
     setLoading(true);
     setError(null);
-    MCPService.getServers()
-      .then((res) => {
-        const serverArr = Object.values(res.servers) || [];
-        setServers(serverArr);
-        // 연결된 서버 체크박스 자동 선택
-        if (model && model.name) {
-          const checked = (serverArr as any[])
-            .filter(
-              (server) =>
-                Array.isArray((server as any).connected_influencers) &&
-                (server as any).connected_influencers.includes(model.name),
-            )
-            .map((server) => (server as any).mcp_name);
-          setSelected(checked);
-        }
-        setLoading(false);
-      })
-      .catch((e) => {
-        setError(e.message || "서버 목록을 불러오지 못했습니다.");
-        setLoading(false);
-      });
-  }, [addSuccess, model]); // model이 바뀌거나 서버 추가 성공 시 목록 새로고침
+    try {
+      const res = await MCPService.getServers();
+      const serverArr = Object.values(res.servers) || [];
+      setServers(serverArr);
+      // 연결된 서버 체크박스 자동 선택
+      if (model && model.name) {
+        const checked = (serverArr as any[])
+          .filter(
+            (server) =>
+              Array.isArray((server as any).connected_influencers) &&
+              (server as any).connected_influencers.includes(model.name),
+          )
+          .map((server) => (server as any).mcp_name);
+        setSelected(checked);
+        setOriginalSelected(checked); // 기존 설정 저장
+      }
+      setLoading(false);
+    } catch (e: any) {
+      setError(e.message || "서버 목록을 불러오지 못했습니다.");
+      setLoading(false);
+    }
+  };
+
+  // 초기 로드
+  useEffect(() => {
+    loadServers();
+  }, []); // 컴포넌트 마운트 시 한 번만 실행
+
+  // 서버 추가/제거 후 새로고침
+  useEffect(() => {
+    if (addSuccess) {
+      loadServers();
+      setAddSuccess(false); // 새로고침 후 플래그 리셋
+    }
+  }, [addSuccess]);
 
   const handleToggle = (name: string) => {
     setSelected((prev) =>
@@ -4195,21 +4208,56 @@ const MCPServerSelector: FC<{ influencerId: string; model: any }> = ({
   };
 
   const handleSaveSelection = async () => {
-    if (selected.length === 0) return;
     try {
       await apiClient.post("/api/v1/mcp/chat/set-selected-servers", {
         influencer_id: influencerId,
         selected_servers: selected,
       });
+      setOriginalSelected([...selected]); // 저장 후 기존 설정 업데이트
       toast({
         title: "MCP 서버 설정 저장",
         description: "MCP 서버 설정이 저장되었습니다.",
       });
+      // 설정 저장 후 MCP 목록 새로고침
+      setAddSuccess(true); // Triggers useEffect to reload servers
     } catch (error) {
       toast({
         title: "MCP 서버 설정 저장 실패",
         description: "설정 저장에 실패했습니다.",
       });
+    }
+  };
+
+  const handleRemoveServer = async (serverName: string) => {
+    if (!serverName) return;
+
+    setRemovingServer(serverName);
+    try {
+      const result = await MCPService.removeServer(serverName);
+      if (result.success) {
+        toast({
+          title: "MCP 서버 제거 성공",
+          description: result.message || "MCP 서버가 성공적으로 제거되었습니다.",
+        });
+        // 서버 목록 새로고침
+        setAddSuccess(true);
+        // 선택된 서버에서도 제거
+        setSelected(prev => prev.filter(name => name !== serverName));
+      } else {
+        toast({
+          title: "MCP 서버 제거 실패",
+          description: result.message || "서버 제거에 실패했습니다.",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      toast({
+        title: "MCP 서버 제거 실패",
+        description: "서버 제거 중 오류가 발생했습니다.",
+        variant: "destructive",
+      });
+    } finally {
+      setRemovingServer(null);
     }
   };
 
@@ -4235,7 +4283,6 @@ const MCPServerSelector: FC<{ influencerId: string; model: any }> = ({
         </button>
         {addOpen && (
           <div className="p-4 border rounded-lg bg-gray-50 mt-0">
-            <div className="font-semibold mb-2">외부 MCP 서버 추가</div>
             <div className="flex gap-4 mb-2">
               <label className="flex items-center gap-1">
                 <input
@@ -4270,13 +4317,26 @@ const MCPServerSelector: FC<{ influencerId: string; model: any }> = ({
                 />
               </>
             ) : (
-              <textarea
-                placeholder={`STDIO MCP 서버 설정 JSON 전체를 입력하세요. 예:\n{\n  \"frankfurtermcp\": {\n    \"command\": \"npx\",\n    \"args\": [\"-y\", \"@smithery/cli@latest\", \"run\", \"exa\", \"--key\", \"...\", \"--profile\", \"...\"]\n  }\n}`}
-                value={addStdioJson}
-                onChange={(e) => setAddStdioJson(e.target.value)}
-                rows={7}
-                className="w-full border rounded p-2 font-mono text-xs mb-2"
-              ></textarea>
+              <>
+                <div className="mb-2 p-2 bg-blue-50 border border-blue-200 rounded text-xs text-blue-800">
+                  <strong>💡 OS별 명령어 경로 안내:</strong>
+                  <br />
+                  • <strong>Windows:</strong> npx.cmd, node.exe 경로 자동 감지
+                  <br />
+                  • <strong>Mac/Linux:</strong> PATH에서 npx, node 자동 검색
+                  <br />
+                  • <strong>NVM 사용 시:</strong> ~/.nvm/versions/node/*/bin/ 경로 자동 감지
+                  <br />
+                  • <strong>설정 형태:</strong> cmd /c 형태와 직접 npx 형태 모두 지원
+                </div>
+                <textarea
+                  placeholder={`STDIO MCP 서버 설정 JSON 전체를 입력하세요. 예:\n{\n  \"frankfurtermcp\": {\n    \"command\": \"npx\",\n    \"args\": [\"-y\", \"@smithery/cli@latest\", \"run\", \"exa\", \"--key\", \"...\", \"--profile\", \"...\"]\n  }\n}\n\n또는 Windows cmd 형태:\n{\n  \"frankfurtermcp\": {\n    \"command\": \"cmd\",\n    \"args\": [\"/c\", \"npx\", \"-y\", \"@smithery/cli@latest\", \"run\", \"exa\", \"--key\", \"...\", \"--profile\", \"...\"]\n  }\n}`}
+                  value={addStdioJson}
+                  onChange={(e) => setAddStdioJson(e.target.value)}
+                  rows={10}
+                  className="w-full border rounded p-2 font-mono text-xs mb-2"
+                ></textarea>
+              </>
             )}
             <Input
               placeholder="설명(선택)"
@@ -4332,17 +4392,73 @@ const MCPServerSelector: FC<{ influencerId: string; model: any }> = ({
               {!server.running && (
                 <span className="ml-2 text-xs text-red-400">(중지됨)</span>
               )}
+              {/* 제거 버튼 */}
+              {server.can_delete && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setServerToRemove(name);
+                  }}
+                  disabled={removingServer === name}
+                  className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                >
+                  {removingServer === name ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Trash2 className="h-4 w-4" />
+                  )}
+                </Button>
+              )}
             </label>
           );
         })}
       </div>
       <button
-        className={`w-full py-2 rounded bg-gray-800 text-white font-semibold transition-all ${selected.length === 0 ? "opacity-50 cursor-not-allowed" : "hover:bg-gray-900"}`}
+        className={`w-full py-2 rounded bg-gray-800 text-white font-semibold transition-all ${JSON.stringify(selected.sort()) === JSON.stringify(originalSelected.sort())
+          ? "opacity-50 cursor-not-allowed"
+          : "hover:bg-gray-900"
+          }`}
         onClick={handleSaveSelection}
-        disabled={selected.length === 0}
+        disabled={JSON.stringify(selected.sort()) === JSON.stringify(originalSelected.sort())}
       >
         설정 저장
       </button>
+
+      {/* MCP 서버 제거 확인 다이얼로그 */}
+      <AlertDialog open={!!serverToRemove} onOpenChange={(open) => !open && setServerToRemove(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>MCP 서버 제거 확인</AlertDialogTitle>
+            <AlertDialogDescription>
+              <span className="block mb-2">
+                <strong>"{serverToRemove}"</strong> 서버를 제거하시겠습니까?
+              </span>
+              <span className="block text-sm text-gray-600">
+                이 작업은 되돌릴 수 없으며, 서버와 관련된 모든 설정이 영구적으로 삭제됩니다.
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setServerToRemove(null)}>
+              취소
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (serverToRemove) {
+                  handleRemoveServer(serverToRemove);
+                  setServerToRemove(null);
+                }
+              }}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              제거
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
