@@ -80,8 +80,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
 
     try {
-      // JWT 토큰에서 직접 사용자 정보 가져오기 (실제 팀 정보 포함)
-      const user = await getUserFromToken(token)
+      // JWT 토큰에서 직접 사용자 정보 가져오기
+      const user = getUserFromToken(token)
       if (user) {
         setAuthState({
           user,
@@ -141,8 +141,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     try {
       tokenUtils.setToken(token)
       
-      // JWT 토큰에서 직접 사용자 정보 가져오기 (실제 팀 정보 포함)
-      const user = await getUserFromToken(token)
+      // JWT 토큰에서 직접 사용자 정보 가져오기
+      const user = getUserFromToken(token)
       if (user) {
         setAuthState({
           user,
@@ -175,11 +175,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     try {
       tokenUtils.setToken(token)
       
-      // JWT 토큰에서 실제 팀 정보를 가져와서 사용자 정보 업데이트
-      const userWithRealTeams = await getUserFromToken(token)
+      // JWT 토큰에서 팀 정보를 가져와서 사용자 정보 업데이트
+      const userWithTeams = getUserFromToken(token)
       
       setAuthState({
-        user: userWithRealTeams || user, // 실제 팀 정보가 있으면 사용, 없으면 원본 사용
+        user: userWithTeams || user, // 팀 정보가 있으면 사용, 없으면 원본 사용
         token,
         isAuthenticated: true,
         isLoading: false

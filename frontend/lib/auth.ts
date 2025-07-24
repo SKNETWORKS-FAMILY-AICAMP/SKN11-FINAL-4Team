@@ -63,34 +63,20 @@ export const parseJWT = (token: string): JWTPayload => {
   }
 }
 
-export const getUserFromToken = async (token: string): Promise<User | null> => {
+export const getUserFromToken = (token: string): User | null => {
   try {
     const payload = parseJWT(token)
     
-    console.log('🔍 JWT Payload:', payload) // 디버깅용 로그
-    
-    // JWT 토큰에 teams 정보가 있으면 실제 팀 정보를 가져오기
-    let teams: any[] = []
-    if (payload.teams && payload.teams.length > 0) {
-      try {
-        const { BackendAuthService } = await import('./backend-auth')
-        const response = await BackendAuthService.getTeamsByNames(payload.teams)
-        teams = response.teams
-        console.log('🏢 실제 팀 정보 조회 완료:', teams)
-      } catch (error) {
-        console.warn('팀 정보 조회 실패, JWT 정보 사용:', error)
-        // 실패시 JWT의 팀 이름을 그대로 사용
-        teams = payload.teams.map((teamName: string) => ({
-          group_id: 0, // 실제 ID를 알 수 없으므로 0 사용
-          group_name: teamName,
-          group_description: undefined
-        }))
-      }
-    }
+    // JWT 토큰의 teams 정보를 User.teams 형태로 변환
+    const teams = payload.teams ? payload.teams.map((teamName: string, index: number) => ({
+      group_id: index + 1, // 임시 ID (실제 ID는 나중에 필요시 조회)
+      group_name: teamName,
+      group_description: undefined
+    })) : []
     
     const user = {
       user_id: payload.sub,
-      provider_id: payload.sub, // JWT에서는 sub가 provider_id 역할을 함
+      provider_id: payload.sub,
       provider: payload.provider,
       user_name: payload.name || '',
       email: payload.email || '',
@@ -99,8 +85,6 @@ export const getUserFromToken = async (token: string): Promise<User | null> => {
       teams: teams
     }
     
-    console.log('👤 최종 사용자 정보:', user) // 디버깅용 로그
-    
     return user
   } catch (error) {
     console.error('Error parsing JWT token:', error)
@@ -108,6 +92,25 @@ export const getUserFromToken = async (token: string): Promise<User | null> => {
   }
 }
 
+// 실제 팀 ID가 필요한 경우에만 호출하는 함수
+export const getRealTeamIds = async (teamNames: string[]): Promise<{[key: string]: number}> => {
+  try {
+    if (teamNames.length === 0) return {}
+    
+    const { BackendAuthService } = await import('./backend-auth')
+    const response = await BackendAuthService.getTeamsByNames(teamNames)
+    
+    const teamIdMap: {[key: string]: number} = {}
+    response.teams.forEach(team => {
+      teamIdMap[team.group_name] = team.group_id
+    })
+    
+    return teamIdMap
+  } catch (error) {
+    console.warn('실제 팀 ID 조회 실패:', error)
+    return {}
+  }
+}
 
 
 export const hasPermission = (
@@ -123,6 +126,21 @@ export const hasPermission = (
 export const hasGroup = (user: User | null, groupName: string): boolean => {
   if (!user || !user.teams) return false
   return user.teams.some(team => team.group_id.toString() === groupName || team.group_name === groupName)
+}
+
+// 실제 팀 ID로 권한 체크가 필요한 경우 사용
+export const hasGroupWithRealId = async (user: User | null, groupId: number): Promise<boolean> => {
+  if (!user || !user.teams) return false
+  
+  // 이미 실제 ID가 있는지 확인
+  const hasRealId = user.teams.some(team => team.group_id === groupId)
+  if (hasRealId) return true
+  
+  // 실제 ID가 없으면 API로 조회
+  const teamNames = user.teams.map(team => team.group_name)
+  const teamIdMap = await getRealTeamIds(teamNames)
+  
+  return Object.values(teamIdMap).includes(groupId)
 }
 
 export const hasAnyGroup = (user: User | null, groupNames: string[]): boolean => {
