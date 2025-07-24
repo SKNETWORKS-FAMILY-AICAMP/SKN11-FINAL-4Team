@@ -35,7 +35,6 @@ interface FormDataType {
   selectedPresetId: string;
   huggingFaceToken: string;
   systemPrompt: string;
-  uploadedImageUrl?: string; // S3에 업로드된 이미지 URL
 }
 
 export default function CreateModelPage() {
@@ -73,7 +72,6 @@ export default function CreateModelPage() {
   const [generatedTones, setGeneratedTones] = useState<ConversationExample[]>([])
   const [huggingFaceTokens, setHuggingFaceTokens] = useState<any[]>([])
   const [loadingTokens, setLoadingTokens] = useState(false)
-  const [uploadingImage, setUploadingImage] = useState(false)
   const [mbtiList, setMbtiList] = useState<ModelMBTI[]>([])
   const [loadingMbti, setLoadingMbti] = useState(false)
 
@@ -167,7 +165,6 @@ export default function CreateModelPage() {
           return {
             ...prev,
             [field]: value,
-            uploadedImageUrl: undefined,
           }
         }
       }
@@ -200,35 +197,8 @@ export default function CreateModelPage() {
       if (type === 'imageSamples') {
         const urls = fileArray.map(file => URL.createObjectURL(file))
         setImagePreviewUrls(urls)
-        
-        // 첫 번째 이미지를 S3에 즉시 업로드
-        if (fileArray.length > 0) {
-          setUploadingImage(true);
-          try {
-            const file = fileArray[0];
-            const formData = new FormData();
-            formData.append('file', file);
-            
-            // 인플루언서 이미지 업로드 API 호출
-            const uploadResponse = await fetch('/api/v1/influencers/upload-image', {
-              method: 'POST',
-              body: formData,
-            });
-
-            if (uploadResponse.ok) {
-              const uploadResult = await uploadResponse.json();
-              console.log('인플루언서 이미지 S3 업로드 성공:', uploadResult.file_url);
-              // 업로드된 S3 URL을 상태에 저장 (나중에 인플루언서 생성 시 사용)
-              setFormData(prev => ({ ...prev, uploadedImageUrl: uploadResult.file_url }));
-            } else {
-              console.warn('인플루언서 이미지 S3 업로드 실패');
-            }
-          } catch (error) {
-            console.warn('인플루언서 이미지 S3 업로드 중 오류:', error);
-          } finally {
-            setUploadingImage(false);
-          }
-        }
+        // 이미지 파일들을 상태에 저장 (인플루언서 생성 시 함께 업로드)
+        console.log('이미지 파일 선택됨:', fileArray.length, '개');
       }
     }
   }
@@ -364,6 +334,7 @@ export default function CreateModelPage() {
           createInfluencerData.style_preset_id = formData.selectedPresetId;
           createInfluencerData.personality = selectedPreset.influencer_personality;
           createInfluencerData.tone = selectedPreset.influencer_speech;
+          createInfluencerData.system_prompt = formData.systemPrompt || selectedPreset.system_prompt; // 프리셋의 시스템 프롬프트 추가
           createInfluencerData.model_type = selectedPreset.influencer_type === 1 ? "character" : selectedPreset.influencer_type === 2 ? "human" : "objects";
           createInfluencerData.mbti = selectedPreset.mbti_name;
           createInfluencerData.gender = selectedPreset.influencer_gender === 0 ? "male" : selectedPreset.influencer_gender === 1 ? "female" : "other";
@@ -389,16 +360,22 @@ export default function CreateModelPage() {
         }
       }
 
-      // 이미지 URL 설정 (이미 S3에 업로드된 경우 사용)
-      let imageUrl = formData.uploadedImageUrl;
-
-      // 이미지 URL을 인플루언서 생성 데이터에 추가
-      if (imageUrl) {
-        createInfluencerData.image_url = imageUrl;
+      // 이미지가 있는 경우 FormData로 전송
+      if (files.imageSamples && files.imageSamples.length > 0) {
+        const formData = new FormData();
+        
+        // 인플루언서 데이터를 JSON 문자열로 변환하여 추가
+        formData.append('influencer_data', JSON.stringify(createInfluencerData));
+        
+        // 첫 번째 이미지 파일 추가
+        formData.append('image', files.imageSamples[0]);
+        
+        // ModelService의 createInfluencerWithImage 메서드 사용
+        await ModelService.createInfluencerWithImage(formData);
+      } else {
+        // 이미지가 없는 경우 기존 방식으로 전송
+        await ModelService.createInfluencer(createInfluencerData);
       }
-
-      // 실제 인플루언서 생성 API 호출
-      await ModelService.createInfluencer(createInfluencerData)
 
       // 성공 알림 표시
       let successMessage = `🎉 AI 인플루언서 "${formData.name}"가 생성되었습니다!\n\n`
@@ -1077,18 +1054,6 @@ export default function CreateModelPage() {
                             <div className="flex items-center justify-between mb-4">
                               <Label className="text-base font-medium">프로필 이미지</Label>
                               <div className="flex gap-2">
-                                {uploadingImage && (
-                                  <div className="flex items-center gap-2 text-sm text-blue-600">
-                                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
-                                    업로드 중...
-                                  </div>
-                                )}
-                                {formData.uploadedImageUrl && (
-                                  <div className="flex items-center gap-2 text-sm text-green-600">
-                                    <div className="w-2 h-2 bg-green-600 rounded-full"></div>
-                                    업로드 완료
-                                  </div>
-                                )}
                                 <input
                                   type="file"
                                   multiple
@@ -1134,10 +1099,8 @@ export default function CreateModelPage() {
                                     // 해당 이미지 제거
                                     const newFiles = files.imageSamples?.filter((_, i) => i !== index) || []
                                     const newUrls = imagePreviewUrls.filter((_, i) => i !== index)
-                                    setFiles(prev => ({ ...prev, imageSamples: newFiles }))
+                                    setFiles(prev => ({ ...prev, imageSamples: newFiles.length > 0 ? newFiles : null }))
                                     setImagePreviewUrls(newUrls)
-                                    // 업로드된 이미지 URL도 제거
-                                    setFormData(prev => ({ ...prev, uploadedImageUrl: undefined }))
                                     // 기존 URL 해제
                                     URL.revokeObjectURL(url)
                                   }}

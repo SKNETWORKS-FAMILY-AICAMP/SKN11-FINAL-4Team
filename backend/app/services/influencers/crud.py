@@ -108,6 +108,7 @@ def create_influencer(db: Session, user_id: str, influencer_data: AIInfluencerCr
                 influencer_personality=influencer_data.personality,
                 influencer_speech=influencer_data.tone,
                 influencer_description=influencer_data.influencer_description or f"{influencer_data.influencer_name}의 AI 인플루언서",
+                system_prompt=influencer_data.system_prompt,  # 시스템 프롬프트 추가
             )
 
             style_preset = create_style_preset(db, preset_data)
@@ -156,8 +157,21 @@ def create_influencer(db: Session, user_id: str, influencer_data: AIInfluencerCr
             logger.warning(f"⚠️ 지정된 허깅페이스 토큰을 찾을 수 없음: {hf_manage_id}")
             hf_manage_id = None
 
-    # 말투 정보 처리
+    # 시스템 프롬프트 처리
     final_system_prompt = influencer_data.system_prompt
+    
+    # 프리셋이 있고 시스템 프롬프트가 없다면 프리셋에서 가져오기
+    if not final_system_prompt and style_preset_id:
+        style_preset = (
+            db.query(StylePreset)
+            .filter(StylePreset.style_preset_id == style_preset_id)
+            .first()
+        )
+        if style_preset and style_preset.system_prompt:
+            final_system_prompt = style_preset.system_prompt
+            logger.info(f"📝 프리셋에서 시스템 프롬프트 가져옴: {style_preset_id}")
+    
+    # 말투 정보 처리 (기존 로직 유지)
     if influencer_data.tone_type and influencer_data.tone_data:
         logger.info(f"📝 말투 정보 처리: type={influencer_data.tone_type}")
         final_system_prompt = influencer_data.tone_data
