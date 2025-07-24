@@ -1,5 +1,11 @@
 import os
+# vLLM 설정
 os.environ["VLLM_USE_V1"] = "0" # vLLM v1 어텐션 백엔드 비활성화
+os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"  # 멀티프로세스 방식 변경
+
+# GPU 설정은 환경 변수로 제어 (CUDA_VISIBLE_DEVICES가 없을 때만 기본값 설정)
+if "CUDA_VISIBLE_DEVICES" not in os.environ:
+    os.environ["CUDA_VISIBLE_DEVICES"] = os.getenv("VLLM_GPU_ID", "0")
 import asyncio
 import logging
 import time
@@ -266,6 +272,11 @@ async def restart_engine():
     global engine, tokenizer
     logger.info("🔄 엔진 재시작 시작...")
     
+    # GPU 설정 유지 (이미 설정된 경우 유지, 아니면 기본값 사용)
+    if 'CUDA_VISIBLE_DEVICES' not in os.environ:
+        os.environ['CUDA_VISIBLE_DEVICES'] = os.getenv('VLLM_GPU_ID', '0')
+    logger.info(f"🖥️ CUDA_VISIBLE_DEVICES={os.environ['CUDA_VISIBLE_DEVICES']} 설정 완료")
+    
     # 기존 엔진 종료
     if engine is not None:
         try:
@@ -349,7 +360,8 @@ async def initialize_vllm_engine():
             engine_args = AsyncEngineArgs(
                 model="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct",
                 max_model_len=2048,
-                tensor_parallel_size=tensor_parallel_size,
+                tensor_parallel_size=1,  # 단일 GPU 사용 명시
+                pipeline_parallel_size=1,  # 파이프라인 병렬화 비활성화
                 trust_remote_code=True,
                 gpu_memory_utilization=gpu_memory_fraction,
                 enable_lora=True,
@@ -361,6 +373,8 @@ async def initialize_vllm_engine():
                 max_num_batched_tokens=8192,
                 disable_log_requests=True,
                 enforce_eager=True,  # CUDA 그래프 비활성화로 디바이스 문제 방지
+                device="cuda:0",  # 명시적으로 cuda:0 디바이스 지정
+                disable_custom_all_reduce=True,  # 다중 GPU 통신 비활성화
             )
             
             engine = AsyncLLMEngine.from_engine_args(engine_args)
@@ -435,6 +449,13 @@ async def load_lora_adapter(request: LoRALoadRequest):
             raise Exception(f"베이스 모델 정보 확인 실패: {str(e)}")
         
         logger.info("📦 어댑터 정보 객체 생성 중...")
+        
+        # CUDA 디바이스 확인 및 설정
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.set_device(0)
+            logger.info(f"🖥️ LoRA 어댑터 로드 시 CUDA 디바이스 0 사용 설정")
+        
         adapter_info = {
             "model_id": request.model_id,
             "hf_repo_name": request.hf_repo_name,

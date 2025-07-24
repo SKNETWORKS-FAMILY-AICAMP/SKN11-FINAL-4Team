@@ -8,6 +8,7 @@ import logging
 import json
 import asyncio
 import torch
+import os
 
 from app.models import GenerateRequest, GenerateResponse
 from app import core
@@ -109,23 +110,24 @@ async def generate_response_endpoint(request: GenerateRequest):
         except RuntimeError as e:
             if "Expected all tensors to be on the same device" in str(e):
                 logger.error(f"❌ CUDA 디바이스 불일치 오류: {str(e)}")
+                # 디바이스 정보 로깅
+                if torch.cuda.is_available():
+                    logger.error(f"현재 CUDA 디바이스: {torch.cuda.current_device()}")
+                    logger.error(f"사용 가능한 디바이스 수: {torch.cuda.device_count()}")
+                    logger.error(f"CUDA_VISIBLE_DEVICES: {os.environ.get('CUDA_VISIBLE_DEVICES', 'Not set')}")
+                
                 # 디바이스 동기화 시도
                 try:
-                    if torch.cuda.is_available():
-                        # 모든 텐서를 동일한 디바이스로 이동
-                        device = torch.cuda.current_device()
-                        logger.info(f"🔧 현재 CUDA 디바이스: {device}")
-                        
-                        # 엔진 재시작으로 디바이스 문제 해결
-                        await core.restart_engine()
-                        # 재시도
-                        async for output in core.engine.generate(
-                            formatted_prompt,
-                            sampling_params,
-                            request_id=request_id,
-                            lora_request=lora_request
-                        ):
-                            results.append(output)
+                    # 엔진 재시작으로 디바이스 문제 해결
+                    await core.restart_engine()
+                    # 재시도
+                    async for output in core.engine.generate(
+                        formatted_prompt,
+                        sampling_params,
+                        request_id=request_id,
+                        lora_request=lora_request
+                    ):
+                        results.append(output)
                 except Exception as device_error:
                     logger.error(f"❌ 디바이스 동기화 실패: {str(device_error)}")
                     raise HTTPException(
@@ -294,6 +296,10 @@ async def generate_response_stream_endpoint(request: GenerateRequest):
                 except RuntimeError as e:
                     if "Expected all tensors to be on the same device" in str(e):
                         logger.error(f"❌ 스트리밍 중 CUDA 디바이스 오류: {str(e)}")
+                        # 디바이스 정보 로그
+                        if torch.cuda.is_available():
+                            logger.error(f"현재 CUDA 디바이스: {torch.cuda.current_device()}")
+                            logger.error(f"사용 가능한 디바이스 수: {torch.cuda.device_count()}")
                         yield f"data: {json.dumps({'error': 'GPU 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.'})}\n\n"
                         
                         # 비동기로 엔진 재시작 예약
