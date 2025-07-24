@@ -281,7 +281,7 @@ export default function CreateModelPage() {
       }
     } else {
       // 직접 입력 모드 검증
-      if (!formData.modelType) {
+      if (!formData.modelType && !formData.imageMethod) {
         alert("모델 유형을 선택해주세요.");
         return;
       }
