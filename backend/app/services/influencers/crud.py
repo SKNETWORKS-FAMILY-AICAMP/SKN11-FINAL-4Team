@@ -289,12 +289,31 @@ def delete_influencer(db: Session, user_id: str, influencer_id: str):
     """AI 인플루언서 삭제"""
     influencer = get_influencer_by_id(db, user_id, influencer_id)
 
-    # 연관된 BatchKey 데이터 삭제
-    from app.models.influencer import BatchKey
+    # 연관된 데이터 삭제 순서가 중요함 (외래키 제약 때문에)
+    from app.models.influencer import BatchKey, InfluencerAPI
 
+    # 1. 먼저 API 호출 집계 데이터 삭제 (InfluencerAPI를 참조하는 테이블)
+    # API ID들을 먼저 조회
+    api_ids = db.query(InfluencerAPI.api_id).filter(
+        InfluencerAPI.influencer_id == influencer_id
+    ).subquery()
+    
+    # API_CALL_AGGREGATION 데이터 삭제
+    from app.models.influencer import APICallAggregation
+    db.query(APICallAggregation).filter(
+        APICallAggregation.api_id.in_(api_ids)
+    ).delete(synchronize_session=False)
+    logger.info(f"🗑️ 인플루언서 {influencer_id}의 API 호출 집계 데이터 삭제 완료")
+
+    # 2. InfluencerAPI 데이터 삭제
+    db.query(InfluencerAPI).filter(InfluencerAPI.influencer_id == influencer_id).delete()
+    logger.info(f"🗑️ 인플루언서 {influencer_id}의 API 키 데이터 삭제 완료")
+
+    # 3. BatchKey 데이터 삭제
     db.query(BatchKey).filter(BatchKey.influencer_id == influencer_id).delete()
     logger.info(f"🗑️ 인플루언서 {influencer_id}와 연관된 BatchKey 데이터 삭제 완료")
 
+    # 4. 마지막으로 인플루언서 삭제
     db.delete(influencer)
     db.commit()
 

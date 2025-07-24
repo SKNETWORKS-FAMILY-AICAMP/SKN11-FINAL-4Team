@@ -261,6 +261,33 @@ async def finetuning_worker():
             
             finetuning_queue.task_done()
 
+async def restart_engine():
+    """엔진을 재시작합니다."""
+    global engine, tokenizer
+    logger.info("🔄 엔진 재시작 시작...")
+    
+    # 기존 엔진 종료
+    if engine is not None:
+        try:
+            logger.info("⏹️ 기존 엔진 종료 중...")
+            # 엔진 종료 로직
+            engine = None
+            
+            # GPU 메모리 정리
+            import gc
+            import torch
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+            logger.info("✅ 기존 엔진 종료 및 메모리 정리 완료")
+        except Exception as e:
+            logger.error(f"❌ 엔진 종료 중 오류: {e}")
+    
+    # 새 엔진 초기화
+    await initialize_vllm_engine()
+    logger.info("✅ 엔진 재시작 완료")
+
 async def initialize_vllm_engine():
     global engine, tokenizer
     logger.info("🚀 vLLM LoRA 엔진 초기화 중...")
@@ -287,6 +314,14 @@ async def initialize_vllm_engine():
             # GPU 메모리 fraction을 고정값으로 설정
             gpu_memory_fraction = 0.5
             
+            # CUDA 디바이스 설정 확인
+            import torch
+            if torch.cuda.is_available():
+                cuda_device = torch.cuda.current_device()
+                logger.info(f"🖥️ 현재 CUDA 디바이스: {cuda_device}")
+                # 모든 CUDA 디바이스에 대해 동일한 설정 적용
+                torch.cuda.set_device(cuda_device)
+            
             engine_args = AsyncEngineArgs(
                 model="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct",
                 max_model_len=2048,
@@ -301,6 +336,7 @@ async def initialize_vllm_engine():
                 max_num_seqs=256,
                 max_num_batched_tokens=8192,
                 disable_log_requests=True,
+                enforce_eager=True,  # CUDA 그래프 비활성화로 디바이스 문제 방지
             )
             
             engine = AsyncLLMEngine.from_engine_args(engine_args)
