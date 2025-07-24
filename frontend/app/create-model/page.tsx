@@ -8,7 +8,7 @@ import { Navigation } from "@/components/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { ModelService, StylePreset, ToneGenerationRequest, ConversationExample } from "@/lib/services/model.service"
+import { ModelService, StylePreset, ToneGenerationRequest, ConversationExample, ModelMBTI } from "@/lib/services/model.service"
 import { useAuth } from "@/hooks/use-auth"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -73,6 +73,8 @@ export default function CreateModelPage() {
   const [huggingFaceTokens, setHuggingFaceTokens] = useState<any[]>([])
   const [loadingTokens, setLoadingTokens] = useState(false)
   const [uploadingImage, setUploadingImage] = useState(false)
+  const [mbtiList, setMbtiList] = useState<ModelMBTI[]>([])
+  const [loadingMbti, setLoadingMbti] = useState(false)
 
   useEffect(() => {
     // 실제 API에서 프리셋 데이터 가져오기
@@ -100,6 +102,11 @@ export default function CreateModelPage() {
       try {
         const tokens = await ModelService.getHuggingFaceTokens(user.teams[0].group_id);
         setHuggingFaceTokens(tokens);
+        
+        // 토큰이 있고 기본값이 설정되지 않은 경우 첫 번째 토큰을 기본값으로 설정
+        if (tokens.length > 0 && !formData.huggingFaceToken) {
+          setFormData(prev => ({ ...prev, huggingFaceToken: tokens[0].hf_manage_id }));
+        }
       } catch (error) {
         // 허깅페이스 토큰 데이터 로드 실패 처리
       } finally {
@@ -107,8 +114,22 @@ export default function CreateModelPage() {
       }
     };
 
+    // MBTI 목록 가져오기
+    const fetchMbtiList = async () => {
+      setLoadingMbti(true);
+      try {
+        const mbtiData = await ModelService.getMBTIList();
+        setMbtiList(mbtiData);
+      } catch (error) {
+        // MBTI 데이터 로드 실패 처리
+      } finally {
+        setLoadingMbti(false);
+      }
+    };
+
     fetchStylePresets();
     fetchHuggingFaceTokens();
+    fetchMbtiList();
   }, [user]) // user가 변경될 때마다 토큰 다시 가져오기
 
   // 성격(personality)이 바뀌면 추천 말투 숨김
@@ -247,7 +268,7 @@ export default function CreateModelPage() {
           tone: preset.influencer_speech || "",
           customTones: [preset.influencer_speech || ""],
           mbti: preset.mbti_id ? String(preset.mbti_id) : "none",
-          gender: preset.influencer_gender === 0 ? "male" : preset.influencer_gender === 1 ? "female" : "other",
+          gender: String(preset.influencer_gender),
           age: preset.influencer_age_group ? String(preset.influencer_age_group * 10) : "",
           hairStyle: preset.influencer_hairstyle || "",
           mood: preset.influencer_style || "",
@@ -353,7 +374,7 @@ export default function CreateModelPage() {
         createInfluencerData.system_prompt = formData.systemPrompt; // Use the stored systemPrompt
         createInfluencerData.model_type = formData.modelType;
         createInfluencerData.mbti = formData.mbti !== "none" ? formData.mbti : undefined;
-        createInfluencerData.gender = formData.gender !== "none" ? formData.gender : undefined;
+        createInfluencerData.gender = formData.gender !== "none" ? (formData.gender === "0" ? "male" : formData.gender === "1" ? "female" : formData.gender === "2" ? "other" : formData.gender) : undefined;
         createInfluencerData.age = formData.age;
 
         // 이미지 생성 방법에 따른 데이터 추가
@@ -372,7 +393,7 @@ export default function CreateModelPage() {
       }
 
       // 실제 인플루언서 생성 API 호출
-      const response = await ModelService.createInfluencer(createInfluencerData)
+      await ModelService.createInfluencer(createInfluencerData)
 
       // 성공 알림 표시
       let successMessage = `🎉 AI 인플루언서 "${formData.name}"가 생성되었습니다!\n\n`
@@ -433,8 +454,8 @@ export default function CreateModelPage() {
         personality: personality,
         name: formData.name || undefined,
         description: formData.description || undefined,
-        mbti: formData.mbti !== "none" ? formData.mbti : undefined,
-        gender: formData.gender !== "none" ? formData.gender : undefined,
+        mbti: formData.mbti !== "none" ? mbtiList.find(m => String(m.mbti_id) === formData.mbti)?.mbti_name : undefined,
+        gender: formData.gender !== "none" ? (formData.gender === "0" ? "male" : formData.gender === "1" ? "female" : formData.gender === "2" ? "other" : formData.gender) : undefined,
         age: formData.age || undefined
       }
 
@@ -621,26 +642,24 @@ export default function CreateModelPage() {
 
   const conversationExamples = generatedTones.length > 0 ? generatedTones : generateStaticConversationExamples(formData.personality)
 
-  // 프리셋 기반 동적 옵션 추출
-  // Note: influencer_type, influencer_gender, influencer_age_group은 StylePreset 모델에 정의된 필드입니다.
-  // ModelService.getStylePresets()에서 이 필드들을 포함하여 반환해야 합니다.
-  const uniqueModelTypes = Array.from(new Set(stylePresets.map(p => p.influencer_type))).filter(Boolean);
-  const uniqueModelTypeOptions = uniqueModelTypes.map(type => ({
-    value: String(type),
-    label: type === 1 ? "캐릭터" : type === 2 ? "사람" : type === 3 ? "사물" : `기타(${type})`
-  }));
-  const uniqueGenders = Array.from(new Set(stylePresets.map(p => p.influencer_gender))).filter(Boolean);
-  const uniqueGenderOptions = uniqueGenders.map(gender => ({
-    value: String(gender),
-    label: gender === 0 ? "남성" : gender === 1 ? "여성" : gender === 2 ? "기타" : `기타(${gender})`
-  }));
-  const uniqueAges = Array.from(new Set(stylePresets.map(p => p.influencer_age_group))).filter(Boolean);
-  const uniqueAgeOptions = uniqueAges.map(age => ({
-    value: String(age),
-    label: age === 1 ? "10대" : age === 2 ? "20대" : age === 3 ? "30대" : age === 4 ? "40대" : age === 5 ? "50대 이상" : `기타(${age})`
-  }));
-  const uniquePersonalities = Array.from(new Set(stylePresets.map(p => p.influencer_personality).filter(Boolean)));
-  const uniqueTones = Array.from(new Set(stylePresets.map(p => p.influencer_speech).filter(Boolean)));
+  // 프리셋 기반 동적 옵션 추출은 현재 사용되지 않음 (주석 처리)
+  // const uniqueModelTypes = Array.from(new Set(stylePresets.map(p => p.influencer_type))).filter(Boolean);
+  // const uniqueModelTypeOptions = uniqueModelTypes.map(type => ({
+  //   value: String(type),
+  //   label: type === 1 ? "캐릭터" : type === 2 ? "사람" : type === 3 ? "사물" : `기타(${type})`
+  // }));
+  // const uniqueGenders = Array.from(new Set(stylePresets.map(p => p.influencer_gender))).filter(Boolean);
+  // const uniqueGenderOptions = uniqueGenders.map(gender => ({
+  //   value: String(gender),
+  //   label: gender === 0 ? "남성" : gender === 1 ? "여성" : gender === 2 ? "기타" : `기타(${gender})`
+  // }));
+  // const uniqueAges = Array.from(new Set(stylePresets.map(p => p.influencer_age_group))).filter(Boolean);
+  // const uniqueAgeOptions = uniqueAges.map(age => ({
+  //   value: String(age),
+  //   label: age === 1 ? "10대" : age === 2 ? "20대" : age === 3 ? "30대" : age === 4 ? "40대" : age === 5 ? "50대 이상" : `기타(${age})`
+  // }));
+  // const uniquePersonalities = Array.from(new Set(stylePresets.map(p => p.influencer_personality).filter(Boolean)));
+  // const uniqueTones = Array.from(new Set(stylePresets.map(p => p.influencer_speech).filter(Boolean)));
 
   // 말투 추가 함수
   const handleAddCustomTone = () => {
@@ -746,28 +765,20 @@ export default function CreateModelPage() {
                   <Label htmlFor="mbti">MBTI (선택사항)</Label>
                   <Select value={formData.mbti} onValueChange={(value) => handleInputChange("mbti", value)}>
                     <SelectTrigger>
-                      <SelectValue placeholder="MBTI 선택 (선택사항)" />
+                      <SelectValue placeholder={loadingMbti ? "MBTI 로딩 중..." : "MBTI 선택 (선택사항)"} />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">선택 안함</SelectItem>
-                      <SelectItem value="ENFP">ENFP - 재기발랄한 활동가</SelectItem>
-                      <SelectItem value="ENFJ">ENFJ - 정의로운 사회운동가</SelectItem>
-                      <SelectItem value="ENTP">ENTP - 뜨거운 논쟁을 즐기는 변론가</SelectItem>
-                      <SelectItem value="ENTJ">ENTJ - 대담한 통솔자</SelectItem>
-                      <SelectItem value="ESFP">ESFP - 자유로운 영혼의 연예인</SelectItem>
-                      <SelectItem value="ESFJ">ESFJ - 사교적인 외교관</SelectItem>
-                      <SelectItem value="ESTP">ESTP - 모험을 즐기는 사업가</SelectItem>
-                      <SelectItem value="ESTJ">ESTJ - 엄격한 관리자</SelectItem>
-                      <SelectItem value="INFP">INFP - 열정적인 중재자</SelectItem>
-                      <SelectItem value="INFJ">INFJ - 선의의 옹호자</SelectItem>
-                      <SelectItem value="INTP">INTP - 논리적인 사색가</SelectItem>
-                      <SelectItem value="INTJ">INTJ - 용의주도한 전략가</SelectItem>
-                      <SelectItem value="ISFP">ISFP - 호기심 많은 예술가</SelectItem>
-                      <SelectItem value="ISFJ">ISFJ - 용감한 수호자</SelectItem>
-                      <SelectItem value="ISTP">ISTP - 만능 재주꾼</SelectItem>
-                      <SelectItem value="ISTJ">ISTJ - 현실주의자</SelectItem>
+                      {mbtiList.map((mbti) => (
+                        <SelectItem key={mbti.mbti_id} value={String(mbti.mbti_id)}>
+                          {mbti.mbti_name} - {mbti.mbti_traits}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
+                  {loadingMbti && (
+                    <p className="text-xs text-gray-500 mt-1">MBTI 목록을 불러오는 중...</p>
+                  )}
                 </div>
                 <div>
                   <Label htmlFor="gender">성별*</Label>
@@ -776,10 +787,9 @@ export default function CreateModelPage() {
                       <SelectValue placeholder="성별을 선택하세요" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="none">선택 안함</SelectItem>
-                      <SelectItem value="male">남성</SelectItem>
-                      <SelectItem value="female">여성</SelectItem>
-                      <SelectItem value="other">기타</SelectItem>
+                      <SelectItem value="0">남성</SelectItem>
+                      <SelectItem value="1">여성</SelectItem>
+                      <SelectItem value="2">기타</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -803,7 +813,6 @@ export default function CreateModelPage() {
                     <SelectValue placeholder="허깅페이스 토큰을 선택하세요" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="none">선택 안함</SelectItem>
                     {huggingFaceTokens.map(token => (
                       <SelectItem key={token.hf_manage_id} value={token.hf_manage_id}>
                         {token.hf_token_nickname}
