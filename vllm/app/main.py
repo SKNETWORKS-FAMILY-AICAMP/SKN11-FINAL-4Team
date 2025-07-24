@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.core import startup_event
-from app.routers import lora, generation, finetuning, speech, qa_generation, backend_utils, zonos_tts_client
+from app.routers import lora, generation, finetuning, speech, qa_generation, backend_utils, zonos_tts_async
 
 # 로깅 설정
 logging.basicConfig(
@@ -96,4 +96,4 @@ app.include_router(finetuning.router, tags=["FineTuning"])
 app.include_router(speech.router, prefix="/speech", tags=["Speech Generator"])
 app.include_router(qa_generation.router, prefix="/qa", tags=["QA Generation"])
 app.include_router(backend_utils.router, prefix="/api/v1", tags=["Backend Utils"])
-app.include_router(zonos_tts_client.router, prefix="/zonos", tags=["Zonos TTS Client"])
+app.include_router(zonos_tts_async.router, prefix="/zonos", tags=["Zonos TTS Async"])

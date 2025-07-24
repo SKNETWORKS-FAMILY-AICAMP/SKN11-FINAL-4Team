@@ -45,6 +45,16 @@ class TTSRequest(BaseModel):
     voice_preset: Optional[str] = "romeo"
     speed: Optional[float] = 1.0
 
+class TTSWithVoiceRequest(BaseModel):
+    text: str
+    voice_data_base64: str
+    language: str = "ko"
+    speaking_rate: float = 22.0
+    pitch_std: float = 40.0
+    cfg_scale: float = 4.0
+    emotion: list[float] = [0.3077, 0.0256, 0.0256, 0.0256, 0.0256, 0.0256, 0.2564, 0.3077]
+    output_filename: Optional[str] = None
+
 @app.on_event("startup")
 async def startup_event():
     """서비스 시작 시 모델 초기화"""
@@ -139,6 +149,60 @@ async def gpu_info():
         }
     else:
         return {"cuda_available": False}
+
+@app.post("/generate_with_voice")
+async def generate_with_voice(request: TTSWithVoiceRequest):
+    """음성 클로닝을 사용한 TTS 생성"""
+    if zonos_model is None:
+        raise HTTPException(status_code=503, detail="모델이 로드되지 않았습니다.")
+    
+    try:
+        logger.info(f"🎤 음성 클로닝 TTS 생성 요청: {len(request.text)} 글자")
+        
+        # Base64 디코딩하여 임시 음성 파일 생성
+        import base64
+        voice_data = base64.b64decode(request.voice_data_base64)
+        
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as voice_file:
+            voice_file.write(voice_data)
+            voice_path = voice_file.name
+        
+        # 출력 파일 경로
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as output_file:
+            output_path = output_file.name
+        
+        # TODO: Zonos 모델의 음성 클로닝 기능 구현
+        # 현재는 일반 TTS로 대체
+        logger.warning("⚠️ 음성 클로닝 기능은 아직 구현되지 않았습니다. 일반 TTS로 대체합니다.")
+        
+        zonos_model.tts(
+            text=request.text,
+            voice_preset="romeo",  # 임시로 기본 음성 사용
+            output_path=output_path,
+            speed=request.speaking_rate / 22.0  # speaking_rate를 speed로 변환
+        )
+        
+        # 임시 음성 파일 삭제
+        os.unlink(voice_path)
+        
+        logger.info(f"✅ 음성 생성 완료: {output_path}")
+        
+        # 파일 응답
+        return {
+            "file_path": output_path,
+            "file_url": None,  # 로컬 파일이므로 URL 없음
+            "message": "음성 생성 완료 (클로닝 미지원)"
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ 음성 클로닝 TTS 생성 실패: {e}")
+        logger.error(traceback.format_exc())
+        
+        # 임시 파일 정리
+        if 'voice_path' in locals() and os.path.exists(voice_path):
+            os.unlink(voice_path)
+        
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     # 독립 실행
