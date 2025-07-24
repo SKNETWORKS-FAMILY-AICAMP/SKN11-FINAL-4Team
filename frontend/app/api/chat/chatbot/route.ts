@@ -3,14 +3,25 @@ import { NextRequest, NextResponse } from 'next/server';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const apiKey = request.headers.get('X-API-Key');
     
-    if (!apiKey) {
+    // Authorization 헤더에서 Bearer 토큰 추출
+    const authorization = request.headers.get('Authorization');
+    if (!authorization) {
       return NextResponse.json(
-        { error: 'API key is required' },
+        { error: 'Authorization header missing' },
         { status: 401 }
       );
     }
+
+    // Bearer 토큰 형식 확인
+    if (!authorization.startsWith('Bearer ')) {
+      return NextResponse.json(
+        { error: 'Invalid authorization header format' },
+        { status: 401 }
+      );
+    }
+
+    const apiKey = authorization.substring(7); // "Bearer " 제거
 
     // 백엔드로 요청 전달
     const backendUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
@@ -18,7 +29,7 @@ export async function POST(request: NextRequest) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-API-Key': apiKey,
+        'Authorization': `Bearer ${apiKey}`,
       },
       body: JSON.stringify(body),
     });
