@@ -241,7 +241,7 @@ async def chatbot_chat_stream(
                 ):
                     # 각 토큰을 실시간으로 클라이언트에 전송
                     logger.debug(f"🔄 스트리밍 토큰 전송: {repr(token)}")
-                    yield f"data: {json.dumps({'text': token})}\n\n"
+                    yield f"data: {json.dumps({'text': token}, ensure_ascii=False)}\n\n"
                     token_count += 1
                     
                     # 너무 많은 토큰이 오면 중단 (무한 루프 방지)
@@ -250,15 +250,15 @@ async def chatbot_chat_stream(
                         break
                 
                 # 스트리밍 완료 신호
-                yield f"data: {json.dumps({'done': True})}\n\n"
+                yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
                 logger.info(f"✅ VLLM 스트리밍 응답 생성 완료: {influencer.influencer_name}")
 
             except Exception as e:
                 logger.error(f"❌ VLLM 스트리밍 응답 생성 실패: {e}")
                 # VLLM 실패 시 기본 응답 사용
                 error_response = f"안녕하세요! 저는 {influencer.influencer_name}입니다. '{request.message}'에 대한 답변을 드리겠습니다."
-                yield f"data: {json.dumps({'text': error_response})}\n\n"
-                yield f"data: {json.dumps({'done': True})}\n\n"
+                yield f"data: {json.dumps({'text': error_response}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
 
         return StreamingResponse(
             generate_stream(),
