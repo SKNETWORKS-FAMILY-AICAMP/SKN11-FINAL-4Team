@@ -100,11 +100,15 @@ async def lifespan(app: FastAPI):
     # 세션 정리 서비스 활성화 (비동기 수정 완료)
     try:
         await start_session_cleanup_service()
-        logger.info("🧹 세션 정리 서비스 시작 완료")
+        # 시작 상태 확인
+        from app.services.session_cleanup_service import get_session_cleanup_service
+        cleanup_service = get_session_cleanup_service()
+        status = cleanup_service.get_status()
+        logger.info(f"🧹 세션 정리 서비스 시작 완료 - 상태: {status}")
     except Exception as e:
-        logger.warning(
-            f"⚠️ Session cleanup service failed to start, but continuing: {e}"
-        )
+        logger.warning(f"⚠️ Session cleanup service failed to start, but continuing: {e}")
+        import traceback
+        logger.error(f"   오류 상세: {traceback.format_exc()}")
 
     logger.info("✅ AIMEX API Server ready")
 
@@ -200,20 +204,29 @@ class FileSizeMiddleware(BaseHTTPMiddleware):
 # 요청 로깅 미들웨어
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
-    """요청/응답 로깅"""
+    """요청/응답 로깅 (보안 강화 - 토큰 마스킹)"""
     start_time = time.time()
 
-    # 요청 로깅
-    client_host = request.client.host if request.client else "unknown"
-    logger.info(f"📥 {request.method} {request.url.path} - {client_host}")
+    # 헬스체크 및 상태조회는 로그 생략
+    skip_paths = ["/health", "/api/v1/user-sessions/status"]
+    if request.url.path not in skip_paths:
+        client_host = request.client.host if request.client else "unknown"
+        
+        # 요청 로그 간소화 (빈번한 status 체크는 DEBUG 레벨로)
+        if request.url.path == "/api/v1/user-sessions/status":
+            logger.debug(f"📥 {request.method} {request.url.path} - {client_host}")
+        else:
+            logger.info(f"📥 {request.method} {request.url.path} - {client_host}")
 
     response = await call_next(request)
 
-    # 응답 로깅
-    process_time = time.time() - start_time
-    logger.info(
-        f"📤 {request.method} {request.url.path} - {response.status_code} ({process_time:.3f}s)"
-    )
+    # 응답 로깅 (중요한 요청만)
+    if request.url.path not in skip_paths:
+        process_time = time.time() - start_time
+        if request.url.path == "/api/v1/user-sessions/status":
+            logger.debug(f"📤 {response.status_code} ({process_time:.3f}s)")
+        else:
+            logger.info(f"📤 {response.status_code} ({process_time:.3f}s)")
 
     return response
 

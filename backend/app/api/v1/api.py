@@ -20,8 +20,9 @@ from app.api.v1.endpoints import (
     mcp,
     content_enhancement,
     user_sessions,  # 새로운 사용자 세션 API
-    image_generation,  # 새로운 통합 이미지 생성 API
+    image_generation,  # 새로운 통합 이미진 생성 API
     unified_images,
+    prompt_test,  # 프롬프트 최적화 테스트 API
 )
 
 # 기존 복잡한 API들 임시 비활성화 (새로운 간소화된 API 사용)
@@ -135,6 +136,11 @@ api_router.include_router(
 # 이미지 생성 API
 api_router.include_router(
     image_generation.router, prefix="/image-generation", tags=["Image Generation"]
+)
+
+# 프롬프트 최적화 테스트 API
+api_router.include_router(
+    prompt_test.router, prefix="/prompt-test", tags=["Prompt Testing"]
 )
 
 # 통합 이미지 API
