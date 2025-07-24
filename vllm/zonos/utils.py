@@ -28,8 +28,12 @@ def pad_weight_(w: nn.Embedding | nn.Linear, multiple: int):
 
 
 def get_device() -> torch.device:
+    import os
+    
     if torch.cuda.is_available():
-        return torch.device(torch.cuda.current_device())
+        # GPU 1번으로 고정
+        torch.cuda.set_device(1)
+        return torch.device("cuda:1")
     # MPS breaks for whatever reason. Uncomment when it's working.
     # if torch.mps.is_available():
     #     return torch.device("mps")

@@ -2768,14 +2768,14 @@ function ModelDetailContent() {
                     <div>
                       <Label>엔드포인트</Label>
                       <div className="bg-gray-100 p-3 rounded-md font-mono text-sm">
-                        POST https://api.aiinfluencer.com/v1/chat/chatbot
+                        POST https://api.aimex.toyproject.site/v1/chat/chatbot
                       </div>
                     </div>
                     <div>
                       <Label>요청 예시</Label>
                       <pre className="bg-gray-100 p-3 rounded-md text-sm overflow-x-auto">
-                        {`curl -X POST https://api.aiinfluencer.com/v1/chat/chatbot \\
-    -H "Authorization: Bearer ${model.apiKey}" \\
+                        {`curl -X POST https://api.aimex.toyproject.site/v1/chat/chatbot \\
+    -H "Authorization: Bearer [API_KEY]" \\
     -H "Content-Type: application/json" \\
     -d '{
       "message": "안녕하세요! 오늘 패션 추천 부탁드려요"

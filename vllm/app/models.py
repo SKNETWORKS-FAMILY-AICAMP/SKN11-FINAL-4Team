@@ -39,6 +39,7 @@ class GenerateResponse(BaseModel):
 class FineTuningRequest(BaseModel):
     influencer_id: str
     influencer_name: str
+    system_prompt:str
     personality: str
     qa_data: List[Dict[str, Any]]
     hf_repo_id: str
