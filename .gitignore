@@ -105,6 +105,15 @@ logs/
 # Claude MCP
 .claude
 
+# Documentation and manuals
+API_DESIGN.md
+API_KEYS_MANUAL.md
+CLAUDE.md
+DEPLOYMENT_GUIDE.md
+GEMINI.md
+README.md
+README_CUSTOM_WORKFLOW.md
+
 # Other
 *.bak
 *.orig

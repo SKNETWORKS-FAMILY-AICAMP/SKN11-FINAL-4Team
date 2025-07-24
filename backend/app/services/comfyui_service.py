@@ -44,6 +44,7 @@ class ImageGenerationRequest(BaseModel):
     custom_parameters: Optional[Dict[str, Any]] = None  # 추가 커스텀 파라미터
     user_id: Optional[str] = None  # 사용자 ID (개인화된 워크플로우 선택용)
     use_runpod: bool = False  # RunPod 사용 여부
+    pod_id: Optional[str] = None  # RunPod pod_id를 body에서 자동 매핑
 
 
 class ImageGenerationResponse(BaseModel):
@@ -84,7 +85,7 @@ class ComfyUIService(ImageGeneratorInterface):
         self.server_url = comfyui_server_url
         self.runpod_endpoint = runpod_endpoint
         self.client_id = str(uuid.uuid4())
-        self.use_mock = True  # 기본적으로 Mock 모드 (ComfyUI 서버 없을 때)
+        self.use_mock = False  # Mock 모드 비활성화 (실제 서비스만 구현)
         
         # ComfyUI 서버 연결 테스트
         self._test_connection()
@@ -102,13 +103,12 @@ class ComfyUIService(ImageGeneratorInterface):
         try:
             response = requests.get(f"{self.server_url}/system_stats", timeout=5)
             if response.status_code == 200:
-                self.use_mock = False
                 logger.info("ComfyUI server connection successful")
             else:
                 logger.warning(f"ComfyUI server responded with status {response.status_code}")
         except requests.exceptions.RequestException as e:
             logger.warning(f"ComfyUI server not available: {e}")
-            self.use_mock = True
+            # Mock 모드 사용하지 않음 - 실제 RunPod 서비스만 사용
     
     async def generate_image(self, request: ImageGenerationRequest) -> ImageGenerationResponse:
         """
@@ -117,216 +117,138 @@ class ComfyUIService(ImageGeneratorInterface):
         Clean Architecture: 비즈니스 로직과 외부 서비스 분리
         """
         try:
-            # RunPod 요청이거나 로컬 서버가 사용 가능한 경우 실제 생성
-            if request.use_runpod or not self.use_mock:
-                return await self._generate_real_image(request)
-            else:
-                return await self._generate_mock_image(request)
+            # 실제 이미지 생성만 수행 (Mock 모드 제거)
+            return await self._generate_real_image(request)
         except Exception as e:
             logger.error(f"Image generation failed: {e}")
-            # RunPod 요청 실패 시에도 오류 반환 (Mock으로 폴백하지 않음)
-            if request.use_runpod:
-                return ImageGenerationResponse(
-                    job_id=str(uuid.uuid4()),
-                    status="failed",
-                    images=[],
-                    prompt_used=request.prompt,
-                    metadata={"error": str(e), "runpod_failed": True}
-                )
-            # 로컬 서버 실패 시만 Mock으로 폴백
-            return await self._generate_mock_image(request)
-    
-    async def get_generation_status(self, job_id: str) -> ImageGenerationResponse:
-        """생성 상태 조회"""
-        if self.use_mock:
-            return await self._get_mock_status(job_id)
-        else:
-            return await self._get_real_status(job_id)
-    
-    async def _generate_real_image(self, request: ImageGenerationRequest) -> ImageGenerationResponse:
-        """실제 ComfyUI API 호출 (RunPod 지원)"""
-        
-        job_id = str(uuid.uuid4())
-        runpod_pod_id = None
-        
-        try:
-            # ComfyUI 워크플로우 JSON 생성 (커스텀 워크플로우 사용)
-            workflow = await self._create_custom_workflow(request)
-            
-            # RunPod 사용 시 기존 인스턴스 활용 또는 새로 생성
-            if request.use_runpod:
-                from app.core.config import settings
-                
-                # 기존 실행 중인 Pod가 있는지 확인하고 활용 (건강 체크 포함)
-                use_existing = False
-                if hasattr(settings, 'RUNPOD_EXISTING_ENDPOINT') and settings.RUNPOD_EXISTING_ENDPOINT:
-                    target_url = settings.RUNPOD_EXISTING_ENDPOINT
-                    runpod_pod_id = getattr(settings, 'RUNPOD_EXISTING_POD_ID', 'existing-pod')
-                    
-                    # 기존 Pod 건강 체크
-                    try:
-                        health_response = requests.get(f"{target_url}/system_stats", timeout=10)
-                        if health_response.status_code == 200:
-                            logger.info(f"Using existing RunPod instance: {target_url}")
-                            use_existing = True
-                        else:
-                            logger.warning(f"Existing RunPod instance unhealthy, creating new one")
-                    except Exception as e:
-                        logger.warning(f"Failed to check existing RunPod health: {e}, creating new one")
-                
-                if not use_existing:
-                    # 새 인스턴스 생성
-                    logger.info(f"Creating new RunPod instance for job {job_id}")
-                    
-                    from .runpod_service import get_runpod_service
-                    runpod_service = get_runpod_service()
-                    
-                    pod_response = await runpod_service.create_pod(job_id)
-                    runpod_pod_id = pod_response.pod_id
-                    
-                    
-                    if pod_response.status != "RUNNING":
-                        logger.info(f"Waiting for RunPod instance {runpod_pod_id} to start...")
-                        await self._wait_for_pod_ready(runpod_service, runpod_pod_id)
-                    
-                    target_url = pod_response.endpoint_url
-                    if not target_url:
-                        logger.info(f"Waiting for RunPod instance {runpod_pod_id} endpoint to be ready...")
-                        # Pod가 완전히 시작될 때까지 대기하고 엔드포인트 정보 가져오기
-                        max_attempts = 30
-                        for attempt in range(max_attempts):
-                            await asyncio.sleep(10)  # 10초 대기
-                            pod_info = await runpod_service.get_pod_status(runpod_pod_id)
-                            if pod_info.endpoint_url:
-                                target_url = pod_info.endpoint_url
-                                logger.info(f"RunPod endpoint ready: {target_url}")
-                                break
-                            logger.info(f"Attempt {attempt+1}/{max_attempts}: Waiting for endpoint...")
-                        
-                        if not target_url:
-                            raise RuntimeError(f"RunPod instance {runpod_pod_id} endpoint not available after {max_attempts} attempts")
-                    
-                    logger.info(f"New RunPod instance ready: {target_url}")
-                    
-                    # ComfyUI 서버가 완전히 준비될 때까지 대기
-                    await self._wait_for_comfyui_ready(target_url)
-                    
-            else:
-                target_url = self.server_url
-                logger.info(f"Using local ComfyUI server: {target_url}")
-            
-            # ComfyUI 서버에 워크플로우 전송
-            logger.info(f"Sending workflow to ComfyUI server: {target_url}/prompt")
-            queue_response = requests.post(
-                f"{target_url}/prompt",
-                json={
-                    "prompt": workflow,
-                    "client_id": self.client_id
-                },
-                timeout=60  # RunPod 환경에서는 더 긴 타임아웃 필요
-            )
-            
-            if queue_response.status_code != 200:
-                raise Exception(f"Failed to queue workflow: {queue_response.text}")
-            
-            queue_data = queue_response.json()
-            prompt_id = queue_data.get("prompt_id")
-            
-            logger.info(f"Workflow queued with prompt_id: {prompt_id}")
-            
-            # 생성 완료까지 대기
-            result = await self._wait_for_completion(prompt_id)
-            
-            # RunPod 인스턴스 정리 (사용 후 종료)
-            if request.use_runpod and runpod_pod_id:
-                logger.info(f"Terminating RunPod instance {runpod_pod_id}")
-                try:
-                    await runpod_service.terminate_pod(runpod_pod_id)
-                except Exception as cleanup_error:
-                    logger.warning(f"Failed to cleanup RunPod instance: {cleanup_error}")
-            
+            # 실패 시 오류 반환 (Mock으로 폴백하지 않음)
             return ImageGenerationResponse(
-                job_id=job_id,
-                status="completed",
-                images=result.get("images", []),
-                prompt_used=request.prompt,
-                generation_time=result.get("generation_time"),
-                metadata={
-                    "prompt_id": prompt_id,
-                    "comfyui_server": target_url,
-                    "runpod_pod_id": runpod_pod_id,
-                    "workflow_type": "custom",
-                    "settings": request.dict()
-                }
-            )
-            
-        except Exception as e:
-            logger.error(f"Image generation failed: {e}")
-            
-            # 오류 발생 시 RunPod 인스턴스 정리
-            if request.use_runpod and runpod_pod_id:
-                try:
-                    from .runpod_service import get_runpod_service
-                    runpod_service = get_runpod_service()
-                    await runpod_service.terminate_pod(runpod_pod_id)
-                    logger.info(f"Cleaned up RunPod instance {runpod_pod_id} after error")
-                except Exception as cleanup_error:
-                    logger.warning(f"Failed to cleanup RunPod instance after error: {cleanup_error}")
-            
-            return ImageGenerationResponse(
-                job_id=job_id,
+                job_id=str(uuid.uuid4()),
                 status="failed",
                 images=[],
                 prompt_used=request.prompt,
-                metadata={
-                    "error": str(e),
-                    "runpod_pod_id": runpod_pod_id,
-                    "use_runpod": request.use_runpod
-                }
+                metadata={"error": str(e), "generation_failed": True}
             )
     
-    async def _generate_mock_image(self, request: ImageGenerationRequest) -> ImageGenerationResponse:
-        """Mock 이미지 생성 (ComfyUI 서버 없을 때)"""
-        
-        # 시뮬레이션 지연
-        await asyncio.sleep(2)
-        
-        job_id = str(uuid.uuid4())
-        
-        # Mock 이미지 URL (실제로는 생성된 이미지)
-        mock_images = [
-            "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",  # 1x1 픽셀 이미지
-        ]
-        
-        return ImageGenerationResponse(
-            job_id=job_id,
-            status="completed",
-            images=mock_images,
-            prompt_used=request.prompt,
-            generation_time=2.0,
-            metadata={
-                "note": "Mock image generation - 실제 ComfyUI 서버 연결 시 실제 이미지가 생성됩니다",
-                "mock_data": True,
-                "prompt": request.prompt,
-                "settings": request.dict()
-            }
-        )
+    async def get_generation_status(self, job_id: str) -> ImageGenerationResponse:
+        """생성 상태 조회"""
+        # Mock 모드 제거 - 실제 상태 조회만 수행
+        return await self._get_real_status(job_id)
     
-    async def _get_mock_status(self, job_id: str) -> ImageGenerationResponse:
-        """Mock 상태 조회"""
-        return ImageGenerationResponse(
-            job_id=job_id,
-            status="completed",
-            images=["mock_image_url"],
-            prompt_used="mock prompt",
-            metadata={"mock_data": True}
-        )
+    async def _generate_real_image(self, request: ImageGenerationRequest) -> ImageGenerationResponse:
+        """실제 ComfyUI API 호출 (RunPod 지원, pod_id로 동적 endpoint_url 사용)"""
+        import aiohttp
+        job_id = str(uuid.uuid4())
+        runpod_pod_id = getattr(request, 'pod_id', None)
+        target_url = None
+        try:
+            if runpod_pod_id:
+                from app.services.runpod_service import get_runpod_service
+                runpod_service = get_runpod_service()
+                logger.info(f"[이미지 생성] 전달받은 pod_id={runpod_pod_id}로 RunPod 상태 조회 및 endpoint_url 사용")
+                pod_status = await runpod_service.get_pod_status(runpod_pod_id)
+                logger.info(f"[RunPod] pod_id={runpod_pod_id} 상태 조회 결과: runtime={pod_status.runtime}")
+                logger.info(f"[RunPod] pod_id={runpod_pod_id} endpoint_url={pod_status.endpoint_url}")
+                # public ip/port 상세 출력
+                if pod_status.runtime and 'ports' in pod_status.runtime:
+                    for port in pod_status.runtime['ports']:
+                        logger.info(f"[RunPod] pod_id={runpod_pod_id} port info: ip={port.get('ip')}, publicPort={port.get('publicPort')}, isIpPublic={port.get('isIpPublic')}")
+                target_url = pod_status.endpoint_url
+                if not target_url:
+                    raise Exception(f"RunPod pod_id={runpod_pod_id}의 endpoint_url을 찾을 수 없습니다.")
+            else:
+                # 기존 방식(로컬 또는 환경변수)
+                logger.info(f"[이미지 생성] pod_id가 전달되지 않아 로컬/환경변수 ComfyUI 서버 사용: {self.server_url}")
+                target_url = self.server_url
+
+            # ComfyUI 워크플로우 JSON 생성
+            workflow = await self._create_custom_workflow(request)
+
+            # ComfyUI 서버에 워크플로우 전송
+            logger.info(f"[ComfyUI] 워크플로우 전송: {target_url}/prompt")
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{target_url}/prompt",
+                    json={"prompt": workflow, "client_id": self.client_id},
+                    timeout=aiohttp.ClientTimeout(total=60)
+                ) as queue_response:
+                    if queue_response.status != 200:
+                        raise Exception(f"ComfyUI 워크플로우 큐 실패: {await queue_response.text()}")
+                    queue_data = await queue_response.json()
+                    prompt_id = queue_data.get("prompt_id")
+                    logger.info(f"[ComfyUI] 워크플로우 큐 완료: prompt_id={prompt_id}")
+
+            # 생성 완료까지 대기 (기존 방식 활용)
+            result = await self._wait_for_completion(prompt_id)
+            return ImageGenerationResponse(
+                job_id=prompt_id,
+                status="completed",
+                images=result.get("images", []),
+                prompt_used=request.prompt,
+                generation_time=1.0,
+                metadata={
+                    "note": "RunPod ComfyUI API 사용",
+                    "pod_id": runpod_pod_id,
+                    "endpoint_url": target_url
+                }
+            )
+        except Exception as e:
+            logger.error(f"[ComfyUI] 이미지 생성 실패: {e}")
+            raise
+    
     
     async def _get_real_status(self, job_id: str) -> ImageGenerationResponse:
         """실제 상태 조회"""
-        # 실제 ComfyUI 상태 조회 로직
-        # 구현 필요
-        pass
+        try:
+            # 히스토리 조회를 통한 상태 확인
+            history_response = requests.get(f"{self.server_url}/history/{job_id}")
+            if history_response.status_code == 200:
+                history_data = history_response.json()
+                if job_id in history_data:
+                    # 완료된 작업
+                    result = history_data[job_id]
+                    images = self._extract_images_from_history(result)
+                    return ImageGenerationResponse(
+                        job_id=job_id,
+                        status="completed",
+                        images=images,
+                        prompt_used="",
+                        metadata={"history_data": result}
+                    )
+            
+            # 진행 중인 작업 확인
+            queue_response = requests.get(f"{self.server_url}/queue")
+            if queue_response.status_code == 200:
+                queue_data = queue_response.json()
+                # 큐에서 job_id 찾기
+                for item in queue_data.get("queue_running", []) + queue_data.get("queue_pending", []):
+                    if len(item) > 1 and item[1] == job_id:
+                        return ImageGenerationResponse(
+                            job_id=job_id,
+                            status="processing",
+                            images=[],
+                            prompt_used="",
+                            metadata={"queue_status": "in_progress"}
+                        )
+            
+            # 상태를 찾을 수 없음
+            return ImageGenerationResponse(
+                job_id=job_id,
+                status="not_found",
+                images=[],
+                prompt_used="",
+                metadata={"error": "Job not found in history or queue"}
+            )
+            
+        except Exception as e:
+            logger.error(f"Failed to get real status: {e}")
+            return ImageGenerationResponse(
+                job_id=job_id,
+                status="error",
+                images=[],
+                prompt_used="",
+                metadata={"error": str(e)}
+            )
     
     async def _create_custom_workflow(self, request: ImageGenerationRequest) -> Dict[str, Any]:
         """

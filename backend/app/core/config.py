@@ -1,49 +1,67 @@
-from pydantic_settings import BaseSettings
-from typing import Optional, List
+from pydantic import model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import List, Optional
+import secrets
 import os
 from dotenv import load_dotenv
-import secrets
-
-load_dotenv()
 
 
 class Settings(BaseSettings):
+    # model_config는 .env 파일을 읽도록 설정합니다.
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", extra="allow"
+    )
+
     # API 설정
     API_V1_STR: str = "/api/v1"
     PROJECT_NAME: str = "AIMEX API"
     VERSION: str = "1.0.0"
-    DEBUG: bool = os.getenv("DEBUG", "False").lower() == "true"
+    DEBUG: bool = False
+    BACKEND_URL: str = os.getenv("BACKEND_URL", "http://localhost:8000")
 
     # 데이터베이스 설정
-    DATABASE_URL: str = os.getenv(
-        "DATABASE_URL", "mysql+pymysql://root:password@localhost:3306/AIMEX_MAIN"
-    )
-    DATABASE_POOL_SIZE: int = int(os.getenv("DATABASE_POOL_SIZE", "10"))
-    DATABASE_MAX_OVERFLOW: int = int(os.getenv("DATABASE_MAX_OVERFLOW", "20"))
-    DATABASE_POOL_TIMEOUT: int = int(os.getenv("DATABASE_POOL_TIMEOUT", "30"))
+    DATABASE_URL: str
+    DATABASE_POOL_SIZE: int = 10
+    DATABASE_MAX_OVERFLOW: int = 20
+    DATABASE_POOL_TIMEOUT: int = 30
 
     # 보안 설정
     SECRET_KEY: str = os.getenv(
         "JWT_SECRET_KEY", os.getenv("SECRET_KEY", secrets.token_urlsafe(32))
     )
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = int(
-        os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "10080")
-    )  # 7 days
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 10080  # 7 days
 
     # CORS 설정
     BACKEND_CORS_ORIGINS: List[str] = [
-        "http://localhost:3000",  # Next.js frontend
-        "https://localhost:3000",  # HTTPS Next.js frontend
-        "http://localhost:3001",
-        "https://localhost:3001",
+        "http://localhost:3000",
+        "https://localhost:3000",
         "http://127.0.0.1:3000",
-        "https://127.0.0.1:3000",
-        "http://127.0.0.1:3001",
-        "https://127.0.0.1:3001",
-        "http://localhost:8080",  # Vue.js frontend
-        "http://localhost:8081",
+        "https://localhost:3001",
     ]
+
+    # 외부 서비스 API 키
+    OPENAI_API_KEY: Optional[str] = None
+    RUNPOD_API_KEY: Optional[str] = None
+    RUNPOD_TEMPLATE_ID: Optional[str] = None
+    RUNPOD_VOLUME_ID: Optional[str] = None
+
+    # RunPod 기타 설정
+    RUNPOD_CUSTOM_TEMPLATE_ID: Optional[str] = None
+    RUNPOD_GPU_TYPE: str = "NVIDIA_RTX_4090"
+    RUNPOD_MAX_WORKERS: int = 1
+    RUNPOD_IDLE_TIMEOUT: int = 300
+
+    # AWS S3 설정
+    AWS_ACCESS_KEY_ID: Optional[str] = None
+    AWS_SECRET_ACCESS_KEY: Optional[str] = None
+    AWS_REGION: str = "ap-northeast-2"
+    S3_BUCKET_NAME: Optional[str] = None
+    S3_ENABLED: bool = True
+
+    # 소셜 로그인 설정
+    GOOGLE_CLIENT_ID: Optional[str] = None
+    GOOGLE_CLIENT_SECRET: Optional[str] = None
 
     # 허깅페이스 설정
     HUGGINGFACE_API_URL: str = "https://api.huggingface.co"
@@ -137,22 +155,9 @@ class Settings(BaseSettings):
     )
 
     # VLLM 서버 설정
-    VLLM_HOST: str = os.getenv("VLLM_HOST", "localhost")
-    VLLM_PORT: int = int(os.getenv("VLLM_PORT", "8000"))
-    VLLM_TIMEOUT: int = int(os.getenv("VLLM_TIMEOUT", "300"))  # 5분
-    VLLM_ENABLED: bool = os.getenv("VLLM_ENABLED", "true").lower() == "true"
-    VLLM_SERVER_URL: Optional[str] = os.getenv("VLLM_SERVER_URL")
-    VLLM_BASE_URL: Optional[str] = None
-
-    def __init__(self, **values):
-        super().__init__(**values)
-        if self.VLLM_ENABLED:
-            if self.VLLM_SERVER_URL:
-                self.VLLM_BASE_URL = self.VLLM_SERVER_URL
-            else:
-                self.VLLM_BASE_URL = f"http://{self.VLLM_HOST}:{self.VLLM_PORT}"
-        else:
-            self.VLLM_BASE_URL = None
+    VLLM_ENABLED: bool = True
+    VLLM_TIMEOUT: int = 300
+    VLLM_BASE_URL: str = os.getenv("VLLM_BASE_URL", "http://localhost:8000")
 
     # 추가 환경 변수들 (누락된 것들)
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
@@ -160,17 +165,6 @@ class Settings(BaseSettings):
     APP_VERSION: str = os.getenv("APP_VERSION", "1.0.0")
     HOST: str = os.getenv("HOST", "0.0.0.0")
     PORT: int = int(os.getenv("PORT", "8000"))
-
-    # Backend URL 설정
-    BACKEND_URL: str = os.getenv("BACKEND_URL", "http://localhost:8000")
-
-    # AWS S3 설정
-    AWS_ACCESS_KEY_ID: str = os.getenv("AWS_ACCESS_KEY_ID", "")
-    AWS_SECRET_ACCESS_KEY: str = os.getenv("AWS_SECRET_ACCESS_KEY", "")
-    AWS_REGION: str = os.getenv("AWS_REGION", "ap-northeast-2")
-    S3_BUCKET_NAME: str = os.getenv("S3_BUCKET_NAME", "aimex-influencers")
-    S3_ENABLED: bool = os.getenv("S3_ENABLED", "true").lower() == "true"
-
     ALLOWED_ORIGINS: str = os.getenv(
         "ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000"
     )
@@ -179,11 +173,6 @@ class Settings(BaseSettings):
     )
     RELOAD: bool = os.getenv("RELOAD", "True").lower() == "true"
     ENABLE_DOCS: bool = os.getenv("ENABLE_DOCS", "True").lower() == "true"
-
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
-        extra = "allow"  # 추가 환경 변수 허용
 
     def validate_settings(self):
         """설정 유효성 검증"""
@@ -222,11 +211,3 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
-
-# 개발 환경에서만 설정 검증
-if settings.DEBUG:
-    try:
-        settings.validate_settings()
-    except ValueError as e:
-        print(f"⚠️  Configuration warning: {e}")
-        print("   This is acceptable in development mode.")

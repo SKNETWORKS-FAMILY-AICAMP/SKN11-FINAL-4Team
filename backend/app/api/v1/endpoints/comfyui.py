@@ -61,34 +61,27 @@ class OptimizePromptRequest(BaseModel):
 # 이미지 생성 엔드포인트
 @router.post("/generate", response_model=ImageGenerationResponse)
 async def generate_image(request: GenerateImageRequest):
-    """커스텀 워크플로우를 사용한 이미지 생성"""
+    """프론트에서 전달받은 모든 선택값을 조합해 최종 프롬프트를 생성하고 이미지 생성"""
+    import json
+    from fastapi import Request as FastapiRequest
     try:
+        # 요청 전체 바디 로깅 (가능하면)
+        # FastAPI의 request 객체가 아니라 Pydantic 모델이므로 dict()로 출력
+        logger.info(f"[이미지 생성 요청] request.dict(): {json.dumps(request.dict(), ensure_ascii=False)}")
+        logger.info(f"[이미지 생성 요청] pod_id: {getattr(request, 'pod_id', None)}")
+        logger.info(f"[이미지 생성 요청] use_runpod: {getattr(request, 'use_runpod', None)}")
+        logger.info(f"[이미지 생성 요청] prompt: {getattr(request, 'prompt', None)}")
+        logger.info(f"[이미지 생성 요청] style: {getattr(request, 'style', None)}")
+        logger.info(f"[이미지 생성 요청] width: {getattr(request, 'width', None)}, height: {getattr(request, 'height', None)}")
+        logger.info(f"[이미지 생성 요청] steps: {getattr(request, 'steps', None)}, cfg_scale: {getattr(request, 'cfg_scale', None)}")
+        logger.info(f"[이미지 생성 요청] workflow_id: {getattr(request, 'workflow_id', None)}")
         comfyui_service = get_comfyui_service()
-        
-        # 디버깅을 위한 로그
-        logger.info(f"📥 이미지 생성 요청 - workflow_id: {request.workflow_id}, use_runpod: {request.use_runpod}")
-        
-        # 요청을 서비스 모델로 변환
-        generation_request = ImageGenerationRequest(
-            prompt=request.prompt,
-            negative_prompt=request.negative_prompt,
-            width=request.width,
-            height=request.height,
-            steps=request.steps,
-            cfg_scale=request.cfg_scale,
-            seed=request.seed,
-            style=request.style,
-            workflow_id=request.workflow_id,
-            custom_parameters=request.custom_parameters,
-            user_id=request.user_id,
-            use_runpod=request.use_runpod
-        )
-        
-        # 이미지 생성
-        result = await comfyui_service.generate_image(generation_request)
+        logger.info(f"[이미지 생성] comfyui_service.generate_image 호출")
+        result = await comfyui_service.generate_image(request)
+        logger.info(f"[이미지 생성 결과] {result.dict() if hasattr(result, 'dict') else result}")
         return result
-        
     except Exception as e:
+        logger.error(f"[이미지 생성 오류] {str(e)}")
         raise HTTPException(status_code=500, detail=f"Image generation failed: {str(e)}")
 
 @router.get("/status/{job_id}", response_model=ImageGenerationResponse)
@@ -138,10 +131,13 @@ async def optimize_prompt(request: OptimizePromptRequest):
 async def list_workflows(category: Optional[str] = None):
     """워크플로우 목록 조회"""
     try:
+        logger.info(f"📋 워크플로우 목록 조회 요청 (category: {category})")
         workflow_manager = get_workflow_manager()
         workflows = await workflow_manager.list_workflows(category=category)
+        logger.info(f"📋 워크플로우 {len(workflows)}개 조회 완료")
         return {"success": True, "workflows": [w.dict() for w in workflows]}
     except Exception as e:
+        logger.error(f"❌ 워크플로우 목록 조회 실패: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to list workflows: {str(e)}")
 
 @router.get("/workflows/{workflow_id}")
@@ -502,3 +498,20 @@ async def set_custom_template_as_default(request: dict):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to set custom template: {str(e)}")
+
+@router.get("/runpod/pod-status/{pod_id}")
+async def get_runpod_pod_status(pod_id: str):
+    """RunPod pod 상태 및 public ip/port 조회"""
+    try:
+        from app.services.runpod_service import get_runpod_service
+        runpod_service = get_runpod_service()
+        pod_status = await runpod_service.get_pod_status(pod_id)
+        return {
+            "success": True,
+            "pod_id": pod_status.pod_id,
+            "status": pod_status.status,
+            "runtime": pod_status.runtime,
+            "endpoint_url": pod_status.endpoint_url
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"RunPod pod 상태 조회 실패: {str(e)}")

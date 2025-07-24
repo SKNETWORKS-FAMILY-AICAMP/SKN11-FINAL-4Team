@@ -102,10 +102,8 @@ async def chatbot(
         # VLLM 서버에 어댑터 로드
         vllm_client = await get_vllm_client()
         try:
-            # model_id를 생성 (lora_repo를 기반으로)
-            model_id = lora_repo_decoded.replace("/", "_")  # 슬래시를 언더스코어로 변환
             await vllm_client.load_adapter(
-                model_id=model_id, hf_repo_name=lora_repo_decoded, hf_token=hf_token
+                lora_repo_decoded, lora_repo_decoded, hf_token
             )
             logger.info(f"[WS] VLLM 어댑터 로드 완료: {lora_repo_decoded}")
         except Exception as e:
@@ -144,7 +142,7 @@ async def chatbot(
                         influencer_name=(
                             str(influencer.influencer_name) if influencer else "한세나"
                         ),
-                        model_id=model_id,  # 이전에 생성한 model_id 사용
+                        model_id=lora_repo_decoded,
                         max_new_tokens=512,
                         temperature=0.7,
                     ):
@@ -204,9 +202,24 @@ async def chatbot(
 
 
 async def _get_hf_token_by_group(group_id: int, db: Session) -> str | None:
-    """그룹 ID로 HF 토큰 가져오기 (하위 호환성을 위해 유지)"""
-    hf_token, _ = await get_token_by_group(group_id, db)
-    return hf_token
+    """그룹 ID로 HF 토큰 가져오기"""
+    try:
+        hf_token_manage = (
+            db.query(HFTokenManage)
+            .filter(HFTokenManage.group_id == group_id)
+            .order_by(HFTokenManage.created_at.desc())
+            .first()
+        )
+
+        if hf_token_manage:
+            return decrypt_sensitive_data(str(hf_token_manage.hf_token_value))
+        else:
+            logger.warning(f"그룹 {group_id}에 등록된 HF 토큰이 없습니다.")
+            return None
+
+    except Exception as e:
+        logger.error(f"HF 토큰 조회 실패: {e}")
+        return None
 
 
 @router.post("/load_model")
@@ -227,11 +240,7 @@ async def model_load(req: ModelLoadRequest, db: Session = Depends(get_db)):
         # VLLM 서버에 어댑터 로드
         try:
             vllm_client = await get_vllm_client()
-            # model_id를 생성 (lora_repo를 기반으로)
-            model_id = req.lora_repo.replace("/", "_")  # 슬래시를 언더스코어로 변환
-            await vllm_client.load_adapter(
-                model_id=model_id, hf_repo_name=req.lora_repo, hf_token=hf_token
-            )
+            await vllm_client.load_adapter(req.lora_repo, req.lora_repo, hf_token)
             logger.info(f"[MODEL LOAD API] VLLM 어댑터 로드 성공: {req.lora_repo}")
             return {
                 "success": True,
