@@ -66,6 +66,7 @@ function PostListContent() {
   // 캐러셀 현재 이미지 인덱스 관리
   const [carouselIndices, setCarouselIndices] = useState<{ [key: string]: number }>({});
 
+  const isFetchingRef = useRef(false)
 
 
   const searchParams = useSearchParams()
@@ -74,7 +75,10 @@ function PostListContent() {
 
   // API에서 게시글 목록 가져오기
   const fetchPosts = async () => {
+    if (isFetchingRef.current) return
+    
     try {
+      isFetchingRef.current = true
       setLoading(true)
 
       const boardData = await apiClient.get<any[]>('/api/v1/boards')
@@ -163,6 +167,7 @@ function PostListContent() {
       })
     } finally {
       setLoading(false)
+      isFetchingRef.current = false
     }
   }
 

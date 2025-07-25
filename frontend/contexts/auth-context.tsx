@@ -80,14 +80,25 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
 
     try {
-      // 백엔드에서 사용자 정보 가져오기 (팀 정보 포함)
-      const user = await BackendAuthService.verifyToken()
-      setAuthState({
-        user,
-        token,
-        isAuthenticated: true,
-        isLoading: false
-      })
+      // JWT 토큰에서 직접 사용자 정보 가져오기
+      const user = getUserFromToken(token)
+      if (user) {
+        setAuthState({
+          user,
+          token,
+          isAuthenticated: true,
+          isLoading: false
+        })
+      } else {
+        // JWT 파싱 실패 시 백엔드에서 사용자 정보 가져오기
+        const backendUser = await BackendAuthService.verifyToken()
+        setAuthState({
+          user: backendUser,
+          token,
+          isAuthenticated: true,
+          isLoading: false
+        })
+      }
     } catch (error) {
       console.error('Failed to verify token:', error)
       // Instagram API 오류 등으로 인한 일시적 실패 시 토큰을 제거하지 않음
@@ -130,15 +141,25 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     try {
       tokenUtils.setToken(token)
       
-      // 백엔드에서 사용자 정보 가져오기 (팀 정보 포함)
-      const user = await BackendAuthService.verifyToken()
-      
-      setAuthState({
-        user,
-        token,
-        isAuthenticated: true,
-        isLoading: false
-      })
+      // JWT 토큰에서 직접 사용자 정보 가져오기
+      const user = getUserFromToken(token)
+      if (user) {
+        setAuthState({
+          user,
+          token,
+          isAuthenticated: true,
+          isLoading: false
+        })
+      } else {
+        // JWT 파싱 실패 시 백엔드에서 사용자 정보 가져오기
+        const backendUser = await BackendAuthService.verifyToken()
+        setAuthState({
+          user: backendUser,
+          token,
+          isAuthenticated: true,
+          isLoading: false
+        })
+      }
     } catch (error) {
       console.error('Login failed:', error)
       // 로그인 실패 시에만 토큰 제거
@@ -154,9 +175,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     try {
       tokenUtils.setToken(token)
       
-      // 소셜 로그인에서는 이미 사용자 정보를 받았으므로 verifyToken 호출하지 않음
+      // JWT 토큰에서 팀 정보를 가져와서 사용자 정보 업데이트
+      const userWithTeams = getUserFromToken(token)
+      
       setAuthState({
-        user,
+        user: userWithTeams || user, // 팀 정보가 있으면 사용, 없으면 원본 사용
         token,
         isAuthenticated: true,
         isLoading: false

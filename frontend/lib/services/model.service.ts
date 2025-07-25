@@ -198,6 +198,13 @@ export class ModelService {
   }
 
   /**
+   * AI 인플루언서 생성 (이미지 포함)
+   */
+  static async createInfluencerWithImage(formData: FormData): Promise<AIInfluencer> {
+    return await apiClient.post<AIInfluencer>('/api/v1/influencers/with-image', formData)
+  }
+
+  /**
    * AI 인플루언서 업데이트
    */
   static async updateInfluencer(influencerId: string, data: UpdateInfluencerRequest): Promise<AIInfluencer> {
@@ -353,6 +360,74 @@ export class ModelService {
         }
       }
     )
+  }
+
+  /**
+   * API 키로 스트리밍 챗봇 호출
+   */
+  static async callChatbotStream(
+    apiKey: string, 
+    request: ChatbotRequest,
+    onToken: (token: string) => void,
+    onComplete: () => void,
+    onError: (error: string) => void
+  ): Promise<void> {
+    try {
+      const response = await fetch('/api/chat/chatbot/stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify(request)
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(errorData.error || '스트리밍 요청 실패')
+      }
+
+      const reader = response.body?.getReader()
+      if (!reader) {
+        throw new Error('스트리밍 응답을 읽을 수 없습니다')
+      }
+
+      const decoder = new TextDecoder()
+      
+      while (true) {
+        const { done, value } = await reader.read()
+        
+        if (done) {
+          onComplete()
+          break
+        }
+
+        const chunk = decoder.decode(value)
+        const lines = chunk.split('\n')
+        
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6))
+              
+              if (data.text) {
+                onToken(data.text)
+              } else if (data.done) {
+                onComplete()
+                return
+              } else if (data.error) {
+                onError(data.error)
+                return
+              }
+            } catch (e) {
+              console.warn('스트리밍 데이터 파싱 실패:', line)
+            }
+          }
+        }
+      }
+    } catch (error) {
+      onError(error instanceof Error ? error.message : '스트리밍 요청 중 오류가 발생했습니다')
+    }
   }
 
 }

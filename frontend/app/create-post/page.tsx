@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { Navigation } from "@/components/navigation"
@@ -83,6 +83,8 @@ export default function CreatePostPage() {
     isResized: boolean;
   } | null>(null)
 
+  const isFetchingRef = useRef(false)
+
 
   // 발행 설정 상태
   const [publishType, setPublishType] = useState<'immediate' | 'scheduled'>('immediate')
@@ -91,8 +93,11 @@ export default function CreatePostPage() {
 
   // 인플루언서 데이터 로딩
   useEffect(() => {
+    if (isFetchingRef.current) return
+    
     const fetchInfluencers = async () => {
       try {
+        isFetchingRef.current = true
         setLoading(true)
         const data = await ModelService.getInfluencers()
         // 사용 가능하고 인스타그램 계정과 연동된 인플루언서만 필터링
@@ -118,6 +123,7 @@ export default function CreatePostPage() {
         setError('인플루언서 정보를 불러오는데 실패했습니다.')
       } finally {
         setLoading(false)
+        isFetchingRef.current = false
       }
     }
 

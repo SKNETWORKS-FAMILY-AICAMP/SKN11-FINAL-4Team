@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Navigation } from "@/components/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -31,6 +31,7 @@ export default function TestModelPage() {
   const [availableModels, setAvailableModels] = useState<AIInfluencer[]>([])
   const [modelsLoading, setModelsLoading] = useState(true)
   const [maxModelWarning, setMaxModelWarning] = useState(false)
+  const isFetchingRef = useRef(false)
 
   const handleModelToggle = (modelId: string) => {
     setSelectedModels((prev) => {
@@ -120,7 +121,10 @@ export default function TestModelPage() {
   // 모델 데이터 로드 (GET /api/v1/influencers)
   useEffect(() => {
     const fetchModels = async () => {
+      if (isFetchingRef.current) return
+      
       try {
+        isFetchingRef.current = true
         setModelsLoading(true)
         const data = await ModelService.getInfluencers()
         setAvailableModels(data)
@@ -129,6 +133,7 @@ export default function TestModelPage() {
         setAvailableModels([])
       } finally {
         setModelsLoading(false)
+        isFetchingRef.current = false
       }
     }
     fetchModels()
