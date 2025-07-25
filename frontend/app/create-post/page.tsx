@@ -269,6 +269,12 @@ export default function CreatePostPage() {
 
   // 이미지 파일 처리 공통 함수
   const processImageFile = async (file: File) => {
+    // 이미지 개수 제한 (5장)
+    if (formData.uploaded_images.length >= 5) {
+      setError('이미지는 최대 5장까지 업로드할 수 있습니다.')
+      return
+    }
+
     // 이미지 파일 검증
     if (!file.type.startsWith('image/')) {
       setError('이미지 파일만 업로드할 수 있습니다.')
@@ -384,8 +390,25 @@ export default function CreatePostPage() {
 
 
 
-  // 게시글 설명 향상
-  const isGenerateEnabled = !!formData.influencer_id && !!formData.board_topic && !!formData.board_description.trim();
+  // AI 생성 버튼 활성화 조건: 인플루언서 선택 + 주제 입력 + (설명 또는 이미지 중 하나 이상)
+  const isGenerateEnabled = !!formData.influencer_id &&
+    !!formData.board_topic &&
+    (!!formData.board_description.trim() || formData.uploaded_images.length > 0);
+
+  // 파일을 base64로 변환하는 함수
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => {
+        const result = reader.result as string;
+        // data:image/jpeg;base64, 부분 제거하고 base64만 반환
+        const base64 = result.split(',')[1];
+        resolve(base64);
+      };
+      reader.onerror = error => reject(error);
+    });
+  };
 
   const generateContent = async () => {
     if (!formData.board_topic || !formData.influencer_id) {
@@ -407,7 +430,44 @@ export default function CreatePostPage() {
     }
 
     try {
+      // 업로드된 이미지들을 base64로 변환
+      const imageBase64List: string[] = [];
+      if (formData.uploaded_images.length > 0) {
+        console.log(`총 ${formData.uploaded_images.length}개의 이미지를 처리합니다.`);
+        for (let i = 0; i < formData.uploaded_images.length; i++) {
+          const file = formData.uploaded_images[i];
+          try {
+            console.log(`이미지 ${i + 1}/${formData.uploaded_images.length} 변환 중: ${file.name}`);
+            const base64 = await fileToBase64(file);
+            imageBase64List.push(base64);
+            console.log(`이미지 ${i + 1} 변환 완료: ${base64.length}자`);
+          } catch (error) {
+            console.error(`이미지 ${i + 1} base64 변환 실패:`, error);
+          }
+        }
+        console.log(`총 ${imageBase64List.length}개의 이미지 변환 완료`);
+      }
+
+      // AI 생성에 활용될 정보 로깅
+      console.log('=== AI 생성 요청 정보 ===');
+      console.log('주제:', formData.board_topic);
+      console.log('플랫폼:', formData.board_platform);
+      console.log('텍스트 내용:', formData.board_description);
+      console.log('해시태그:', formData.board_hashtag.join(' '));
+      console.log('이미지 개수:', imageBase64List.length);
+      console.log('=== AI 생성 요청 정보 끝 ===');
+
       // /generate-content 엔드포인트로 요청 (DB 저장 안 함)
+      console.log('API 요청 데이터:', {
+        board_topic: formData.board_topic,
+        board_platform: formData.board_platform,
+        influencer_id: formData.influencer_id,
+        team_id: selectedInfluencer?.group_id || user?.teams?.[0]?.group_id || 1,
+        include_content: formData.board_description,
+        hashtags: formData.board_hashtag.join(' '),
+        image_base64_list: imageBase64List.length > 0 ? `${imageBase64List.length}개 이미지` : '없음',
+      });
+
       const res: any = await apiClient.post('/api/v1/boards/generate-content', {
         board_topic: formData.board_topic,
         board_platform: formData.board_platform,
@@ -415,11 +475,18 @@ export default function CreatePostPage() {
         team_id: selectedInfluencer?.group_id || user?.teams?.[0]?.group_id || 1,
         include_content: formData.board_description,
         hashtags: formData.board_hashtag.join(' '),
+        image_base64_list: imageBase64List.length > 0 ? imageBase64List : undefined,
       });
+
+      console.log('API 응답:', res);
+
+      if (!res.generated_content) {
+        throw new Error('AI 생성 결과가 없습니다.');
+      }
 
       const generatedContent = {
         content: res.generated_content,
-        hashtags: res.generated_hashtags,
+        hashtags: res.generated_hashtags || [],
       };
       setGenerated(generatedContent);
 
@@ -437,7 +504,12 @@ export default function CreatePostPage() {
       //   }
       // }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'AI 생성에 실패했습니다.');
+      console.error('AI 생성 실패:', err);
+      if (err instanceof Error) {
+        setError(`AI 생성에 실패했습니다: ${err.message}`);
+      } else {
+        setError('AI 생성에 실패했습니다. 콘솔을 확인해주세요.');
+      }
     } finally {
       setIsEnhancing(false);
     }
@@ -460,11 +532,12 @@ export default function CreatePostPage() {
     }
 
     try {
-      const response = await apiClient.post('/api/v1/boards/influencer-style/convert', {
+      const response = await apiClient.post('/api/v1/content-enhancement/influencer-tone', {
         influencer_id: selectedInfluencer.influencer_id,
-        text: generated.content,  // AI 생성 결과 사용
+        content: generated.content,  // AI 생성 결과 사용
+        platform: "instagram"
       });
-      setConverted((response as any).converted_text || "");
+      setConverted((response as any).transformed_content || "");
     } catch (err) {
       setError("인플루언서 말투 변환에 실패했습니다.");
     } finally {
@@ -794,17 +867,21 @@ export default function CreatePostPage() {
                   <div
                     className={`relative group transition-all duration-300 ${isDragOver
                       ? "scale-105"
-                      : "hover:scale-[1.02]"
+                      : formData.uploaded_images.length >= 5
+                        ? "opacity-50 cursor-not-allowed"
+                        : "hover:scale-[1.02]"
                       }`}
-                    onDragOver={handleDragOver}
-                    onDragLeave={handleDragLeave}
-                    onDrop={handleDrop}
+                    onDragOver={formData.uploaded_images.length >= 5 ? undefined : handleDragOver}
+                    onDragLeave={formData.uploaded_images.length >= 5 ? undefined : handleDragLeave}
+                    onDrop={formData.uploaded_images.length >= 5 ? undefined : handleDrop}
                   >
                     <div className={`
                         relative overflow-hidden rounded-xl border-2 border-dashed transition-all duration-300
                         ${isDragOver
                         ? "border-blue-500 bg-gradient-to-br from-blue-50 to-indigo-50 shadow-lg shadow-blue-100"
-                        : "border-gray-300 bg-gradient-to-br from-gray-50 to-white hover:border-blue-400 hover:bg-gradient-to-br hover:from-blue-50 hover:to-indigo-50"
+                        : formData.uploaded_images.length >= 5
+                          ? "border-gray-200 bg-gray-50"
+                          : "border-gray-300 bg-gradient-to-br from-gray-50 to-white hover:border-blue-400 hover:bg-gradient-to-br hover:from-blue-50 hover:to-indigo-50"
                       }
                       `}>
                       {/* 배경 패턴 */}
@@ -841,18 +918,27 @@ export default function CreatePostPage() {
                         <div className="space-y-3">
                           <h3 className={`
                               text-xl font-semibold transition-colors duration-300
-                              ${isDragOver ? "text-blue-700" : "text-gray-800 group-hover:text-blue-700"}
+                              ${isDragOver ? "text-blue-700" : formData.uploaded_images.length >= 5 ? "text-gray-500" : "text-gray-800 group-hover:text-blue-700"}
                             `}>
-                            {isDragOver ? "여기에 놓으세요!" : "이미지 업로드"}
+                            {isDragOver ? "여기에 놓으세요!" : formData.uploaded_images.length >= 5 ? "최대 개수 도달" : "이미지 업로드"}
                           </h3>
                           <p className={`
                               text-sm transition-colors duration-300 max-w-md mx-auto
-                              ${isDragOver ? "text-blue-600" : "text-gray-600 group-hover:text-blue-600"}
+                              ${isDragOver ? "text-blue-600" : formData.uploaded_images.length >= 5 ? "text-gray-500" : "text-gray-600 group-hover:text-blue-600"}
                             `}>
-                            게시글에 사용할 이미지를 드래그하여 놓거나 클릭하여 선택하세요
+                            {formData.uploaded_images.length >= 5
+                              ? "이미지 5장이 모두 업로드되었습니다. 추가 업로드를 원하면 기존 이미지를 제거하세요."
+                              : "게시글에 사용할 이미지를 드래그하여 놓거나 클릭하여 선택하세요"
+                            }
                           </p>
                           <p className="text-xs text-gray-500">
                             지원 형식: JPG, PNG, GIF, WebP (최대 5MB)
+                          </p>
+                          <p className="text-xs text-blue-600 mt-2">
+                            💡 이미지를 업로드하면 AI가 이미지와 텍스트를 모두 분석하여 더 정확한 게시글을 생성합니다
+                          </p>
+                          <p className="text-xs text-orange-600 mt-1">
+                            ⚠️ 최대 5장까지 업로드 가능합니다 ({formData.uploaded_images.length}/5)
                           </p>
                         </div>
 
@@ -865,6 +951,7 @@ export default function CreatePostPage() {
                             multiple
                             onChange={handleImageUpload}
                             className="hidden"
+                            disabled={formData.uploaded_images.length >= 5}
                           />
                           <label htmlFor="image_upload">
                             <Button
@@ -872,14 +959,17 @@ export default function CreatePostPage() {
                                   transition-all duration-300 cursor-pointer
                                   ${isDragOver
                                   ? "bg-blue-600 hover:bg-blue-700 text-white shadow-lg"
-                                  : "bg-white hover:bg-blue-50 text-gray-700 border-gray-300 hover:border-blue-400 hover:text-blue-700 shadow-sm hover:shadow-md"
+                                  : formData.uploaded_images.length >= 5
+                                    ? "bg-gray-100 text-gray-400 cursor-not-allowed"
+                                    : "bg-white hover:bg-blue-50 text-gray-700 border-gray-300 hover:border-blue-400 hover:text-blue-700 shadow-sm hover:shadow-md"
                                 }
                                 `}
                               asChild
+                              disabled={formData.uploaded_images.length >= 5}
                             >
                               <span className="flex items-center gap-2">
                                 <Upload className="h-4 w-4" />
-                                파일 선택
+                                {formData.uploaded_images.length >= 5 ? "최대 개수 도달" : "파일 선택"}
                               </span>
                             </Button>
                           </label>
@@ -913,16 +1003,32 @@ export default function CreatePostPage() {
                           size="sm"
                           onClick={generateContent}
                           disabled={isEnhancing}
+                          className="flex items-center gap-1"
                         >
                           {isEnhancing ? (
                             <>
-                              <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                              <Loader2 className="h-3 w-3 animate-spin" />
                               생성 중...
                             </>
                           ) : (
                             <>
-                              <Sparkles className="h-3 w-3 mr-1" />
+                              <Sparkles className="h-3 w-3" />
                               AI 생성
+                              {formData.uploaded_images.length > 0 && formData.board_description.trim() && (
+                                <span className="ml-1 text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full">
+                                  {formData.uploaded_images.length}개 이미지 + 텍스트 분석
+                                </span>
+                              )}
+                              {formData.uploaded_images.length > 0 && !formData.board_description.trim() && (
+                                <span className="ml-1 text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full">
+                                  {formData.uploaded_images.length}개 이미지 분석
+                                </span>
+                              )}
+                              {formData.uploaded_images.length === 0 && formData.board_description.trim() && (
+                                <span className="ml-1 text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full">
+                                  텍스트 기반 생성
+                                </span>
+                              )}
                             </>
                           )}
                         </Button>
@@ -940,7 +1046,15 @@ export default function CreatePostPage() {
                   {generated && (
                     <div className="mt-4 space-y-4">
                       <div className="p-4 bg-green-50 border border-green-200 rounded-lg relative">
-                        <h4 className="font-medium text-green-900 mb-2 flex items-center">AI가 생성한 본문</h4>
+                        <h4 className="font-medium text-green-900 mb-2 flex items-center">
+                          <Sparkles className="h-4 w-4 mr-2" />
+                          AI가 생성한 본문
+                          {formData.uploaded_images.length > 0 && (
+                            <span className="ml-2 text-xs bg-green-200 text-green-800 px-2 py-1 rounded-full">
+                              {formData.uploaded_images.length}개 이미지 + 텍스트 기반
+                            </span>
+                          )}
+                        </h4>
                         <div className="text-sm text-green-800 whitespace-pre-wrap bg-white p-3 rounded border mb-4 max-h-60 overflow-y-auto leading-relaxed">
                           {generated.content}
                         </div>

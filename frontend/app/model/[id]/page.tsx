@@ -305,13 +305,17 @@ function ModelDetailContent() {
         `/api/v1/boards?influencer_id=${params.id}`,
       );
 
-      // 게시글 데이터 변환 (백엔드에서 제공하는 인플루언서 정보 사용)
+      // 인플루언서 정보 조회
+      const influencerResponse = await apiClient.get(`/api/v1/influencers/${params.id}`);
+      const influencerData = influencerResponse as any;
+
+      // 게시글 데이터 변환
       const transformedPosts: ContentPost[] = boardData.map((board: any) => {
-        // 백엔드에서 이미 제공하는 인플루언서 정보 사용
+        // 인플루언서 ID를 통해 인플루언서 정보 사용
         const influencerName =
-          board.influencer_name || model?.name || "AI 인플루언서";
+          board.influencer_name || influencerData?.influencer_name || "AI 인플루언서";
         const influencerDescription =
-          board.influencer_description || model?.description || "";
+          board.influencer_description || influencerData?.influencer_description || "";
 
         const basePost = {
           id: board.board_id,
@@ -1790,15 +1794,8 @@ function ModelDetailContent() {
 
   // 플랫폼별 성과 계산 함수 추가
   const calculatePlatformStats = () => {
-    // 모든 플랫폼을 기본으로 설정
-    const allPlatforms = [
-      "Instagram",
-      "Facebook",
-      "Twitter",
-      "TikTok",
-      "YouTube",
-      "Blog",
-    ];
+    // Instagram만 남기고 나머지는 제거
+    const allPlatforms = ["Instagram"];
     const platformStats: Record<
       string,
       {
@@ -1811,7 +1808,7 @@ function ModelDetailContent() {
       }
     > = {};
 
-    // 모든 플랫폼을 0으로 초기화
+    // Instagram만 0으로 초기화
     allPlatforms.forEach((platform) => {
       platformStats[platform] = {
         name: platform,
@@ -1824,18 +1821,7 @@ function ModelDetailContent() {
     });
 
     posts.forEach((post) => {
-      if (post.status === "published" && post.platform) {
-        if (!platformStats[post.platform]) {
-          platformStats[post.platform] = {
-            name: post.platform,
-            posts: 0,
-            totalLikes: 0,
-            totalComments: 0,
-            avgEngagement: 0,
-            color: "",
-          };
-        }
-
+      if (post.status === "published" && post.platform === "Instagram") {
         const stats = platformStats[post.platform];
         stats.posts += 1;
         stats.totalLikes += post.engagement?.likes || 0;
@@ -1850,16 +1836,8 @@ function ModelDetailContent() {
       stats.avgEngagement =
         stats.posts > 0 ? Math.round(totalEngagement / stats.posts) : 0;
 
-      // 플랫폼별 색상 설정
-      const colors: Record<string, string> = {
-        Instagram: "bg-pink-500",
-        Facebook: "bg-blue-600",
-        Twitter: "bg-sky-500",
-        TikTok: "bg-purple-600",
-        YouTube: "bg-red-600",
-        Blog: "bg-orange-500",
-      };
-      stats.color = colors[platform] || "bg-gray-500";
+      // Instagram 색상 설정
+      stats.color = "bg-pink-500";
     });
 
     return platformStats;
@@ -2643,7 +2621,6 @@ function ModelDetailContent() {
                       <PostCard
                         key={post.id}
                         post={post}
-                        onView={handleViewPostDetail}
                         showActions={false}
                         showInfluencerInfo={false}
                         variant="content"

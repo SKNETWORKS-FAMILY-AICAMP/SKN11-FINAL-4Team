@@ -70,7 +70,9 @@ class AIContentGenerationRequest(BaseModel):
     include_content: Optional[str] = None
     hashtags: Optional[str] = None
 
-    # 이미지 생성 옵션
+    # 이미지 base64 데이터 리스트 (최대 5개)
+    image_base64_list: Optional[List[str]] = None
+
     generate_image: bool = True
     image_style: str = "realistic"
     image_width: int = 1024

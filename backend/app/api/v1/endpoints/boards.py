@@ -1132,6 +1132,8 @@ class AIContentGenerationRequest(BaseModel):
     team_id: int  # ← int로 변경
     include_content: str = None
     hashtags: str = None
+    image_base64: str = None  # 단일 이미지 데이터
+    image_base64_list: List[str] = None  # 다중 이미지 데이터
 
 
 class ContentGenerationResponse(BaseModel):
@@ -1146,63 +1148,6 @@ class AIContentGenerationResponse(BaseModel):
     created_at: str
 
 
-# 인플루언서 말투 변환 관련 모델
-class InfluencerStyleRequest(BaseModel):
-    influencer_id: str
-    text: str
-
-
-class InfluencerStyleResponse(BaseModel):
-    converted_text: str
-
-
-@router.post("/influencer-style/convert", response_model=InfluencerStyleResponse)
-async def convert_influencer_style(
-    request: InfluencerStyleRequest,
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
-):
-    """인플루언서 말투로 텍스트 변환"""
-    try:
-        user_id = current_user.get("sub")
-        if not user_id:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="User authentication required",
-            )
-
-        # 인플루언서 정보 조회
-        influencer = (
-            db.query(AIInfluencer)
-            .filter(AIInfluencer.influencer_id == request.influencer_id)
-            .first()
-        )
-
-        if not influencer:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="인플루언서를 찾을 수 없습니다.",
-            )
-
-        # ContentEnhancementService 사용하여 말투 변환
-        content_service = ContentEnhancementService()
-        result = await content_service.convert_to_influencer_style(
-            text=request.text,
-            influencer_name=influencer.influencer_name,
-            influencer_desc=influencer.influencer_description,
-            influencer_personality=influencer.influencer_personality,
-        )
-
-        return InfluencerStyleResponse(converted_text=result["converted_text"])
-
-    except Exception as e:
-        logger.error(f"인플루언서 말투 변환 실패: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"인플루언서 말투 변환에 실패했습니다: {str(e)}",
-        )
-
-
 @router.post("/generate-content", response_model=ContentGenerationResponse)
 async def generate_content_only(
     request: AIContentGenerationRequest,
@@ -1210,16 +1155,31 @@ async def generate_content_only(
 ):
     """
     AI 콘텐츠 생성만 수행 (DB 저장 안 함)
-
-    워크플로우:
-    1. 사용자 입력 받기
-    2. OpenAI로 소셜 미디어 콘텐츠 생성
-    3. 결과만 반환 (DB 저장 안 함)
     """
     try:
-        logger.info(f"Starting content generation for topic: {request.board_topic}")
+        logger.info(f"=== AI 콘텐츠 생성 요청 시작 ===")
+        logger.info(f"요청 데이터: {request.dict()}")
+        logger.info(f"board_topic: {request.board_topic}")
+        logger.info(f"board_platform: {request.board_platform}")
+        logger.info(f"include_content: {request.include_content}")
+        logger.info(f"hashtags: {request.hashtags}")
+        # 이미지 리스트 안전하게 처리
+        image_list = request.image_base64_list or []
+        logger.info(f"=== AI 생성 요청 정보 ===")
+        logger.info(f"주제: {request.board_topic}")
+        logger.info(f"플랫폼: {request.board_platform}")
+        logger.info(
+            f"텍스트 내용: {request.include_content[:100] if request.include_content else '없음'}..."
+        )
+        logger.info(f"해시태그: {request.hashtags}")
+        logger.info(f"전체 이미지 개수: {len(image_list)}개")
+        if image_list:
+            for i, img in enumerate(image_list):
+                logger.info(f"이미지 {i+1}: {img[:50]}... (총 {len(img)}자)")
+        else:
+            logger.info("처리할 이미지가 없습니다.")
+        logger.info(f"=== AI 생성 요청 정보 끝 ===")
 
-        # 인증된 사용자 ID 가져오기
         user_id = current_user.get("sub")
         if not user_id:
             raise HTTPException(
@@ -1227,30 +1187,37 @@ async def generate_content_only(
                 detail="User authentication required",
             )
 
-        # 플랫폼 문자열 매핑
         platform_names = {0: "instagram", 1: "facebook", 2: "twitter", 3: "tiktok"}
         platform_name = platform_names.get(request.board_platform, "instagram")
 
-        # ContentEnhancementService 인스턴스 생성
         content_service = ContentEnhancementService()
 
-        # AI 콘텐츠 생성
         content_result = await content_service.generate_content(
             topic=request.board_topic,
             platform=platform_name,
             include_content=request.include_content,
             hashtags=request.hashtags,
+            image_base64_list=image_list,
         )
 
-        logger.info(f"Content generation completed successfully")
+        logger.info(f"AI 콘텐츠 생성 완료")
+        logger.info(f"생성된 설명: {content_result.get('description', '')[:200]}...")
+        logger.info(f"생성된 해시태그: {content_result.get('hashtags', '')}")
 
         return ContentGenerationResponse(
-            generated_content=content_result["social_media_content"],
-            generated_hashtags=content_result["hashtags"],
+            generated_content=content_result["description"],
+            generated_hashtags=(
+                content_result["hashtags"].split() if content_result["hashtags"] else []
+            ),
         )
 
     except Exception as e:
-        logger.error(f"Content generation failed: {e}")
+        logger.error(f"AI 콘텐츠 생성 실패: {e}")
+        logger.error(f"에러 타입: {type(e)}")
+        logger.error(f"에러 상세: {str(e)}")
+        import traceback
+
+        logger.error(f"스택 트레이스: {traceback.format_exc()}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Content generation failed: {str(e)}",
