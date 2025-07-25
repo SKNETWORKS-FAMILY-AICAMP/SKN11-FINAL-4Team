@@ -18,17 +18,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent } from "@/components/ui/tabs";
-import {
-  ModelTabsList,
-  AnalyticsTab,
-  ContentTab,
-  ApiTab,
-  IntegrationsTab,
-  SettingsTab,
-  VoiceTab,
-  McpTab
-} from "./components";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog,
   DialogContent,
@@ -338,9 +328,9 @@ function ModelDetailContent() {
           scheduledAt: board.reservation_at || "",
           hashtags: board.board_hash_tag
             ? board.board_hash_tag
-              .split(" ")
-              .filter((tag: string) => tag.trim())
-              .map((tag: string) => (tag.startsWith("#") ? tag : `#${tag}`))
+                .split(" ")
+                .filter((tag: string) => tag.trim())
+                .map((tag: string) => (tag.startsWith("#") ? tag : `#${tag}`))
             : [],
           media: {
             type: board.image_url && board.image_url.split(",").length > 1 ? "carousel" as const : "image" as const,
@@ -543,7 +533,7 @@ function ModelDetailContent() {
     if (token) {
       try {
         const payload = JSON.parse(atob(token.split(".")[1]));
-      } catch (e) { }
+      } catch (e) {}
     } else {
     }
 
@@ -1137,10 +1127,10 @@ function ModelDetailContent() {
                 is_connected: data.connected,
                 instagram_info: data.instagram_username
                   ? {
-                    id: "",
-                    username: data.instagram_username,
-                    account_type: data.instagram_account_type || "",
-                  }
+                      id: "",
+                      username: data.instagram_username,
+                      account_type: data.instagram_account_type || "",
+                    }
                   : undefined,
               });
             } catch (error) {
@@ -1264,11 +1254,11 @@ function ModelDetailContent() {
               scheduledAt: board.reservation_at || "",
               hashtags: board.board_hash_tag
                 ? board.board_hash_tag
-                  .split(" ")
-                  .filter((tag: string) => tag.trim())
-                  .map((tag: string) =>
-                    tag.startsWith("#") ? tag : `#${tag}`,
-                  )
+                    .split(" ")
+                    .filter((tag: string) => tag.trim())
+                    .map((tag: string) =>
+                      tag.startsWith("#") ? tag : `#${tag}`,
+                    )
                 : [],
               media: {
                 type: "image" as const,
@@ -1430,7 +1420,7 @@ function ModelDetailContent() {
       editContent !== (selectedPost.content || "") ||
       editHashtags !== (selectedPost.hashtags?.join(" ") || "") ||
       editScheduledAt !==
-      (selectedPost.scheduledAt ? selectedPost.scheduledAt.slice(0, 16) : "");
+        (selectedPost.scheduledAt ? selectedPost.scheduledAt.slice(0, 16) : "");
 
     if (!hasChanges) {
       setIsEditing(false);
@@ -2371,103 +2361,1168 @@ function ModelDetailContent() {
           onValueChange={setActiveTab}
           className="space-y-6"
         >
-          <ModelTabsList />
+          <TabsList className="grid w-full grid-cols-7">
+            <TabsTrigger
+              value="analytics"
+              className="flex items-center space-x-2"
+            >
+              <BarChart3 className="h-4 w-4" />
+              <span>분석</span>
+            </TabsTrigger>
+            <TabsTrigger
+              value="content"
+              className="flex items-center space-x-2"
+            >
+              <FileText className="h-4 w-4" />
+              <span>콘텐츠</span>
+            </TabsTrigger>
+            <TabsTrigger value="api" className="flex items-center space-x-2">
+              <Download className="h-4 w-4" />
+              <span>API</span>
+            </TabsTrigger>
+            <TabsTrigger
+              value="integrations"
+              className="flex items-center space-x-2"
+            >
+              <Link2 className="h-4 w-4" />
+              <span>연동</span>
+            </TabsTrigger>
+            <TabsTrigger
+              value="settings"
+              className="flex items-center space-x-2"
+            >
+              <Info className="h-4 w-4" />
+              <span>정보</span>
+            </TabsTrigger>
+            <TabsTrigger value="voice" className="flex items-center space-x-2">
+              <Mic className="h-4 w-4" />
+              <span>음성</span>
+            </TabsTrigger>
+
+            <TabsTrigger value="mcp" className="flex items-center space-x-2">
+              <Settings className="h-4 w-4" />
+              <span>MCP</span>
+            </TabsTrigger>
+          </TabsList>
 
           {/* 분석 탭 */}
           <TabsContent value="analytics">
-            <AnalyticsTab
-              model={model}
-              analyticsData={analyticsData}
-              weeklyChartData={weeklyChartData}
-              platformStats={platformStats}
-              isPostsLoading={isPostsLoading}
-              loadAnalyticsData={loadAnalyticsData}
-              getPlatformBadge={getPlatformBadge}
-            />
+            <div className="flex justify-between items-center mb-6">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">
+                  인플루언서 분석
+                </h3>
+                <p className="text-sm text-gray-600">
+                  {model?.name}의 성과와 통계를 확인하세요
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={loadAnalyticsData}
+                disabled={isPostsLoading}
+                className="flex items-center space-x-2"
+              >
+                <RefreshCw
+                  className={`h-4 w-4 ${isPostsLoading ? "animate-spin" : ""}`}
+                />
+                <span>새로고침</span>
+              </Button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+              <Card>
+                <CardContent className="p-6">
+                  <div className="text-center">
+                    <p className="text-2xl font-bold text-blue-600">
+                      {analyticsData.totalApiCalls.toLocaleString()}
+                    </p>
+                    <p className="text-sm text-gray-600">총 API 호출</p>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-6">
+                  <div className="text-center">
+                    <p className="text-2xl font-bold text-orange-600">
+                      {analyticsData.todayApiCalls.toLocaleString()}
+                    </p>
+                    <p className="text-sm text-gray-600">오늘 호출</p>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-6">
+                  <div className="text-center">
+                    <p className="text-2xl font-bold text-green-600">
+                      {analyticsData.publishedPosts.toLocaleString()}
+                    </p>
+                    <p className="text-sm text-gray-600">발행된 게시글</p>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-6">
+                  <div className="text-center">
+                    <p className="text-2xl font-bold text-purple-600">
+                      {analyticsData.totalLikes.toLocaleString()}
+                    </p>
+                    <p className="text-sm text-gray-600">총 좋아요</p>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>사용량 통계</CardTitle>
+                <CardDescription>
+                  최근 7일간의 API 사용량 추이입니다
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="h-64">
+                  {weeklyChartData.length > 0 ? (
+                    <div className="h-full flex items-end justify-between space-x-2">
+                      {weeklyChartData.map((data, index) => (
+                        <div
+                          key={data.date}
+                          className="flex-1 flex flex-col items-center"
+                        >
+                          <div
+                            className="w-full bg-blue-500 rounded-t"
+                            style={{
+                              height: `${Math.max((data.calls / Math.max(...weeklyChartData.map((d) => d.calls))) * 200, 4)}px`,
+                            }}
+                          />
+                          <div className="text-xs text-gray-500 mt-2 text-center">
+                            {new Date(data.date).toLocaleDateString("ko-KR", {
+                              month: "short",
+                              day: "numeric",
+                            })}
+                          </div>
+                          <div className="text-xs font-medium text-gray-700 mt-1">
+                            {data.calls}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="h-full flex items-center justify-center">
+                      <div className="text-center">
+                        <BarChart3 className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                        <p className="text-gray-500 mb-2">
+                          차트 데이터 로딩 중...
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="mt-6">
+              <CardHeader>
+                <CardTitle>플랫폼별 성과 요약</CardTitle>
+                <CardDescription>
+                  각 소셜미디어 플랫폼별 게시글 성과를 확인하세요
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {Object.values(platformStats).map((stats) => (
+                    <div
+                      key={stats.name}
+                      className="bg-white border rounded-lg p-4"
+                    >
+                      <div className="flex items-center space-x-3 mb-4">
+                        <div
+                          className={`w-3 h-3 rounded-full ${stats.color}`}
+                        ></div>
+                        <h4 className="font-semibold text-gray-900">
+                          {stats.name}
+                        </h4>
+                        {getPlatformBadge(stats.name)}
+                      </div>
+
+                      <div className="space-y-3">
+                        <div className="flex justify-between">
+                          <span className="text-sm text-gray-600">
+                            게시글 수
+                          </span>
+                          <span className="font-medium">{stats.posts}개</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-sm text-gray-600">
+                            총 좋아요
+                          </span>
+                          <span className="font-medium">
+                            {stats.totalLikes.toLocaleString()}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-sm text-gray-600">총 댓글</span>
+                          <span className="font-medium">
+                            {stats.totalComments.toLocaleString()}
+                          </span>
+                        </div>
+
+                        <div className="flex justify-between border-t pt-2">
+                          <span className="text-sm text-gray-600">
+                            평균 참여
+                          </span>
+                          <span className="font-semibold text-blue-600">
+                            {stats.avgEngagement.toLocaleString()}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
           </TabsContent>
 
           {/* 콘텐츠 탭 */}
           <TabsContent value="content">
-            <ContentTab
-              posts={posts}
-              isPostsLoading={isPostsLoading}
-              loadPostsData={loadPostsData}
-              handleViewPostDetail={handleViewPostDetail}
-              PostCard={PostCard}
-            />
+            <div className="space-y-6">
+              <div className="flex justify-between items-center">
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900">
+                    최근 게시된 콘텐츠
+                  </h3>
+                  <p className="text-sm text-gray-600">
+                    이 AI 모델이 생성한 게시글 목록입니다
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={loadPostsData}
+                  disabled={isPostsLoading}
+                  className="flex items-center space-x-2"
+                >
+                  <RefreshCw
+                    className={`h-4 w-4 ${isPostsLoading ? "animate-spin" : ""}`}
+                  />
+                  <span>새로고침</span>
+                </Button>
+              </div>
+
+              {isPostsLoading ? (
+                <div className="text-center py-12">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                  <p className="text-gray-500 text-lg">
+                    게시글을 불러오는 중...
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {posts.map((post) => (
+                      <PostCard
+                        key={post.id}
+                        post={post}
+                        onView={handleViewPostDetail}
+                        showActions={false}
+                        showInfluencerInfo={false}
+                        variant="content"
+                      />
+                    ))}
+                  </div>
+
+                  {posts.length === 0 && (
+                    <div className="text-center py-12">
+                      <FileText className="h-12 w-12 mx-auto mb-4 text-gray-300" />
+                      <p className="text-gray-500 text-lg">
+                        아직 생성된 콘텐츠가 없습니다
+                      </p>
+                      <p className="text-gray-400 mt-2">
+                        첫 번째 게시글을 작성해보세요!
+                      </p>
+                      <Link href="/create-post">
+                        <Button className="mt-4">
+                          <FileText className="h-4 w-4 mr-2" />
+                          게시글 작성하기
+                        </Button>
+                      </Link>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
           </TabsContent>
 
           {/* API 탭 */}
           <TabsContent value="api">
-            <ApiTab
-              model={model}
-              showApiKey={showApiKey}
-              setShowApiKey={setShowApiKey}
-              isGeneratingApiKey={isGeneratingApiKey}
-              copyApiKey={copyApiKey}
-              generateNewApiKey={generateNewApiKey}
-              apiKeyInfo={apiKeyInfo}
-            />
+            <div className="space-y-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle>API 키 관리</CardTitle>
+                  <CardDescription>
+                    AI 모델에 접근하기 위한 API 키를 관리합니다
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div>
+                    <Label htmlFor="api-key">API 키</Label>
+                    <div className="flex space-x-2">
+                      <Input
+                        id="api-key"
+                        type={showApiKey ? "text" : "password"}
+                        value={model.apiKey || ""}
+                        readOnly
+                        className="font-mono"
+                        placeholder={
+                          isGeneratingApiKey
+                            ? "생성 중..."
+                            : "API 키를 불러오는 중..."
+                        }
+                      />
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={() => setShowApiKey(!showApiKey)}
+                      >
+                        {showApiKey ? (
+                          <EyeOff className="h-4 w-4" />
+                        ) : (
+                          <Eye className="h-4 w-4" />
+                        )}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={copyApiKey}
+                      >
+                        <Copy className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    {apiKeyInfo && (
+                      <div className="mt-2 text-xs text-gray-500 space-y-1">
+                        <div>
+                          생성일:{" "}
+                          {new Date(apiKeyInfo.created_at).toLocaleDateString(
+                            "ko-KR",
+                          )}
+                        </div>
+                        {apiKeyInfo.updated_at !== apiKeyInfo.created_at && (
+                          <div>
+                            수정일:{" "}
+                            {new Date(apiKeyInfo.updated_at).toLocaleDateString(
+                              "ko-KR",
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex space-x-2">
+                    <Button
+                      variant="outline"
+                      onClick={generateNewApiKey}
+                      disabled={isGeneratingApiKey}
+                    >
+                      {isGeneratingApiKey ? (
+                        <>
+                          <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                          생성 중...
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="h-4 w-4 mr-2" />새 키 생성
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>API 사용법</CardTitle>
+                  <CardDescription>
+                    AI 모델을 호출하는 방법을 안내합니다
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4">
+                    <div>
+                      <Label>단일 응답 엔드포인트</Label>
+                      <div className="bg-gray-100 p-3 rounded-md font-mono text-sm">
+                        POST https://api.aimex.toyproject.site/v1/chat/chatbot
+                      </div>
+                    </div>
+                    <div>
+                      <Label>요청 예시</Label>
+                      <pre className="bg-gray-100 p-3 rounded-md text-sm overflow-x-auto">
+                        {`curl -X POST https://api.aimex.toyproject.site/v1/chat/chatbot \\
+    -H "Authorization: Bearer [API_KEY]" \\
+    -H "Content-Type: application/json" \\
+    -d '{
+      "message": "안녕하세요! 오늘 패션 추천 부탁드려요"
+    }'`}
+                      </pre>
+                    </div>
+                  </div>
+                  <div className="space-y-4 mt-4">
+                    <div>
+                      <Label>스트리밍 엔드포인트</Label>
+                      <div className="bg-gray-100 p-3 rounded-md font-mono text-sm">
+                        POST https://api.aimex.toyproject.site/v1/chat/chatbot/stream
+                      </div>
+                    </div>
+                    <div>
+                      <Label>요청 예시</Label>
+                      <pre className="bg-gray-100 p-3 rounded-md text-sm overflow-x-auto">
+                        {`curl -X POST https://api.aimex.toyproject.site/v1/chat/chatbot/stream \\
+    -H "Authorization: Bearer [API_KEY]" \\
+    -H "Content-Type: application/json" \\
+    -d '{
+      "message": "안녕하세요! 오늘 패션 추천 부탁드려요"
+    }'`}
+                      </pre>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
           </TabsContent>
 
           {/* 연동 탭 */}
           <TabsContent value="integrations">
-            <IntegrationsTab
-              instagramStatus={instagramStatus}
-              isConnecting={isConnecting}
-              handleInstagramConnect={handleInstagramConnect}
-              handleInstagramDisconnect={handleInstagramDisconnect}
-              PostImage={PostImage}
-            />
+            <div className="space-y-6">
+              {/* Instagram 계정 연동 */}
+              <Card className="bg-white shadow-sm border border-gray-200">
+                <CardHeader className="pb-4">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-12 h-12 bg-pink-100 rounded-lg flex items-center justify-center">
+                      <Instagram className="h-6 w-6 text-pink-600" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-lg font-medium text-gray-900">
+                        Instagram 계정 연동
+                      </CardTitle>
+                      <CardDescription className="text-sm text-gray-600 mt-1">
+                        비즈니스 계정을 연동하여 AI 콘텐츠 자동 포스팅, 인사이트
+                        분석 등 다양한 기능을 활용하세요.
+                      </CardDescription>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  {instagramStatus.is_connected ? (
+                    <div className="space-y-6">
+                      {/* 연동된 계정 정보 */}
+                      <div
+                        className={`flex items-start space-x-4 p-4 rounded-lg border-2 ${
+                          instagramStatus.token_expired
+                            ? "bg-yellow-50 border-yellow-200"
+                            : "bg-green-50 border-green-200"
+                        }`}
+                      >
+                        <div className="w-12 h-12 bg-gradient-to-br from-pink-500 to-purple-600 rounded-full flex items-center justify-center shadow-sm">
+                          {instagramStatus.instagram_info
+                            ?.profile_picture_url ? (
+                            <PostImage
+                              url={
+                                instagramStatus.instagram_info
+                                  .profile_picture_url
+                              }
+                              alt="Profile"
+                              className="w-12 h-12 rounded-full object-cover"
+                            />
+                          ) : (
+                            <Instagram className="h-6 w-6 text-white" />
+                          )}
+                        </div>
+                        <div className="flex-1">
+                          <div className="flex items-center space-x-2 mb-1">
+                            {instagramStatus.token_expired ? (
+                              <AlertCircle className="h-4 w-4 text-yellow-600" />
+                            ) : (
+                              <CheckCircle className="h-4 w-4 text-green-600" />
+                            )}
+                            <p
+                              className={`font-medium ${
+                                instagramStatus.token_expired
+                                  ? "text-yellow-900"
+                                  : "text-green-900"
+                              }`}
+                            >
+                              {instagramStatus.token_expired
+                                ? "Instagram 계정 재연동 필요"
+                                : "Instagram 계정 연동됨"}
+                            </p>
+                          </div>
+                          <p
+                            className={`text-sm ${
+                              instagramStatus.token_expired
+                                ? "text-yellow-700"
+                                : "text-green-700"
+                            }`}
+                          >
+                            @
+                            {instagramStatus.instagram_info?.username ||
+                              "Unknown"}{" "}
+                            •{" "}
+                            {instagramStatus.instagram_info?.account_type ||
+                              "Unknown"}{" "}
+                            계정
+                          </p>
+                          {instagramStatus.connected_at && (
+                            <p
+                              className={`text-xs mt-1 ${
+                                instagramStatus.token_expired
+                                  ? "text-yellow-600"
+                                  : "text-green-600"
+                              }`}
+                            >
+                              연동일:{" "}
+                              {new Date(
+                                instagramStatus.connected_at,
+                              ).toLocaleDateString("ko-KR")}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Instagram 상세 정보 */}
+                      {instagramStatus.instagram_info &&
+                        !instagramStatus.token_expired && (
+                          <div className="space-y-4">
+                            {/* 통계 정보 */}
+                            <div className="grid grid-cols-3 gap-4 p-4 bg-white rounded-lg border border-gray-200">
+                              <div className="text-center">
+                                <p className="text-lg font-semibold text-gray-900">
+                                  {(
+                                    instagramStatus.instagram_info
+                                      .followers_count || 0
+                                  ).toLocaleString()}
+                                </p>
+                                <p className="text-xs text-gray-500">팔로워</p>
+                              </div>
+                              <div className="text-center">
+                                <p className="text-lg font-semibold text-gray-900">
+                                  {(
+                                    instagramStatus.instagram_info
+                                      .follows_count || 0
+                                  ).toLocaleString()}
+                                </p>
+                                <p className="text-xs text-gray-500">팔로잉</p>
+                              </div>
+                              <div className="text-center">
+                                <p className="text-lg font-semibold text-gray-900">
+                                  {(
+                                    instagramStatus.instagram_info
+                                      .media_count || 0
+                                  ).toLocaleString()}
+                                </p>
+                                <p className="text-xs text-gray-500">게시물</p>
+                              </div>
+                            </div>
+
+                            {/* 프로필 정보 */}
+                            {(instagramStatus.instagram_info.name ||
+                              instagramStatus.instagram_info.biography ||
+                              instagramStatus.instagram_info.website) && (
+                              <div className="p-4 bg-white rounded-lg border border-gray-200 space-y-3">
+                                {instagramStatus.instagram_info.name && (
+                                  <div>
+                                    <p className="text-xs text-gray-500 mb-1">
+                                      이름
+                                    </p>
+                                    <p className="text-sm font-medium text-gray-900">
+                                      {instagramStatus.instagram_info.name}
+                                    </p>
+                                  </div>
+                                )}
+
+                                {instagramStatus.instagram_info.biography && (
+                                  <div>
+                                    <p className="text-xs text-gray-500 mb-1">
+                                      소개
+                                    </p>
+                                    <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
+                                      {instagramStatus.instagram_info.biography}
+                                    </p>
+                                  </div>
+                                )}
+
+                                {instagramStatus.instagram_info.website && (
+                                  <div>
+                                    <p className="text-xs text-gray-500 mb-1">
+                                      웹사이트
+                                    </p>
+                                    <a
+                                      href={
+                                        instagramStatus.instagram_info.website
+                                      }
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-sm text-blue-600 hover:text-blue-800 underline"
+                                    >
+                                      {instagramStatus.instagram_info.website}
+                                    </a>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                      {/* 재연동/연동 해제 버튼 */}
+                      <div className="pt-2 space-y-3">
+                        {instagramStatus.token_expired && (
+                          <Button
+                            onClick={handleInstagramConnect}
+                            disabled={isConnecting}
+                            className="w-full bg-yellow-500 hover:bg-yellow-600 text-white font-medium py-2.5"
+                          >
+                            {isConnecting ? (
+                              <>
+                                <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                                재연동 중...
+                              </>
+                            ) : (
+                              <>
+                                <RefreshCw className="h-4 w-4 mr-2" />
+                                Instagram 계정 재연동하기
+                              </>
+                            )}
+                          </Button>
+                        )}
+                        <Button
+                          variant="outline"
+                          onClick={handleInstagramDisconnect}
+                          className="w-full text-red-600 border-red-200 hover:bg-red-50 font-medium py-2.5"
+                        >
+                          <Unlink className="h-4 w-4 mr-2" />
+                          연동 해제
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-6">
+                      {/* 연동 버튼 */}
+                      <Button
+                        onClick={handleInstagramConnect}
+                        disabled={isConnecting}
+                        className="w-full bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white font-medium py-3 text-base"
+                      >
+                        {isConnecting ? (
+                          <>
+                            <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                            연동 중...
+                          </>
+                        ) : (
+                          "Instagram 계정 연동하기"
+                        )}
+                      </Button>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
           </TabsContent>
 
           {/* 정보 탭 */}
           <TabsContent value="settings">
-            <SettingsTab
-              model={model}
-              setModel={setModel}
-              isModelLoading={isModelLoading}
-              isUpdating={isUpdating}
-              isUploadingImage={isUploadingImage}
-              uploadedImage={uploadedImage}
-              imagePreview={imagePreview}
-              openImageModal={openImageModal}
-              handleUpdateModel={handleUpdateModel}
-            />
+            <div className="space-y-6">
+              {/* 기본 정보 카드 */}
+              <Card className="bg-white shadow-sm border border-gray-200">
+                <CardHeader className="pb-4">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
+                      <Bot className="h-6 w-6 text-blue-600" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-lg font-medium text-gray-900">
+                        기본 정보
+                      </CardTitle>
+                      <CardDescription className="text-sm text-gray-600 mt-1">
+                        AI 인플루언서의 프로필 이미지를 설정하고 기본 정보를
+                        수정할 수 있습니다.
+                      </CardDescription>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-8">
+                  {/* 프로필 이미지와 기본 정보를 가로로 배치 */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    {/* 프로필 이미지 섹션 */}
+                    <div className="flex flex-col items-center space-y-4 pt-12">
+                      {/* 대형 프로필 이미지 - 클릭 가능 */}
+                      <div
+                        className="relative cursor-pointer"
+                        onClick={openImageModal}
+                      >
+                        {uploadedImage && imagePreview ? (
+                          // 업로드된 이미지 미리보기
+                          <div className="w-36 h-36 rounded-full overflow-hidden shadow-lg hover:opacity-80 transition-opacity">
+                            <img
+                              src={imagePreview}
+                              alt="Uploaded"
+                              className="w-full h-full object-cover"
+                            />
+                          </div>
+                        ) : model?.image_url && !imgError ? (
+                          // 기존 인플루언서 이미지
+                          <div className="w-36 h-36 rounded-full overflow-hidden shadow-lg hover:opacity-80 transition-opacity">
+                            <img
+                              src={model.image_url}
+                              alt="Profile"
+                              className="w-full h-full object-cover"
+                              key={model.image_url}
+                              onError={() => setImgError(true)}
+                            />
+                          </div>
+                        ) : (
+                          // 기본 아이콘
+                          <div className="w-36 h-36 rounded-full bg-gray-200 flex items-center justify-center">
+                            <Bot className="h-16 w-16 text-gray-400" />
+                          </div>
+                        )}
+                        {/* 클릭 안내 오버레이 */}
+                        <div className="absolute inset-0 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity bg-black bg-opacity-30 rounded-full">
+                          <div className="text-center">
+                            <span className="text-white text-sm font-medium">
+                              확대/변경
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="text-center space-y-3">
+                        <p className="text-sm text-gray-500">
+                          권장 크기: 400x400px, 최대 5MB
+                        </p>
+                        <p className="text-xs text-gray-400">
+                          이미지를 클릭하여 확대/변경
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* 기본 정보 입력 섹션 */}
+                    <div className="space-y-6">
+                      <div className="space-y-4">
+                        <div>
+                          <Label
+                            htmlFor="model-name"
+                            className="text-sm font-medium text-gray-700 mb-2 block"
+                          >
+                            모델 이름
+                          </Label>
+                          <Input
+                            id="model-name"
+                            value={isModelLoading ? "로딩 중..." : model.name}
+                            onChange={(e) =>
+                              setModel((prev: any) => ({
+                                ...prev,
+                                name: e.target.value,
+                              }))
+                            }
+                            placeholder="AI 인플루언서 이름을 입력하세요"
+                            className="border-gray-300 focus:border-blue-500 focus:ring-blue-500"
+                            disabled={isModelLoading}
+                          />
+                        </div>
+                        <div>
+                          <Label
+                            htmlFor="model-description"
+                            className="text-sm font-medium text-gray-700 mb-2 block"
+                          >
+                            설명
+                          </Label>
+                          <Textarea
+                            id="model-description"
+                            value={
+                              isModelLoading ? "로딩 중..." : model.description
+                            }
+                            onChange={(e) =>
+                              setModel((prev: any) => ({
+                                ...prev,
+                                description: e.target.value,
+                              }))
+                            }
+                            rows={4}
+                            placeholder="AI 인플루언서에 대한 설명을 입력하세요"
+                            className="border-gray-300 focus:border-blue-500 focus:ring-blue-500 resize-none"
+                            disabled={isModelLoading}
+                          />
+                        </div>
+                      </div>
+                      <Button
+                        onClick={handleUpdateModel}
+                        disabled={
+                          isUpdating || isModelLoading || isUploadingImage
+                        }
+                        className="w-full bg-gray-800 hover:bg-gray-900 text-white font-medium py-2.5"
+                      >
+                        {isUploadingImage
+                          ? "이미지 업로드 중..."
+                          : isUpdating
+                            ? "업데이트 중..."
+                            : isModelLoading
+                              ? "로딩 중..."
+                              : "정보 저장"}
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
           </TabsContent>
 
           {/* 음성 탭 */}
           <TabsContent value="voice">
-            <VoiceTab
-              hasBaseVoice={hasBaseVoice}
-              baseVoiceUrl={baseVoiceUrl}
-              baseVoiceFile={baseVoiceFile}
-              setBaseVoiceFile={setBaseVoiceFile}
-              isUploadingBaseVoice={isUploadingBaseVoice}
-              voiceText={voiceText}
-              setVoiceText={setVoiceText}
-              isGeneratingVoice={isGeneratingVoice}
-              voiceHistory={voiceHistory}
-              isLoadingVoiceHistory={isLoadingVoiceHistory}
-              playingVoiceUrl={playingVoiceUrl}
-              setVoiceToDelete={setVoiceToDelete}
-              handlePlayVoice={handlePlayVoice}
-              handleChangeBaseVoice={handleChangeBaseVoice}
-              handleBaseVoiceFileSelect={handleBaseVoiceFileSelect}
-              handleUploadBaseVoice={handleUploadBaseVoice}
-              handleGenerateVoice={handleGenerateVoice}
-              loadVoiceHistory={loadVoiceHistory}
-              handleDownloadVoice={handleDownloadVoice}
-              toast={toast}
-            />
+            <div className="space-y-6">
+              {/* 베이스 음성 업로드 카드 */}
+              <Card className="bg-white shadow-sm border border-gray-200">
+                <CardHeader className="pb-4">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-12 h-12 bg-indigo-100 rounded-lg flex items-center justify-center">
+                      <Upload className="h-6 w-6 text-indigo-600" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-lg font-medium text-gray-900">
+                        베이스 음성 설정
+                      </CardTitle>
+                      <CardDescription className="text-sm text-gray-600 mt-1">
+                        AI 인플루언서의 목소리가 될 기본 음성을 업로드하세요.
+                      </CardDescription>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {hasBaseVoice ? (
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between p-4 bg-green-50 border border-green-200 rounded-lg">
+                        <div className="flex items-center space-x-3">
+                          <CheckCircle className="h-5 w-5 text-green-600" />
+                          <div>
+                            <p className="text-sm font-medium text-green-900">
+                              베이스 음성이 설정되었습니다
+                            </p>
+                            <p className="text-xs text-green-700 mt-1">
+                              이제 텍스트를 음성으로 변환할 수 있습니다.
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          {baseVoiceUrl && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handlePlayVoice(baseVoiceUrl)}
+                            >
+                              {playingVoiceUrl === baseVoiceUrl ? (
+                                <PauseCircle className="h-4 w-4" />
+                              ) : (
+                                <PlayCircle className="h-4 w-4" />
+                              )}
+                            </Button>
+                          )}
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handleChangeBaseVoice}
+                            className="text-indigo-600 hover:text-indigo-700"
+                          >
+                            변경
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
+                        <input
+                          type="file"
+                          accept="audio/*"
+                          onChange={handleBaseVoiceFileSelect}
+                          className="hidden"
+                          id="base-voice-upload"
+                        />
+                        <label
+                          htmlFor="base-voice-upload"
+                          className="cursor-pointer"
+                        >
+                          <Upload className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                          <p className="text-sm font-medium text-gray-900 mb-1">
+                            클릭하여 음성 파일 선택
+                          </p>
+                          <p className="text-xs text-gray-500">
+                            MP3, WAV, M4A 등 (최대 10MB)
+                          </p>
+                        </label>
+                      </div>
+                      {baseVoiceFile && (
+                        <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                          <div className="flex items-center space-x-3">
+                            <Volume2 className="h-5 w-5 text-gray-600" />
+                            <div>
+                              <p className="text-sm font-medium text-gray-900">
+                                {baseVoiceFile.name}
+                              </p>
+                              <p className="text-xs text-gray-500">
+                                {(baseVoiceFile.size / 1024 / 1024).toFixed(2)}{" "}
+                                MB
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                setBaseVoiceFile(null);
+                              }}
+                            >
+                              취소
+                            </Button>
+                            <Button
+                              size="sm"
+                              onClick={handleUploadBaseVoice}
+                              disabled={isUploadingBaseVoice}
+                              className="bg-indigo-600 hover:bg-indigo-700 text-white"
+                            >
+                              {isUploadingBaseVoice ? (
+                                <>
+                                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                  업로드 중...
+                                </>
+                              ) : (
+                                "업로드"
+                              )}
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* 음성 생성 카드 */}
+              <Card
+                className={`bg-white shadow-sm border border-gray-200 ${!hasBaseVoice ? "opacity-50" : ""}`}
+              >
+                <CardHeader className="pb-4">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
+                      <Mic className="h-6 w-6 text-purple-600" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-lg font-medium text-gray-900">
+                        음성 생성
+                      </CardTitle>
+                      <CardDescription className="text-sm text-gray-600 mt-1">
+                        텍스트를 입력하면 AI 인플루언서의 음성으로 변환할 수
+                        있습니다.
+                      </CardDescription>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {!hasBaseVoice && (
+                    <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                      <p className="text-sm text-yellow-800">
+                        <AlertCircle className="h-4 w-4 inline mr-1" />
+                        먼저 베이스 음성을 업로드해주세요.
+                      </p>
+                    </div>
+                  )}
+                  <div>
+                    <Label htmlFor="voice-text">텍스트 입력</Label>
+                    <Textarea
+                      id="voice-text"
+                      placeholder="음성으로 변환할 텍스트를 입력하세요..."
+                      className="min-h-[100px] mt-2"
+                      value={voiceText}
+                      onChange={(e) => {
+                        const newText = e.target.value;
+                        if (newText.length <= 300) {
+                          setVoiceText(newText);
+                        } else {
+                          toast({
+                            title: "글자수 제한",
+                            description:
+                              "텍스트는 300자까지만 입력할 수 있습니다.",
+                            variant: "destructive",
+                          });
+                        }
+                      }}
+                      disabled={!hasBaseVoice}
+                      maxLength={300}
+                    />
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-500">
+                      {voiceText.length} / 300자
+                    </span>
+                    <Button
+                      onClick={handleGenerateVoice}
+                      disabled={
+                        !hasBaseVoice ||
+                        !voiceText.trim() ||
+                        isGeneratingVoice ||
+                        voiceText.length > 300
+                      }
+                      className="bg-purple-600 hover:bg-purple-700 text-white"
+                    >
+                      {isGeneratingVoice ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          생성 중...
+                        </>
+                      ) : (
+                        <>
+                          <Volume2 className="h-4 w-4 mr-2" />
+                          음성 생성
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* 생성된 음성 목록 카드 */}
+              <Card className="bg-white shadow-sm border border-gray-200">
+                <CardHeader className="pb-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-3">
+                      <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
+                        <Volume2 className="h-6 w-6 text-green-600" />
+                      </div>
+                      <div>
+                        <CardTitle className="text-lg font-medium text-gray-900">
+                          생성된 음성
+                        </CardTitle>
+                        <CardDescription className="text-sm text-gray-600 mt-1">
+                          이전에 생성한 음성 파일들을 관리할 수 있습니다.
+                        </CardDescription>
+                      </div>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={loadVoiceHistory}
+                      disabled={isLoadingVoiceHistory}
+                      className="flex items-center space-x-2"
+                    >
+                      <RefreshCw
+                        className={`h-4 w-4 ${isLoadingVoiceHistory ? "animate-spin" : ""}`}
+                      />
+                      <span>새로고침</span>
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {isLoadingVoiceHistory ? (
+                    <div className="text-center py-8">
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600 mx-auto mb-4"></div>
+                      <p className="text-gray-500">
+                        음성 목록을 불러오는 중...
+                      </p>
+                    </div>
+                  ) : voiceHistory.length > 0 ? (
+                    <div className="space-y-3">
+                      {voiceHistory.map((voice) => (
+                        <div
+                          key={voice.id}
+                          className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
+                        >
+                          <div className="flex items-center space-x-3">
+                            {voice.status === "pending" ? (
+                              <div className="p-2 bg-yellow-100 rounded-full">
+                                <Loader2 className="h-5 w-5 text-yellow-600 animate-spin" />
+                              </div>
+                            ) : voice.status === "failed" ? (
+                              <div className="p-2 bg-red-100 rounded-full">
+                                <AlertCircle className="h-5 w-5 text-red-600" />
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => handlePlayVoice(voice.url)}
+                                className="p-2 bg-white rounded-full shadow-sm hover:shadow-md transition-shadow"
+                                disabled={!voice.url}
+                              >
+                                {playingVoiceUrl === voice.url ? (
+                                  <PauseCircle className="h-5 w-5 text-purple-600" />
+                                ) : (
+                                  <PlayCircle className="h-5 w-5 text-purple-600" />
+                                )}
+                              </button>
+                            )}
+                            <div>
+                              <p className="text-sm font-medium text-gray-900 line-clamp-1">
+                                {voice.text}
+                              </p>
+                              <p className="text-xs text-gray-500">
+                                {new Date(voice.createdAt).toLocaleDateString(
+                                  "ko-KR",
+                                )}{" "}
+                                •{" "}
+                                {voice.status === "pending"
+                                  ? "생성 중..."
+                                  : voice.status === "failed"
+                                    ? "생성 실패"
+                                    : voice.duration
+                                      ? `${voice.duration}초`
+                                      : "길이 정보 없음"}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() =>
+                                handleDownloadVoice(voice.url, voice.id)
+                              }
+                            >
+                              <Download className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setVoiceToDelete(voice.id)}
+                              className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8">
+                      <Volume2 className="h-12 w-12 mx-auto mb-4 text-gray-300" />
+                      <p className="text-gray-500 text-lg">
+                        아직 생성된 음성이 없습니다
+                      </p>
+                      <p className="text-gray-400 mt-2">
+                        위에서 텍스트를 입력하고 음성을 생성해보세요!
+                      </p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
           </TabsContent>
 
           {/* MCP 탭 */}
           <TabsContent value="mcp">
-            <McpTab
-              model={model}
-              MCPServerSelector={MCPServerSelector}
-            />
+            <div className="p-8 text-center text-gray-700">
+              <Settings className="h-8 w-8 mx-auto mb-2 text-blue-500" />
+              <h2 className="text-xl font-bold mb-2">MCP 도구 관리</h2>
+              <p className="text-gray-600 mb-6">
+                MCP 서버 및 도구 상태를 확인하고, 챗봇 페이지에서 사용할 MCP
+                서버를 선택할 수 있습니다.
+              </p>
+              <MCPServerSelector influencerId={model.id} model={model} />
+            </div>
           </TabsContent>
         </Tabs>
 
@@ -2485,25 +3540,25 @@ function ModelDetailContent() {
               <div className="flex items-center space-x-2">
                 {(selectedPost?.status === "draft" ||
                   selectedPost?.status === "scheduled") && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setIsEditing(!isEditing)}
-                      className="flex items-center space-x-1"
-                    >
-                      {isEditing ? (
-                        <>
-                          <Eye className="h-4 w-4" />
-                          <span>보기 모드</span>
-                        </>
-                      ) : (
-                        <>
-                          <Edit className="h-4 w-4" />
-                          <span>수정 모드</span>
-                        </>
-                      )}
-                    </Button>
-                  )}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setIsEditing(!isEditing)}
+                    className="flex items-center space-x-1"
+                  >
+                    {isEditing ? (
+                      <>
+                        <Eye className="h-4 w-4" />
+                        <span>보기 모드</span>
+                      </>
+                    ) : (
+                      <>
+                        <Edit className="h-4 w-4" />
+                        <span>수정 모드</span>
+                      </>
+                    )}
+                  </Button>
+                )}
                 {isEditing && (
                   <Button
                     onClick={handleEditSave}
@@ -2559,8 +3614,8 @@ function ModelDetailContent() {
                     <div className="flex items-center space-x-2 text-sm text-gray-500 mt-1">
                       <Calendar className="h-4 w-4" />
                       {selectedPost.status === "scheduled" &&
-                        selectedPost.scheduledAt &&
-                        selectedPost.scheduledAt.trim() !== "" ? (
+                      selectedPost.scheduledAt &&
+                      selectedPost.scheduledAt.trim() !== "" ? (
                         <span>
                           예약 발행:{" "}
                           {formatDate(selectedPost.scheduledAt || "")}
@@ -2595,8 +3650,8 @@ function ModelDetailContent() {
                     게시글 내용
                   </h4>
                   {isEditing &&
-                    (selectedPost?.status === "draft" ||
-                      selectedPost?.status === "scheduled") ? (
+                  (selectedPost?.status === "draft" ||
+                    selectedPost?.status === "scheduled") ? (
                     <div className="space-y-4">
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -3022,7 +4077,6 @@ const MCPServerSelector: FC<{ influencerId: string; model: any }> = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
-  const [originalSelected, setOriginalSelected] = useState<string[]>([]);
 
   // MCP 서버 추가 관련 상태
   const [addName, setAddName] = useState(""); // HTTP 방식에서만 사용
@@ -3037,48 +4091,32 @@ const MCPServerSelector: FC<{ influencerId: string; model: any }> = ({
   const [addSuccess, setAddSuccess] = useState(false);
   // MCP 서버 추가 폼 접힘 상태
   const [addOpen, setAddOpen] = useState(false);
-  // MCP 서버 제거 관련 상태
-  const [removingServer, setRemovingServer] = useState<string | null>(null);
-  const [serverToRemove, setServerToRemove] = useState<string | null>(null);
 
-  const loadServers = async () => {
+  useEffect(() => {
     setLoading(true);
     setError(null);
-    try {
-      const res = await MCPService.getServers();
-      const serverArr = Object.values(res.servers) || [];
-      setServers(serverArr);
-      // 연결된 서버 체크박스 자동 선택
-      if (model && model.name) {
-        const checked = (serverArr as any[])
-          .filter(
-            (server) =>
-              Array.isArray((server as any).connected_influencers) &&
-              (server as any).connected_influencers.includes(model.name),
-          )
-          .map((server) => (server as any).mcp_name);
-        setSelected(checked);
-        setOriginalSelected(checked); // 기존 설정 저장
-      }
-      setLoading(false);
-    } catch (e: any) {
-      setError(e.message || "서버 목록을 불러오지 못했습니다.");
-      setLoading(false);
-    }
-  };
-
-  // 초기 로드
-  useEffect(() => {
-    loadServers();
-  }, []); // 컴포넌트 마운트 시 한 번만 실행
-
-  // 서버 추가/제거 후 새로고침
-  useEffect(() => {
-    if (addSuccess) {
-      loadServers();
-      setAddSuccess(false); // 새로고침 후 플래그 리셋
-    }
-  }, [addSuccess]);
+    MCPService.getServers()
+      .then((res) => {
+        const serverArr = Object.values(res.servers) || [];
+        setServers(serverArr);
+        // 연결된 서버 체크박스 자동 선택
+        if (model && model.name) {
+          const checked = (serverArr as any[])
+            .filter(
+              (server) =>
+                Array.isArray((server as any).connected_influencers) &&
+                (server as any).connected_influencers.includes(model.name),
+            )
+            .map((server) => (server as any).mcp_name);
+          setSelected(checked);
+        }
+        setLoading(false);
+      })
+      .catch((e) => {
+        setError(e.message || "서버 목록을 불러오지 못했습니다.");
+        setLoading(false);
+      });
+  }, [addSuccess, model]); // model이 바뀌거나 서버 추가 성공 시 목록 새로고침
 
   const handleToggle = (name: string) => {
     setSelected((prev) =>
@@ -3190,56 +4228,21 @@ const MCPServerSelector: FC<{ influencerId: string; model: any }> = ({
   };
 
   const handleSaveSelection = async () => {
+    if (selected.length === 0) return;
     try {
       await apiClient.post("/api/v1/mcp/chat/set-selected-servers", {
         influencer_id: influencerId,
         selected_servers: selected,
       });
-      setOriginalSelected([...selected]); // 저장 후 기존 설정 업데이트
       toast({
         title: "MCP 서버 설정 저장",
         description: "MCP 서버 설정이 저장되었습니다.",
       });
-      // 설정 저장 후 MCP 목록 새로고침
-      setAddSuccess(true); // Triggers useEffect to reload servers
     } catch (error) {
       toast({
         title: "MCP 서버 설정 저장 실패",
         description: "설정 저장에 실패했습니다.",
       });
-    }
-  };
-
-  const handleRemoveServer = async (serverName: string) => {
-    if (!serverName) return;
-
-    setRemovingServer(serverName);
-    try {
-      const result = await MCPService.removeServer(serverName);
-      if (result.success) {
-        toast({
-          title: "MCP 서버 제거 성공",
-          description: result.message || "MCP 서버가 성공적으로 제거되었습니다.",
-        });
-        // 서버 목록 새로고침
-        setAddSuccess(true);
-        // 선택된 서버에서도 제거
-        setSelected(prev => prev.filter(name => name !== serverName));
-      } else {
-        toast({
-          title: "MCP 서버 제거 실패",
-          description: result.message || "서버 제거에 실패했습니다.",
-          variant: "destructive",
-        });
-      }
-    } catch (error) {
-      toast({
-        title: "MCP 서버 제거 실패",
-        description: "서버 제거 중 오류가 발생했습니다.",
-        variant: "destructive",
-      });
-    } finally {
-      setRemovingServer(null);
     }
   };
 
@@ -3265,6 +4268,7 @@ const MCPServerSelector: FC<{ influencerId: string; model: any }> = ({
         </button>
         {addOpen && (
           <div className="p-4 border rounded-lg bg-gray-50 mt-0">
+            <div className="font-semibold mb-2">외부 MCP 서버 추가</div>
             <div className="flex gap-4 mb-2">
               <label className="flex items-center gap-1">
                 <input
@@ -3299,26 +4303,13 @@ const MCPServerSelector: FC<{ influencerId: string; model: any }> = ({
                 />
               </>
             ) : (
-              <>
-                <div className="mb-2 p-2 bg-blue-50 border border-blue-200 rounded text-xs text-blue-800">
-                  <strong>💡 OS별 명령어 경로 안내:</strong>
-                  <br />
-                  • <strong>Windows:</strong> npx.cmd, node.exe 경로 자동 감지
-                  <br />
-                  • <strong>Mac/Linux:</strong> PATH에서 npx, node 자동 검색
-                  <br />
-                  • <strong>NVM 사용 시:</strong> ~/.nvm/versions/node/*/bin/ 경로 자동 감지
-                  <br />
-                  • <strong>설정 형태:</strong> cmd /c 형태와 직접 npx 형태 모두 지원
-                </div>
-                <textarea
-                  placeholder={`STDIO MCP 서버 설정 JSON 전체를 입력하세요. 예:\n{\n  \"frankfurtermcp\": {\n    \"command\": \"npx\",\n    \"args\": [\"-y\", \"@smithery/cli@latest\", \"run\", \"exa\", \"--key\", \"...\", \"--profile\", \"...\"]\n  }\n}\n\n또는 Windows cmd 형태:\n{\n  \"frankfurtermcp\": {\n    \"command\": \"cmd\",\n    \"args\": [\"/c\", \"npx\", \"-y\", \"@smithery/cli@latest\", \"run\", \"exa\", \"--key\", \"...\", \"--profile\", \"...\"]\n  }\n}`}
-                  value={addStdioJson}
-                  onChange={(e) => setAddStdioJson(e.target.value)}
-                  rows={10}
-                  className="w-full border rounded p-2 font-mono text-xs mb-2"
-                ></textarea>
-              </>
+              <textarea
+                placeholder={`STDIO MCP 서버 설정 JSON 전체를 입력하세요. 예:\n{\n  \"frankfurtermcp\": {\n    \"command\": \"npx\",\n    \"args\": [\"-y\", \"@smithery/cli@latest\", \"run\", \"exa\", \"--key\", \"...\", \"--profile\", \"...\"]\n  }\n}`}
+                value={addStdioJson}
+                onChange={(e) => setAddStdioJson(e.target.value)}
+                rows={7}
+                className="w-full border rounded p-2 font-mono text-xs mb-2"
+              ></textarea>
             )}
             <Input
               placeholder="설명(선택)"
@@ -3374,73 +4365,17 @@ const MCPServerSelector: FC<{ influencerId: string; model: any }> = ({
               {!server.running && (
                 <span className="ml-2 text-xs text-red-400">(중지됨)</span>
               )}
-              {/* 제거 버튼 */}
-              {server.can_delete && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setServerToRemove(name);
-                  }}
-                  disabled={removingServer === name}
-                  className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                >
-                  {removingServer === name ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Trash2 className="h-4 w-4" />
-                  )}
-                </Button>
-              )}
             </label>
           );
         })}
       </div>
       <button
-        className={`w-full py-2 rounded bg-gray-800 text-white font-semibold transition-all ${JSON.stringify(selected.sort()) === JSON.stringify(originalSelected.sort())
-          ? "opacity-50 cursor-not-allowed"
-          : "hover:bg-gray-900"
-          }`}
+        className={`w-full py-2 rounded bg-gray-800 text-white font-semibold transition-all ${selected.length === 0 ? "opacity-50 cursor-not-allowed" : "hover:bg-gray-900"}`}
         onClick={handleSaveSelection}
-        disabled={JSON.stringify(selected.sort()) === JSON.stringify(originalSelected.sort())}
+        disabled={selected.length === 0}
       >
         설정 저장
       </button>
-
-      {/* MCP 서버 제거 확인 다이얼로그 */}
-      <AlertDialog open={!!serverToRemove} onOpenChange={(open) => !open && setServerToRemove(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>MCP 서버 제거 확인</AlertDialogTitle>
-            <AlertDialogDescription>
-              <span className="block mb-2">
-                <strong>"{serverToRemove}"</strong> 서버를 제거하시겠습니까?
-              </span>
-              <span className="block text-sm text-gray-600">
-                이 작업은 되돌릴 수 없으며, 서버와 관련된 모든 설정이 영구적으로 삭제됩니다.
-              </span>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setServerToRemove(null)}>
-              취소
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                if (serverToRemove) {
-                  handleRemoveServer(serverToRemove);
-                  setServerToRemove(null);
-                }
-              }}
-              className="bg-red-600 hover:bg-red-700 text-white"
-            >
-              제거
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 };

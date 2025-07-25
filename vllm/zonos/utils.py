@@ -31,18 +31,9 @@ def get_device() -> torch.device:
     import os
     
     if torch.cuda.is_available():
-        # 환경 변수에서 TTS GPU ID 가져오기 (기본값: 0)
-        tts_gpu_id = int(os.getenv('TTS_GPU_ID', '0'))
-        
-        # GPU가 존재하는지 확인
-        if tts_gpu_id < torch.cuda.device_count():
-            torch.cuda.set_device(tts_gpu_id)
-            return torch.device(f"cuda:{tts_gpu_id}")
-        else:
-            # 지정된 GPU가 없으면 첫 번째 GPU 사용
-            print(f"Warning: GPU {tts_gpu_id} not found. Using GPU 0.")
-            torch.cuda.set_device(0)
-            return torch.device("cuda:0")
+        # GPU 1번으로 고정
+        torch.cuda.set_device(1)
+        return torch.device("cuda:1")
     # MPS breaks for whatever reason. Uncomment when it's working.
     # if torch.mps.is_available():
     #     return torch.device("mps")

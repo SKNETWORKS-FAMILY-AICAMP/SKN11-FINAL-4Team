@@ -75,7 +75,7 @@ def find_all_linear_names(model):
     return list(lora_module_names)
 
 def load_model_and_tokenizer(model_name="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct"):
-    """모델과 토크나이저 로드 - 환경 변수 기반 GPU 지정"""
+    """모델과 토크나이저 로드 - device_map='auto'로 자동 할당"""
     
     # 토크나이저 로드
     tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -85,23 +85,11 @@ def load_model_and_tokenizer(model_name="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct"):
         tokenizer.pad_token = tokenizer.eos_token
         tokenizer.pad_token_id = tokenizer.eos_token_id
     
-    # GPU 설정
-    finetuning_gpu_id = int(os.getenv('FINETUNING_GPU_ID', '2'))
-    
-    # CUDA_VISIBLE_DEVICES로 격리된 경우
-    if 'CUDA_VISIBLE_DEVICES' in os.environ:
-        device_map = {"": 0}  # 격리된 환경에서는 항상 device 0 사용
-        logger.info(f"🔧 격리된 GPU 환경 사용 (CUDA_VISIBLE_DEVICES={os.environ['CUDA_VISIBLE_DEVICES']})")
-    else:
-        # 격리되지 않은 경우 특정 GPU 지정
-        device_map = {"": finetuning_gpu_id}
-        logger.info(f"🔧 GPU {finetuning_gpu_id} 사용")
-    
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
         torch_dtype=torch.bfloat16,
         trust_remote_code=True,
-        device_map=device_map,
+        device_map="auto",
         use_cache=False,  # 그래디언트 체크포인팅과 호환성을 위해
         low_cpu_mem_usage=True,  # CPU 메모리 사용량 최소화
     )

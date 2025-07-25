@@ -5,140 +5,11 @@ import signal
 import sys
 import os
 import json
-import platform
-import shutil
 from typing import Dict, List, Optional
 from pathlib import Path
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
-
-
-def get_os_info():
-    """현재 OS 정보를 반환합니다."""
-    system = platform.system()
-    release = platform.release()
-    version = platform.version()
-    machine = platform.machine()
-
-    logger.info(f"🖥️ OS 정보: {system} {release} ({machine})")
-    return {
-        "system": system,
-        "release": release,
-        "version": version,
-        "machine": machine,
-        "is_windows": system == "Windows",
-        "is_macos": system == "Darwin",
-        "is_linux": system == "Linux",
-    }
-
-
-def get_command_path(command: str) -> str:
-    """OS별로 명령어 경로를 찾습니다."""
-    os_info = get_os_info()
-
-    # 먼저 PATH에서 찾기
-    path_result = shutil.which(command)
-    if path_result:
-        logger.info(f"✅ 명령어 '{command}' 경로 찾음: {path_result}")
-        return path_result
-
-    # OS별 기본 경로 확인
-    if os_info["is_windows"]:
-        # Windows 기본 경로들
-        windows_paths = {
-            "npx": [
-                "C:\\Program Files\\nodejs\\npx.cmd",
-                "C:\\Program Files (x86)\\nodejs\\npx.cmd",
-                os.path.expanduser("~\\AppData\\Roaming\\npm\\npx.cmd"),
-                os.path.expanduser("~\\AppData\\Roaming\\npm\\npx.ps1"),
-            ],
-            "node": [
-                "C:\\Program Files\\nodejs\\node.exe",
-                "C:\\Program Files (x86)\\nodejs\\node.exe",
-            ],
-            "npm": [
-                "C:\\Program Files\\nodejs\\npm.cmd",
-                "C:\\Program Files (x86)\\nodejs\\npm.cmd",
-            ],
-        }
-
-        if command in windows_paths:
-            for path in windows_paths[command]:
-                if os.path.exists(path):
-                    logger.info(f"✅ Windows에서 '{command}' 경로 찾음: {path}")
-                    return path
-
-    elif os_info["is_macos"]:
-        # macOS 기본 경로들
-        macos_paths = {
-            "npx": [
-                "/usr/local/bin/npx",
-                "/opt/homebrew/bin/npx",
-                os.path.expanduser("~/.nvm/versions/node/*/bin/npx"),
-            ],
-            "node": [
-                "/usr/local/bin/node",
-                "/opt/homebrew/bin/node",
-                os.path.expanduser("~/.nvm/versions/node/*/bin/node"),
-            ],
-        }
-
-        if command in macos_paths:
-            for path in macos_paths[command]:
-                if os.path.exists(path):
-                    logger.info(f"✅ macOS에서 '{command}' 경로 찾음: {path}")
-                    return path
-
-    elif os_info["is_linux"]:
-        # Linux 기본 경로들
-        linux_paths = {
-            "npx": [
-                "/usr/bin/npx",
-                "/usr/local/bin/npx",
-                os.path.expanduser("~/.nvm/versions/node/*/bin/npx"),
-            ],
-            "node": [
-                "/usr/bin/node",
-                "/usr/local/bin/node",
-                os.path.expanduser("~/.nvm/versions/node/*/bin/node"),
-            ],
-        }
-
-        if command in linux_paths:
-            for path in linux_paths[command]:
-                if os.path.exists(path):
-                    logger.info(f"✅ Linux에서 '{command}' 경로 찾음: {path}")
-                    return path
-
-    logger.warning(
-        f"⚠️ 명령어 '{command}' 경로를 찾을 수 없습니다. 기본값 사용: {command}"
-    )
-    return command
-
-
-def normalize_path(path: str) -> str:
-    """OS별로 경로를 정규화합니다."""
-    os_info = get_os_info()
-
-    if os_info["is_windows"]:
-        # Windows에서는 백슬래시를 슬래시로 변환
-        return path.replace("\\", "/")
-    else:
-        # Mac/Linux에서는 그대로 사용
-        return path
-
-
-def get_shell_command():
-    """OS별 셸 명령어를 반환합니다."""
-    os_info = get_os_info()
-
-    if os_info["is_windows"]:
-        return ["cmd", "/c"]
-    elif os_info["is_macos"]:
-        return ["/bin/bash", "-c"]
-    else:  # Linux
-        return ["/bin/bash", "-c"]
 
 
 class MCPServerManager:
@@ -389,74 +260,32 @@ class MCPServerManager:
             command = config["command"]
             args = config["args"]
 
-            # OS별 명령어 경로 처리 및 설정 정규화
-            os_info = get_os_info()
-            logger.info(f"🖥️ OS: {os_info['system']} {os_info['release']}")
+            logger.info(
+                f"🚀 명령어 실행 방식 MCP 서버 시작: {command} {' '.join(args)}"
+            )
 
-            # 설정 정규화: cmd /c 형태를 OS별로 처리
-            if command == "cmd" and args and args[0] == "/c":
-                # Windows cmd /c 형태인 경우
-                if os_info["is_windows"]:
-                    # Windows에서는 그대로 사용
-                    resolved_command = command
-                    resolved_args = args
-                    logger.info(
-                        f"🪟 Windows cmd /c 형태 사용: {command} {' '.join(args)}"
-                    )
-                else:
-                    # Mac/Linux에서는 cmd /c 제거하고 직접 명령어 사용
-                    actual_command = args[1]  # npx
-                    actual_args = args[2:]  # 나머지 인수들
-                    resolved_command = get_command_path(actual_command)
-                    resolved_args = actual_args
-                    logger.info(
-                        f"🍎 Mac/Linux에서 cmd /c 제거: {resolved_command} {' '.join(actual_args)}"
-                    )
-            else:
-                # 일반적인 형태 (npx 직접 사용)
-                resolved_command = get_command_path(command)
-                resolved_args = args
-                logger.info(f"🔧 일반 형태 사용: {resolved_command} {' '.join(args)}")
-
-            logger.info(f"🚀 최종 명령어: {resolved_command} {' '.join(resolved_args)}")
-
-            # OS별 프로세스 실행 설정
-            if os_info["is_windows"]:
-                # Windows에서는 shell=True 사용하여 cmd에서 실행
-                process = subprocess.Popen(
-                    [resolved_command] + resolved_args,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    stdin=subprocess.PIPE,
-                    text=True,
-                    bufsize=1,
-                    universal_newlines=True,
-                    shell=True,  # Windows에서 cmd 사용
-                    creationflags=subprocess.CREATE_NO_WINDOW,  # 콘솔 창 숨기기
-                )
-            else:
-                # Mac/Linux에서는 일반적인 방식
-                process = subprocess.Popen(
-                    [resolved_command] + resolved_args,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    stdin=subprocess.PIPE,
-                    text=True,
-                    bufsize=1,
-                    universal_newlines=True,
-                )
+            # 서브프로세스로 MCP 서버 실행
+            process = subprocess.Popen(
+                [command] + args,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                stdin=subprocess.PIPE,
+                text=True,
+                bufsize=1,
+                universal_newlines=True,
+            )
 
             # 프로세스가 정상적으로 시작되었는지 확인
             await asyncio.sleep(3)
             if process.poll() is None:
                 self.processes[server_name] = process
                 logger.info(
-                    f"✅ {server_name} 명령어 실행 MCP 서버 시작됨 (PID: {process.pid})"
+                    f"{server_name} 명령어 실행 MCP 서버 시작됨 (PID: {process.pid})"
                 )
             else:
                 stdout, stderr = process.communicate()
                 logger.error(
-                    f"❌ {server_name} 명령어 실행 MCP 서버 시작 실패:\nstdout: {stdout}\nstderr: {stderr}"
+                    f"{server_name} 명령어 실행 MCP 서버 시작 실패:\nstdout: {stdout}\nstderr: {stderr}"
                 )
                 raise RuntimeError(
                     f"{server_name} 명령어 실행 MCP 서버 시작 실패: {stderr}"
@@ -474,18 +303,11 @@ class MCPServerManager:
             import subprocess
             from mcp.client import ClientSession, StdioServerParameters
 
-            # OS 정보 가져오기
-            os_info = get_os_info()
-            logger.info(
-                f"🖥️ 외부 MCP 서버 시작 - OS: {os_info['system']} {os_info['release']}"
-            )
-
             # 외부 MCP 서버 설정
             if server_name == "websearch":
-                # Exa Search MCP 서버 - OS별 명령어 경로 처리
-                npx_path = get_command_path("npx")
+                # Exa Search MCP 서버
                 cmd = [
-                    npx_path,
+                    "npx",
                     "-y",
                     "@smithery/cli@latest",
                     "run",
@@ -495,48 +317,30 @@ class MCPServerManager:
                     "--profile",
                     "controversial-swallow-jyXJrS",
                 ]
-                logger.info(f"🔍 Exa Search MCP 서버 명령어: {' '.join(cmd)}")
             else:
                 logger.error(f"알 수 없는 외부 MCP 서버: {server_name}")
                 return
 
-            # OS별 프로세스 실행 설정
-            if os_info["is_windows"]:
-                # Windows에서는 shell=True 사용
-                process = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    stdin=subprocess.PIPE,
-                    text=True,
-                    bufsize=1,
-                    universal_newlines=True,
-                    shell=True,  # Windows에서 cmd 사용
-                    creationflags=subprocess.CREATE_NO_WINDOW,  # 콘솔 창 숨기기
-                )
-            else:
-                # Mac/Linux에서는 일반적인 방식
-                process = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    stdin=subprocess.PIPE,
-                    text=True,
-                    bufsize=1,
-                    universal_newlines=True,
-                )
+            # 서브프로세스로 외부 MCP 서버 실행
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                stdin=subprocess.PIPE,
+                text=True,
+                bufsize=1,
+                universal_newlines=True,
+            )
 
             # 프로세스가 정상적으로 시작되었는지 확인
             await asyncio.sleep(2)
             if process.poll() is None:
                 self.processes[server_name] = process
-                logger.info(
-                    f"✅ {server_name} 외부 MCP 서버 시작됨 (PID: {process.pid})"
-                )
+                logger.info(f"{server_name} 외부 MCP 서버 시작됨 (PID: {process.pid})")
             else:
                 stdout, stderr = process.communicate()
                 logger.error(
-                    f"❌ {server_name} 외부 MCP 서버 시작 실패:\nstdout: {stdout}\nstderr: {stderr}"
+                    f"{server_name} 외부 MCP 서버 시작 실패:\nstdout: {stdout}\nstderr: {stderr}"
                 )
 
         except Exception as e:

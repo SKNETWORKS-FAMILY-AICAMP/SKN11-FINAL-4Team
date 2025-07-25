@@ -2,13 +2,10 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from vllm import SamplingParams
 from vllm.lora.request import LoRARequest
-from vllm.engine.async_llm_engine import AsyncEngineDeadError
 import uuid
 import logging
 import json
 import asyncio
-import torch
-import os
 
 from app.models import GenerateRequest, GenerateResponse
 from app import core
@@ -77,65 +74,13 @@ async def generate_response_endpoint(request: GenerateRequest):
         
         # 비동기 생성
         results = []
-        try:
-            async for output in core.engine.generate(
-                formatted_prompt,
-                sampling_params,
-                request_id=request_id,
-                lora_request=lora_request
-            ):
-                results.append(output)
-        except AsyncEngineDeadError as e:
-            logger.error(f"❌ AsyncEngineDeadError 발생: {str(e)}")
-            logger.info("🔄 엔진 재시작 시도 중...")
-            
-            # 엔진 재시작 시도
-            try:
-                await core.restart_engine()
-                logger.info("✅ 엔진 재시작 성공")
-                # 재시도
-                async for output in core.engine.generate(
-                    formatted_prompt,
-                    sampling_params,
-                    request_id=request_id,
-                    lora_request=lora_request
-                ):
-                    results.append(output)
-            except Exception as restart_error:
-                logger.error(f"❌ 엔진 재시작 실패: {str(restart_error)}")
-                raise HTTPException(
-                    status_code=503,
-                    detail="AI 엔진에 문제가 발생했습니다. 관리자에게 문의해주세요."
-                )
-        except RuntimeError as e:
-            if "Expected all tensors to be on the same device" in str(e):
-                logger.error(f"❌ CUDA 디바이스 불일치 오류: {str(e)}")
-                # 디바이스 정보 로깅
-                if torch.cuda.is_available():
-                    logger.error(f"현재 CUDA 디바이스: {torch.cuda.current_device()}")
-                    logger.error(f"사용 가능한 디바이스 수: {torch.cuda.device_count()}")
-                    logger.error(f"CUDA_VISIBLE_DEVICES: {os.environ.get('CUDA_VISIBLE_DEVICES', 'Not set')}")
-                
-                # 디바이스 동기화 시도
-                try:
-                    # 엔진 재시작으로 디바이스 문제 해결
-                    await core.restart_engine()
-                    # 재시도
-                    async for output in core.engine.generate(
-                        formatted_prompt,
-                        sampling_params,
-                        request_id=request_id,
-                        lora_request=lora_request
-                    ):
-                        results.append(output)
-                except Exception as device_error:
-                    logger.error(f"❌ 디바이스 동기화 실패: {str(device_error)}")
-                    raise HTTPException(
-                        status_code=503,
-                        detail="GPU 디바이스 오류가 발생했습니다. 관리자에게 문의해주세요."
-                    )
-            else:
-                raise
+        async for output in core.engine.generate(
+            formatted_prompt,
+            sampling_params,
+            request_id=request_id,
+            lora_request=lora_request
+        ):
+            results.append(output)
         
         if not results:
             raise HTTPException(status_code=500, detail="생성된 응답이 없습니다.")
@@ -157,24 +102,12 @@ async def generate_response_endpoint(request: GenerateRequest):
             raw_response=raw_response
         )
         
-    except HTTPException:
-        # HTTPException은 그대로 전달
-        raise
     except Exception as e:
         logger.error(f"❌ 응답 생성 엔드포인트에서 예외 발생: {str(e)}")
         logger.error(f"❌ 예외 타입: {type(e).__name__}")
         import traceback
         logger.error(f"❌ 전체 스택 트레이스: {traceback.format_exc()}")
-        
-        # 사용자 친화적인 에러 메시지
-        if "CUDA" in str(e) or "device" in str(e):
-            detail = "GPU 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
-        elif "memory" in str(e).lower():
-            detail = "메모리 부족으로 요청을 처리할 수 없습니다. 더 짧은 메시지로 시도해주세요."
-        else:
-            detail = "응답 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
-        
-        raise HTTPException(status_code=500, detail=detail)
+        raise HTTPException(status_code=500, detail=f"응답 생성 실패: {str(e)}")
 
 @router.post("/generate/stream")
 async def generate_response_stream_endpoint(request: GenerateRequest):
@@ -266,47 +199,25 @@ async def generate_response_stream_endpoint(request: GenerateRequest):
                 token_count = 0
                 has_output = False
                 
-                try:
-                    async for output in core.engine.generate(
-                        formatted_prompt,
-                        sampling_params,
-                        request_id=request_id,
-                        lora_request=lora_request
-                    ):
-                        has_output = True
-                        if output.outputs and len(output.outputs) > 0:
-                            current_text = output.outputs[0].text
+                async for output in core.engine.generate(
+                    formatted_prompt,
+                    sampling_params,
+                    request_id=request_id,
+                    lora_request=lora_request
+                ):
+                    has_output = True
+                    if output.outputs and len(output.outputs) > 0:
+                        current_text = output.outputs[0].text
 
-                            if len(current_text) > len(previous_text):
-                                new_tokens = current_text[len(previous_text):]
-                                
-                                if new_tokens:
-                                    new_tokens = new_tokens.replace('[|endofturn|]', '').replace('[|endoftext|]', '').replace('<|im_end|>', '')
-                                    if new_tokens.strip():
-                                        yield f"data: {json.dumps({'text': new_tokens}, ensure_ascii=False, separators=(',', ':'))}\n\n"
-                                        previous_text = current_text
-                                        token_count += len(new_tokens)
-                except AsyncEngineDeadError as e:
-                    logger.error(f"❌ 스트리밍 중 AsyncEngineDeadError 발생: {str(e)}")
-                    yield f"data: {json.dumps({'error': 'AI 엔진에 문제가 발생했습니다. 잠시 후 다시 시도해주세요.'})}\n\n"
-                    
-                    # 비동기로 엔진 재시작 예약
-                    asyncio.create_task(core.restart_engine())
-                    return
-                except RuntimeError as e:
-                    if "Expected all tensors to be on the same device" in str(e):
-                        logger.error(f"❌ 스트리밍 중 CUDA 디바이스 오류: {str(e)}")
-                        # 디바이스 정보 로그
-                        if torch.cuda.is_available():
-                            logger.error(f"현재 CUDA 디바이스: {torch.cuda.current_device()}")
-                            logger.error(f"사용 가능한 디바이스 수: {torch.cuda.device_count()}")
-                        yield f"data: {json.dumps({'error': 'GPU 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.'})}\n\n"
-                        
-                        # 비동기로 엔진 재시작 예약
-                        asyncio.create_task(core.restart_engine())
-                        return
-                    else:
-                        raise
+                        if len(current_text) > len(previous_text):
+                            new_tokens = current_text[len(previous_text):]
+                            
+                            if new_tokens:
+                                new_tokens = new_tokens.replace('[|endofturn|]', '').replace('[|endoftext|]', '').replace('<|im_end|>', '')
+                                if new_tokens.strip():
+                                    yield f"data: {json.dumps({'text': new_tokens}, ensure_ascii=False, separators=(',', ':'))}\n\n"
+                                    previous_text = current_text
+                                    token_count += len(new_tokens)
                 
                 if not has_output:
                     yield f"data: {json.dumps({'error': '생성된 응답이 없습니다.'}, ensure_ascii=False, separators=(',', ':'))}\n\n"

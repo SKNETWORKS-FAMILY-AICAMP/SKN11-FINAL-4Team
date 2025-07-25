@@ -37,7 +37,7 @@ class LangChainToneGenerator:
             api_key=self.api_key,
             model="gpt-4o-mini",
             temperature=0.8,
-            max_tokens=2000,  # 3개 어투 생성을 위해 토큰 증가
+            max_tokens=500,
             max_retries=2,
             request_timeout=30
         )
@@ -391,8 +391,7 @@ class LangChainToneGenerator:
 [말투3]
 {prompt3}
 
-주어진 질문에 대해 위 3가지 말투로 각각 답변하세요. 각 답변은 2-3문장으로 간결하게 작성하세요.
-다음 JSON 형식으로 정확히 출력하고, JSON 외에 다른 텍스트는 포함하지 마세요:
+주어진 질문에 대해 위 3가지 말투로 각각 답변하고, 다음 JSON 형식으로 정확히 출력하세요:
 {json_format}"""
             
             # JSON 형식을 이중 중괄호로 이스케이프
@@ -439,30 +438,7 @@ class LangChainToneGenerator:
             import re
             json_match = re.search(r'\{[\s\S]*\}', content)
             if json_match:
-                json_str = json_match.group()
-                # JSON 문자열 정리 (일반적인 문제 해결)
-                json_str = json_str.replace('\n\n', '\n')  # 이중 줄바꿈 제거
-                json_str = re.sub(r',\s*}', '}', json_str)  # 마지막 쉼표 제거
-                json_str = re.sub(r',\s*]', ']', json_str)  # 배열 마지막 쉼표 제거
-                
-                # 불완전한 JSON 감지 및 수정 시도
-                open_braces = json_str.count('{')
-                close_braces = json_str.count('}')
-                if open_braces > close_braces:
-                    # 닫는 중괄호 추가
-                    json_str += '"' if json_str.rstrip()[-1] not in '"' else ''
-                    json_str += '}' * (open_braces - close_braces)
-                    logger.warning(f"불완전한 JSON 감지. 닫는 중괄호 {open_braces - close_braces}개 추가")
-                
-                try:
-                    result = json.loads(json_str)
-                except json.JSONDecodeError as e:
-                    logger.error(f"JSON 파싱 오류: {e}")
-                    logger.error(f"원본 응답 길이: {len(content)}자")
-                    logger.error(f"원본 응답: {content[:1000]}...")  # 더 많은 로그
-                    logger.error(f"정리된 JSON 길이: {len(json_str)}자")
-                    logger.error(f"정리된 JSON: {json_str[:1000]}...")
-                    raise
+                result = json.loads(json_match.group())
                 
                 # 결과 포맷팅
                 responses = {}

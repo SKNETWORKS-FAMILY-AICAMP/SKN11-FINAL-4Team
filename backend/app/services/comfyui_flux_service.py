@@ -116,25 +116,75 @@ class ComfyUIFluxService:
         
         workflow = json.loads(json.dumps(self.base_workflow))  # 깊은 복사
         
-        # 노드별 파라미터 업데이트 (workflow는 노드 ID를 키로 하는 객체)
-        # CLIP Text Encode 노드에 프롬프트 인젝션
-        if "6" in workflow and workflow["6"].get("class_type") == "CLIPTextEncode":
-            workflow["6"]["inputs"]["text"] = prompt
-            logger.info(f"✅ 프롬프트 인젝션 완료: {prompt[:50]}...")
-        
-        # EmptySD3LatentImage 노드에 해상도 설정
-        if "27" in workflow and workflow["27"].get("class_type") == "EmptySD3LatentImage":
-            workflow["27"]["inputs"]["width"] = width
-            workflow["27"]["inputs"]["height"] = height
-            logger.info(f"✅ 해상도 설정 완료 (EmptySD3LatentImage): {width}x{height}")
-        
-        # ModelSamplingFlux 노드에 해상도 설정
-        if "30" in workflow and workflow["30"].get("class_type") == "ModelSamplingFlux":
-            workflow["30"]["inputs"]["width"] = width
-            workflow["30"]["inputs"]["height"] = height
-            logger.info(f"✅ 해상도 설정 완료 (ModelSamplingFlux): {width}x{height}")
-        
-        
+        # 노드별 파라미터 업데이트
+        for node in workflow.get("nodes", []):
+            node_id = node.get("id")
+            node_type = node.get("type")
+            
+            # CLIP Text Encode 노드에 프롬프트 인젝션
+            if node_id == 6 and node_type == "CLIPTextEncode":
+                node["widgets_values"] = [prompt]
+                logger.debug(f"🔤 프롬프트 인젝션 완료: {prompt}")
+            
+            # FluxGuidance 노드에 가이던스 설정
+            elif node_id == 26 and node_type == "FluxGuidance":
+                node["widgets_values"] = [guidance]
+                logger.debug(f"🎯 가이던스 설정: {guidance}")
+            
+            # BasicScheduler 노드에 스텝 수 설정
+            elif node_id == 17 and node_type == "BasicScheduler":
+                current_values = node.get("widgets_values", ["simple", 8, 1])
+                node["widgets_values"] = [current_values[0], steps, current_values[2]]
+                logger.debug(f"📊 스텝 수 설정: {steps}")
+            
+            # 이미지 크기 설정 (width/height primitives)
+            elif node_id == 34:  # width primitive
+                node["widgets_values"] = [width, "fixed"]
+                logger.debug(f"📐 너비 설정: {width}")
+            
+            elif node_id == 35:  # height primitive
+                node["widgets_values"] = [height, "fixed"]
+                logger.debug(f"📏 높이 설정: {height}")
+            
+            # 🔥 Nunchaku 모델 경로 설정 (스크린샷 기반)
+            
+            # NunchakuTextEncoderLoader 노드 - CLIP 모델 경로
+            elif node_type == "NunchakuTextEncoderLoader":
+                current_values = node.get("widgets_values", [])
+                if len(current_values) >= 1:
+                    # text_encoder2 모델 경로 설정
+                    current_values[0] = "clip_l.safetensors"  # 스크린샷의 값
+                    node["widgets_values"] = current_values
+                    logger.debug(f"🤖 NunchakuTextEncoderLoader 모델 경로 설정: clip_l.safetensors")
+            
+            # NunchakuFluxDiTLoader 노드 - FLUX 메인 모델 경로
+            elif node_type == "NunchakuFluxDiTLoader":
+                current_values = node.get("widgets_values", [])
+                if len(current_values) >= 1:
+                    # flux1-dev 모델 경로 설정
+                    current_values[0] = "flux1-dev-bnb-nf4.safetensors"  # 스크린샷의 값
+                    node["widgets_values"] = current_values
+                    logger.debug(f"🔥 NunchakuFluxDiTLoader 모델 경로 설정: flux1-dev-bnb-nf4.safetensors")
+            
+            # NunchakuFlux1LoraLoader 노드 - LoRA 모델 경로
+            elif node_type == "NunchakuFlux1LoraLoader":
+                current_values = node.get("widgets_values", [])
+                if len(current_values) >= 2:
+                    # LoRA 모델과 강도 설정
+                    current_values[0] = "FLUXFLEXLUX1-Turbo-Alpha.safetensors"  # 스크린샷의 LoRA 모델
+                    current_values[1] = 0.5  # LoRA 강도
+                    node["widgets_values"] = current_values
+                    logger.debug(f"⚡ NunchakuFlux1LoraLoader 설정: FLUXFLEXLUX1-Turbo-Alpha.safetensors, 강도: 0.5")
+            
+            # VAELoader 노드 - VAE 모델 경로
+            elif node_type == "VAELoader":
+                current_values = node.get("widgets_values", [])
+                if len(current_values) >= 1:
+                    # VAE 모델 경로 설정
+                    current_values[0] = "ae.safetensors"  # 스크린샷의 VAE 모델
+                    node["widgets_values"] = current_values
+                    logger.debug(f"🎨 VAELoader 모델 경로 설정: ae.safetensors")
+        logger.debug('워크 플로우',workflow)
         return workflow
     
     async def _execute_workflow(
@@ -150,7 +200,7 @@ class ComfyUIFluxService:
             
             # 워크플로우 실행 요청 페이로드
             payload = {
-                "prompt": workflow                
+                "prompt": workflow
             }
             
             # ComfyUI 연결 재시도 로직 (초기화 시간 고려)

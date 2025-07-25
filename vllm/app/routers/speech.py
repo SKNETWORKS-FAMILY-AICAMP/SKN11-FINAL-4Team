@@ -163,8 +163,6 @@ async def generate_character_qa_fast(request: Dict[str, Any]):
                     logger.error(f"말투 {i+1} 생성 실패: {result}")
                     responses[tone_name] = create_error_response(i+1)
                 else:
-                    # system_prompt 추가
-                    result['system_prompt'] = system_prompts[i]
                     responses[tone_name] = [result]
         
         # 생성 시간 계산

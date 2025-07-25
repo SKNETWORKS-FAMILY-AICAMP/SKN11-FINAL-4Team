@@ -103,12 +103,11 @@ def create_influencer(db: Session, user_id: str, influencer_data: AIInfluencerCr
                 ),
                 influencer_gender=DataMapper.map_gender_to_db(influencer_data.gender),
                 influencer_age_group=age_group,
-                influencer_hairstyle=influencer_data.hair_style or "이미지로 업로드 됨.",
-                influencer_style=influencer_data.mood or "이미지로 업로드 됨.",
+                influencer_hairstyle=influencer_data.hair_style or "기본 헤어스타일",
+                influencer_style=influencer_data.mood or "자연스럽고 편안한",
                 influencer_personality=influencer_data.personality,
                 influencer_speech=influencer_data.tone,
                 influencer_description=influencer_data.influencer_description or f"{influencer_data.influencer_name}의 AI 인플루언서",
-                system_prompt=influencer_data.system_prompt,  # 시스템 프롬프트 추가
             )
 
             style_preset = create_style_preset(db, preset_data)
@@ -126,33 +125,19 @@ def create_influencer(db: Session, user_id: str, influencer_data: AIInfluencerCr
                 status_code=status.HTTP_404_NOT_FOUND, detail="Style preset not found"
             )
 
-    # MBTI 처리: 텍스트로 받은 경우 mbti_id로 변환
     mbti_id = influencer_data.mbti_id
-    
-    # MBTI 텍스트가 있고 mbti_id가 없는 경우
     if influencer_data.mbti and not mbti_id:
-        mbti_text = influencer_data.mbti.upper()  # 대문자로 변환
         mbti_record = (
             db.query(ModelMBTI)
-            .filter(ModelMBTI.mbti_name == mbti_text)
+            .filter(ModelMBTI.mbti_name == influencer_data.mbti)
             .first()
         )
         if mbti_record:
             mbti_id = mbti_record.mbti_id
-            logger.info(f"✅ MBTI 텍스트 '{mbti_text}'를 mbti_id {mbti_id}로 변환")
-        else:
-            logger.warning(f"⚠️ 유효하지 않은 MBTI 타입: {mbti_text}")
-            # 잘못된 MBTI 타입인 경우 에러 발생
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"유효하지 않은 MBTI 타입입니다: {mbti_text}"
-            )
 
-    # mbti_id가 설정된 경우 유효성 검증
     if mbti_id:
         mbti = db.query(ModelMBTI).filter(ModelMBTI.mbti_id == mbti_id).first()
         if not mbti:
-            logger.warning(f"⚠️ 존재하지 않는 mbti_id: {mbti_id}")
             mbti_id = None
 
     hf_manage_id = influencer_data.hf_manage_id
@@ -171,21 +156,8 @@ def create_influencer(db: Session, user_id: str, influencer_data: AIInfluencerCr
             logger.warning(f"⚠️ 지정된 허깅페이스 토큰을 찾을 수 없음: {hf_manage_id}")
             hf_manage_id = None
 
-    # 시스템 프롬프트 처리
+    # 말투 정보 처리
     final_system_prompt = influencer_data.system_prompt
-    
-    # 프리셋이 있고 시스템 프롬프트가 없다면 프리셋에서 가져오기
-    if not final_system_prompt and style_preset_id:
-        style_preset = (
-            db.query(StylePreset)
-            .filter(StylePreset.style_preset_id == style_preset_id)
-            .first()
-        )
-        if style_preset and style_preset.system_prompt:
-            final_system_prompt = style_preset.system_prompt
-            logger.info(f"📝 프리셋에서 시스템 프롬프트 가져옴: {style_preset_id}")
-    
-    # 말투 정보 처리 (기존 로직 유지)
     if influencer_data.tone_type and influencer_data.tone_data:
         logger.info(f"📝 말투 정보 처리: type={influencer_data.tone_type}")
         final_system_prompt = influencer_data.tone_data
@@ -205,6 +177,7 @@ def create_influencer(db: Session, user_id: str, influencer_data: AIInfluencerCr
         "learning_status": influencer_data.learning_status,
         "influencer_model_repo": influencer_data.influencer_model_repo,
         "chatbot_option": influencer_data.chatbot_option,
+        # AIInfluencer 모델의 직접 필드 채우기
         "influencer_personality": influencer_data.personality,
         "influencer_tone": influencer_data.tone,
         "influencer_age_group": None,  # 초기화 후 아래에서 매핑
@@ -316,35 +289,12 @@ def delete_influencer(db: Session, user_id: str, influencer_id: str):
     """AI 인플루언서 삭제"""
     influencer = get_influencer_by_id(db, user_id, influencer_id)
 
-    # 연관된 데이터 삭제 순서가 중요함 (외래키 제약 때문에)
-    from app.models.influencer import BatchKey, InfluencerAPI, APICallAggregation
+    # 연관된 BatchKey 데이터 삭제
+    from app.models.influencer import BatchKey
 
-    # 1. 먼저 API 호출 집계 데이터 삭제 (InfluencerAPI를 참조하는 테이블)
-    # API ID들을 먼저 조회 (리스트로 변환)
-    api_ids = [row[0] for row in db.query(InfluencerAPI.api_id).filter(
-        InfluencerAPI.influencer_id == influencer_id
-    ).all()]
-    
-    if api_ids:
-        # API_CALL_AGGREGATION 데이터 삭제
-        db.query(APICallAggregation).filter(
-            APICallAggregation.api_id.in_(api_ids)
-        ).delete(synchronize_session='fetch')
-        logger.info(f"🗑️ 인플루언서 {influencer_id}의 API 호출 집계 데이터 삭제 완료")
-
-    # 2. InfluencerAPI 데이터 삭제
-    db.query(InfluencerAPI).filter(
-        InfluencerAPI.influencer_id == influencer_id
-    ).delete(synchronize_session='fetch')
-    logger.info(f"🗑️ 인플루언서 {influencer_id}의 API 키 데이터 삭제 완료")
-
-    # 3. BatchKey 데이터 삭제
-    db.query(BatchKey).filter(
-        BatchKey.influencer_id == influencer_id
-    ).delete(synchronize_session='fetch')
+    db.query(BatchKey).filter(BatchKey.influencer_id == influencer_id).delete()
     logger.info(f"🗑️ 인플루언서 {influencer_id}와 연관된 BatchKey 데이터 삭제 완료")
 
-    # 4. 마지막으로 인플루언서 삭제
     db.delete(influencer)
     db.commit()
 

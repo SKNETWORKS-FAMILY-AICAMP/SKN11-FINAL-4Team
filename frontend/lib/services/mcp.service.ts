@@ -88,39 +88,6 @@ class MCPService {
             return { success: false, message: msg };
         }
     }
-
-    /**
-     * MCP 서버 제거
-     * @param serverName 제거할 서버 이름
-     */
-    static async removeServer(serverName: string): Promise<{ success: boolean, message?: string }> {
-        try {
-            const res = await apiClient.delete(`/api/v1/mcp/servers/${serverName}`, {
-                requireAuth: false,
-                timeout: 30000
-            });
-            return {
-                success: true,
-                message: '서버가 제거되었습니다.'
-            };
-        } catch (error: any) {
-            let msg = '서버 제거에 실패했습니다.';
-
-            if (error?.data?.detail) {
-                msg = error.data.detail;
-            } else if (error?.data?.message) {
-                msg = error.data.message;
-            } else if (error?.message) {
-                msg = error.message;
-            } else if (error?.response?.data?.detail) {
-                msg = error.response.data.detail;
-            } else if (error?.response?.data?.message) {
-                msg = error.response.data.message;
-            }
-
-            return { success: false, message: msg };
-        }
-    }
 }
 
 export default MCPService; 

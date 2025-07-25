@@ -7,10 +7,6 @@ from typing import Optional, Dict, Any
 from datetime import datetime
 import concurrent.futures
 import httpx
-import multiprocessing as mp
-from multiprocessing import Queue, Process
-import signal
-import sys
 
 import torch
 import torchaudio
@@ -31,11 +27,6 @@ router = APIRouter()
 zonos_model = None
 device = None
 zonos_initialization_attempted = False  # 초기화 시도 추적
-
-# 멀티프로세싱 관련 전역 변수
-zonos_process = None
-request_queue = None
-response_queue = None
 
 # 비동기 작업 상태 추적 (Legacy - will be migrated to cache manager)
 task_status: Dict[str, Dict[str, Any]] = {}
@@ -176,139 +167,66 @@ class TaskStatusResponse(BaseModel):
     created_at: str
     updated_at: str
 
-def zonos_worker_process(request_queue: Queue, response_queue: Queue):
-    """별도 프로세스에서 실행되는 Zonos 워커"""
-    # 시그널 핸들러 설정
-    def signal_handler(signum, frame):
-        logger.info("Zonos 워커 프로세스 종료 중...")
-        sys.exit(0)
+def initialize_zonos_model():
+    """Zonos 모델 초기화 (싱글톤 패턴)"""
+    global zonos_model, device, zonos_initialization_attempted
     
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
+    # 이미 초기화 시도했으면 스킵 (성공 여부와 관계없이)
+    if zonos_initialization_attempted:
+        if zonos_model is not None:
+            logger.info("ℹ️ Zonos 모델이 이미 초기화되어 있습니다.")
+        else:
+            logger.info("ℹ️ Zonos 모델 초기화가 이미 시도되었습니다.")
+        return zonos_model is not None
     
-    # GPU 설정
-    tts_gpu_id = int(os.getenv('TTS_GPU_ID', '1'))
-    os.environ['CUDA_VISIBLE_DEVICES'] = str(tts_gpu_id)
+    # 초기화 시도 플래그 설정
+    zonos_initialization_attempted = True
     
-    # 이 프로세스 내에서 torch와 Zonos 임포트
-    import torch
-    import torchaudio
-    from zonos.model import Zonos
-    from zonos.conditioning import make_cond_dict
-    
-    # 모델 초기화
     try:
+        # 환경 변수에서 TTS GPU ID 가져오기 (기본값: 1)
+        tts_gpu_id = int(os.getenv('TTS_GPU_ID', '1'))
+        
+        # GPU 설정 - GPU 1번 고정
         if torch.cuda.is_available():
-            torch.cuda.set_device(0)  # 격리된 환경에서는 항상 0
-            device = torch.device("cuda:0")
-            logger.info(f"🔧 Zonos 워커 초기화 중... (격리된 GPU {tts_gpu_id}, 디바이스: cuda:0)")
+            torch.cuda.set_device(1)  # GPU 1번으로 고정
+            device = torch.device("cuda:1")  # GPU 1번 명시
+            logger.info(f"🔧 Zonos 모델 초기화 중... (디바이스: cuda:1, 고정)")
+            logger.info(f"✅ GPU 1번 고정 할당 (전체 GPU 수: {torch.cuda.device_count()})")
         else:
             device = torch.device("cpu")
             logger.warning("⚠️ CUDA를 사용할 수 없습니다. CPU를 사용합니다.")
         
         zonos_model = Zonos.from_pretrained("Zyphra/Zonos-v0.1-transformer", device=device)
-        logger.info("✅ Zonos 워커 모델 초기화 완료")
+        logger.info("✅ Zonos 모델 초기화 완료")
+        return True
     except Exception as e:
-        logger.error(f"❌ Zonos 워커 모델 초기화 실패: {e}")
-        return
-    
-    # 요청 처리 루프
-    while True:
-        try:
-            # 요청 대기
-            request = request_queue.get()
-            
-            if request is None:  # 종료 신호
-                break
-            
-            task_type = request['type']
-            task_id = request['task_id']
-            
-            try:
-                if task_type == 'generate_tts':
-                    # TTS 생성
-                    result = generate_tts_in_process(
-                        zonos_model, device,
-                        request['text'],
-                        request.get('speaker'),
-                        request['language'],
-                        request['speaking_rate'],
-                        request['pitch_std'],
-                        request['cfg_scale'],
-                        request['emotion']
-                    )
-                    
-                    # 오디오 저장
-                    output_path = request['output_path']
-                    torchaudio.save(
-                        output_path,
-                        result.cpu(),
-                        zonos_model.autoencoder.sampling_rate
-                    )
-                    
-                    response_queue.put({
-                        'task_id': task_id,
-                        'status': 'success',
-                        'output_path': output_path
-                    })
-                    
-                elif task_type == 'generate_tts_with_voice':
-                    # 음성 클로닝 TTS
-                    voice_path = request['voice_path']
-                    
-                    # 스피커 임베딩 생성
-                    wav, sampling_rate = torchaudio.load(voice_path)
-                    wav = wav.to(device)
-                    speaker = zonos_model.make_speaker_embedding(wav, sampling_rate)
-                    
-                    # TTS 생성
-                    result = generate_tts_in_process(
-                        zonos_model, device,
-                        request['text'],
-                        speaker,
-                        request['language'],
-                        request['speaking_rate'],
-                        request['pitch_std'],
-                        request['cfg_scale'],
-                        request['emotion']
-                    )
-                    
-                    # 오디오 저장
-                    output_path = request['output_path']
-                    torchaudio.save(
-                        output_path,
-                        result.cpu(),
-                        zonos_model.autoencoder.sampling_rate
-                    )
-                    
-                    response_queue.put({
-                        'task_id': task_id,
-                        'status': 'success',
-                        'output_path': output_path
-                    })
-                    
-            except Exception as e:
-                logger.error(f"작업 처리 실패 (task_id: {task_id}): {e}")
-                response_queue.put({
-                    'task_id': task_id,
-                    'status': 'error',
-                    'error': str(e)
-                })
-                
-        except Exception as e:
-            logger.error(f"워커 프로세스 오류: {e}")
-            
-def generate_tts_in_process(zonos_model, device, text, speaker, language, speaking_rate, pitch_std, cfg_scale, emotion):
-    """프로세스 내에서 TTS 생성"""
-    from zonos.conditioning import make_cond_dict
-    
+        logger.error(f"❌ Zonos 모델 초기화 실패: {e}")
+        zonos_model = None  # 실패 시 None으로 설정
+        return False
+
+@router.on_event("startup")
+async def startup_event():
+    """라우터 시작 시 모델 초기화"""
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(executor, initialize_zonos_model)
+
+def generate_tts_sync(
+    text: str,
+    speaker_embedding,
+    language: str,
+    speaking_rate: float,
+    pitch_std: float,
+    cfg_scale: float,
+    emotion: list[float] = [0.3077, 0.0256, 0.0256, 0.0256, 0.0256, 0.0256, 0.2564, 0.3077]
+) -> torch.Tensor:
+    """동기 TTS 생성 함수 (CPU-bound 작업)"""
     # 조건 딕셔너리 생성
     cond_dict = make_cond_dict(
         text=text,
-        speaker=speaker,
+        speaker=speaker_embedding,
         language=language,
         speaking_rate=speaking_rate,
-        emotion=emotion,
+        emotion = emotion,
         pitch_std=pitch_std
     )
     
@@ -317,7 +235,7 @@ def generate_tts_in_process(zonos_model, device, text, speaker, language, speaki
     
     # 코드 생성
     codes = zonos_model.generate(
-        conditioning,
+        conditioning, 
         cfg_scale=cfg_scale,
         disable_torch_compile=True,
         progress_bar=False
@@ -327,94 +245,6 @@ def generate_tts_in_process(zonos_model, device, text, speaker, language, speaki
     wavs = zonos_model.autoencoder.decode(codes)
     
     return wavs[0]
-
-def initialize_zonos_multiprocessing():
-    """멀티프로세싱 환경 초기화"""
-    global zonos_process, request_queue, response_queue
-    
-    if zonos_process is not None and zonos_process.is_alive():
-        logger.info("Zonos 멀티프로세싱이 이미 실행 중입니다.")
-        return True
-    
-    try:
-        # 멀티프로세싱 방식을 spawn으로 설정 (CUDA 컨텍스트 격리)
-        mp.set_start_method('spawn', force=True)
-        
-        # 큐 생성
-        request_queue = mp.Queue(maxsize=100)
-        response_queue = mp.Queue(maxsize=100)
-        
-        # 워커 프로세스 시작
-        zonos_process = mp.Process(
-            target=zonos_worker_process,
-            args=(request_queue, response_queue),
-            daemon=False
-        )
-        zonos_process.start()
-        
-        logger.info("✅ Zonos 멀티프로세싱 환경 초기화 완료")
-        return True
-        
-    except Exception as e:
-        logger.error(f"❌ Zonos 멀티프로세싱 초기화 실패: {e}")
-        return False
-
-@router.on_event("startup")
-async def startup_event():
-    """라우터 시작 시 멀티프로세싱 환경 초기화"""
-    loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, initialize_zonos_multiprocessing)
-
-async def generate_tts_multiprocess(
-    task_id: str,
-    text: str,
-    speaker_embedding,
-    language: str,
-    speaking_rate: float,
-    pitch_std: float,
-    cfg_scale: float,
-    emotion: list[float],
-    output_path: str
-) -> str:
-    """멀티프로세스로 TTS 생성"""
-    # 요청 전송
-    request_queue.put({
-        'type': 'generate_tts',
-        'task_id': task_id,
-        'text': text,
-        'speaker': speaker_embedding,
-        'language': language,
-        'speaking_rate': speaking_rate,
-        'pitch_std': pitch_std,
-        'cfg_scale': cfg_scale,
-        'emotion': emotion,
-        'output_path': output_path
-    })
-    
-    # 응답 대기 (타임아웃 설정)
-    timeout = 60  # 60초 타임아웃
-    start_time = asyncio.get_event_loop().time()
-    
-    while True:
-        try:
-            # 논블로킹으로 응답 확인
-            if not response_queue.empty():
-                response = response_queue.get_nowait()
-                if response['task_id'] == task_id:
-                    if response['status'] == 'success':
-                        return response['output_path']
-                    else:
-                        raise Exception(response.get('error', 'Unknown error'))
-            
-            # 타임아웃 체크
-            if asyncio.get_event_loop().time() - start_time > timeout:
-                raise Exception("TTS 생성 타임아웃")
-            
-            # 잠시 대기
-            await asyncio.sleep(0.1)
-            
-        except Exception as e:
-            raise e
 
 
 async def send_webhook_notification(
@@ -475,6 +305,23 @@ async def process_tts_task(
         task_status[task_id]["progress"] = 30
         task_status[task_id]["updated_at"] = datetime.utcnow().isoformat()
         
+        # TTS 생성 (CPU-bound 작업을 비동기로)
+        loop = asyncio.get_event_loop()
+        wav_output = await loop.run_in_executor(
+            executor,
+            generate_tts_sync,
+            request.text,
+            speaker,
+            request.language,
+            request.speaking_rate,
+            request.pitch_std,
+            request.cfg_scale,
+            request.emotion
+        )
+        
+        task_status[task_id]["progress"] = 70
+        task_status[task_id]["updated_at"] = datetime.utcnow().isoformat()
+        
         # 출력 파일명 설정
         if request.output_filename:
             output_filename = request.output_filename
@@ -483,21 +330,14 @@ async def process_tts_task(
         
         output_path = temp_dir / output_filename
         
-        # TTS 생성 (멀티프로세스로)
-        await generate_tts_multiprocess(
-            task_id,
-            request.text,
-            speaker,
-            request.language,
-            request.speaking_rate,
-            request.pitch_std,
-            request.cfg_scale,
-            request.emotion,
-            str(output_path)
+        # 오디오 저장
+        await loop.run_in_executor(
+            executor,
+            torchaudio.save,
+            str(output_path),
+            wav_output.cpu(),
+            zonos_model.autoencoder.sampling_rate
         )
-        
-        task_status[task_id]["progress"] = 70
-        task_status[task_id]["updated_at"] = datetime.utcnow().isoformat()
         
         logger.info(f"✅ TTS 생성 완료: {output_path}")
         task_status[task_id]["progress"] = 90
@@ -516,7 +356,7 @@ async def process_tts_task(
                 # S3 메타데이터는 ASCII만 지원하므로 non-ASCII 텍스트는 제외하거나 인코딩
                 metadata = {
                     "text_length": str(len(request.text)),
-                    "language": 'ko',
+                    "language": request.language,
                     "speaking_rate": str(request.speaking_rate),
                     "pitch_std": str(request.pitch_std),
                     "cfg_scale": str(request.cfg_scale),
@@ -596,12 +436,12 @@ async def generate_tts_async(
     request: ZonosTTSRequest
 ):
     """비동기 TTS 생성 (JSON 전용)"""
-    # 멀티프로세싱이 초기화되지 않았으면 초기화
-    if zonos_process is None or not zonos_process.is_alive():
-        logger.warning("⚠️ Zonos 멀티프로세싱이 초기화되지 않았습니다. 초기화 시도 중...")
-        success = await asyncio.get_event_loop().run_in_executor(None, initialize_zonos_multiprocessing)
+    # 모델이 초기화되지 않았으면 다시 시도
+    if zonos_model is None:
+        logger.warning("⚠️ Zonos 모델이 초기화되지 않았습니다. 초기화 시도 중...")
+        success = await asyncio.get_event_loop().run_in_executor(executor, initialize_zonos_model)
         if not success:
-            raise HTTPException(status_code=500, detail="Zonos 멀티프로세싱 초기화에 실패했습니다. 서버 로그를 확인하세요.")
+            raise HTTPException(status_code=500, detail="Zonos 모델 초기화에 실패했습니다. 서버 로그를 확인하세요.")
     
     # 작업 ID 생성
     task_id = str(uuid.uuid4())
@@ -736,12 +576,12 @@ async def generate_tts_with_voice_async(
     request: ZonosTTSWithVoiceRequest
 ):
     """음성 클로닝을 사용한 비동기 TTS 생성 (Base64 인코딩된 음성 데이터 사용)"""
-    # 멀티프로세싱이 초기화되지 않았으면 초기화
-    if zonos_process is None or not zonos_process.is_alive():
-        logger.warning("⚠️ Zonos 멀티프로세싱이 초기화되지 않았습니다. 초기화 시도 중...")
-        success = await asyncio.get_event_loop().run_in_executor(None, initialize_zonos_multiprocessing)
+    # 모델이 초기화되지 않았으면 다시 시도
+    if zonos_model is None:
+        logger.warning("⚠️ Zonos 모델이 초기화되지 않았습니다. 초기화 시도 중...")
+        success = await asyncio.get_event_loop().run_in_executor(executor, initialize_zonos_model)
         if not success:
-            raise HTTPException(status_code=500, detail="Zonos 멀티프로세싱 초기화에 실패했습니다. 서버 로그를 확인하세요.")
+            raise HTTPException(status_code=500, detail="Zonos 모델 초기화에 실패했습니다. 서버 로그를 확인하세요.")
     
     # 작업 ID 생성
     task_id = str(uuid.uuid4())
@@ -803,17 +643,11 @@ async def process_tts_with_voice_task(task_id: str, request: ZonosTTSWithVoiceRe
         async with aiofiles.open(temp_voice_path, "wb") as f:
             await f.write(voice_data)
         
-        # 출력 파일명 설정
-        if request.output_filename:
-            output_filename = request.output_filename
-        else:
-            output_filename = f"zonos_tts_voice_{task_id}.wav"
-        
-        output_path = str(temp_dir / output_filename)
-        
-        # 멀티프로세스로 TTS 생성
-        await generate_tts_with_voice_multiprocess(
-            task_id,
+        # ThreadPoolExecutor에서 실행
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            executor,
+            _generate_tts_with_voice_sync,
             str(temp_voice_path),
             request.text,
             request.language,
@@ -821,11 +655,13 @@ async def process_tts_with_voice_task(task_id: str, request: ZonosTTSWithVoiceRe
             request.pitch_std,
             request.cfg_scale,
             request.emotion,
-            output_path
+            request.output_filename
         )
         
         # 임시 파일 삭제
         temp_voice_path.unlink()
+        
+        output_path = result["output_path"]
         
         # S3 업로드 처리
         s3_info = None
@@ -840,7 +676,7 @@ async def process_tts_with_voice_task(task_id: str, request: ZonosTTSWithVoiceRe
                 # S3 메타데이터는 ASCII만 지원하므로 non-ASCII 텍스트는 제외하거나 인코딩
                 metadata = {
                     "text_length": str(len(request.text)),
-                    "language": 'ko',
+                    "language": request.language,
                     "speaking_rate": str(request.speaking_rate),
                     "pitch_std": str(request.pitch_std),
                     "generated_by": "zonos-tts-with-voice-async"
@@ -911,8 +747,7 @@ async def process_tts_with_voice_task(task_id: str, request: ZonosTTSWithVoiceRe
             error_message=str(e)
         )
 
-async def generate_tts_with_voice_multiprocess(
-    task_id: str,
+def _generate_tts_with_voice_sync(
     voice_path: str,
     text: str,
     language: str,
@@ -920,47 +755,52 @@ async def generate_tts_with_voice_multiprocess(
     pitch_std: float,
     cfg_scale: float,
     emotion: list[float],
-    output_path: str
-) -> str:
-    """멀티프로세스로 음성 클로닝 TTS 생성"""
-    # 요청 전송
-    request_queue.put({
-        'type': 'generate_tts_with_voice',
-        'task_id': task_id,
-        'voice_path': voice_path,
-        'text': text,
-        'language': language,
-        'speaking_rate': speaking_rate,
-        'pitch_std': pitch_std,
-        'cfg_scale': cfg_scale,
-        'emotion': emotion,
-        'output_path': output_path
-    })
+    output_filename: Optional[str]
+) -> dict:
+    """음성 클로닝 TTS 생성 (동기 함수)"""
+    # 스피커 임베딩 생성
+    wav, sampling_rate = torchaudio.load(voice_path)
+    wav = wav.to(device)
+    speaker = zonos_model.make_speaker_embedding(wav, sampling_rate)
     
-    # 응답 대기 (타임아웃 설정)
-    timeout = 60  # 60초 타임아웃
-    start_time = asyncio.get_event_loop().time()
+    # 조건 딕셔너리 생성
+    cond_dict = make_cond_dict(
+        text=text,
+        speaker=speaker,
+        language='ko',
+        speaking_rate=speaking_rate,
+        emotion=emotion,
+        pitch_std=pitch_std
+    )
     
-    while True:
-        try:
-            # 논블로킹으로 응답 확인
-            if not response_queue.empty():
-                response = response_queue.get_nowait()
-                if response['task_id'] == task_id:
-                    if response['status'] == 'success':
-                        return response['output_path']
-                    else:
-                        raise Exception(response.get('error', 'Unknown error'))
-            
-            # 타임아웃 체크
-            if asyncio.get_event_loop().time() - start_time > timeout:
-                raise Exception("음성 클로닝 TTS 생성 타임아웃")
-            
-            # 잠시 대기
-            await asyncio.sleep(0.1)
-            
-        except Exception as e:
-            raise e
+    # 조건 준비
+    conditioning = zonos_model.prepare_conditioning(cond_dict)
+    
+    # 코드 생성
+    codes = zonos_model.generate(
+        conditioning,
+        cfg_scale=cfg_scale,
+        disable_torch_compile=True,
+        progress_bar=False
+    )
+    
+    # 오디오 디코드
+    wavs = zonos_model.autoencoder.decode(codes)
+    
+    # 출력 파일명 설정
+    if not output_filename:
+        output_filename = f"zonos_tts_voice_{uuid.uuid4()}.wav"
+    
+    output_path = f"/tmp/zonos_tts/{output_filename}"
+    
+    # 오디오 저장
+    torchaudio.save(
+        output_path,
+        wavs[0].cpu(),
+        zonos_model.autoencoder.sampling_rate
+    )
+    
+    return {"output_path": output_path}
 
 @router.post("/generate_tts_simple", response_model=ZonosTTSResponse)
 async def generate_tts_simple(
@@ -970,7 +810,7 @@ async def generate_tts_simple(
     """간단한 TTS 생성 (JSON 요청, 기본 설정 사용)"""
     full_request = ZonosTTSRequest(
         text=request.text,
-        language='ko',
+        language=request.language,
         speaking_rate=request.speaking_rate,
         pitch_std=request.pitch_std,
         cfg_scale=request.cfg_scale,
@@ -1003,8 +843,9 @@ async def get_zonos_status():
     pending_tasks = sum(1 for task in task_status.values() if task["status"] == "pending")
     
     return {
-        "multiprocessing_active": zonos_process is not None and zonos_process.is_alive(),
-        "tts_gpu_id": os.getenv('TTS_GPU_ID', '1'),
+        
+        "model_loaded": zonos_model is not None,
+        "device": str(device) if device else None,
         "cuda_available": torch.cuda.is_available(),
         "active_tasks": active_tasks,
         "pending_tasks": pending_tasks,
@@ -1095,29 +936,3 @@ async def cleanup_old_tasks():
 async def start_cleanup_task():
     """정리 작업 시작"""
     asyncio.create_task(cleanup_old_tasks())
-
-@router.on_event("shutdown")
-async def shutdown_event():
-    """라우터 종료 시 정리"""
-    global zonos_process, request_queue, response_queue
-    
-    # 멀티프로세싱 종료
-    if zonos_process is not None:
-        try:
-            # 종료 신호 전송
-            if request_queue is not None:
-                request_queue.put(None)
-            
-            # 프로세스 종료 대기
-            zonos_process.join(timeout=5)
-            
-            if zonos_process.is_alive():
-                zonos_process.terminate()
-                zonos_process.join(timeout=2)
-            
-            logger.info("✅ Zonos 멀티프로세싱 종료 완료")
-        except Exception as e:
-            logger.error(f"Zonos 멀티프로세싱 종료 중 오류: {e}")
-    
-    # ThreadPoolExecutor 종료
-    await shutdown_executor()

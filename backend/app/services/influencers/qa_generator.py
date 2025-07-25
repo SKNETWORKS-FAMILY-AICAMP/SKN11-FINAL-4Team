@@ -24,8 +24,6 @@ from app.models.influencer import BatchKey
 from app.core.config import settings
 # Backend 내부 모델 사용
 from app.models.vllm_models import Gender, VLLMCharacterProfile
-from dotenv import load_dotenv
-load_dotenv()
 
 # 하위 호환성을 위한 별칭
 CharacterProfile = VLLMCharacterProfile
@@ -150,7 +148,7 @@ class InfluencerQAGenerator:
         print(f"QA 생성 요청: {num_requests}개 (환경변수 QA_GENERATION_COUNT: {settings.QA_GENERATION_COUNT})")
         
         # VLLM 서버 URL 설정
-        vllm_server_url = getattr(settings, 'VLLM_BASE_URL', 'http://localhost:8000')
+        vllm_server_url = getattr(settings, 'VLLM_SERVER_URL', 'http://localhost:8001')
         
         # VLLM 서버에 요청할 캐릭터 프로필 데이터 준비
         character_data = {
@@ -165,20 +163,16 @@ class InfluencerQAGenerator:
         # VLLM 서버에서 JSONL 생성 작업 시작 (새로운 QA 전용 엔드포인트 사용)
         try:
             print(f"VLLM 서버에 {num_requests}개 QA JSONL 생성 작업 시작 요청...")
-            print(f"VLLM 서버 URL: {vllm_server_url}")
-            
-            request_data = {
-                "character": character_data,
-                "num_qa_pairs": num_requests,
-                "domains": ["일상생활", "과학기술", "사회이슈", "인문학", "스포츠", "역사문화"],
-                "system_prompt": system_prompt
-            }
-            print(f"요청 데이터: {json.dumps(request_data, ensure_ascii=False, indent=2)[:500]}...")
             
             # 새로운 QA 생성 엔드포인트 사용
             response = requests.post(
                 f"{vllm_server_url}/qa/generate_qa_for_influencer",
-                json=request_data,
+                json={
+                    "character": character_data,
+                    "num_qa_pairs": num_requests,
+                    "domains": ["일상생활", "과학기술", "사회이슈", "인문학", "스포츠", "역사문화"],
+                    "system_prompt": system_prompt
+                },
                 timeout=30
             )
             
@@ -491,8 +485,6 @@ class InfluencerQAGenerator:
         Returns:
             작업 ID
         """
-        print(f"🎨 QA Generator: start_qa_generation 함수 시작 - influencer_id={influencer_id}, user_id={user_id}")
-        
         # 작업 ID 생성
         task_id = f"qa_{influencer_id}_{int(time.time())}"
         print(f"🎨 QA Generator: 작업 시작 - task_id={task_id}, influencer_id={influencer_id}")
