@@ -76,7 +76,7 @@ function PostListContent() {
   // API에서 게시글 목록 가져오기
   const fetchPosts = async () => {
     if (isFetchingRef.current) return
-    
+
     try {
       isFetchingRef.current = true
       setLoading(true)
@@ -972,7 +972,7 @@ function PostListContent() {
                 onInstagramUpload={handleInstagramUpload}
                 showActions={false}
                 showInfluencerInfo={false}
-                variant="content"
+                variant="list"
               />
             ))}
           </div>
