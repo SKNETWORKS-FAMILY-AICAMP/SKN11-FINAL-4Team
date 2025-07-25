@@ -89,15 +89,15 @@ class ComfyUIFluxService:
             workflow = self._inject_prompt_to_workflow(
                 prompt, width, height, guidance, steps
             )
-            
+            print('워크 플로우!!',workflow)
             # ComfyUI API로 워크플로우 실행
             result = await self._execute_workflow(comfyui_endpoint, workflow)
             
             if result:
-                logger.info(f"✅ Flux 이미지 생성 완료 - 프롬프트: {prompt[:50]}...")
+                logger.info(f"✅ Flux 이미지 생성 완료 - 프롬프트: {prompt}")
                 return result
             else:
-                logger.error(f"❌ Flux 이미지 생성 실패 - 프롬프트: {prompt[:50]}...")
+                logger.error(f"❌ Flux 이미지 생성 실패 - 프롬프트: {prompt}")
                 return None
                 
         except Exception as e:
@@ -124,7 +124,7 @@ class ComfyUIFluxService:
             # CLIP Text Encode 노드에 프롬프트 인젝션
             if node_id == 6 and node_type == "CLIPTextEncode":
                 node["widgets_values"] = [prompt]
-                logger.debug(f"🔤 프롬프트 인젝션 완료: {prompt[:30]}...")
+                logger.debug(f"🔤 프롬프트 인젝션 완료: {prompt}")
             
             # FluxGuidance 노드에 가이던스 설정
             elif node_id == 26 and node_type == "FluxGuidance":
@@ -184,7 +184,7 @@ class ComfyUIFluxService:
                     current_values[0] = "ae.safetensors"  # 스크린샷의 VAE 모델
                     node["widgets_values"] = current_values
                     logger.debug(f"🎨 VAELoader 모델 경로 설정: ae.safetensors")
-        
+        logger.debug('워크 플로우',workflow)
         return workflow
     
     async def _execute_workflow(
@@ -235,7 +235,7 @@ class ComfyUIFluxService:
                                 logger.error(f"❌ prompt_id 없음: {result}")
                                 return None
                         else:
-                            logger.warning(f"⚠️ ComfyUI API 응답 오류 (시도 {attempt + 1}/{max_retries}): {response.status_code} - {response.text[:200]}...")
+                            logger.warning(f"⚠️ ComfyUI API 응답 오류 (시도 {attempt + 1}/{max_retries}): {response.status_code} - {response.text}...")
                             if attempt == max_retries - 1:  # 마지막 시도
                                 logger.error(f"❌ 모든 재시도 실패 - 최종 오류: {response.status_code}")
                                 return None

@@ -121,7 +121,7 @@ async def get_current_user(
     token = credentials.credentials
     
     # 보안 로깅: 토큰 마스킹 처리 (DEBUG 로그 제거 - 너무 빈번함)
-    # masked_token = mask_token_for_logging(token)
+    masked_token = mask_token_for_logging(token)
     # logger.debug(f"🔐 인증 토큰 검증 시작: {masked_token}")
     
     payload = verify_token(token)

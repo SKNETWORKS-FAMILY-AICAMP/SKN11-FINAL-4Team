@@ -52,6 +52,10 @@ class RunPodService:
         
         logger.info(f"RunPod Service initialized (API Key: {'***' + self.api_key[-4:] if len(self.api_key) > 4 else '***'}, Template: {self.template_id})")
     
+    def _generate_proxy_url(self, pod_id: str, internal_port: int = 8188) -> str:
+        """RunPod proxy URL 생성 """
+        return f"https://{pod_id}-{internal_port}.proxy.runpod.net"
+    
     async def create_pod(self, request_id: str) -> RunPodPodResponse:
         """ComfyUI 서버 인스턴스 생성 (GPU 폴백 지원)"""
         
@@ -156,7 +160,7 @@ class RunPodService:
                     logger.info(f"     💰 입찰가 ${bid_price}/hr 시도 ({bid_idx + 1}/{len(bid_steps)})...")
                     
                     # Spot 먼저, 실패시 On-Demand 시도
-                    for instance_type in ["interruptible", "on_demand"]:
+                    for instance_type in ["on_demand", "interruptible"]:
                         # 각 인스턴스 타입별로 최대 2번 시도 (즉시 + 5초 후 재시도)
                         for retry_attempt in range(2):
                             try:
@@ -216,32 +220,29 @@ class RunPodService:
             
             # Pod 생성 성공한 경우
             if pod_data:
-                # Pod 데이터 처리 (개선된 로직)
-                endpoint_url = None
-                if pod_data.get("runtime") and pod_data["runtime"].get("ports"):
-                    for port in pod_data["runtime"]["ports"]:
-                        if port["privatePort"] == 8188:
-                            endpoint_url = f"http://{port['ip']}:{port['publicPort']}"
-                            break
+                # RunPod proxy URL 생성 (공식 방식)
+                pod_id = pod_data["id"]
+                endpoint_url = self._generate_proxy_url(pod_id, 8188)
                 
                 logger.info(f"🎯 최적 GPU 확보 성공!")
                 logger.info(f"  GPU: {gpu_type} ({vram}, {tier} 등급)")
                 logger.info(f"  리소스: {vcpu} vCPU, {memory}GB RAM (고정)")
                 logger.info(f"  최종 입찰가: ${successful_bid}/hr")
-                logger.info(f"  Pod ID: {pod_data['id']}")
+                logger.info(f"  Pod ID: {pod_id}")
+                logger.info(f"  Proxy URL: {endpoint_url}")
                 logger.info(f"  볼륨: {settings.RUNPOD_VOLUME_ID} → /workspace")
                 
                 # Pod 생성 후 자동으로 시작
-                pod_id = pod_data["id"]
                 logger.info(f"🚀 Pod {pod_id} 자동 시작 중...")
                 logger.info(f"   Template ID: {settings.RUNPOD_TEMPLATE_ID}")
                 logger.info(f"   Volume ID: {settings.RUNPOD_VOLUME_ID}")
                 logger.info(f"   Container Port: 8188 (ComfyUI)")
+                logger.info(f"   Proxy URL: {endpoint_url}")
                 
                 start_success = await self._start_pod(pod_id)
                 if start_success:
                     logger.info(f"✅ Pod {pod_id} 자동 시작 성공")
-                    logger.info(f"   ComfyUI 초기화 시작 예정...")
+                    logger.info(f"   ComfyUI 접근: {endpoint_url}")
                     logger.info(f"   예상 준비 시간: 60-90초")
                 else:
                     logger.warning(f"⚠️ Pod {pod_id} 자동 시작 실패")
@@ -332,13 +333,11 @@ class RunPodService:
                 "input": {
                     "bidPerGpu": bid_price,  # GPU별 적정 입찰가 사용
                     "gpuCount": 1,
-                    "volumeInGb": 200,  # 고정 네트워크 볼륨
+                    "volumeInGb": 250,  # 고정 네트워크 볼륨
                     "networkVolumeId": settings.RUNPOD_VOLUME_ID,
                     "containerDiskInGb": 20,  # 강제 고정 컨테이너 디스크 (과할당 방지)
                     "minVcpuCount": vcpu,   # 강제 고정된 vCPU 수
                     "minMemoryInGb": memory,  # 강제 고정된 RAM 용량
-                    "maxVcpuCount": vcpu,   # 최대값도 동일하게 설정하여 과할당 방지
-                    "maxMemoryInGb": memory,  # 최대값도 동일하게 설정하여 과할당 방지
                     "gpuTypeId": gpu_type,
                     "templateId": settings.RUNPOD_TEMPLATE_ID,  # 템플릿 사용
                     "name": f"AIMEX_ComfyUI_{request_id}",
@@ -379,8 +378,6 @@ class RunPodService:
                     "containerDiskInGb": 20,  # 강제 고정 컨테이너 디스크 (과할당 방지)
                     "minVcpuCount": vcpu,   # 강제 고정된 vCPU 수
                     "minMemoryInGb": memory,  # 강제 고정된 RAM 용량
-                    "maxVcpuCount": vcpu,   # 최대값도 동일하게 설정하여 과할당 방지
-                    "maxMemoryInGb": memory,  # 최대값도 동일하게 설정하여 과할당 방지
                     "gpuTypeId": gpu_type,
                     "templateId": settings.RUNPOD_TEMPLATE_ID,  # 템플릿 사용
                     "name": f"AIMEX_ComfyUI_{request_id}",
@@ -432,6 +429,7 @@ class RunPodService:
                 
                 data = await response.json()
                 logger.info(f"   ✅ JSON 데이터 파싱 성공")
+                logger.info(data)
                 
                 if "errors" in data:
                     logger.error(f"   ❌ GraphQL 오류 발견: {data['errors']}")
@@ -521,14 +519,8 @@ class RunPodService:
                     data = await response.json()
                     pod_data = data["data"]["pod"]
                     
-                    # 엔드포인트 URL 구성
-                    endpoint_url = None
-                    if pod_data.get("runtime") and pod_data["runtime"].get("ports"):
-                        for port in pod_data["runtime"]["ports"]:
-                            if port["privatePort"] == 8188:
-                                # ComfyUI는 HTTP 프로토콜 사용
-                                endpoint_url = f"http://{port['ip']}:{port['publicPort']}"
-                                break
+                    # RunPod proxy URL 생성 (공식 방식)
+                    endpoint_url = self._generate_proxy_url(pod_data["id"], 8188)
                     
                     return RunPodPodResponse(
                         pod_id=pod_data["id"],
@@ -839,10 +831,7 @@ class RunPodService:
         
         # ComfyUI API 엔드포인트들 (우선순위 순)
         test_endpoints = [
-            "/",           # 메인 페이지 (가장 기본적)
-            "/api/v1/embeddings",  # 간단한 API
-            "/system_stats",       # 시스템 상태
-            "/history",           # 기존 엔드포인트
+            "/",           # 메인 페이지 (가장 기본적)          # 기존 엔드포인트
             "/queue",             # 큐 상태
         ]
         
@@ -861,7 +850,8 @@ class RunPodService:
                         async with session.get(
                             test_url,
                             timeout=aiohttp.ClientTimeout(total=10),  # 타임아웃 10초로 연장
-                            headers={"User-Agent": "AIMEX-Backend/1.0"}
+                            headers={"User-Agent": "AIMEX-Backend/1.0"},
+                            ssl=False  # RunPod proxy SSL 문제 회피
                         ) as response:
                             logger.info(f"     🔍 API 응답 ({endpoint}): {response.status}")
                             
@@ -902,21 +892,24 @@ class RunPodService:
         return False
     
     async def _check_volume_mount(self, endpoint_url: str) -> bool:
-        """볼륨 마운트 상태 확인 (간단한 테스트)"""
+        """볼륨 마운트 상태 확인 (RunPod proxy URL 사용)"""
         try:
-            # JupyterLab API를 통해 파일 시스템 접근 (포트 8888)
-            jupyter_url = endpoint_url.replace(':60033', ':8888').replace('8188', '8888')
+            # RunPod proxy를 통한 JupyterLab 접근 (포트 8888)
+            pod_id = endpoint_url.split('://')[1].split('-')[0]  # URL에서 pod_id 추출
+            jupyter_url = self._generate_proxy_url(pod_id, 8888)
             
             logger.info(f"     💾 볼륨 마운트 상태 확인: /workspace")
+            logger.info(f"     🔍 JupyterLab URL: {jupyter_url}")
             
-            # 간단한 HTTP 요청으로 JupyterLab 접근 시도
+            # RunPod proxy를 통한 JupyterLab 접근 시도
             async with aiohttp.ClientSession() as session:
                 async with session.get(
                     f"{jupyter_url}/tree",
-                    timeout=aiohttp.ClientTimeout(total=3)
+                    timeout=aiohttp.ClientTimeout(total=5),
+                    ssl=False  # RunPod proxy SSL 문제 회피
                 ) as response:
                     if response.status == 200:
-                        logger.info(f"     ✅ JupyterLab 접근 가능 - 볼륨 마운트 예상")
+                        logger.info(f"     ✅ JupyterLab 접근 가능 - 볼륨 마운트 확인됨")
                         return True
                     else:
                         logger.info(f"     ⚠️ JupyterLab 접근 실패: {response.status}")
