@@ -58,7 +58,7 @@ class RunPodService:
         # GPU 리소스 실제 스펙 설정 (RunPod 이미지 기준 - 각 GPU별 고유 리소스)
         # 컨테이너 디스크만 20GB로 고정, 나머지는 GPU별 실제 스펙 사용
         FIXED_DISK = 20     # 고정 컴테이너 디스크 (GB) - 안정성을 위해 고정
-        FIXED_VOLUME = 200  # 고정 네트워크 볼륨 (GB)
+        FIXED_VOLUME = 250  # 고정 네트워크 볼륨 (GB)
         
         gpu_config = [
             # 1순위: RTX 4090 (실제 스펙: 24GB VRAM, 61GB RAM, 16 vCPU)
