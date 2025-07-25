@@ -8,8 +8,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Bot } from "lucide-react"
 import { socialLogin } from "@/lib/social-auth"
 import { useAuth } from "@/hooks/use-auth"
+import { useToast } from "@/hooks/use-toast"
 
 export default function LoginPage() {
+  const { toast } = useToast()
   const [isLoading, setIsLoading] = useState<string | null>(null)
   const router = useRouter()
   const { login, isAuthenticated, isLoading: authLoading } = useAuth()
@@ -40,7 +42,12 @@ export default function LoginPage() {
       // 이 시점에서 페이지가 리다이렉트되므로 아래 코드는 실행되지 않음
     } catch (error) {
       console.error('로그인 시작 실패:', error)
-      alert('로그인을 시작할 수 없습니다. 다시 시도해주세요.')
+      toast({
+        title: "로그인 실패",
+        description: '로그인을 시작할 수 없습니다. 다시 시도해주세요.',
+        variant: "destructive",
+        duration: 3000,
+      })
       setIsLoading(null)
       setIsRedirecting(false)
     }

@@ -18,6 +18,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Upload, ArrowLeft, Lightbulb, MessageCircle, Palette, Trash2 } from "lucide-react"
 import Link from "next/link"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
+import { useToast } from "@/hooks/use-toast"
 
 interface FormDataType {
   name: string;
@@ -38,6 +39,7 @@ interface FormDataType {
 }
 
 export default function CreateModelPage() {
+  const { toast } = useToast()
   const fetchedRef = useRef(false)
   const [formData, setFormData] = useState<FormDataType>({
     name: "",
@@ -260,7 +262,12 @@ export default function CreateModelPage() {
         setShowToneExamples(true);
       }
     } catch (e) {
-      alert("프리셋 정보를 불러오지 못했습니다.");
+      toast({
+        title: "오류 발생",
+        description: "프리셋 정보를 불러오지 못했습니다.",
+        variant: "destructive",
+        duration: 3000,
+      });
     } finally {
       setLoadingPresets(false);
     }
@@ -272,21 +279,41 @@ export default function CreateModelPage() {
     // 프리셋 모드 검증
     if (formData.selectedPresetId && formData.selectedPresetId !== "manual") {
       if (!formData.selectedPresetId) {
-        alert("프리셋을 선택해주세요.")
+        toast({
+          title: "선택 필요",
+          description: "프리셋을 선택해주세요.",
+          variant: "destructive",
+          duration: 3000,
+        })
         return
       }
     } else {
       // 직접 입력 모드 검증
       if (!formData.modelType && !formData.imageMethod) {
-        alert("모델 유형을 선택해주세요.");
+        toast({
+          title: "선택 필요",
+          description: "모델 유형을 선택해주세요.",
+          variant: "destructive",
+          duration: 3000,
+        });
         return;
       }
       if (!formData.personality.trim()) {
-        alert("성격을 입력해주세요.");
+        toast({
+          title: "입력 필요",
+          description: "성격을 입력해주세요.",
+          variant: "destructive",
+          duration: 3000,
+        });
         return;
       }
       if (!formData.tone.trim() && formData.customTones.length === 0) {
-        alert("말투를 선택하거나 직접 입력해주세요.");
+        toast({
+          title: "선택 필요",
+          description: "말투를 선택하거나 직접 입력해주세요.",
+          variant: "destructive",
+          duration: 3000,
+        });
         return;
       }
 
@@ -297,7 +324,12 @@ export default function CreateModelPage() {
         formData.mood.trim() !== "";
 
       if (!hasImageUpload && !hasImagePrompt) {
-        alert("이미지를 업로드하거나 이미지 생성 프롬프트를 입력해주세요.");
+        toast({
+          title: "입력 필요",
+          description: "이미지를 업로드하거나 이미지 생성 프롬프트를 입력해주세요.",
+          variant: "destructive",
+          duration: 3000,
+        });
         return;
       }
     }
@@ -307,7 +339,12 @@ export default function CreateModelPage() {
     try {
       // 사용자 인증 확인
       if (!user || !user.teams || user.teams.length === 0) {
-        alert("❌ 인플루언서 생성 권한이 없습니다.\n\n팀에 소속되어야 인플루언서를 생성할 수 있습니다.")
+        toast({
+          title: "권한 없음",
+          description: "팀에 소속되어야 인플루언서를 생성할 수 있습니다.",
+          variant: "destructive",
+          duration: 3000,
+        })
         setIsLoading(false)
         return
       }
@@ -400,7 +437,11 @@ export default function CreateModelPage() {
 
       successMessage += `\n다음 작업이 백그라운드에서 자동으로 진행됩니다:\n• 2,000개 QA 쌍 생성\n• S3에 데이터 업로드\n• QLoRA 4비트 양자화 파인튜닝\n• Hugging Face에 모델 업로드\n\n완료 시 이메일과 웹 알림을 받으실 수 있습니다.`
 
-      alert(successMessage)
+      toast({
+        title: "생성 성공",
+        description: successMessage,
+        duration: 3000,
+      })
 
       setIsLoading(false)
       router.push("/dashboard")
@@ -410,22 +451,42 @@ export default function CreateModelPage() {
       setIsLoading(false)
 
       // 에러 알림 표시
-      alert(`❌ 인플루언서 생성에 실패했습니다.\n\n오류: ${error instanceof Error ? error.message : '알 수 없는 오류'}\n\n다시 시도해주세요.`)
+      toast({
+        title: "생성 실패",
+        description: `오류: ${error instanceof Error ? error.message : '알 수 없는 오류'}. 다시 시도해주세요.`,
+        variant: "destructive",
+        duration: 3000,
+      })
     }
   }
 
   // API를 통한 말투 생성
   const generateConversationExamples = async (personality: string, isRegeneration: boolean = false) => {
     if (!personality.trim()) {
-      alert('성격을 먼저 입력해주세요.')
+      toast({
+        title: "입력 필요",
+        description: '성격을 먼저 입력해주세요.',
+        variant: "destructive",
+        duration: 3000,
+      })
       return
     }
     if (!user || !user.user_id) {
-      alert('사용자 정보가 없어 말투를 생성할 수 없습니다. 로그인 후 다시 시도해주세요.');
+      toast({
+        title: "인증 필요",
+        description: '사용자 정보가 없어 말투를 생성할 수 없습니다. 로그인 후 다시 시도해주세요.',
+        variant: "destructive",
+        duration: 3000,
+      });
       return;
     }
     if (!user.teams || user.teams.length === 0) {
-      alert('팀 정보가 없어 말투를 생성할 수 없습니다. 팀에 소속된 후 다시 시도해주세요.');
+      toast({
+        title: "팀 정보 필요",
+        description: '팀 정보가 없어 말투를 생성할 수 없습니다. 팀에 소속된 후 다시 시도해주세요.',
+        variant: "destructive",
+        duration: 3000,
+      });
       return;
     }
 
@@ -450,7 +511,12 @@ export default function CreateModelPage() {
 
     } catch (error) {
       console.error('말투 생성 실패:', error)
-      alert('말투 생성에 실패했습니다. 다시 시도해주세요.')
+      toast({
+        title: "생성 실패",
+        description: '말투 생성에 실패했습니다. 다시 시도해주세요.',
+        variant: "destructive",
+        duration: 3000,
+      })
     } finally {
       setGeneratingTones(false)
     }

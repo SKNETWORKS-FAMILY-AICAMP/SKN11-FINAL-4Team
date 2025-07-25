@@ -1,449 +1,388 @@
 'use client'
 
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Download, Trash2, Search, Filter, ChevronLeft, ChevronRight } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import Image from 'next/image'
+import { useToast } from '@/hooks/use-toast'
+import { useAuth } from '@/hooks/use-auth'
 
 interface GeneratedImage {
-  storage_id?: string
-  s3_url?: string
-  group_id?: number
-  created_at?: string
-  updated_at?: string
-  team_id?: number
-  team_name?: string
-  // S3 직접 조회 시 사용되는 필드
-  key?: string
-  size?: number
-  last_modified?: string
-  presigned_url?: string
-  filename?: string
+  id: number
+  storage_id: string
+  s3_url: string
+  team_id: number
+  user_id: string
+  prompt?: string
+  width: number
+  height: number
+  created_at: string
+  workflow_name?: string
+  model_name?: string
+}
+
+interface PaginationInfo {
+  page: number
+  page_size: number
+  total_count: number
+  total_pages: number
 }
 
 export default function GalleryPage() {
+  const { toast } = useToast()
+  const { user } = useAuth()
   const [images, setImages] = useState<GeneratedImage[]>([])
-  const [filteredImages, setFilteredImages] = useState<GeneratedImage[]>([])
   const [loading, setLoading] = useState(true)
-  const [searchTerm, setSearchTerm] = useState('')
-  const [selectedTeam, setSelectedTeam] = useState<string>('all')
-  const [teams, setTeams] = useState<{id: number, name: string}[]>([])
+  const [selectedTeam, setSelectedTeam] = useState<string>('')
   const [selectedImage, setSelectedImage] = useState<GeneratedImage | null>(null)
-  const [wsConnected, setWsConnected] = useState(false)
-  const wsRef = useRef<WebSocket | null>(null)
   const [currentPage, setCurrentPage] = useState(1)
-  const imagesPerPage = 12
+  const [pagination, setPagination] = useState<PaginationInfo>({
+    page: 1,
+    page_size: 10,
+    total_count: 0,
+    total_pages: 0
+  })
 
-  // WebSocket 연결
-  const connectWebSocket = () => {
+  // 이미지 목록 가져오기
+  const fetchImages = async (page: number = 1) => {
     try {
-      const accessToken = localStorage.getItem('access_token')
-      if (!accessToken) {
-        console.error('No access token found')
+      setLoading(true)
+      const token = localStorage.getItem('access_token')
+      if (!token) {
+        toast({
+          title: "인증 필요",
+          description: '로그인이 필요합니다.',
+          variant: "destructive",
+          duration: 3000,
+        })
+        return
+      }
+
+      // 팀 ID 설정
+      const teamId = selectedTeam || (user?.teams?.[0] || '')
+      if (!teamId) {
+        toast({
+          title: "팀 정보 없음",
+          description: '소속된 팀이 없습니다.',
+          variant: "destructive",
+          duration: 3000,
+        })
         setLoading(false)
         return
       }
 
-      // 이미 연결되어 있으면 재연결하지 않음
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        console.log('WebSocket already connected, skipping reconnection')
-        return
-      }
+      const params = new URLSearchParams({
+        page: page.toString(),
+        page_size: '10',
+        team_id: teamId.toString()
+      })
 
-      // 기존 연결이 있으면 정리
-      if (wsRef.current) {
-        wsRef.current.close()
-        wsRef.current = null
-      }
-
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
-      const wsProtocol = backendUrl.startsWith('https') ? 'wss:' : 'ws:'
-      const wsHost = backendUrl.replace(/^https?:\/\//, '')
-      const wsUrl = `${wsProtocol}//${wsHost}/api/v1/image-generation/ws?token=${accessToken}`
-      
-      console.log('Connecting to WebSocket:', wsUrl)
-      const ws = new WebSocket(wsUrl)
-      
-      ws.onopen = () => {
-        console.log('WebSocket connected')
-        setWsConnected(true)
-        // S3에서 직접 이미지 목록 요청
-        ws.send(JSON.stringify({
-          type: 'get_s3_images',
-          data: {
-            folder_path: ''  // 비워두면 모든 팀 폴더 조회
-          }
-        }))
-      }
-      
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data)
-          console.log('WebSocket message:', data)
-          
-          if (data.type === 's3_images_list' && data.data.success) {
-            // S3 이미지 데이터를 GeneratedImage 형식으로 변환
-            const s3Images: GeneratedImage[] = data.data.images.map((img: any) => ({
-              key: img.key,
-              s3_url: img.presigned_url,
-              presigned_url: img.presigned_url,
-              filename: img.filename,
-              size: img.size,
-              last_modified: img.last_modified,
-              created_at: img.last_modified,
-              team_id: img.team_id,
-              team_name: img.team_name,
-              storage_id: img.key  // key를 storage_id로 사용
-            }))
-            
-            setImages(s3Images)
-            setFilteredImages(s3Images)
-            setLoading(false)
-            
-            // 팀 목록 추출
-            const teamMap = new Map<number, string>()
-            s3Images.forEach((img: GeneratedImage) => {
-              if (img.team_id && img.team_name) {
-                teamMap.set(img.team_id, img.team_name)
-              }
-            })
-            
-            const uniqueTeams = Array.from(teamMap, ([id, name]) => ({ id, name }))
-            setTeams(uniqueTeams)
-          }
-        } catch (error) {
-          console.error('Failed to parse WebSocket message:', error)
+      const response = await fetch(`/api/v1/gallery/images?${params}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
         }
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        setImages(data.images || [])
+        setPagination(data.pagination || {
+          page: 1,
+          page_size: 10,
+          total_count: 0,
+          total_pages: 0
+        })
+      } else {
+        throw new Error('이미지 목록 조회 실패')
       }
-      
-      ws.onerror = (error) => {
-        console.error('WebSocket error:', error)
-        setWsConnected(false)
-      }
-      
-      ws.onclose = () => {
-        console.log('WebSocket disconnected')
-        setWsConnected(false)
-        wsRef.current = null
-        
-        // 재연결 시도 (연결이 없을 때만)
-        setTimeout(() => {
-          if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-            connectWebSocket()
-          }
-        }, 3000)
-      }
-      
-      wsRef.current = ws
     } catch (error) {
-      console.error('Failed to connect WebSocket:', error)
+      console.error('Failed to fetch images:', error)
+      toast({
+        title: "오류 발생",
+        description: '이미지 목록을 불러오는데 실패했습니다.',
+        variant: "destructive",
+        duration: 3000,
+      })
+    } finally {
       setLoading(false)
     }
   }
 
-  useEffect(() => {
-    connectWebSocket()
-    
-    return () => {
-      if (wsRef.current) {
-        wsRef.current.close()
-      }
+  // 페이지 변경
+  const handlePageChange = (newPage: number) => {
+    if (newPage >= 1 && newPage <= pagination.total_pages) {
+      setCurrentPage(newPage)
+      fetchImages(newPage)
     }
-  }, [])
+  }
 
-  // 필터링 효과
-  useEffect(() => {
-    let filtered = images
+  // 팀 변경
+  const handleTeamChange = (teamId: string) => {
+    setSelectedTeam(teamId)
+    setCurrentPage(1)
+  }
 
-    // 팀 필터링
-    if (selectedTeam !== 'all') {
-      filtered = filtered.filter(img => img.team_id?.toString() === selectedTeam)
-    }
-
-    // 검색어 필터링 (created_at 날짜로 검색)
-    if (searchTerm) {
-      filtered = filtered.filter(img => {
-        if (!img.created_at) return false
-        const date = new Date(img.created_at)
-        return date.toLocaleDateString().includes(searchTerm) ||
-               date.toLocaleTimeString().includes(searchTerm)
-      })
-    }
-
-    setFilteredImages(filtered)
-    setCurrentPage(1) // 필터 변경시 첫 페이지로
-  }, [searchTerm, selectedTeam, images])
-
-  // 페이지네이션
-  const indexOfLastImage = currentPage * imagesPerPage
-  const indexOfFirstImage = indexOfLastImage - imagesPerPage
-  const currentImages = filteredImages.slice(indexOfFirstImage, indexOfLastImage)
-  const totalPages = Math.ceil(filteredImages.length / imagesPerPage)
-
+  // 이미지 삭제
   const handleDelete = async (storageId: string) => {
     if (!confirm('이 이미지를 삭제하시겠습니까?')) return
 
     try {
       const token = localStorage.getItem('access_token')
       if (!token) {
-        alert('로그인이 필요합니다.')
+        toast({
+          title: "인증 필요",
+          description: '로그인이 필요합니다.',
+          variant: "destructive",
+          duration: 3000,
+        })
         return
       }
 
-      const response = await fetch(`/api/image-generation/images/${storageId}`, {
+      const response = await fetch(`/api/v1/gallery/images/${storageId}`, {
         method: 'DELETE',
         headers: {
-          'Authorization': `Bearer ${token}`,
-        },
+          'Authorization': `Bearer ${token}`
+        }
       })
 
       if (response.ok) {
         setImages(prev => prev.filter(img => img.storage_id !== storageId))
-        alert('이미지가 삭제되었습니다.')
+        toast({
+          title: "삭제 완료",
+          description: '이미지가 삭제되었습니다.',
+          duration: 3000,
+        })
+        // 현재 페이지 새로고침
+        fetchImages(currentPage)
       } else {
-        alert('이미지 삭제에 실패했습니다.')
+        toast({
+          title: "삭제 실패",
+          description: '이미지 삭제에 실패했습니다.',
+          variant: "destructive",
+          duration: 3000,
+        })
       }
     } catch (error) {
       console.error('Failed to delete image:', error)
-      alert('이미지 삭제 중 오류가 발생했습니다.')
+      toast({
+        title: "오류 발생",
+        description: '이미지 삭제 중 오류가 발생했습니다.',
+        variant: "destructive",
+        duration: 3000,
+      })
     }
   }
 
-  const handleDownload = async (imageUrl: string, filename: string) => {
+  // 이미지 다운로드
+  const handleDownload = async (s3Url: string, storageId: string) => {
     try {
-      const response = await fetch(imageUrl)
+      const response = await fetch(s3Url)
       const blob = await response.blob()
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      // 파일 이름이 있으면 사용하고, 없으면 기본값 사용
-      a.download = filename.includes('.') ? filename : `${filename}.png`
+      a.download = `image-${storageId}.png`
       document.body.appendChild(a)
       a.click()
       window.URL.revokeObjectURL(url)
       document.body.removeChild(a)
     } catch (error) {
       console.error('Failed to download image:', error)
-      alert('이미지 다운로드에 실패했습니다.')
+      toast({
+        title: "다운로드 실패",
+        description: '이미지 다운로드에 실패했습니다.',
+        variant: "destructive",
+        duration: 3000,
+      })
     }
   }
 
-  const handleImageClick = (image: GeneratedImage) => {
-    setSelectedImage(image)
-  }
+  // 초기 로드 및 팀 변경시 이미지 가져오기
+  useEffect(() => {
+    if (user && (selectedTeam || user.teams?.length > 0)) {
+      fetchImages(1)
+    }
+  }, [selectedTeam, user])
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
-          <p>이미지를 불러오는 중...</p>
-        </div>
-      </div>
-    )
-  }
+  // 초기 팀 설정
+  useEffect(() => {
+    if (user?.teams?.length > 0 && !selectedTeam) {
+      setSelectedTeam(user.teams[0].toString())
+    }
+  }, [user])
 
   return (
-    <div className="container mx-auto p-6">
-      <h1 className="text-3xl font-bold mb-6">내 이미지 갤러리</h1>
-      
-      {/* 필터링 섹션 */}
-      <div className="mb-6 flex flex-col md:flex-row gap-4">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-          <Input
-            type="text"
-            placeholder="날짜로 검색..."
-            className="pl-10"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
-        </div>
+    <div className="container mx-auto px-4 py-8">
+      <div className="mb-8">
+        <h1 className="text-3xl font-bold mb-4">이미지 갤러리</h1>
         
-        <Select value={selectedTeam} onValueChange={setSelectedTeam}>
-          <SelectTrigger className="w-full md:w-[200px]">
-            <SelectValue placeholder="팀 선택" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">모든 팀</SelectItem>
-            {teams.map(team => (
-              <SelectItem key={team.id} value={team.id.toString()}>
-                {team.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        
-        <div className="text-sm text-gray-500 flex items-center">
-          총 {filteredImages.length}개의 이미지
-        </div>
-      </div>
-
-      {/* 이미지 그리드 */}
-      {currentImages.length === 0 ? (
-        <div className="text-center py-12">
-          <p className="text-gray-500">표시할 이미지가 없습니다.</p>
-        </div>
-      ) : (
-        <>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {currentImages.map((image) => (
-              <Card key={image.storage_id} className="overflow-hidden hover:shadow-lg transition-shadow">
-                <CardContent className="p-0">
-                  <div 
-                    className="relative aspect-square cursor-pointer"
-                    onClick={() => handleImageClick(image)}
-                  >
-                    <Image
-                      src={image.presigned_url || image.s3_url || ''}
-                      alt={`Generated image ${image.filename || image.storage_id}`}
-                      fill
-                      className="object-cover"
-                      sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
-                    />
-                  </div>
-                  <div className="p-4">
-                    <div className="text-xs text-gray-500 mb-2">
-                      {new Date(image.created_at || image.last_modified || '').toLocaleString()}
-                    </div>
-                    {image.filename && (
-                      <div className="text-xs text-gray-600 mb-1 truncate">
-                        {image.filename}
-                      </div>
-                    )}
-                    {image.team_name && (
-                      <div className="text-xs text-blue-600 mb-2">
-                        {image.team_name}
-                      </div>
-                    )}
-                    <div className="flex gap-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          handleDownload(image.presigned_url || image.s3_url || '', image.filename || image.storage_id || 'image')
-                        }}
-                      >
-                        <Download className="w-4 h-4 mr-1" />
-                        다운로드
-                      </Button>
-                      {/* S3 직접 조회한 이미지는 삭제 버튼 숨김 */}
-                      {!image.key && image.storage_id && (
-                        <Button
-                          size="sm"
-                          variant="destructive"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            if (image.storage_id) {
-                              handleDelete(image.storage_id)
-                            }
-                          }}
-                        >
-                          <Trash2 className="w-4 h-4 mr-1" />
-                          삭제
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-
-          {/* 페이지네이션 */}
-          {totalPages > 1 && (
-            <div className="mt-6 flex justify-center items-center gap-4">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                disabled={currentPage === 1}
-              >
-                <ChevronLeft className="w-4 h-4" />
-                이전
-              </Button>
-              
-              <span className="text-sm">
-                {currentPage} / {totalPages} 페이지
-              </span>
-              
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-                disabled={currentPage === totalPages}
-              >
-                다음
-                <ChevronRight className="w-4 h-4" />
-              </Button>
-            </div>
+        {/* 필터 영역 */}
+        <div className="flex gap-4 mb-6">
+          {user?.teams && user.teams.length > 1 && (
+            <Select value={selectedTeam} onValueChange={handleTeamChange}>
+              <SelectTrigger className="w-48">
+                <SelectValue placeholder="팀 선택" />
+              </SelectTrigger>
+              <SelectContent>
+                {user.teams.map(teamId => (
+                  <SelectItem key={teamId} value={teamId.toString()}>
+                    팀 {teamId}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           )}
-        </>
-      )}
+          
+          <div className="flex items-center text-sm text-gray-600">
+            총 {pagination.total_count}개의 이미지
+          </div>
+        </div>
+
+        {/* 로딩 상태 */}
+        {loading && (
+          <div className="text-center py-12">
+            <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+            <p className="mt-2 text-gray-600">이미지를 불러오는 중...</p>
+          </div>
+        )}
+
+        {/* 이미지 그리드 */}
+        {!loading && images.length === 0 && (
+          <div className="text-center py-12 bg-gray-50 rounded-lg">
+            <p className="text-gray-500">생성된 이미지가 없습니다.</p>
+          </div>
+        )}
+
+        {!loading && images.length > 0 && (
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+              {images.map((image) => (
+                <Card key={image.storage_id} className="overflow-hidden group">
+                  <div className="relative aspect-square">
+                    <Image
+                      src={image.s3_url}
+                      alt={image.prompt || `Generated image ${image.storage_id}`}
+                      fill
+                      className="object-cover cursor-pointer transition-transform group-hover:scale-105"
+                      onClick={() => setSelectedImage(image)}
+                    />
+                    <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-20 transition-opacity" />
+                    <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-2">
+                      <Button
+                        size="icon"
+                        variant="secondary"
+                        onClick={() => handleDownload(image.s3_url, image.storage_id)}
+                        className="bg-white/90 hover:bg-white"
+                      >
+                        <Download className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="secondary"
+                        onClick={() => handleDelete(image.storage_id)}
+                        className="bg-white/90 hover:bg-white text-red-600 hover:text-red-700"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                  <CardContent className="p-4">
+                    <p className="text-sm text-gray-600 truncate">
+                      {image.prompt || '프롬프트 없음'}
+                    </p>
+                    <p className="text-xs text-gray-400 mt-1">
+                      {new Date(image.created_at).toLocaleDateString()}
+                    </p>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+
+            {/* 페이지네이션 */}
+            {pagination.total_pages > 1 && (
+              <div className="mt-8 flex justify-center items-center gap-4">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handlePageChange(currentPage - 1)}
+                  disabled={currentPage === 1}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                  이전
+                </Button>
+                <span className="text-sm">
+                  {currentPage} / {pagination.total_pages} 페이지
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handlePageChange(currentPage + 1)}
+                  disabled={currentPage === pagination.total_pages}
+                >
+                  다음
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            )}
+          </>
+        )}
+      </div>
 
       {/* 이미지 상세 모달 */}
       {selectedImage && (
-        <div 
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+        <div
+          className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4"
           onClick={() => setSelectedImage(null)}
         >
-          <div 
-            className="bg-white rounded-lg max-w-4xl max-h-[90vh] overflow-auto"
+          <div
+            className="relative max-w-4xl max-h-[90vh] bg-white rounded-lg overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="relative">
               <Image
-                src={selectedImage.presigned_url || selectedImage.s3_url || ''}
-                alt={`Generated image ${selectedImage.filename || selectedImage.storage_id}`}
-                width={1024}
-                height={1024}
-                className="w-full h-auto"
+                src={selectedImage.s3_url}
+                alt={selectedImage.prompt || 'Generated image'}
+                width={selectedImage.width || 512}
+                height={selectedImage.height || 512}
+                className="max-h-[70vh] object-contain"
               />
-              <Button
-                className="absolute top-4 right-4"
-                variant="secondary"
-                size="sm"
-                onClick={() => setSelectedImage(null)}
-              >
-                닫기
-              </Button>
             </div>
             <div className="p-4">
-              <p className="text-sm text-gray-600">
-                생성일: {new Date(selectedImage.created_at || selectedImage.last_modified || '').toLocaleString()}
+              <h3 className="font-semibold mb-2">이미지 정보</h3>
+              <p className="text-sm text-gray-600 mb-1">
+                <strong>프롬프트:</strong> {selectedImage.prompt || '없음'}
               </p>
-              {selectedImage.team_name && (
-                <p className="text-sm text-blue-600">
-                  팀: {selectedImage.team_name}
+              <p className="text-sm text-gray-600 mb-1">
+                <strong>크기:</strong> {selectedImage.width} x {selectedImage.height}
+              </p>
+              <p className="text-sm text-gray-600 mb-1">
+                <strong>생성일:</strong> {new Date(selectedImage.created_at).toLocaleString()}
+              </p>
+              {selectedImage.model_name && (
+                <p className="text-sm text-gray-600 mb-1">
+                  <strong>모델:</strong> {selectedImage.model_name}
                 </p>
               )}
-              <div className="mt-4 flex gap-2">
+              <div className="flex gap-2 mt-4">
                 <Button
-                  variant="outline"
-                  onClick={() => handleDownload(selectedImage.presigned_url || selectedImage.s3_url || '', selectedImage.filename || selectedImage.storage_id || 'image')}
+                  onClick={() => handleDownload(selectedImage.s3_url, selectedImage.storage_id)}
                 >
-                  <Download className="w-4 h-4 mr-2" />
+                  <Download className="h-4 w-4 mr-2" />
                   다운로드
                 </Button>
-                {/* S3 직접 조회한 이미지는 삭제 버튼 숨김 */}
-                {!selectedImage.key && selectedImage.storage_id && (
-                  <Button
-                    variant="destructive"
-                    onClick={() => {
-                      if (selectedImage.storage_id) {
-                        handleDelete(selectedImage.storage_id)
-                      }
-                      setSelectedImage(null)
-                    }}
-                  >
-                    <Trash2 className="w-4 h-4 mr-2" />
-                    삭제
-                  </Button>
-                )}
+                <Button
+                  variant="destructive"
+                  onClick={() => {
+                    handleDelete(selectedImage.storage_id)
+                    setSelectedImage(null)
+                  }}
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  삭제
+                </Button>
               </div>
             </div>
           </div>

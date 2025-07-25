@@ -10,8 +10,10 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Shield, Clock, Mail, MessageSquare } from "lucide-react"
 import { useAuth } from "@/hooks/use-auth"
 import PermissionService from "@/lib/services/permission.service"
+import { useToast } from "@/hooks/use-toast"
 
 export default function PermissionRequestPage() {
+  const { toast } = useToast()
   const { user } = useAuth()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isSubmitted, setIsSubmitted] = useState(false)
@@ -20,12 +22,22 @@ export default function PermissionRequestPage() {
 
   const handleSubmitRequest = async () => {
     if (!requestReason.trim()) {
-      alert("권한 요청 사유를 입력해주세요.")
+      toast({
+        title: "입력 필요",
+        description: "권한 요청 사유를 입력해주세요.",
+        variant: "destructive",
+        duration: 3000,
+      })
       return
     }
 
     if (!contactEmail.trim()) {
-      alert("연락처 이메일을 입력해주세요.")
+      toast({
+        title: "입력 필요",
+        description: "연락처 이메일을 입력해주세요.",
+        variant: "destructive",
+        duration: 3000,
+      })
       return
     }
 
@@ -41,7 +53,12 @@ export default function PermissionRequestPage() {
     } catch (error) {
       console.error("권한 요청 실패:", error)
       const errorMessage = error instanceof Error ? error.message : "권한 요청 중 오류가 발생했습니다."
-      alert(errorMessage + " 다시 시도해주세요.")
+      toast({
+        title: "요청 실패",
+        description: errorMessage + " 다시 시도해주세요.",
+        variant: "destructive",
+        duration: 3000,
+      })
     } finally {
       setIsSubmitting(false)
     }

@@ -4,6 +4,8 @@ import { useState, useEffect, useRef, useMemo, useCallback } from "react"
 import { Navigation } from "@/components/navigation"
 import { useAuth } from "@/hooks/use-auth"
 import { tokenUtils } from "@/lib/auth"
+import { galleryService } from "@/lib/services/gallery.service"
+import { imageModificationService } from "@/lib/services/image-modification.service"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
@@ -13,7 +15,7 @@ import { Input } from "@/components/ui/input"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 
 import { Separator } from "@/components/ui/separator"
-
+import { useToast } from "@/hooks/use-toast"
 import { Progress } from "@/components/ui/progress"
 import { 
   ImageIcon, 
@@ -31,7 +33,9 @@ import {
   X,
   Maximize2,
   Eraser,
-  Filter
+  Filter,
+  ChevronLeft,
+  ChevronRight
 } from "lucide-react"
 
 interface GeneratedImage {
@@ -177,6 +181,8 @@ const STYLE_CATEGORIES = [
 ]
 
 export default function ImageGeneratorPage() {
+  const { toast } = useToast()
+  const { user } = useAuth()
   const [images, setImages] = useState<GeneratedImage[]>([])
   const [loading, setLoading] = useState(false)
 
@@ -186,6 +192,11 @@ export default function ImageGeneratorPage() {
   const [selectedStyle, setSelectedStyle] = useState<string>("realistic")
   const [selectedSize, setSelectedSize] = useState<string>("square")
 
+  // 갤러리 페이지네이션 상태
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalPages, setTotalPages] = useState(0)
+  const [totalImages, setTotalImages] = useState(0)
+  const [galleryLoading, setGalleryLoading] = useState(false)
   
   // 세션 상태 관리 추가
   const [sessionStatus, setSessionStatus] = useState<SessionStatus | null>(null)
@@ -291,10 +302,47 @@ export default function ImageGeneratorPage() {
                 }
                 break
                 
+              case 'pod_ready':
+                if (message.data) {
+                  console.log('Pod ready:', message.data)
+                  setSessionStatus(prev => ({
+                    ...prev,
+                    pod_status: 'ready',
+                    pod_id: message.data.pod_id || prev.pod_id
+                  }))
+                  toast({
+                    title: "Pod 준비 완료",
+                    description: message.data.message || 'Pod가 준비되었습니다. 이미지 생성이 가능합니다.',
+                    duration: 3000,
+                  })
+                }
+                break
+                
+              case 'pod_failed':
+                if (message.data) {
+                  console.error('Pod failed:', message.data)
+                  setSessionStatus(prev => ({
+                    ...prev,
+                    pod_status: 'failed'
+                  }))
+                  toast({
+                    title: "Pod 준비 실패",
+                    description: message.data.message || 'Pod 준비에 실패했습니다. 다시 시도해주세요.',
+                    variant: "destructive",
+                    duration: 3000,
+                  })
+                }
+                break
+                
               case 'error':
                 if (message.data?.message) {
                   console.error('WebSocket error:', message.data.message)
-                  alert(message.data.message)
+                  toast({
+                    title: "오류",
+                    description: message.data.message,
+                    variant: "destructive",
+                    duration: 3000,
+                  })
                 }
                 break
                 
@@ -408,7 +456,12 @@ export default function ImageGeneratorPage() {
       // WebSocket 연결 확인
       if (!wsConnected || !wsRef.current) {
         console.error('WebSocket 연결이 없습니다.')
-        alert('WebSocket 연결이 끊어졌습니다. 페이지를 새로고침해주세요.')
+        toast({
+          title: "연결 오류",
+          description: 'WebSocket 연결이 끊어졌습니다. 페이지를 새로고침해주세요.',
+          variant: "destructive",
+          duration: 3000,
+        })
         return false
       }
       
@@ -539,19 +592,93 @@ export default function ImageGeneratorPage() {
   const lastPointRef = useRef<{x: number, y: number} | null>(null)
 
 
-  // my-images 요청 제거 - 갤러리 페이지에서만 이미지 목록 조회
+  // 갤러리 이미지 가져오기 함수
+  const fetchGalleryImages = async (page: number = 1) => {
+    try {
+      setGalleryLoading(true)
+
+      // 팀 ID 가져오기
+      const teamId = user?.teams?.[0]?.group_id
+      if (!teamId) {
+        toast({
+          title: "팀 정보 없음",
+          description: '소속된 팀이 없습니다.',
+          variant: "destructive",
+          duration: 3000,
+        })
+        return
+      }
+
+      const data = await galleryService.getImages({
+        page: page,
+        page_size: 10,
+        team_id: teamId
+      })
+
+      // GeneratedImage 형식으로 변환
+      const convertedImages = data.images.map((img) => ({
+        id: img.storage_id,
+        prompt: img.prompt || '',
+        width: img.width,
+        height: img.height,
+        image_url: img.s3_url,
+        created_at: img.created_at,
+        status: 'completed' as const
+      }))
+      
+      setImages(convertedImages)
+      setTotalPages(data.pagination.total_pages)
+      setTotalImages(data.pagination.total_count)
+      setCurrentPage(data.pagination.page)
+    } catch (error) {
+      console.error('Failed to fetch gallery images:', error)
+      toast({
+        title: "오류 발생",
+        description: '이미지 목록을 불러오는데 실패했습니다.',
+        variant: "destructive",
+        duration: 3000,
+      })
+    } finally {
+      setGalleryLoading(false)
+    }
+  }
+
+  // 페이지 변경 핸들러
+  const handlePageChange = (newPage: number) => {
+    if (newPage >= 1 && newPage <= totalPages) {
+      setCurrentPage(newPage)
+      fetchGalleryImages(newPage)
+    }
+  }
+
+  // 갤러리 탭 활성화 시 이미지 가져오기
+  useEffect(() => {
+    if (activeTab === 'gallery' && user?.teams?.[0]?.group_id) {
+      fetchGalleryImages(currentPage)
+    }
+  }, [activeTab, user])
 
   // 프롬프트 최적화 테스트 함수
   const handleTestPrompt = async () => {
     if (!prompt.trim() && !getCombinedPromptKeywords()) {
-      alert('테스트할 프롬프트를 입력하거나 스타일을 선택해주세요.')
+      toast({
+        title: "입력 필요",
+        description: '테스트할 프롬프트를 입력하거나 스타일을 선택해주세요.',
+        variant: "destructive",
+        duration: 3000,
+      })
       return
     }
 
     try {
       const token = localStorage.getItem('access_token')
       if (!token) {
-        alert('로그인이 필요합니다.')
+        toast({
+          title: "인증 필요",
+          description: '로그인이 필요합니다.',
+          variant: "destructive",
+          duration: 3000,
+        })
         return
       }
 
@@ -589,16 +716,30 @@ ${testData.optimized_prompt}
 ${testData.message}
         `
         
-        alert(resultMessage)
+        toast({
+          title: "프롬프트 최적화 테스트 완료",
+          description: resultMessage,
+          duration: 3000,
+        })
         
         // 콘솔에도 상세 정보 출력
         console.log('🤖 프롬프트 최적화 테스트 결과:', testData)
       } else {
-        alert('프롬프트 테스트 실패: ' + (testData.detail || '알 수 없는 오류'))
+        toast({
+          title: "프롬프트 테스트 실패",
+          description: testData.detail || '알 수 없는 오류',
+          variant: "destructive",
+          duration: 3000,
+        })
       }
     } catch (error) {
       console.error('Prompt test failed:', error)
-      alert('프롬프트 테스트 중 오류가 발생했습니다.')
+      toast({
+        title: "오류 발생",
+        description: '프롬프트 테스트 중 오류가 발생했습니다.',
+        variant: "destructive",
+        duration: 3000,
+      })
     }
   }
 
@@ -629,19 +770,34 @@ ${testData.message}
       
       // 세션 상태는 WebSocket을 통해 자동으로 업데이트됨
     } else {
-      alert(data.message || '이미지 생성 실패')
+      toast({
+        title: "이미지 생성 실패",
+        description: data.message || '이미지 생성 실패',
+        variant: "destructive",
+        duration: 3000,
+      })
     }
   }
 
   const handleGenerateImage = async () => {
     if (!prompt.trim() && !getCombinedPromptKeywords()) {
-      alert('프롬프트를 입력하거나 스타일을 선택해주세요.')
+      toast({
+        title: "입력 필요",
+        description: '프롬프트를 입력하거나 스타일을 선택해주세요.',
+        variant: "destructive",
+        duration: 3000,
+      })
       return
     }
 
     // WebSocket 연결 확인
     if (!wsConnected || !wsRef.current) {
-      alert('WebSocket 연결이 끊어졌습니다. 페이지를 새로고침해주세요.')
+      toast({
+        title: "연결 오류",
+        description: 'WebSocket 연결이 끊어졌습니다. 페이지를 새로고침해주세요.',
+        variant: "destructive",
+        duration: 3000,
+      })
       return
     }
 
@@ -681,27 +837,40 @@ ${testData.message}
       console.error('Failed to send image generation request:', error)
       setIsGenerating(false)
       setGenerationProgress(null)
-      alert('이미지 생성 요청 중 오류가 발생했습니다.')
+      toast({
+        title: "오류 발생",
+        description: '이미지 생성 요청 중 오류가 발생했습니다.',
+        variant: "destructive",
+        duration: 3000,
+      })
     }
   }
 
   const handleDeleteImage = async (storage_id: string) => {
-    try {
-      const token = localStorage.getItem('access_token')
-      if (!token) {
-        console.error('No access token found')
-        return
-      }
+    if (!confirm('이 이미지를 삭제하시겠습니까?')) return
 
-      await fetch(`/api/image-generation/images/${storage_id}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      })
+    try {
+      await galleryService.deleteImage(storage_id)
+      
       setImages(prev => prev.filter(img => img.id !== storage_id))
+      toast({
+        title: "삭제 완료",
+        description: '이미지가 삭제되었습니다.',
+        duration: 3000,
+      })
+      
+      // 현재 페이지 새로고침
+      if (activeTab === 'gallery') {
+        fetchGalleryImages(currentPage)
+      }
     } catch (error) {
       console.error('Failed to delete image:', error)
+      toast({
+        title: "삭제 실패",
+        description: '이미지 삭제에 실패했습니다.',
+        variant: "destructive",
+        duration: 3000,
+      })
     }
   }
 
@@ -768,7 +937,12 @@ ${testData.message}
       const currentCount = selectedImages.length + gallerySelectedImages.length
       const maxAllowed = getRequiredImageCount()
       if (currentCount >= maxAllowed) {
-        alert(`최대 ${maxAllowed}개까지 이미지를 선택할 수 있습니다.`)
+        toast({
+          title: "선택 제한",
+          description: `최대 ${maxAllowed}개까지 이미지를 선택할 수 있습니다.`,
+          variant: "destructive",
+          duration: 3000,
+        })
         return
       }
       setGallerySelectedImages(prev => [...prev, image])
@@ -794,7 +968,12 @@ ${testData.message}
     if (file && file.type.startsWith('image/')) {
       const maxAllowed = getRequiredImageCount()
       if (selectedImages.length >= maxAllowed) {
-        alert(`최대 ${maxAllowed}개까지 이미지를 선택할 수 있습니다.`)
+        toast({
+          title: "선택 제한",
+          description: `최대 ${maxAllowed}개까지 이미지를 선택할 수 있습니다.`,
+          variant: "destructive",
+          duration: 3000,
+        })
         return
       }
       
@@ -968,13 +1147,23 @@ ${testData.message}
   const handleInpainting = async () => {
     const maskData = getMaskData()
     if (!maskData) {
-      alert('먼저 마스크를 그려주세요.')
+      toast({
+        title: "마스크 필요",
+        description: '먼저 마스크를 그려주세요.',
+        variant: "destructive",
+        duration: 3000,
+      })
       return
     }
 
     const inpaintPrompt = (document.getElementById('inpaint-prompt') as HTMLTextAreaElement)?.value
     if (!inpaintPrompt.trim()) {
-      alert('수정 프롬프트를 입력해주세요.')
+      toast({
+        title: "입력 필요",
+        description: '수정 프롬프트를 입력해주세요.',
+        variant: "destructive",
+        duration: 3000,
+      })
       return
     }
 
@@ -997,14 +1186,28 @@ ${testData.message}
       const data = await response.json()
       
       if (data.success) {
-        alert('인페인팅이 시작되었습니다!')
+        toast({
+          title: "인페인팅 시작",
+          description: '인페인팅이 시작되었습니다!',
+          duration: 3000,
+        })
         // 진행 상황 모니터링 로직...
       } else {
-        alert('인페인팅 시작에 실패했습니다.')
+        toast({
+          title: "인페인팅 실패",
+          description: '인페인팅 시작에 실패했습니다.',
+          variant: "destructive",
+          duration: 3000,
+        })
       }
     } catch (error) {
       console.error('Inpainting error:', error)
-      alert('인페인팅 중 오류가 발생했습니다.')
+      toast({
+        title: "오류 발생",
+        description: '인페인팅 중 오류가 발생했습니다.',
+        variant: "destructive",
+        duration: 3000,
+      })
     } finally {
       setIsGenerating(false)
     }
@@ -1016,7 +1219,12 @@ ${testData.message}
     
     // WebSocket 연결 확인
     if (!wsConnected || !wsRef.current) {
-      alert('WebSocket 연결이 끊어졌습니다. 페이지를 새로고침해주세요.')
+      toast({
+        title: "연결 오류",
+        description: 'WebSocket 연결이 끊어졌습니다. 페이지를 새로고침해주세요.',
+        variant: "destructive",
+        duration: 3000,
+      })
       return
     }
     
@@ -1063,7 +1271,12 @@ ${testData.message}
       setIsGenerating(false)
       setGenerationProgress(null)
       setPreviewImage(previousImage) // 실패 시 이전 이미지 복원
-      alert('이미지 재생성 요청 중 오류가 발생했습니다.')
+      toast({
+        title: "오류 발생",
+        description: '이미지 재생성 요청 중 오류가 발생했습니다.',
+        variant: "destructive",
+        duration: 3000,
+      })
     }
   }
 
@@ -1132,7 +1345,12 @@ ${testData.message}
       const files = Array.from(e.dataTransfer.files).filter(file => file.type.startsWith('image/'))
       
       if (files.length === 0) {
-        alert('이미지 파일만 업로드할 수 있습니다.')
+        toast({
+          title: "파일 형식 오류",
+          description: '이미지 파일만 업로드할 수 있습니다.',
+          variant: "destructive",
+          duration: 3000,
+        })
         return
       }
       
@@ -1140,7 +1358,12 @@ ${testData.message}
       const filesToUpload = files.slice(0, remainingSlots)
       
       if (files.length > remainingSlots) {
-        alert(`최대 2개까지 선택 가능합니다. ${remainingSlots}개 파일만 업로드됩니다.`)
+        toast({
+          title: "선택 제한",
+          description: `최대 2개까지 선택 가능합니다. ${remainingSlots}개 파일만 업로드됩니다.`,
+          variant: "destructive",
+          duration: 3000,
+        })
       }
       
       filesToUpload.forEach(file => {
@@ -1156,7 +1379,12 @@ ${testData.message}
       const imageFiles = Array.from(files).filter(file => file.type.startsWith('image/'))
       
       if (imageFiles.length === 0) {
-        alert('이미지 파일만 선택할 수 있습니다.')
+        toast({
+          title: "파일 형식 오류",
+          description: '이미지 파일만 선택할 수 있습니다.',
+          variant: "destructive",
+          duration: 3000,
+        })
         return
       }
       
@@ -1164,7 +1392,12 @@ ${testData.message}
       const filesToUpload = imageFiles.slice(0, remainingSlots)
       
       if (imageFiles.length > remainingSlots) {
-        alert(`최대 2개까지 선택 가능합니다. ${remainingSlots}개 파일만 업로드됩니다.`)
+        toast({
+          title: "선택 제한",
+          description: `최대 2개까지 선택 가능합니다. ${remainingSlots}개 파일만 업로드됩니다.`,
+          variant: "destructive",
+          duration: 3000,
+        })
       }
       
       filesToUpload.forEach(file => {
@@ -2499,27 +2732,119 @@ ${testData.message}
                         <Button 
                           className="w-full bg-blue-600 hover:bg-blue-700 text-white"
                           size="lg"
-                          onClick={() => {
+                          onClick={async () => {
                             const editPrompt = (document.getElementById('edit-prompt') as HTMLTextAreaElement)?.value
                             if (!editPrompt?.trim()) {
-                              alert('수정 내용을을 입력해주세요.')
+                              toast({
+                                title: "입력 필요",
+                                description: '수정 내용을 입력해주세요.',
+                                variant: "destructive",
+                                duration: 3000,
+                              })
                               return
                             }
                             
-                            // TODO: 각 방법에 따른 수정 API 호출
-                            console.log('수정 실행:', {
-                              method: getCurrentMethod(),
-                              prompt: editPrompt,
-                              images: selectedImages,
-                              maskMode: maskMode
-                            })
+                            // 단순 이미지 수정 (방법 1)
+                            if (getCurrentMethod() === 1 && selectedImages.length > 0) {
+                              try {
+                                setIsGenerating(true)
+                                
+                                // 선택된 이미지 파일 가져오기
+                                let imageFile: File | null = null
+                                
+                                if (selectedImages[0].type === 'upload' && selectedImages[0].file) {
+                                  imageFile = selectedImages[0].file
+                                } else if (selectedImages[0].type === 'gallery' && selectedImages[0].url) {
+                                  // 갤러리 이미지의 경우 URL에서 blob으로 변환
+                                  const response = await fetch(selectedImages[0].url)
+                                  const blob = await response.blob()
+                                  imageFile = new File([blob], `image_${Date.now()}.png`, { type: 'image/png' })
+                                }
+                                
+                                if (!imageFile) {
+                                  throw new Error('이미지 파일을 찾을 수 없습니다')
+                                }
+                                
+                                toast({
+                                  title: "이미지 수정 중",
+                                  description: '이미지를 수정하고 있습니다. 잠시만 기다려주세요...',
+                                  duration: 5000,
+                                })
+                                
+                                // API 호출
+                                const result = await imageModificationService.modifyImageSimple(
+                                  imageFile,
+                                  editPrompt,
+                                  'image_modify_text_simple'
+                                )
+                                
+                                if (result.success) {
+                                  // 성공 시 새로운 이미지 추가
+                                  const newImage: GeneratedImage = {
+                                    id: result.storage_id,
+                                    prompt: `[Modified] ${editPrompt}`,
+                                    width: result.width,
+                                    height: result.height,
+                                    image_url: result.s3_url,
+                                    created_at: new Date().toISOString(),
+                                    status: 'completed'
+                                  }
+                                  
+                                  setImages(prev => [newImage, ...prev])
+                                  setPreviewImage(newImage)
+                                  setShowImageModal(true)
+                                  
+                                  toast({
+                                    title: "수정 완료",
+                                    description: '이미지가 성공적으로 수정되었습니다.',
+                                    duration: 3000,
+                                  })
+                                  
+                                  // 입력 초기화
+                                  const textArea = document.getElementById('edit-prompt') as HTMLTextAreaElement
+                                  if (textArea) textArea.value = ''
+                                  setSelectedImages([])
+                                  setSelectedMethod(0)
+                                } else {
+                                  throw new Error(result.message || '이미지 수정에 실패했습니다')
+                                }
+                              } catch (error) {
+                                console.error('이미지 수정 실패:', error)
+                                toast({
+                                  title: "수정 실패",
+                                  description: error instanceof Error ? error.message : '이미지 수정에 실패했습니다.',
+                                  variant: "destructive",
+                                  duration: 5000,
+                                })
+                              } finally {
+                                setIsGenerating(false)
+                              }
+                            } else {
+                              // TODO: 다른 수정 방법들 구현
+                              toast({
+                                title: "준비 중",
+                                description: '해당 수정 방법은 아직 준비 중입니다.',
+                                variant: "default",
+                                duration: 3000,
+                              })
+                            }
                           }}
+                          disabled={isGenerating}
                         >
-                          <Wand2 className="h-4 w-4 mr-2" />
-                          {getCurrentMethod() === 1 && "이미지 수정"}
-                          {getCurrentMethod() === 2 && "마스킹 수정"}
-                          {getCurrentMethod() === 3 && "이미지 합성"}
-                          {getCurrentMethod() === 4 && "복합 마스킹"}
+                          {isGenerating ? (
+                            <>
+                              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                              처리 중...
+                            </>
+                          ) : (
+                            <>
+                              <Wand2 className="h-4 w-4 mr-2" />
+                              {getCurrentMethod() === 1 && "이미지 수정"}
+                              {getCurrentMethod() === 2 && "마스킹 수정"}
+                              {getCurrentMethod() === 3 && "이미지 합성"}
+                              {getCurrentMethod() === 4 && "복합 마스킹"}
+                            </>
+                          )}
                         </Button>
                       </div>
                     </div>
@@ -2533,73 +2858,129 @@ ${testData.message}
                 {activeTab === "gallery" && (
                   <div className="space-y-6">
                     <div className="flex justify-between items-center">
-                <h2 className="text-xl font-semibold">생성된 이미지</h2>
-                <Button variant="outline" onClick={() => window.location.reload()}>
-                  <RefreshCw className="h-4 w-4 mr-2" />
-                  새로고침
-                </Button>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                {images.map((image) => (
-                  <Card key={image.id} className="overflow-hidden cursor-pointer hover:shadow-lg transition-shadow" onClick={() => {
-                    setPreviewImage(image)
-                    setShowGalleryImageModal(true)
-                  }}>
-                    <div className="aspect-square relative">
-                      <img
-                        src={image.image_url}
-                        alt={image.prompt}
-                        className="w-full h-full object-cover"
-                      />
-                      <div className="absolute top-2 right-2 flex gap-1">
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            handleDownloadImage(image.image_url, `generated_image_${image.id}.png`)
-                          }}
-                          title="다운로드"
-                        >
-                          <Download className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            setPreviewImage(image)
-                            setShowGalleryImageModal(true)
-                          }}
-                          title="확대 보기"
-                        >
-                          <Maximize2 className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="destructive"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            handleDeleteImage(image.id)
-                          }}
-                          title="삭제"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                      <div>
+                        <h2 className="text-xl font-semibold">생성된 이미지</h2>
+                        {totalImages > 0 && (
+                          <p className="text-sm text-gray-600 mt-1">
+                            총 {totalImages}개의 이미지
+                          </p>
+                        )}
                       </div>
+                      <Button variant="outline" onClick={() => fetchGalleryImages(currentPage)}>
+                        <RefreshCw className="h-4 w-4 mr-2" />
+                        새로고침
+                      </Button>
                     </div>
-                  </Card>
-                ))}
-              </div>
 
-              {images.length === 0 && (
-                <div className="text-center py-12">
-                  <ImageIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                  <p className="text-lg font-medium text-gray-900 mb-2">생성된 이미지가 없습니다</p>
-                  <p className="text-gray-600">첫 번째 이미지를 생성해보세요</p>
-                </div>
-              )}
+                    {/* 로딩 상태 */}
+                    {galleryLoading && (
+                      <div className="text-center py-12">
+                        <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+                        <p className="mt-2 text-gray-600">이미지를 불러오는 중...</p>
+                      </div>
+                    )}
+
+                    {/* 이미지 그리드 */}
+                    {!galleryLoading && images.length > 0 && (
+                      <>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                          {images.map((image) => (
+                            <Card key={image.id} className="overflow-hidden cursor-pointer hover:shadow-lg transition-shadow" onClick={() => {
+                              setPreviewImage(image)
+                              setShowGalleryImageModal(true)
+                            }}>
+                              <div className="aspect-square relative">
+                                <img
+                                  src={image.image_url}
+                                  alt={image.prompt}
+                                  className="w-full h-full object-cover"
+                                />
+                                <div className="absolute top-2 right-2 flex gap-1">
+                                  <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      handleDownloadImage(image.image_url, `generated_image_${image.id}.png`)
+                                    }}
+                                    title="다운로드"
+                                  >
+                                    <Download className="h-4 w-4" />
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      setPreviewImage(image)
+                                      setShowGalleryImageModal(true)
+                                    }}
+                                    title="확대 보기"
+                                  >
+                                    <Maximize2 className="h-4 w-4" />
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="destructive"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      handleDeleteImage(image.id)
+                                    }}
+                                    title="삭제"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              </div>
+                              <CardContent className="p-3">
+                                <p className="text-sm text-gray-600 truncate">
+                                  {image.prompt || '프롬프트 없음'}
+                                </p>
+                                <p className="text-xs text-gray-400 mt-1">
+                                  {new Date(image.created_at).toLocaleDateString()}
+                                </p>
+                              </CardContent>
+                            </Card>
+                          ))}
+                        </div>
+
+                        {/* 페이지네이션 */}
+                        {totalPages > 1 && (
+                          <div className="mt-8 flex justify-center items-center gap-4">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handlePageChange(currentPage - 1)}
+                              disabled={currentPage === 1}
+                            >
+                              <ChevronLeft className="h-4 w-4" />
+                              이전
+                            </Button>
+                            <span className="text-sm">
+                              {currentPage} / {totalPages} 페이지
+                            </span>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handlePageChange(currentPage + 1)}
+                              disabled={currentPage === totalPages}
+                            >
+                              다음
+                              <ChevronRight className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        )}
+                      </>
+                    )}
+
+                    {/* 이미지가 없을 때 */}
+                    {!galleryLoading && images.length === 0 && (
+                      <div className="text-center py-12">
+                        <ImageIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                        <p className="text-lg font-medium text-gray-900 mb-2">생성된 이미지가 없습니다</p>
+                        <p className="text-gray-600">첫 번째 이미지를 생성해보세요</p>
+                      </div>
+                    )}
                   </div>
                 )}
               </CardContent>
@@ -2810,7 +3191,12 @@ ${testData.message}
                             
                             // WebSocket 연결 확인
                             if (!wsConnected || !wsRef.current) {
-                              alert('WebSocket 연결이 끊어졌습니다. 페이지를 새로고침해주세요.')
+                              toast({
+          title: "연결 오류",
+          description: 'WebSocket 연결이 끊어졌습니다. 페이지를 새로고침해주세요.',
+          variant: "destructive",
+          duration: 3000,
+        })
                               return
                             }
                             
@@ -2989,7 +3375,12 @@ ${testData.message}
                             }
                           }))
                         } else {
-                          alert('WebSocket 연결이 끊어졌습니다. 페이지를 새로고침해주세요.')
+                          toast({
+          title: "연결 오류",
+          description: 'WebSocket 연결이 끊어졌습니다. 페이지를 새로고침해주세요.',
+          variant: "destructive",
+          duration: 3000,
+        })
                           setIsGenerating(false)
                           setGenerationProgress(null)
                           setShowImageModal(false)
