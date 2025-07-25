@@ -138,17 +138,17 @@ async def generate_response_stream_endpoint(request: GenerateRequest):
                 )
             except Exception as e:
                 logger.error(f"❌ 프롬프트 생성 실패: {str(e)}")
-                yield f"data: {json.dumps({'error': '프롬프트 생성에 실패했습니다.'})}\n\n"
+                yield f"data: {json.dumps({'error': '프롬프트 생성에 실패했습니다.'}, ensure_ascii=False, separators=(',', ':'))}\n\n"
                 return
             
             # 샘플링 파라미터 검증 및 설정
             try:
                 if request.temperature < 0 or request.temperature > 2:
-                    yield f"data: {json.dumps({'error': 'temperature는 0과 2 사이의 값이어야 합니다.'})}\n\n"
+                    yield f"data: {json.dumps({'error': 'temperature는 0과 2 사이의 값이어야 합니다.'}, ensure_ascii=False, separators=(',', ':'))}\n\n"
                     return
                 
                 if request.max_new_tokens <= 0 or request.max_new_tokens > 4096:
-                    yield f"data: {json.dumps({'error': 'max_new_tokens는 1과 4096 사이의 값이어야 합니다.'})}\n\n"
+                    yield f"data: {json.dumps({'error': 'max_new_tokens는 1과 4096 사이의 값이어야 합니다.'}, ensure_ascii=False, separators=(',', ':'))}\n\n"
                     return
                 
                 sampling_params = SamplingParams(
@@ -161,7 +161,7 @@ async def generate_response_stream_endpoint(request: GenerateRequest):
                 )
             except Exception as e:
                 logger.error(f"❌ 샘플링 파라미터 설정 실패: {str(e)}")
-                yield f"data: {json.dumps({'error': f'잘못된 파라미터: {str(e)}'})}\n\n"
+                yield f"data: {json.dumps({'error': f'잘못된 파라미터: {str(e)}'}, ensure_ascii=False, separators=(',', ':'))}\n\n"
                 return
             
             # LoRA 요청 설정
@@ -171,13 +171,13 @@ async def generate_response_stream_endpoint(request: GenerateRequest):
                 try:
                     if request.model_id not in core.loaded_adapters:
                         error_msg = f"어댑터 '{request.model_id}'가 로드되지 않았습니다."
-                        yield f"data: {json.dumps({'error': error_msg})}\n\n"
+                        yield f"data: {json.dumps({'error': error_msg}, ensure_ascii=False, separators=(',', ':'))}\n\n"
                         return
                     
                     adapter_info = core.loaded_adapters[request.model_id]
                     if not adapter_info or "lora_int_id" not in adapter_info or "hf_repo_name" not in adapter_info:
                         error_msg = f"어댑터 '{request.model_id}'의 정보가 불완전합니다."
-                        yield f"data: {json.dumps({'error': error_msg})}\n\n"
+                        yield f"data: {json.dumps({'error': error_msg}, ensure_ascii=False, separators=(',', ':'))}\n\n"
                         return
                     
                     lora_request = LoRARequest(
@@ -187,7 +187,7 @@ async def generate_response_stream_endpoint(request: GenerateRequest):
                     )
                 except Exception as e:
                     logger.error(f"❌ LoRA 어댑터 설정 실패: {str(e)}")
-                    yield f"data: {json.dumps({'error': 'LoRA 어댑터 설정에 실패했습니다.'})}\n\n"
+                    yield f"data: {json.dumps({'error': 'LoRA 어댑터 설정에 실패했습니다.'}, ensure_ascii=False, separators=(',', ':'))}\n\n"
                     return
             
             # 고유 request_id 생성
@@ -215,24 +215,24 @@ async def generate_response_stream_endpoint(request: GenerateRequest):
                             if new_tokens:
                                 new_tokens = new_tokens.replace('[|endofturn|]', '').replace('[|endoftext|]', '').replace('<|im_end|>', '')
                                 if new_tokens.strip():
-                                    yield f"data: {json.dumps({'text': new_tokens})}\n\n"
+                                    yield f"data: {json.dumps({'text': new_tokens}, ensure_ascii=False, separators=(',', ':'))}\n\n"
                                     previous_text = current_text
                                     token_count += len(new_tokens)
                 
                 if not has_output:
-                    yield f"data: {json.dumps({'error': '생성된 응답이 없습니다.'})}\n\n"
+                    yield f"data: {json.dumps({'error': '생성된 응답이 없습니다.'}, ensure_ascii=False, separators=(',', ':'))}\n\n"
                     return
                 
                 # 스트리밍 완료 신호
-                yield f"data: {json.dumps({'done': True})}\n\n"
+                yield f"data: {json.dumps({'done': True}, ensure_ascii=False, separators=(',', ':'))}\n\n"
                 
             except Exception as e:
                 logger.error(f"❌ AI 스트리밍 생성 중 오류: {str(e)}")
-                yield f"data: {json.dumps({'error': 'AI 응답 생성 중 오류가 발생했습니다.'})}\n\n"
+                yield f"data: {json.dumps({'error': 'AI 응답 생성 중 오류가 발생했습니다.'}, ensure_ascii=False, separators=(',', ':'))}\n\n"
             
         except Exception as e:
             logger.error(f"❌ 스트리밍 생성 중 오류: {str(e)}")
-            yield f"data: {json.dumps({'error': '스트리밍 생성 중 예상치 못한 오류가 발생했습니다.'})}\n\n"
+            yield f"data: {json.dumps({'error': '스트리밍 생성 중 예상치 못한 오류가 발생했습니다.'}, ensure_ascii=False, separators=(',', ':'))}\n\n"
     
     return StreamingResponse(
         generate_stream(),
