@@ -198,6 +198,13 @@ export class ModelService {
   }
 
   /**
+   * AI 인플루언서 생성 (이미지 포함)
+   */
+  static async createInfluencerWithImage(formData: FormData): Promise<AIInfluencer> {
+    return await apiClient.post<AIInfluencer>('/api/v1/influencers/with-image', formData)
+  }
+
+  /**
    * AI 인플루언서 업데이트
    */
   static async updateInfluencer(influencerId: string, data: UpdateInfluencerRequest): Promise<AIInfluencer> {

@@ -84,12 +84,6 @@ async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
         finally:
             await session.close()
 
-
-# 동기/비동기 지원
-# API 엔드포인트에서는 get_async_db를 사용하도록 하고
-# 레거시 서비스들은 get_sync_db를 사용하도록 함
-
-
 def init_database():
     """데이터베이스 초기화"""
     try:

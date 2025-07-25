@@ -1,5 +1,11 @@
 import os
+# vLLM 설정
 os.environ["VLLM_USE_V1"] = "0" # vLLM v1 어텐션 백엔드 비활성화
+os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"  # 멀티프로세스 방식 변경
+
+# GPU 설정은 환경 변수로 제어 (CUDA_VISIBLE_DEVICES가 없을 때만 기본값 설정)
+if "CUDA_VISIBLE_DEVICES" not in os.environ:
+    os.environ["CUDA_VISIBLE_DEVICES"] = os.getenv("VLLM_GPU_ID", "0")
 import asyncio
 import logging
 import time
@@ -261,6 +267,38 @@ async def finetuning_worker():
             
             finetuning_queue.task_done()
 
+async def restart_engine():
+    """엔진을 재시작합니다."""
+    global engine, tokenizer
+    logger.info("🔄 엔진 재시작 시작...")
+    
+    # GPU 설정 유지 (이미 설정된 경우 유지, 아니면 기본값 사용)
+    if 'CUDA_VISIBLE_DEVICES' not in os.environ:
+        os.environ['CUDA_VISIBLE_DEVICES'] = os.getenv('VLLM_GPU_ID', '0')
+    logger.info(f"🖥️ CUDA_VISIBLE_DEVICES={os.environ['CUDA_VISIBLE_DEVICES']} 설정 완료")
+    
+    # 기존 엔진 종료
+    if engine is not None:
+        try:
+            logger.info("⏹️ 기존 엔진 종료 중...")
+            # 엔진 종료 로직
+            engine = None
+            
+            # GPU 메모리 정리
+            import gc
+            import torch
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+            logger.info("✅ 기존 엔진 종료 및 메모리 정리 완료")
+        except Exception as e:
+            logger.error(f"❌ 엔진 종료 중 오류: {e}")
+    
+    # 새 엔진 초기화
+    await initialize_vllm_engine()
+    logger.info("✅ 엔진 재시작 완료")
+
 async def initialize_vllm_engine():
     global engine, tokenizer
     logger.info("🚀 vLLM LoRA 엔진 초기화 중...")
@@ -281,16 +319,49 @@ async def initialize_vllm_engine():
         try:
             tensor_parallel_size = 1
         
-            # vLLM은 자동으로 GPU 할당 (보통 0번 GPU 사용)
-            logger.info(f"vLLM GPU 자동 할당 모드")
+            # GPU 설정 및 격리 확인
+            vllm_gpu_id = int(os.getenv('VLLM_GPU_ID', '0'))
+            
+            # CUDA_VISIBLE_DEVICES로 격리된 경우
+            if 'CUDA_VISIBLE_DEVICES' in os.environ:
+                logger.info(f"🔒 GPU 격리 모드 (CUDA_VISIBLE_DEVICES={os.environ['CUDA_VISIBLE_DEVICES']})")
+                # 격리된 환경에서는 항상 device 0 사용
+                visible_devices = os.environ['CUDA_VISIBLE_DEVICES'].split(',')
+                if len(visible_devices) == 1:
+                    logger.info(f"✅ 단일 GPU 격리 환경 - Physical GPU {visible_devices[0]} → Logical GPU 0")
+                else:
+                    logger.info(f"✅ 다중 GPU 격리 환경 - Physical GPUs {visible_devices} → Logical GPUs 0-{len(visible_devices)-1}")
+            else:
+                logger.info(f"🔧 vLLM GPU {vllm_gpu_id} 사용 (격리되지 않은 환경)")
         
-            # GPU 메모리 fraction을 고정값으로 설정
-            gpu_memory_fraction = 0.5
+            # GPU 메모리 fraction 설정
+            gpu_memory_fraction = float(os.getenv('VLLM_GPU_MEMORY_UTILIZATION', '0.5'))
+            logger.info(f"💾 GPU 메모리 사용률: {gpu_memory_fraction * 100}%")
+            
+            # CUDA 디바이스 설정 확인 및 충돌 방지
+            import torch
+            if torch.cuda.is_available():
+                # 다른 프로세스와의 충돌 방지를 위해 초기화
+                torch.cuda.empty_cache()
+                
+                # 격리된 환경에서는 항상 device 0 사용
+                if 'CUDA_VISIBLE_DEVICES' in os.environ:
+                    cuda_device = 0
+                else:
+                    cuda_device = vllm_gpu_id
+                    
+                try:
+                    torch.cuda.set_device(cuda_device)
+                    logger.info(f"🖥️ CUDA 디바이스 설정 완료: {cuda_device}")
+                except RuntimeError as e:
+                    logger.warning(f"⚠️ CUDA 디바이스 설정 실패: {e}")
+                    logger.info("🔄 기본 디바이스 사용")
             
             engine_args = AsyncEngineArgs(
                 model="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct",
                 max_model_len=2048,
-                tensor_parallel_size=tensor_parallel_size,
+                tensor_parallel_size=1,  # 단일 GPU 사용 명시
+                pipeline_parallel_size=1,  # 파이프라인 병렬화 비활성화
                 trust_remote_code=True,
                 gpu_memory_utilization=gpu_memory_fraction,
                 enable_lora=True,
@@ -301,6 +372,9 @@ async def initialize_vllm_engine():
                 max_num_seqs=256,
                 max_num_batched_tokens=8192,
                 disable_log_requests=True,
+                enforce_eager=True,  # CUDA 그래프 비활성화로 디바이스 문제 방지
+                device="cuda:0",  # 명시적으로 cuda:0 디바이스 지정
+                disable_custom_all_reduce=True,  # 다중 GPU 통신 비활성화
             )
             
             engine = AsyncLLMEngine.from_engine_args(engine_args)
@@ -375,6 +449,13 @@ async def load_lora_adapter(request: LoRALoadRequest):
             raise Exception(f"베이스 모델 정보 확인 실패: {str(e)}")
         
         logger.info("📦 어댑터 정보 객체 생성 중...")
+        
+        # CUDA 디바이스 확인 및 설정
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.set_device(0)
+            logger.info(f"🖥️ LoRA 어댑터 로드 시 CUDA 디바이스 0 사용 설정")
+        
         adapter_info = {
             "model_id": request.model_id,
             "hf_repo_name": request.hf_repo_name,

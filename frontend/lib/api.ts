@@ -40,8 +40,12 @@ class APIClient {
     console.log('🌐 API 요청:', { method: fetchOptions.method || 'GET', url, requireAuth })
 
     const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
       ...(customHeaders as Record<string, string>)
+    }
+    
+    // FormData가 아닌 경우에만 Content-Type 설정
+    if (!(fetchOptions.body instanceof FormData)) {
+      headers['Content-Type'] = 'application/json'
     }
 
     // 인증이 필요한 경우 토큰 추가
@@ -141,7 +145,7 @@ class APIClient {
     return this.request<T>(endpoint, {
       ...options,
       method: 'POST',
-      body: data ? JSON.stringify(data) : undefined
+      body: data instanceof FormData ? data : (data ? JSON.stringify(data) : undefined)
     })
   }
 
