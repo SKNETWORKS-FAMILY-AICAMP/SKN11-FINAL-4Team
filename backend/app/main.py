@@ -17,8 +17,12 @@ from app.api.v1.api import api_router
 from app.services.startup_service import run_startup_tasks
 from app.services.batch_monitor import start_batch_monitoring, stop_batch_monitoring
 from app.services.scheduler_service import scheduler_service
+
 # 세션 정리 서비스 - 비동기로 수정 완료
-from app.services.session_cleanup_service import start_session_cleanup_service, stop_session_cleanup_service
+from app.services.session_cleanup_service import (
+    start_session_cleanup_service,
+    stop_session_cleanup_service,
+)
 
 # 로깅 설정
 if settings.DEBUG:
@@ -41,12 +45,6 @@ else:
 
 logger = logging.getLogger(__name__)
 
-# SQLAlchemy 로그 완전 비활성화 (개발/프로덕션 공통)
-logging.getLogger("sqlalchemy.engine").setLevel(logging.CRITICAL)
-logging.getLogger("sqlalchemy.pool").setLevel(logging.CRITICAL)
-logging.getLogger("sqlalchemy.dialects").setLevel(logging.CRITICAL)
-logging.getLogger("sqlalchemy.orm").setLevel(logging.CRITICAL)
-
 # 기타 외부 라이브러리 로그 비활성화
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
@@ -59,6 +57,20 @@ async def lifespan(app: FastAPI):
     """애플리케이션 생명주기 관리"""
     # 시작 시 실행
     logger.info("🚀 Starting AIMEX API Server...")
+
+    # MCP 서버 자동 실행 (데이터베이스에서 로드)
+    try:
+        from app.services.mcp_server_manager import get_mcp_server_manager
+
+        # 데이터베이스 기반 MCP 서버 매니저 가져오기
+        mcp_manager = get_mcp_server_manager()
+
+        # 모든 서버 시작
+        await mcp_manager.start_all_servers()
+        logger.info("✅ 데이터베이스의 모든 MCP 서버 자동 실행 완료")
+
+    except Exception as e:
+        logger.error(f"❌ MCP 서버 자동 실행 실패: {e}")
 
     # 데이터베이스 연결 테스트
     if not test_database_connection():
@@ -84,13 +96,19 @@ async def lifespan(app: FastAPI):
         logger.info("📅 스케줄러 서비스 시작 완료")
     except Exception as e:
         logger.warning(f"⚠️ Scheduler service failed to start, but continuing: {e}")
-    
+
     # 세션 정리 서비스 활성화 (비동기 수정 완료)
     try:
         await start_session_cleanup_service()
-        logger.info("🧹 세션 정리 서비스 시작 완료")
+        # 시작 상태 확인
+        from app.services.session_cleanup_service import get_session_cleanup_service
+        cleanup_service = get_session_cleanup_service()
+        status = cleanup_service.get_status()
+        logger.info(f"🧹 세션 정리 서비스 시작 완료 - 상태: {status}")
     except Exception as e:
         logger.warning(f"⚠️ Session cleanup service failed to start, but continuing: {e}")
+        import traceback
+        logger.error(f"   오류 상세: {traceback.format_exc()}")
 
     logger.info("✅ AIMEX API Server ready")
 
@@ -98,6 +116,15 @@ async def lifespan(app: FastAPI):
 
     # 종료 시 실행
     logger.info("🛑 Shutting down AIMEX API Server...")
+
+    # MCP 서버들 중지
+    try:
+        from app.services.mcp_server_manager import mcp_server_manager
+
+        await mcp_server_manager.stop_all_servers()
+        logger.info("✅ 모든 MCP 서버가 정상적으로 중지되었습니다")
+    except Exception as e:
+        logger.error(f"❌ MCP 서버 중지 중 오류: {e}")
 
     # 배치 모니터링 중지
     try:
@@ -112,7 +139,7 @@ async def lifespan(app: FastAPI):
         logger.info("✅ 스케줄러 서비스가 정상적으로 중지되었습니다")
     except Exception as e:
         logger.error(f"❌ 스케줄러 서비스 중지 중 오류: {e}")
-    
+
     # 세션 정리 서비스 활성화 (비동기 수정 완료)
     try:
         await stop_session_cleanup_service()
@@ -177,20 +204,29 @@ class FileSizeMiddleware(BaseHTTPMiddleware):
 # 요청 로깅 미들웨어
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
-    """요청/응답 로깅"""
+    """요청/응답 로깅 (보안 강화 - 토큰 마스킹)"""
     start_time = time.time()
 
-    # 요청 로깅
-    client_host = request.client.host if request.client else "unknown"
-    logger.info(f"📥 {request.method} {request.url.path} - {client_host}")
+    # 헬스체크 및 상태조회는 로그 생략
+    skip_paths = ["/health", "/api/v1/user-sessions/status"]
+    if request.url.path not in skip_paths:
+        client_host = request.client.host if request.client else "unknown"
+        
+        # 요청 로그 간소화 (빈번한 status 체크는 DEBUG 레벨로)
+        if request.url.path == "/api/v1/user-sessions/status":
+            logger.debug(f"📥 {request.method} {request.url.path} - {client_host}")
+        else:
+            logger.info(f"📥 {request.method} {request.url.path} - {client_host}")
 
     response = await call_next(request)
 
-    # 응답 로깅
-    process_time = time.time() - start_time
-    logger.info(
-        f"📤 {request.method} {request.url.path} - {response.status_code} ({process_time:.3f}s)"
-    )
+    # 응답 로깅 (중요한 요청만)
+    if request.url.path not in skip_paths:
+        process_time = time.time() - start_time
+        if request.url.path == "/api/v1/user-sessions/status":
+            logger.debug(f"📤 {response.status_code} ({process_time:.3f}s)")
+        else:
+            logger.info(f"📤 {response.status_code} ({process_time:.3f}s)")
 
     return response
 

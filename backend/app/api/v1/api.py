@@ -12,16 +12,19 @@ from app.api.v1.endpoints import (
     instagram,
     instagram_posting,
     model_test,
-    content_enhancement,
     hf_tokens,
     admin,
     chatbot,  # 챗봇 활성화
     comfyui,
     tts,
+    mcp,
+    content_enhancement,
     user_sessions,  # 새로운 사용자 세션 API
-    image_generation,  # 새로운 통합 이미지 생성 API
+    image_generation,  # 새로운 통합 이미진 생성 API
     unified_images,
+    prompt_test,  # 프롬프트 최적화 테스트 API
 )
+
 # 기존 복잡한 API들 임시 비활성화 (새로운 간소화된 API 사용)
 # from app.api.v1 import images, pod_sessions, prompt_pipelines, s3_images
 from app.api.v1.endpoints.public import mbti as public_mbti
@@ -89,6 +92,9 @@ api_router.include_router(admin.router, prefix="/admin", tags=["Administrator"])
 # ComfyUI 이미지 생성 API
 api_router.include_router(comfyui.router, prefix="/comfyui", tags=["ComfyUI"])
 
+# MCP 도구 API (메타데이터 포함)
+api_router.include_router(mcp.router, prefix="/mcp", tags=["MCP"])
+
 # 워크플로우 전용 라우터 (프론트엔드 호환성)
 from fastapi import APIRouter as FastAPIRouter
 
@@ -123,13 +129,19 @@ api_router.include_router(workflow_only_router, prefix="/workflows", tags=["Work
 
 
 # 사용자 세션 관리 API (새로운 간소화된 버전)
-api_router.include_router(user_sessions.router, prefix="/user-sessions", tags=["User Sessions"])
+api_router.include_router(
+    user_sessions.router, prefix="/user-sessions", tags=["User Sessions"]
+)
 
 # 이미지 생성 API
-api_router.include_router(image_generation.router, prefix="/image-generation", tags=["Image Generation"])
+api_router.include_router(
+    image_generation.router, prefix="/image-generation", tags=["Image Generation"]
+)
 
-# 통합 이미지 API
-api_router.include_router(unified_images.router, prefix="/api/images", tags=["Unified Images"])
+# 프롬프트 최적화 테스트 API
+api_router.include_router(
+    prompt_test.router, prefix="/prompt-test", tags=["Prompt Testing"]
+)
 
 # 통합 이미지 API
 api_router.include_router(unified_images.router, prefix="/api/images", tags=["Unified Images"])

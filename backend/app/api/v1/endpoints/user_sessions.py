@@ -14,18 +14,24 @@ USER 테이블 기반으로 1 user = 1 RunPod 제한 및 세션 관리
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
+from sqlalchemy import select
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
 import logging
 
-from app.database import get_db
-from app.core.security import get_current_user
+from app.database import get_db, get_async_db, AsyncSession
+from app.core.security import get_current_user, get_current_user_id
 from app.services.user_session_service import get_user_session_service
+from app.services.runpod_service import get_runpod_service
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# 서비스 인스턴스
+user_session_service = get_user_session_service()
+runpod_service = get_runpod_service()
 
 
 # 요청/응답 스키마
@@ -137,6 +143,101 @@ def create_user_session(
     except Exception as e:
         logger.error(f"사용자 {user_id}의 세션 생성 실패: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"세션 생성 중 오류 발생: {str(e)}")
+
+
+@router.post("/check-health")
+async def check_pod_health(
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """현재 사용자 Pod의 건강성 체크"""
+    try:
+        logger.info(f"Pod 건강성 체크 요청: {user_id}")
+        
+        # 사용자 세션 상태 조회
+        session_status = await user_session_service.get_session_status(user_id, db)
+        
+        if not session_status or not session_status.get("pod_id"):
+            raise HTTPException(
+                status_code=404, 
+                detail="활성 Pod가 없습니다"
+            )
+        
+        pod_id = session_status["pod_id"]
+        
+        # RunPod 건강성 체크
+        health_result = await runpod_service.check_pod_health(pod_id)
+        
+        logger.info(f"Pod {pod_id} 건강성 결과: {health_result}")
+        
+        return {
+            "success": True,
+            "pod_id": pod_id,
+            "health_check": health_result,
+            "needs_restart": health_result.get("needs_restart", False),
+            "healthy": health_result.get("healthy", False)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Pod 건강성 체크 실패: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"건강성 체크 중 오류 발생: {str(e)}")
+
+
+@router.post("/force-restart")
+async def force_restart_pod(
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """리소스 부족 또는 문제가 있는 Pod 강제 재시작"""
+    try:
+        logger.info(f"Pod 강제 재시작 요청: {user_id}")
+        
+        # 사용자 세션 상태 조회
+        session_status = await user_session_service.get_session_status(user_id, db)
+        
+        if not session_status or not session_status.get("pod_id"):
+            raise HTTPException(
+                status_code=404, 
+                detail="활성 Pod가 없습니다"
+            )
+        
+        pod_id = session_status["pod_id"]
+        
+        # Pod 강제 재시작
+        restart_result = await runpod_service.force_restart_pod(pod_id, user_id)
+        
+        if restart_result.get("success"):
+            # 데이터베이스 업데이트
+            result = await db.execute(select(User).where(User.user_id == user_id))
+            user = result.scalar_one_or_none()
+            
+            if user:
+                user.current_pod_id = restart_result["new_pod_id"]
+                user.pod_status = restart_result["status"].lower()
+                await db.commit()
+                logger.info(f"사용자 {user_id} Pod 업데이트: {restart_result['new_pod_id']}")
+            
+            return {
+                "success": True,
+                "message": "Pod 재시작 완료",
+                "old_pod_id": restart_result["old_pod_id"],
+                "new_pod_id": restart_result["new_pod_id"],
+                "status": restart_result["status"],
+                "endpoint_url": restart_result["endpoint_url"]
+            }
+        else:
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Pod 재시작 실패: {restart_result.get('error')}"
+            )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Pod 강제 재시작 실패: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Pod 재시작 중 오류 발생: {str(e)}")
 
 
 @router.get("/status", response_model=SessionStatusResponse)

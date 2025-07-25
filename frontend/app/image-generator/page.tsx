@@ -192,6 +192,14 @@ export default function ImageGeneratorPage() {
   const [clientSessionTime, setClientSessionTime] = useState<number | null>(null)
   const [clientProcessingTime, setClientProcessingTime] = useState<number | null>(null)
   
+  // 세션 자동 재시도 상태
+  const [sessionRetryCount, setSessionRetryCount] = useState(0)
+  const [isAutoRetrying, setIsAutoRetrying] = useState(false)
+  
+  // 세션 만료 추적 상태
+  const [sessionExpiredNaturally, setSessionExpiredNaturally] = useState(false)
+  const [lastKnownSessionStatus, setLastKnownSessionStatus] = useState<SessionStatus | null>(null)
+  
   // 인증 상태 추가
   const { token, isAuthenticated } = useAuth()
   const [accessToken, setAccessToken] = useState<string | null>(null)
@@ -240,21 +248,6 @@ export default function ImageGeneratorPage() {
   // 선택된 수정 방법 상태
   const [selectedMethod, setSelectedMethod] = useState<number>(0)
   
-  // 갤러리 필터 상태
-  const [galleryFilter, setGalleryFilter] = useState<string>("all")
-  const [tempGalleryFilter, setTempGalleryFilter] = useState<string>("all")
-  const [isFilterModalOpen, setIsFilterModalOpen] = useState(false)
-  
-  // 필터링된 이미지 목록
-  const filteredImages = useMemo(() => {
-    if (galleryFilter === "all") {
-      return images
-    }
-    
-    const [width, height] = galleryFilter.split("x").map(Number)
-    return images.filter(image => image.width === width && image.height === height)
-  }, [images, galleryFilter])
-  
   // 드래그 이벤트 핸들러
   const [dragActive, setDragActive] = useState(false)
   const [maskMode, setMaskMode] = useState(false)
@@ -269,13 +262,24 @@ export default function ImageGeneratorPage() {
   const imageRef = useRef<HTMLImageElement>(null)
 
   // 세션 관리 함수들
-  const createUserSession = async () => {
+  const createUserSession = async (isAutoRetry = false, retryAttempt = 0) => {
+    const maxRetries = 3
+    const retryDelay = 3000 // 3초
+    
     try {
-      setSessionLoading(true)
+      if (!isAutoRetry) {
+        setSessionLoading(true)
+        setSessionRetryCount(0)
+        // 사용자가 수동으로 세션을 생성하는 경우 만료 플래그 리셋
+        setSessionExpiredNaturally(false)
+      } else {
+        setIsAutoRetrying(true)
+      }
+      
       const currentToken = accessToken || tokenUtils.getToken()
       if (!currentToken) {
         console.error('인증 토큰이 없습니다. 로그인이 필요합니다.')
-        return
+        return false
       }
       
       const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
@@ -296,15 +300,64 @@ export default function ImageGeneratorPage() {
         setClientSessionTime(data.session_remaining_seconds || null)
         setClientProcessingTime(data.processing_remaining_seconds || null)
         
+        // 성공 시 재시도 카운트 리셋
+        setSessionRetryCount(0)
+        setIsAutoRetrying(false)
+        
         console.log('세션 생성 성공:', data)
+        return true
+        
       } else {
-        console.error('세션 생성 실패:', response.statusText)
+        console.error(`세션 생성 실패 (시도 ${retryAttempt + 1}/${maxRetries + 1}):`, response.statusText)
+        
+        // 재시도 로직
+        if (retryAttempt < maxRetries) {
+          const nextAttempt = retryAttempt + 1
+          setSessionRetryCount(nextAttempt)
+          
+          console.log(`${retryDelay/1000}초 후 세션 생성 재시도 (${nextAttempt}/${maxRetries})...`)
+          
+          setTimeout(async () => {
+            await createUserSession(true, nextAttempt)
+          }, retryDelay)
+          
+          return false
+        } else {
+          console.error('세션 생성 최대 재시도 횟수 초과')
+          setIsAutoRetrying(false)
+          return false
+        }
       }
     } catch (error) {
-      console.error('세션 생성 오류:', error)
+      console.error(`세션 생성 오류 (시도 ${retryAttempt + 1}/${maxRetries + 1}):`, error)
+      
+      // 재시도 로직
+      if (retryAttempt < maxRetries) {
+        const nextAttempt = retryAttempt + 1
+        setSessionRetryCount(nextAttempt)
+        
+        console.log(`${retryDelay/1000}초 후 세션 생성 재시도 (${nextAttempt}/${maxRetries})...`)
+        
+        setTimeout(async () => {
+          await createUserSession(true, nextAttempt)
+        }, retryDelay)
+        
+        return false
+      } else {
+        console.error('세션 생성 최대 재시도 횟수 초과')
+        setIsAutoRetrying(false)
+        return false
+      }
     } finally {
-      setSessionLoading(false)
+      if (!isAutoRetry) {
+        setSessionLoading(false)
+      }
     }
+  }
+
+  // 버튼 클릭용 래퍼 함수
+  const handleCreateSession = async () => {
+    await createUserSession(false, 0) // 수동 호출
   }
 
   const checkSessionStatus = async () => {
@@ -321,25 +374,64 @@ export default function ImageGeneratorPage() {
           'Authorization': `Bearer ${currentToken}`,
         }
       })
+      
       if (response.ok) {
         const data = await response.json()
+        
+        // 세션이 없는 경우 처리
+        if (!data || !data.pod_id) {
+          // 이전에 세션이 있었고 15분이 지나서 자연스럽게 만료된 경우 자동 재생성하지 않음
+          if (lastKnownSessionStatus && lastKnownSessionStatus.pod_id) {
+            console.log('세션이 정상적으로 만료되었습니다. 사용자가 수동으로 재시작해야 합니다.')
+            setSessionExpiredNaturally(true)
+            setSessionStatus(null) // 세션 상태를 null로 설정
+            return
+          }
+          
+          // 페이지 로드 시 처음부터 세션이 없었거나 생성 실패인 경우에만 자동 생성
+          if (!sessionExpiredNaturally && !sessionLoading && !isAutoRetrying) {
+            console.log('초기 세션이 없습니다. 자동으로 새 세션을 생성합니다.')
+            await createUserSession(true, 0) // 자동 재시도로 세션 생성
+          }
+          return
+        }
+        
+        // 유효한 세션이 있는 경우
+        setLastKnownSessionStatus(data) // 마지막 알려진 세션 상태 저장
+        setSessionExpiredNaturally(false) // 자연 만료 플래그 리셋
         setSessionStatus(data)
         
         // 클라이언트 사이드 타이머 업데이트
         setClientSessionTime(data.session_remaining_seconds || null)
         setClientProcessingTime(data.processing_remaining_seconds || null)
+        
+      } else {
+        console.error('세션 상태 확인 실패:', response.statusText)
+        
+        // API 오류 시에는 자연 만료가 아닌 경우에만 세션 생성 시도
+        if (!sessionExpiredNaturally && !sessionLoading && !isAutoRetrying) {
+          console.log('세션 상태 확인 실패. 새 세션 생성을 시도합니다.')
+          await createUserSession(true, 0)
+        }
       }
     } catch (error) {
       console.error('세션 상태 확인 오류:', error)
+      
+      // 네트워크 오류 시에는 자연 만료가 아닌 경우에만 세션 생성 시도
+      if (!sessionExpiredNaturally && !sessionLoading && !isAutoRetrying) {
+        console.log('네트워크 오류. 새 세션 생성을 시도합니다.')
+        await createUserSession(true, 0)
+      }
     }
   }
 
-  // 페이지 로드 시 세션 생성
+  // 페이지 로드 시 세션 상태 확인 (자동 생성하지 않음)
   useEffect(() => {
     let isActive = true
     const initializeSession = async () => {
       if (accessToken && isActive) {
-        await createUserSession()
+        // 페이지 로드 시에는 세션 상태만 확인하고 자동 생성은 checkSessionStatus에서 처리
+        await checkSessionStatus()
       }
     }
     initializeSession()
@@ -360,7 +452,12 @@ export default function ImageGeneratorPage() {
       setClientSessionTime(prev => {
         if (prev && prev > 0) {
           const newValue = prev - 1
-          return newValue <= 0 ? null : newValue
+          // 세션 시간이 0이 되면 자연 만료로 표시
+          if (newValue <= 0) {
+            setSessionExpiredNaturally(true)
+            return null
+          }
+          return newValue
         }
         return prev
       })
@@ -407,6 +504,67 @@ export default function ImageGeneratorPage() {
     fetchImages()
   }, [])
 
+  // 프롬프트 최적화 테스트 함수
+  const handleTestPrompt = async () => {
+    if (!prompt.trim() && !getCombinedPromptKeywords()) {
+      alert('테스트할 프롬프트를 입력하거나 스타일을 선택해주세요.')
+      return
+    }
+
+    try {
+      const token = localStorage.getItem('access_token')
+      if (!token) {
+        alert('로그인이 필요합니다.')
+        return
+      }
+
+      const testResponse = await fetch('/api/prompt-test/test-prompt', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          prompt: prompt.trim() || getCombinedPromptKeywords(),
+          selected_styles: getSelectedStylesForAPI()
+        })
+      })
+
+      const testData = await testResponse.json()
+      
+      if (testData.success) {
+        // 결과를 알림으로 표시
+        const resultMessage = `
+📝 원본 프롬프트:
+${testData.original_prompt}
+
+🎨 선택된 스타일:
+${JSON.stringify(testData.selected_styles, null, 2)}
+
+🤖 최적화된 프롬프트:
+${testData.optimized_prompt}
+
+📊 통계:
+- 길이: ${testData.character_count} 문자
+- 추정 토큰: ${testData.estimated_tokens}
+- 최적화 방법: ${testData.optimization_method}
+
+${testData.message}
+        `
+        
+        alert(resultMessage)
+        
+        // 콘솔에도 상세 정보 출력
+        console.log('🤖 프롬프트 최적화 테스트 결과:', testData)
+      } else {
+        alert('프롬프트 테스트 실패: ' + (testData.detail || '알 수 없는 오류'))
+      }
+    } catch (error) {
+      console.error('Prompt test failed:', error)
+      alert('프롬프트 테스트 중 오류가 발생했습니다.')
+    }
+  }
+
   const handleGenerateImage = async () => {
     if (!prompt.trim()) return
 
@@ -442,20 +600,24 @@ export default function ImageGeneratorPage() {
           'Authorization': `Bearer ${token}`,
         },
         body: JSON.stringify({
-
-          prompt: getCombinedPromptKeywords(), // 최적화된 프롬프트 사용
-          // 커스텀 템플릿에서는 부정 프롬프트 사용하지 않음
-          style: selectedStyle,
-          width: selectedSizeData?.width || 512,
-          height: selectedSizeData?.height || 512
+          prompt: prompt.trim() || getCombinedPromptKeywords(), // 사용자 입력 프롬프트 우선
+          selected_styles: getSelectedStylesForAPI(), // 스타일 선택 정보 추가
+          width: selectedSizeData?.width || 1024,
+          height: selectedSizeData?.height || 1024,
+          steps: 8,  // Flux 기본 스텝 수
+          guidance: 3.5,  // Flux 가이던스 스케일
+          seed: null  // 랜덤 시드
         })
       })
 
       console.log('Request body:', {
-        prompt: getCombinedPromptKeywords(),
-        workflow_type: selectedWorkflow || 'basic_txt2img',
+        prompt: prompt.trim() || getCombinedPromptKeywords(),
+        selected_styles: getSelectedStylesForAPI(),
         width: selectedSizeData?.width || 1024,
         height: selectedSizeData?.height || 1024,
+        steps: 8,
+        guidance: 3.5,
+        seed: null
       })
 
       // 프론트엔드 로그: 응답 상태
@@ -976,10 +1138,8 @@ export default function ImageGeneratorPage() {
     setShowDownloadDialog(false)
     setDownloadFileName("")
     setShowGallerySelector(false)
-    setIsFilterModalOpen(false)
     setSelectedImages([])
     setSelectedMethod(0)
-    setGalleryFilter("all")
     setUploadedFile(null)
     setUploadedImageUrl(null)
     setSelectedGalleryImage(null)
@@ -996,17 +1156,6 @@ export default function ImageGeneratorPage() {
         ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height)
       }
     }
-  }
-
-  // 필터 관련 함수들
-  const handleApplyFilters = () => {
-    setGalleryFilter(tempGalleryFilter)
-    setIsFilterModalOpen(false)
-  }
-
-  const handleOpenFilterModal = () => {
-    setTempGalleryFilter(galleryFilter)
-    setIsFilterModalOpen(true)
   }
 
   // 갤러리 선택기 닫기
@@ -1251,6 +1400,44 @@ export default function ImageGeneratorPage() {
     
     return combinedKeywords.join(', ')
   }
+  
+  // 백엔드 API용 스타일 선택 정보 구성
+  const getSelectedStylesForAPI = () => {
+    const selectedStyles: Record<string, string> = {}
+    
+    // 대분류 매핑
+    if (selectedMainCategory) {
+      const categoryMapping: Record<string, string> = {
+        'person': '사람',
+        'animal': '동물',
+        'object': '사물',
+        'landscape': '풍경',
+        'building': '건물'
+      }
+      selectedStyles['대분류'] = categoryMapping[selectedMainCategory] || '선택안함'
+    }
+    
+    // 세부스타일 매핑 (예시로 기본적인 매핑만 구현)
+    if (selectedDetailStyle) {
+      const styleMapping: Record<string, string> = {
+        'realistic': '사실적',
+        'anime': '애니메이션',
+        'cartoon': '만화',
+        'painting': '유화',
+        'watercolor': '수채화',
+        'digital': '디지털아트',
+        'minimal': '미니멀',
+        'fantasy': '판타지'
+      }
+      selectedStyles['세부스타일'] = styleMapping[selectedDetailStyle] || '사실적'
+    }
+    
+    // 분위기 매핑 (기본값으로 밝은 사용)
+    selectedStyles['분위기'] = '밝은'  // 디폴트
+    
+    console.log('🎨 선택된 스타일 정보:', selectedStyles)
+    return selectedStyles
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -1306,19 +1493,19 @@ export default function ImageGeneratorPage() {
                 {activeTab === "generate" && (
                   <div className="space-y-6">
                   {/* 세션 상태 카드 */}
-                  {sessionStatus && (
+                  {sessionStatus ? (
                     <Card className={`border-2 ${
                       sessionStatus.pod_status === 'ready' || sessionStatus.pod_status === 'running' ? 'border-blue-300' : 
-                      sessionStatus.pod_status === 'starting' ? 'border-yellow-500' :
+                      sessionStatus.pod_status === 'starting' ? 'border-gray-200' :
                       sessionStatus.pod_status === 'processing' ? 'border-blue-500' :
                       sessionStatus.pod_status === 'failed' ? 'border-red-500' :
-                      'border-gray-300'
+                      'border-gray-200'
                     }`}>
                       <CardHeader>
                         <CardTitle className="flex items-center gap-2">
                           <div className={`w-3 h-3 rounded-full ${
-                            sessionStatus.pod_status === 'ready' || sessionStatus.pod_status === 'running' ? 'bg-blue-500 animate-pulse' :
-                            sessionStatus.pod_status === 'starting' ? 'bg-yellow-500 animate-pulse' :
+                            sessionStatus.pod_status === 'ready' || sessionStatus.pod_status === 'running' ? 'bg-blue-300 animate-pulse' :
+                            sessionStatus.pod_status === 'starting' ? 'bg-gray-400 animate-pulse' :
                             sessionStatus.pod_status === 'processing' ? 'bg-blue-500 animate-pulse' :
                             sessionStatus.pod_status === 'failed' ? 'bg-red-500' :
                             'bg-gray-400'
@@ -1343,7 +1530,7 @@ export default function ImageGeneratorPage() {
                         {/* 세션 시간이 만료되거나 실패한 경우 재시작 버튼 표시 */}
                         {(sessionStatus.pod_status === 'failed' || (clientSessionTime !== null && clientSessionTime <= 0)) && (
                           <Button 
-                            onClick={createUserSession} 
+                            onClick={handleCreateSession} 
                             className="mt-2" 
                             size="sm"
                             disabled={sessionLoading}
@@ -1358,6 +1545,54 @@ export default function ImageGeneratorPage() {
                         {clientSessionTime !== null && clientSessionTime <= 0 && sessionStatus.pod_status !== 'failed' && (
                           <p className="text-xs text-orange-600 mt-2">
                             ⏰ 세션 시간이 만료되었습니다. 새로운 세션을 시작해주세요.
+                          </p>
+                        )}
+                      </CardContent>
+                    </Card>
+                  ) : (
+                    /* 세션이 없는 경우 새 세션 생성 안내 카드 */
+                    <Card className="border-2 border-gray-300">
+                      <CardHeader>
+                        <CardTitle className="flex items-center gap-2">
+                          <div className="w-3 h-3 rounded-full bg-gray-500" />
+                          런팟 세션 상태
+                          {sessionLoading && <Loader2 className="h-4 w-4 animate-spin" />}
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <p className="text-sm mb-2 text-gray-600">🔄 세션이 만료되었습니다</p>
+                        <p className="text-xs text-gray-500 mb-4">
+                          AI 이미지 생성을 위해 새로운 RunPod 세션을 시작해주세요.
+                        </p>
+                        <Button 
+                          onClick={handleCreateSession} 
+                          size="default"
+                          disabled={sessionLoading || isAutoRetrying}
+                          variant="default"
+                          className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-3"
+                        >
+                          {sessionLoading ? (
+                            <>
+                              <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                              세션 생성 중...
+                            </>
+                          ) : isAutoRetrying ? (
+                            <>
+                              <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                              자동 재시도 중... ({sessionRetryCount}/3)
+                            </>
+                          ) : (
+                            <>
+                              <RefreshCw className="h-4 w-4 mr-2" />
+                              새 세션 시작하기
+                            </>
+                          )}
+                        </Button>
+                        
+                        {/* 자동 재시도 안내 메시지 */}
+                        {isAutoRetrying && sessionRetryCount > 0 && (
+                          <p className="text-xs text-blue-600 mt-2 text-center">
+                            🔄 연결 실패 시 자동으로 재시도합니다 ({sessionRetryCount}/3)
                           </p>
                         )}
                       </CardContent>
@@ -1639,6 +1874,19 @@ export default function ImageGeneratorPage() {
                                       onChange={(e) => setPrompt(e.target.value)}
                                       className="min-h-[100px]"
                                     />
+                                  </div>
+                                  {/* 프롬프트 테스트 버튼 */}
+                                  <div className="flex justify-end">
+                                    <Button
+                                      type="button"
+                                      variant="outline" 
+                                      size="sm"
+                                      onClick={handleTestPrompt}
+                                      className="flex items-center gap-2 text-sm"
+                                    >
+                                      <Sparkles className="h-4 w-4" />
+                                      AI 프롬프트 미리보기
+                                    </Button>
                                   </div>
                                 </CardContent>
                               </Card>
@@ -2323,73 +2571,8 @@ export default function ImageGeneratorPage() {
                 </Button>
               </div>
 
-              <div className="flex items-center gap-2 mb-4">
-                <Dialog open={isFilterModalOpen} onOpenChange={setIsFilterModalOpen}>
-                  <DialogTrigger asChild>
-                    <Button variant="outline" className="flex items-center gap-2" onClick={handleOpenFilterModal}>
-                      <Filter className="h-4 w-4" />
-                      필터
-                      {galleryFilter !== "all" && (
-                        <span className="text-gray-600">
-                          {galleryFilter}
-                        </span>
-                      )}
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent className="max-w-md">
-                    <DialogHeader>
-                      <DialogTitle>크기 필터 설정</DialogTitle>
-                    </DialogHeader>
-                    <div className="space-y-6">
-                      {/* 크기 필터 */}
-                      <div>
-                        <h3 className="font-medium text-sm text-gray-900 mb-3">이미지 크기</h3>
-                        <div className="grid grid-cols-1 gap-2">
-                          <button
-                            onClick={() => setTempGalleryFilter("all")}
-                            className={`text-left px-3 py-2 rounded-md text-sm transition-colors ${tempGalleryFilter === "all"
-                              ? "bg-blue-100 text-blue-700 border border-blue-200"
-                              : "bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-200"
-                              }`}
-                          >
-                            모든 크기
-                          </button>
-                          {PRESET_SIZES.map((size) => (
-                            <button
-                              key={size.id}
-                              onClick={() => setTempGalleryFilter(`${size.width}x${size.height}`)}
-                              className={`text-left px-3 py-2 rounded-md text-sm transition-colors ${tempGalleryFilter === `${size.width}x${size.height}`
-                                ? "bg-blue-100 text-blue-700 border border-blue-200"
-                                : "bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-200"
-                                }`}
-                            >
-                              {size.name} ({size.width} × {size.height})
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                    {/* 적용하기 버튼 */}
-                    <div className="flex justify-end gap-2 pt-4 border-t">
-                      <Button
-                        variant="outline"
-                        onClick={() => setIsFilterModalOpen(false)}
-                      >
-                        취소
-                      </Button>
-                      <Button
-                        onClick={handleApplyFilters}
-                        className="bg-blue-600 hover:bg-blue-700"
-                      >
-                        적용하기
-                      </Button>
-                    </div>
-                  </DialogContent>
-                </Dialog>
-              </div>
-
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                {filteredImages.map((image) => (
+                {images.map((image) => (
                   <Card key={image.id} className="overflow-hidden cursor-pointer hover:shadow-lg transition-shadow" onClick={() => {
                     setPreviewImage(image)
                     setShowGalleryImageModal(true)
@@ -2400,7 +2583,18 @@ export default function ImageGeneratorPage() {
                         alt={image.prompt}
                         className="w-full h-full object-cover"
                       />
-                      <div className="absolute top-2 right-2 flex gap-2">
+                      <div className="absolute top-2 right-2 flex gap-1">
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleDownloadImage(image.image_url, `generated_image_${image.id}.png`)
+                          }}
+                          title="다운로드"
+                        >
+                          <Download className="h-4 w-4" />
+                        </Button>
                         <Button
                           size="sm"
                           variant="secondary"
@@ -2409,6 +2603,7 @@ export default function ImageGeneratorPage() {
                             setPreviewImage(image)
                             setShowGalleryImageModal(true)
                           }}
+                          title="확대 보기"
                         >
                           <Maximize2 className="h-4 w-4" />
                         </Button>
@@ -2419,6 +2614,7 @@ export default function ImageGeneratorPage() {
                             e.stopPropagation()
                             handleDeleteImage(image.id)
                           }}
+                          title="삭제"
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>
@@ -2428,7 +2624,7 @@ export default function ImageGeneratorPage() {
                 ))}
               </div>
 
-              {filteredImages.length === 0 && (
+              {images.length === 0 && (
                 <div className="text-center py-12">
                   <ImageIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
                   <p className="text-lg font-medium text-gray-900 mb-2">생성된 이미지가 없습니다</p>
@@ -2622,9 +2818,43 @@ export default function ImageGeneratorPage() {
                       <p className="text-sm text-gray-600 line-clamp-2 mb-2">
                         {image.prompt}
                       </p>
-                      <div className="flex justify-between items-center text-xs text-gray-500">
+                      <div className="flex justify-between items-center text-xs text-gray-500 mb-3">
                         <span>{image.width} × {image.height}</span>
                         <span>{new Date(image.created_at).toLocaleDateString()}</span>
+                      </div>
+                      {/* 빠른 액션 버튼들 */}
+                      <div className="flex gap-1">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            const originalPrompt = image.prompt
+                            setActiveTab("generate")
+                            setTimeout(() => {
+                              setPrompt(originalPrompt)
+                              setTimeout(() => {
+                                handleGenerateImage()
+                              }, 100)
+                            }, 100)
+                          }}
+                          className="flex-1 text-xs"
+                        >
+                          <RefreshCw className="h-3 w-3 mr-1" />
+                          재생성
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleDownloadImage(image.image_url, `generated_image_${image.id}.png`)
+                          }}
+                          className="flex-1 text-xs"
+                        >
+                          <Download className="h-3 w-3 mr-1" />
+                          저장
+                        </Button>
                       </div>
                     </CardContent>
                   </Card>
@@ -2705,13 +2935,35 @@ export default function ImageGeneratorPage() {
                 </div>
                 
                 {/* 액션 버튼 */}
-                <div className="flex gap-3 justify-center">
+                <div className="flex gap-2 justify-center">
                   <Button
                     onClick={openDownloadDialog}
                     className="flex-1"
                   >
                     <Download className="h-4 w-4 mr-2" />
                     다운로드
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      // 동일한 프롬프트로 재생성
+                      const originalPrompt = previewImage.prompt
+                      setShowGalleryImageModal(false)
+                      setActiveTab("generate") // 생성 탭으로 이동
+                      
+                      // 프롬프트 설정 후 이미지 생성 실행
+                      setTimeout(() => {
+                        setPrompt(originalPrompt)
+                        // 생성 버튼 자동 클릭을 위해 약간의 딜레이
+                        setTimeout(() => {
+                          handleGenerateImage()
+                        }, 100)
+                      }, 100)
+                    }}
+                    variant="outline"
+                    className="flex-1"
+                  >
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    재생성
                   </Button>
                   <Button
                     onClick={() => handleDeleteImage(previewImage.id)}

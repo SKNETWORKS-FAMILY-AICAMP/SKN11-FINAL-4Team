@@ -1,10 +1,11 @@
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, text, event
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import QueuePool
 from app.core.config import settings
 import logging
 from typing import Generator, AsyncGenerator
+import time
 
 logger = logging.getLogger(__name__)
 

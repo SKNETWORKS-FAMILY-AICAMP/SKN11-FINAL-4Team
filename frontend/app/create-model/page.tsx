@@ -73,6 +73,21 @@ export default function CreateModelPage() {
   const [huggingFaceTokens, setHuggingFaceTokens] = useState<any[]>([])
   const [loadingTokens, setLoadingTokens] = useState(false)
   const [uploadingImage, setUploadingImage] = useState(false)
+  // 1. 상태 선언부에 MBTI 목록 추가
+  const [mbtiList, setMbtiList] = useState<{ mbti_id: number, mbti_name: string }[]>([]);
+
+  // 2. useEffect로 MBTI 목록 불러오기
+  useEffect(() => {
+    const fetchMBTIList = async () => {
+      try {
+        const list = await ModelService.getMBTIList();
+        setMbtiList(list);
+      } catch (e) {
+        // 에러 처리
+      }
+    };
+    fetchMBTIList();
+  }, []);
 
   useEffect(() => {
     // 실제 API에서 프리셋 데이터 가져오기
@@ -750,22 +765,11 @@ export default function CreateModelPage() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">선택 안함</SelectItem>
-                      <SelectItem value="ENFP">ENFP - 재기발랄한 활동가</SelectItem>
-                      <SelectItem value="ENFJ">ENFJ - 정의로운 사회운동가</SelectItem>
-                      <SelectItem value="ENTP">ENTP - 뜨거운 논쟁을 즐기는 변론가</SelectItem>
-                      <SelectItem value="ENTJ">ENTJ - 대담한 통솔자</SelectItem>
-                      <SelectItem value="ESFP">ESFP - 자유로운 영혼의 연예인</SelectItem>
-                      <SelectItem value="ESFJ">ESFJ - 사교적인 외교관</SelectItem>
-                      <SelectItem value="ESTP">ESTP - 모험을 즐기는 사업가</SelectItem>
-                      <SelectItem value="ESTJ">ESTJ - 엄격한 관리자</SelectItem>
-                      <SelectItem value="INFP">INFP - 열정적인 중재자</SelectItem>
-                      <SelectItem value="INFJ">INFJ - 선의의 옹호자</SelectItem>
-                      <SelectItem value="INTP">INTP - 논리적인 사색가</SelectItem>
-                      <SelectItem value="INTJ">INTJ - 용의주도한 전략가</SelectItem>
-                      <SelectItem value="ISFP">ISFP - 호기심 많은 예술가</SelectItem>
-                      <SelectItem value="ISFJ">ISFJ - 용감한 수호자</SelectItem>
-                      <SelectItem value="ISTP">ISTP - 만능 재주꾼</SelectItem>
-                      <SelectItem value="ISTJ">ISTJ - 현실주의자</SelectItem>
+                      {mbtiList.map(mbti => (
+                        <SelectItem key={mbti.mbti_id} value={String(mbti.mbti_id)}>
+                          {mbti.mbti_name}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
