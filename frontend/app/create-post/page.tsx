@@ -70,14 +70,13 @@ export default function CreatePostPage() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [hashtagInput, setHashtagInput] = useState("")
-  const [imagePreview, setImagePreview] = useState<string | null>(null)
+  const [imagePreviews, setImagePreviews] = useState<string[]>([])  // 다중 이미지 미리보기
   const [isDragOver, setIsDragOver] = useState(false)
   const [showPreview, setShowPreview] = useState(false)
   const [generated, setGenerated] = useState<{ content: string, hashtags: string[] } | null>(null)
   const [isEnhancing, setIsEnhancing] = useState(false)
   const [converted, setConverted] = useState<string | null>(null)
   const [isConverting, setIsConverting] = useState(false)
-  const [showFullPreview, setShowFullPreview] = useState(false)
   const [imageInfo, setImageInfo] = useState<{
     originalSize: { width: number; height: number } | null;
     resizedSize: { width: number; height: number } | null;
@@ -312,7 +311,7 @@ export default function CreatePostPage() {
       // 이미지 미리보기 생성 (패딩 처리된 이미지 사용)
       const reader = new FileReader()
       reader.onload = (e) => {
-        setImagePreview(e.target?.result as string)
+        setImagePreviews(prev => [...prev, e.target?.result as string])
       }
       reader.readAsDataURL(processedFile)
 
@@ -329,27 +328,17 @@ export default function CreatePostPage() {
   }
 
   // 이미지 업로드 처리
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
     if (files) {
       // 다중 파일 처리
-      const newImages: File[] = []
       for (let i = 0; i < files.length; i++) {
         const file = files[i]
         if (file.type.startsWith("image/")) {
-          newImages.push(file)
+          await processImageFile(file)
         }
       }
-
-      if (newImages.length > 0) {
-        setFormData(prev => ({
-          ...prev,
-          uploaded_images: [...prev.uploaded_images, ...newImages]
-        }))
-        setError("")
-      } else {
-        setError("이미지 파일만 업로드 가능합니다.")
-      }
+      setError("")
     }
   }
 
@@ -369,8 +358,14 @@ export default function CreatePostPage() {
     setIsDragOver(false)
 
     const files = e.dataTransfer.files
-    if (files && files[0]) {
-      await processImageFile(files[0])
+    if (files) {
+      // 다중 파일 처리
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i]
+        if (file.type.startsWith("image/")) {
+          await processImageFile(file)
+        }
+      }
     }
   }
 
@@ -380,6 +375,8 @@ export default function CreatePostPage() {
       ...prev,
       uploaded_images: prev.uploaded_images.filter((_, i) => i !== index)
     }))
+    // 미리보기도 함께 제거
+    setImagePreviews(prev => prev.filter((_, i) => i !== index))
   }
 
   // S3 연결 상태 확인
@@ -391,54 +388,54 @@ export default function CreatePostPage() {
   const isGenerateEnabled = !!formData.influencer_id && !!formData.board_topic && !!formData.board_description.trim();
 
   const generateContent = async () => {
-    if (!formData.influencer_id) {
-      setError('AI 인플루언서를 선택하세요.');
+    if (!formData.board_topic || !formData.influencer_id) {
+      setError("주제와 인플루언서를 선택해주세요.");
       return;
     }
-    if (!formData.board_topic) {
-      setError('게시글 주제를 입력하세요.');
-      return;
-    }
-    if (!formData.board_description || !formData.board_description.trim()) {
-      setError('게시글 설명을 입력하세요.');
-      return;
-    }
+
     setIsEnhancing(true);
     setError(null);
+
+    // 인플루언서 정보 가져오기
+    const selectedInfluencer = influencers.find(
+      (inf) => inf.influencer_id === formData.influencer_id
+    );
+    if (!selectedInfluencer) {
+      setError("인플루언서를 찾을 수 없습니다.");
+      setIsEnhancing(false);
+      return;
+    }
+
     try {
-      // 선택한 인플루언서에서 group_id 추출
-      const selectedInfluencer = influencers.find(
-        (inf) => inf.influencer_id === formData.influencer_id
-      );
-      // /full-enhance 엔드포인트로 요청
-      const res: any = await apiClient.post('/api/v1/boards/full-enhance', {
-        topic: formData.board_topic,
-        platform: PLATFORM_OPTIONS[formData.board_platform].label.toLowerCase(),
-        include_content: formData.board_description,
+      // /generate-content 엔드포인트로 요청 (DB 저장 안 함)
+      const res: any = await apiClient.post('/api/v1/boards/generate-content', {
+        board_topic: formData.board_topic,
+        board_platform: formData.board_platform,
         influencer_id: formData.influencer_id,
-        team_id: selectedInfluencer?.group_id, // group_id를 team_id로 보냄
-        user_id: user?.user_id, // 로그인한 유저의 user_id를 body에 포함
+        team_id: selectedInfluencer?.group_id || user?.teams?.[0]?.group_id || 1,
+        include_content: formData.board_description,
+        hashtags: formData.board_hashtag.join(' '),
       });
 
       const generatedContent = {
-        content: res.social_media_content,
-        hashtags: res.hashtags,
+        content: res.generated_content,
+        hashtags: res.generated_hashtags,
       };
       setGenerated(generatedContent);
 
-      // 생성된 본문으로 바로 말투 변환 실행
-      if (generatedContent.content && selectedInfluencer) {
-        try {
-          const response = await apiClient.post('/api/v1/boards/influencer-style/convert', {
-            influencer_id: selectedInfluencer.influencer_id,
-            text: generatedContent.content,
-          });
-          setConverted((response as any).converted_text || "");
-        } catch (convertErr) {
-          console.error("말투 변환 실패:", convertErr);
-          // 말투 변환 실패해도 본문 생성은 성공으로 처리
-        }
-      }
+      // 자동 말투 변환 제거 - 사용자가 별도 버튼으로 실행하도록 변경
+      // if (generatedContent.content && selectedInfluencer) {
+      //   try {
+      //     const response = await apiClient.post('/api/v1/boards/influencer-style/convert', {
+      //       influencer_id: selectedInfluencer.influencer_id,
+      //       text: generatedContent.content,
+      //     });
+      //     setConverted((response as any).converted_text || "");
+      //   } catch (convertErr) {
+      //     console.error("말투 변환 실패:", convertErr);
+      //     // 말투 변환 실패해도 본문 생성은 성공으로 처리
+      //   }
+      // }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'AI 생성에 실패했습니다.');
     } finally {
@@ -465,7 +462,7 @@ export default function CreatePostPage() {
     try {
       const response = await apiClient.post('/api/v1/boards/influencer-style/convert', {
         influencer_id: selectedInfluencer.influencer_id,
-        text: generated.content,
+        text: generated.content,  // AI 생성 결과 사용
       });
       setConverted((response as any).converted_text || "");
     } catch (err) {
@@ -483,9 +480,6 @@ export default function CreatePostPage() {
   };
 
   // 인플루언서 말투 변환 승인
-  // - 변환된 텍스트를 설명란(board_description)에 적용
-  // - 해시태그도 폼에 반영
-  // - 이미지 업로드 상태는 절대 변경하지 않음
   const approveConverted = () => {
     if (!converted) return;
     // 해시태그 제거 후 설명란에 적용
@@ -495,7 +489,6 @@ export default function CreatePostPage() {
     if (generated?.hashtags) {
       handleInputChange('board_hashtag', generated.hashtags.map((tag: string) => tag.replace(/^#+/, '')));
     }
-    // 이미지 업로드 상태(formData.uploaded_image)는 절대 변경하지 않음
   };
 
   // 폼 제출 (게시글 저장)
@@ -583,8 +576,8 @@ export default function CreatePostPage() {
         const errorMessage = errorData.detail || errorData.message || '게시글 생성에 실패했습니다.';
 
         // 인스타그램 업로드 관련 에러인 경우 특별 처리
-        if (errorMessage.includes('로컬 이미지 URL') || errorMessage.includes('인스타그램 API')) {
-          throw new Error('인스타그램 업로드에 실패했습니다. 로컬 이미지는 인스타그램에서 접근할 수 없습니다. S3 등의 클라우드 스토리지를 사용하거나 공개 URL을 사용하세요.');
+        if (errorMessage.includes('인스타그램') || errorMessage.includes('Instagram')) {
+          throw new Error('게시글이 생성되었지만 인스타그램 업로드에 실패했습니다. 인스타그램 계정 설정을 확인해주세요.');
         }
 
         throw new Error(errorMessage);
@@ -961,17 +954,21 @@ export default function CreatePostPage() {
                         <div className="flex flex-wrap justify-end items-center gap-2 mt-6">
                           <Button
                             type="button"
-                            onClick={() => setShowFullPreview(true)}
+                            onClick={convertToInfluencerStyle}
                             variant="outline"
-                            size="sm"
-                            className="flex items-center gap-1 border-blue-300 hover:border-blue-500 hover:bg-blue-50 transition-colors"
+                            className="flex items-center space-x-2 border-purple-400 hover:border-purple-600 hover:bg-purple-50 transition-colors"
+                            disabled={isConverting}
                           >
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-                            전체 보기
+                            {isConverting ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <User className="h-4 w-4" />
+                            )}
+                            <span>{isConverting ? "변환 중..." : "인플루언서 말투로 변환"}</span>
                           </Button>
                           <Button type="button" onClick={approveGenerated} variant="outline" className="flex items-center space-x-2 border-green-400 hover:border-green-600 hover:bg-green-50 transition-colors">
                             <span>✓</span>
-                            <span>폼에 적용</span>
+                            <span>본문 적용</span>
                           </Button>
                         </div>
                       </div>
@@ -989,19 +986,9 @@ export default function CreatePostPage() {
                         </div>
                         <span className="text-xs text-blue-600 block mt-2">{converted.length}자 • 스크롤 또는 전체 보기로 확인</span>
                         <div className="flex flex-wrap justify-end items-center gap-2 mt-6">
-                          <Button
-                            type="button"
-                            onClick={() => setShowFullPreview(true)}
-                            variant="outline"
-                            size="sm"
-                            className="flex items-center gap-1 border-blue-300 hover:border-blue-500 hover:bg-blue-50 transition-colors"
-                          >
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-                            전체 보기
-                          </Button>
                           <Button type="button" onClick={approveConverted} variant="outline" className="flex items-center space-x-2 border-blue-400 hover:border-blue-600 hover:bg-blue-50 transition-colors">
                             <span>✓</span>
-                            <span>폼에 적용 (해시태그 포함)</span>
+                            <span>본문 적용 (해시태그 포함)</span>
                           </Button>
                         </div>
                       </div>
@@ -1218,14 +1205,26 @@ export default function CreatePostPage() {
                 </div>
 
                 {/* 업로드된 이미지 */}
-                {imagePreview && (
+                {imagePreviews.length > 0 && (
                   <div className="my-4">
-                    <div className="flex justify-center">
-                      <img
-                        src={imagePreview}
-                        alt="Preview"
-                        className="max-w-full max-h-64 object-cover rounded-lg border"
-                      />
+                    <h4 className="font-medium text-gray-700 mb-2">업로드된 이미지 ({imagePreviews.length}개)</h4>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                      {imagePreviews.map((preview, index) => (
+                        <div key={index} className="relative group">
+                          <img
+                            src={preview}
+                            alt={`Preview ${index + 1}`}
+                            className="w-full h-32 object-cover rounded-lg border"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => removeImage(index)}
+                            className="absolute top-1 right-1 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))}
                     </div>
                     {/* 이미지 정보 표시 */}
                     {imageInfo && (
@@ -1271,61 +1270,7 @@ export default function CreatePostPage() {
         </div>
       )}
 
-      {/* 전체 미리보기 모달 */}
-      {showFullPreview && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="p-6">
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-xl font-bold">전체 내용 미리보기</h2>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setShowFullPreview(false)}
-                >
-                  ×
-                </Button>
-              </div>
-
-              <div className="space-y-6">
-                {converted && (
-                  <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                    <h3 className="font-medium text-blue-900 mb-3">인플루언서 말투 변환 결과</h3>
-                    <div className="text-sm text-blue-800 whitespace-pre-wrap bg-white p-4 rounded border leading-relaxed">
-                      {converted}
-                    </div>
-                  </div>
-                )}
-
-                {generated && (
-                  <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
-                    <h3 className="font-medium text-green-900 mb-3">AI 생성 원본</h3>
-                    <div className="text-sm text-green-800 whitespace-pre-wrap bg-white p-4 rounded border leading-relaxed">
-                      {generated.content}
-                    </div>
-                    <div className="mt-3">
-                      <h4 className="font-medium text-green-800 mb-2">생성된 해시태그</h4>
-                      <div className="flex flex-wrap gap-2">
-                        {generated.hashtags.map((tag: string, index: number) => (
-                          <Badge key={index} variant="secondary" className="bg-green-100 text-green-800 border-green-300">
-                            {tag}
-                          </Badge>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div className="mt-6 flex justify-end">
-                <Button onClick={() => setShowFullPreview(false)}>
-                  확인
-                </Button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* 전체 미리보기 모달 제거 */}
     </div>
   )
 }

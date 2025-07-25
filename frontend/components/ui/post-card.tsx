@@ -270,7 +270,7 @@ export function PostCard({
               {post.title || post.board_topic}
             </h4>
 
-            {renderInfluencerInfo()}
+
 
             <p className="text-gray-600 text-sm line-clamp-3 mb-3">
               {(post.content || post.board_description || '').length > 150
@@ -294,7 +294,7 @@ export function PostCard({
             <div className="flex items-center justify-between text-sm text-gray-500">
               <div className="flex items-center space-x-1">
                 <User className="h-4 w-4" />
-                <span>{post.influencerName || post.author || 'AI 인플루언서'}</span>
+                <span>{post.influencerName || post.author || ''}</span>
               </div>
               <div className="flex items-center space-x-1">
                 <Calendar className="h-4 w-4" />
@@ -312,7 +312,7 @@ export function PostCard({
               <div className="flex items-center space-x-4 text-sm text-gray-500">
                 <div className="flex items-center space-x-1">
                   <User className="h-4 w-4" />
-                  <span>{post.influencerName || post.author || 'AI 인플루언서'}</span>
+                  <span>{post.influencerName || post.author || ''}</span>
                 </div>
               </div>
               <div className="flex items-center space-x-1 text-sm text-gray-500">

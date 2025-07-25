@@ -189,25 +189,19 @@ class InstagramPostingService:
 
                     if response.status_code != 200:
                         logger.error(
-                            f"Image upload failed: {response.status_code} - {response.text}"
+                            "\n==== INSTAGRAM API ERROR (upload_image_to_instagram) ===="
                         )
-
-                        # Instagram API 오류 메시지 파싱
-                        error_message = "이미지 업로드에 실패했습니다"
-                        try:
-                            error_data = response.json()
-                            if "error" in error_data:
-                                error_detail = error_data["error"]
-                                if "error_user_msg" in error_detail:
-                                    error_message = error_detail["error_user_msg"]
-                                elif "message" in error_detail:
-                                    error_message = error_detail["message"]
-                        except:
-                            pass
-
+                        logger.error(
+                            f"Request URL: {self.base_url}/{instagram_id}/media"
+                        )
+                        logger.error(f"Request data: {request_data}")
+                        logger.error(f"Response status: {response.status_code}")
+                        logger.error(f"Response headers: {response.headers}")
+                        logger.error(f"Response body: {response.text}")
+                        logger.error("==== END ====")
                         raise HTTPException(
                             status_code=status.HTTP_400_BAD_REQUEST,
-                            detail=f"{error_message}: {response.text}",
+                            detail=f"이미지 업로드 실패: {response.text}",
                         )
 
                     try:
@@ -414,6 +408,15 @@ class InstagramPostingService:
                 logger.info(f"캐러셀 생성 API 응답: {response.text}")
 
                 if response.status_code != 200:
+                    logger.error(
+                        "\n==== INSTAGRAM API ERROR (upload_carousel_to_instagram) ===="
+                    )
+                    logger.error(f"Request URL: {self.base_url}/{instagram_id}/media")
+                    logger.error(f"Request data: {carousel_data}")
+                    logger.error(f"Response status: {response.status_code}")
+                    logger.error(f"Response headers: {response.headers}")
+                    logger.error(f"Response body: {response.text}")
+                    logger.error("==== END ====")
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail=f"캐러셀 생성 실패: {response.text}",
@@ -434,7 +437,22 @@ class InstagramPostingService:
                 )
 
                 logger.info(f"캐러셀 업로드 완료: {carousel_id}")
-                return publish_result
+
+                # publish_result에서 post ID 추출
+                instagram_post_id = publish_result.get("id")
+                if not instagram_post_id:
+                    logger.error("캐러셀 발행 후 post ID를 받지 못했습니다")
+                    return {
+                        "success": False,
+                        "error": "캐러셀 발행 후 post ID를 받지 못했습니다",
+                        "message": "인스타그램 업로드에 실패했습니다.",
+                    }
+
+                return {
+                    "success": True,
+                    "instagram_post_id": instagram_post_id,
+                    "message": "인스타그램에 성공적으로 업로드되었습니다.",
+                }
 
         except Exception as e:
             logger.error(f"캐러셀 업로드 오류: {str(e)}")
@@ -517,6 +535,15 @@ class InstagramPostingService:
                 logger.info(f"Instagram publish response text: {response.text}")
 
                 if response.status_code != 200:
+                    logger.error(
+                        "\n==== INSTAGRAM API ERROR (publish_post_to_instagram) ===="
+                    )
+                    logger.error(f"Request URL: {request_url}")
+                    logger.error(f"Request params: {publish_params}")
+                    logger.error(f"Response status: {response.status_code}")
+                    logger.error(f"Response headers: {response.headers}")
+                    logger.error(f"Response body: {response.text}")
+                    logger.error("==== END ====")
                     logger.error(
                         f"Post publishing failed: {response.status_code} - {response.text}"
                     )
@@ -660,7 +687,13 @@ class InstagramPostingService:
             logger.error(f"  - 인스타그램 ID: {instagram_id}")
             logger.error(f"  - 이미지 URL: {image_url}")
             logger.error(f"  - 캡션 길이: {len(caption)}자")
-            raise
+            # HTTPException을 다시 발생시키지 않고 실패 정보 반환
+            return {
+                "success": False,
+                "error": str(he),
+                "detail": he.detail,
+                "message": "인스타그램 업로드에 실패했습니다.",
+            }
         except Exception as e:
             logger.error(f"❌ Instagram posting error: {str(e)}")
             logger.error(f"Error type: {type(e)}")
@@ -669,10 +702,12 @@ class InstagramPostingService:
             logger.error(f"  - 인스타그램 ID: {instagram_id}")
             logger.error(f"  - 이미지 URL: {image_url}")
             logger.error(f"  - 캡션 길이: {len(caption)}자")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"인스타그램 업로드 중 오류가 발생했습니다: {str(e)}",
-            )
+            # Exception을 HTTPException으로 변환하지 않고 실패 정보 반환
+            return {
+                "success": False,
+                "error": str(e),
+                "message": "인스타그램 업로드 중 오류가 발생했습니다.",
+            }
 
     async def verify_instagram_permissions(
         self, access_token: str, instagram_id: str

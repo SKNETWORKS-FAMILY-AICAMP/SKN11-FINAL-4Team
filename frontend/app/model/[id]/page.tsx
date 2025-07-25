@@ -233,6 +233,7 @@ function ModelDetailContent() {
     is_connected: false,
   });
   const [isConnecting, setIsConnecting] = useState(false);
+  const [carouselIndices, setCarouselIndices] = useState<{ [key: string]: number }>({});
   const [analyticsData, setAnalyticsData] = useState({
     totalApiCalls: 0,
     todayApiCalls: 0,
@@ -327,10 +328,11 @@ function ModelDetailContent() {
               .map((tag: string) => (tag.startsWith("#") ? tag : `#${tag}`))
             : [],
           media: {
-            type: "image" as const,
-            urls: [board.image_url || "/placeholder.svg?height=400&width=400"],
-            thumbnailUrl:
-              board.image_url || "/placeholder.svg?height=400&width=400",
+            type: board.image_url && board.image_url.split(",").length > 1 ? "carousel" as const : "image" as const,
+            urls: board.image_url
+              ? board.image_url.split(",").map((url: string) => url.trim()).filter(Boolean)
+              : ["/placeholder.svg?height=400&width=400"],
+            thumbnailUrl: board.image_url ? board.image_url.split(",")[0]?.trim() || "/placeholder.svg?height=400&width=400" : "/placeholder.svg?height=400&width=400",
           },
           // 인플루언서 정보: 조회한 값 사용
           influencerId: board.influencer_id,
@@ -3622,6 +3624,7 @@ function ModelDetailContent() {
                         </span>
                       )}
                     </div>
+
                     <div className="flex items-center space-x-2 text-sm text-gray-500 mt-1">
                       <Calendar className="h-4 w-4" />
                       {selectedPost.status === "scheduled" &&
@@ -3748,7 +3751,7 @@ function ModelDetailContent() {
                         <span className="text-sm font-medium text-gray-700">
                           {selectedPost.media.type === "image" && "이미지"}
                           {selectedPost.media.type === "video" && "비디오"}
-                          {selectedPost.media.type === "carousel" && "캐러셀"}
+                          {selectedPost.media.type === "carousel" && "이미지"}
                         </span>
                         {selectedPost.media.type === "carousel" && (
                           <Badge variant="outline" className="text-xs">
@@ -3756,13 +3759,75 @@ function ModelDetailContent() {
                           </Badge>
                         )}
                       </div>
-                      {selectedPost.media.thumbnailUrl && (
+                      {selectedPost.media.urls && selectedPost.media.urls.length > 0 && (
                         <div className="mt-2">
-                          <img
-                            src={selectedPost.media.thumbnailUrl}
-                            alt="미디어 썸네일"
-                            className="w-32 h-32 object-cover rounded-lg border"
-                          />
+                          {selectedPost.media.urls.length === 1 ? (
+                            // 단일 이미지
+                            <img
+                              src={selectedPost.media.urls[0]}
+                              alt="미디어"
+                              className="w-32 h-32 object-cover rounded-lg border"
+                            />
+                          ) : (
+                            // 다중 이미지 캐러셀
+                            <div className="relative">
+                              <div className="flex items-center justify-between absolute inset-0 z-10">
+                                <button
+                                  onClick={() => {
+                                    const currentIndex = carouselIndices[selectedPost.id || ''] || 0;
+                                    const newIndex = currentIndex > 0 ? currentIndex - 1 : selectedPost.media.urls.length - 1;
+                                    setCarouselIndices(prev => ({
+                                      ...prev,
+                                      [selectedPost.id || '']: newIndex
+                                    }));
+                                  }}
+                                  className="bg-black bg-opacity-50 text-white p-1 rounded-full hover:bg-opacity-70 transition-all"
+                                >
+                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                                  </svg>
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    const currentIndex = carouselIndices[selectedPost.id || ''] || 0;
+                                    const newIndex = currentIndex < selectedPost.media.urls.length - 1 ? currentIndex + 1 : 0;
+                                    setCarouselIndices(prev => ({
+                                      ...prev,
+                                      [selectedPost.id || '']: newIndex
+                                    }));
+                                  }}
+                                  className="bg-black bg-opacity-50 text-white p-1 rounded-full hover:bg-opacity-70 transition-all"
+                                >
+                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                  </svg>
+                                </button>
+                              </div>
+                              <img
+                                src={selectedPost.media.urls[carouselIndices[selectedPost.id || ''] || 0]}
+                                alt={`미디어 ${(carouselIndices[selectedPost.id || ''] || 0) + 1}`}
+                                className="w-32 h-32 object-cover rounded-lg border"
+                              />
+                              {/* 인디케이터 */}
+                              <div className="flex justify-center mt-2 space-x-1">
+                                {selectedPost.media.urls.map((_, index) => (
+                                  <button
+                                    key={index}
+                                    onClick={() => {
+                                      setCarouselIndices(prev => ({
+                                        ...prev,
+                                        [selectedPost.id || '']: index
+                                      }));
+                                    }}
+                                    className={`w-2 h-2 rounded-full transition-all ${index === (carouselIndices[selectedPost.id || ''] || 0)
+                                      ? 'bg-blue-500'
+                                      : 'bg-gray-300'
+                                      }`}
+                                  />
+                                ))}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
