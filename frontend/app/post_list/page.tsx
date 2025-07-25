@@ -64,6 +64,7 @@ function PostListContent() {
   const [editScheduledAt, setEditScheduledAt] = useState("");
   const [isSaving, setIsSaving] = useState(false);
 
+  const isFetchingRef = useRef(false)
 
 
   const searchParams = useSearchParams()
@@ -72,7 +73,10 @@ function PostListContent() {
 
   // API에서 게시글 목록 가져오기
   const fetchPosts = async () => {
+    if (isFetchingRef.current) return
+    
     try {
+      isFetchingRef.current = true
       setLoading(true)
 
       const boardData = await apiClient.get<any[]>('/api/v1/boards')
@@ -161,6 +165,7 @@ function PostListContent() {
       })
     } finally {
       setLoading(false)
+      isFetchingRef.current = false
     }
   }
 
