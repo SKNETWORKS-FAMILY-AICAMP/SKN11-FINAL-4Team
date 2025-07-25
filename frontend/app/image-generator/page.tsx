@@ -55,17 +55,20 @@ const PRESET_SIZES = [
 
 // 세션 상태 인터페이스 추가
 interface SessionStatus {
-  success: boolean
-  has_session: boolean
   pod_id?: string
   pod_status?: string
   session_created_at?: string
   session_expires_at?: string
   processing_expires_at?: string
-  total_generations: number
+  total_generations?: number
   session_remaining_seconds?: number
   processing_remaining_seconds?: number
-  message: string
+}
+
+// WebSocket 메시지 타입
+interface WSMessage {
+  type: 'session_status' | 'generation_progress' | 'generation_complete' | 'error' | 'pong' | 'session_created'
+  data: any
 }
 
 // 공통 2단계 유형
@@ -194,6 +197,15 @@ export default function ImageGeneratorPage() {
   
   // 세션 자동 재시도 상태
   const [sessionRetryCount, setSessionRetryCount] = useState(0)
+  
+  // WebSocket 관련 상태
+  const wsRef = useRef<WebSocket | null>(null)
+  const [wsConnected, setWsConnected] = useState(false)
+  const [generationProgress, setGenerationProgress] = useState<{
+    status: string
+    progress: number
+    message: string
+  } | null>(null)
   const [isAutoRetrying, setIsAutoRetrying] = useState(false)
   
   // 세션 만료 추적 상태
@@ -211,6 +223,124 @@ export default function ImageGeneratorPage() {
       setAccessToken(storedToken)
     }
   }, [token])
+
+  // WebSocket 연결 초기화
+  useEffect(() => {
+    if (!accessToken) return
+
+    // 이미 연결되어 있으면 재연결하지 않음
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      console.log('WebSocket already connected, skipping reconnection')
+      return
+    }
+
+    const connectWebSocket = () => {
+      try {
+        // 기존 연결이 있으면 정리
+        if (wsRef.current) {
+          wsRef.current.close()
+          wsRef.current = null
+        }
+
+        // WebSocket URL 구성 - 백엔드가 HTTP면 ws, HTTPS면 wss 사용
+        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
+        const wsProtocol = backendUrl.startsWith('https') ? 'wss:' : 'ws:'
+        const wsHost = backendUrl.replace(/^https?:\/\//, '')
+        const wsUrl = `${wsProtocol}//${wsHost}/api/v1/image-generation/ws?token=${accessToken}`
+        
+        console.log('Connecting to WebSocket:', wsUrl)
+        const ws = new WebSocket(wsUrl)
+        
+        ws.onopen = () => {
+          console.log('WebSocket connected')
+          setWsConnected(true)
+          
+          // 초기 세션 상태 요청
+          ws.send(JSON.stringify({ type: 'session_status' }))
+        }
+        
+        ws.onmessage = (event) => {
+          try {
+            const message = JSON.parse(event.data) as WSMessage
+            
+            switch (message.type) {
+              case 'session_status':
+                if (message.data) {
+                  const status = message.data as SessionStatus
+                  setSessionStatus(status)
+                  
+                  // 세션 시간 업데이트
+                  if (status.session_remaining_seconds !== undefined) {
+                    setClientSessionTime(status.session_remaining_seconds)
+                  }
+                  if (status.processing_remaining_seconds !== undefined) {
+                    setClientProcessingTime(status.processing_remaining_seconds)
+                  }
+                }
+                break
+                
+              case 'generation_progress':
+                if (message.data) {
+                  setGenerationProgress(message.data)
+                }
+                break
+                
+              case 'generation_complete':
+                if (message.data) {
+                  handleGenerationComplete(message.data)
+                }
+                break
+                
+              case 'error':
+                if (message.data?.message) {
+                  console.error('WebSocket error:', message.data.message)
+                  alert(message.data.message)
+                }
+                break
+                
+              case 'session_created':
+                // 세션 생성 응답은 createUserSession 함수에서 처리
+                break
+            }
+          } catch (error) {
+            console.error('WebSocket message parsing error:', error)
+          }
+        }
+        
+        ws.onerror = (error) => {
+          console.error('WebSocket error:', error)
+          setWsConnected(false)
+        }
+        
+        ws.onclose = () => {
+          console.log('WebSocket disconnected')
+          setWsConnected(false)
+          wsRef.current = null
+          
+          // 5초 후 재연결 시도 (연결이 없을 때만)
+          setTimeout(() => {
+            if (accessToken && (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN)) {
+              connectWebSocket()
+            }
+          }, 5000)
+        }
+        
+        wsRef.current = ws
+      } catch (error) {
+        console.error('WebSocket connection error:', error)
+        setWsConnected(false)
+      }
+    }
+    
+    connectWebSocket()
+    
+    // Cleanup
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close()
+      }
+    }
+  }, [accessToken])
   
   // 생성 파라미터
   const [prompt, setPrompt] = useState("")
@@ -219,7 +349,6 @@ export default function ImageGeneratorPage() {
   // UI 상태
   const [activeTab, setActiveTab] = useState("generate")
   const [isGenerating, setIsGenerating] = useState(false)
-  const [generationProgress, setGenerationProgress] = useState(0)
   const [selectedImage, setSelectedImage] = useState<GeneratedImage | null>(null)
   // 이미지 수정 관련 상태
   const [uploadedFile, setUploadedFile] = useState<File | null>(null)
@@ -276,58 +405,77 @@ export default function ImageGeneratorPage() {
         setIsAutoRetrying(true)
       }
       
-      const currentToken = accessToken || tokenUtils.getToken()
-      if (!currentToken) {
-        console.error('인증 토큰이 없습니다. 로그인이 필요합니다.')
+      // WebSocket 연결 확인
+      if (!wsConnected || !wsRef.current) {
+        console.error('WebSocket 연결이 없습니다.')
+        alert('WebSocket 연결이 끊어졌습니다. 페이지를 새로고침해주세요.')
         return false
       }
       
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
-      const response = await fetch(`${backendUrl}/api/v1/user-sessions/create`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${currentToken}`,
-        },
-        body: JSON.stringify({})
-      })
-      
-      if (response.ok) {
-        const data = await response.json()
-        setSessionStatus(data)
-        
-        // 클라이언트 사이드 타이머 업데이트
-        setClientSessionTime(data.session_remaining_seconds || null)
-        setClientProcessingTime(data.processing_remaining_seconds || null)
-        
-        // 성공 시 재시도 카운트 리셋
-        setSessionRetryCount(0)
-        setIsAutoRetrying(false)
-        
-        console.log('세션 생성 성공:', data)
-        return true
-        
-      } else {
-        console.error(`세션 생성 실패 (시도 ${retryAttempt + 1}/${maxRetries + 1}):`, response.statusText)
-        
-        // 재시도 로직
-        if (retryAttempt < maxRetries) {
-          const nextAttempt = retryAttempt + 1
-          setSessionRetryCount(nextAttempt)
-          
-          console.log(`${retryDelay/1000}초 후 세션 생성 재시도 (${nextAttempt}/${maxRetries})...`)
-          
-          setTimeout(async () => {
-            await createUserSession(true, nextAttempt)
-          }, retryDelay)
-          
-          return false
-        } else {
-          console.error('세션 생성 최대 재시도 횟수 초과')
-          setIsAutoRetrying(false)
-          return false
+      // WebSocket으로 세션 생성 요청
+      return new Promise((resolve) => {
+        // 임시 이벤트 리스너 설정
+        const handleSessionCreated = (event: MessageEvent) => {
+          try {
+            const message = JSON.parse(event.data)
+            if (message.type === 'session_created') {
+              // 리스너 제거
+              wsRef.current?.removeEventListener('message', handleSessionCreated)
+              
+              const data = message.data
+              if (data.success) {
+                setSessionStatus(data.session_status)
+                
+                // 클라이언트 사이드 타이머 업데이트
+                setClientSessionTime(data.session_status?.session_remaining_seconds || null)
+                setClientProcessingTime(data.session_status?.processing_remaining_seconds || null)
+                
+                // 성공 시 재시도 카운트 리셋
+                setSessionRetryCount(0)
+                setIsAutoRetrying(false)
+                
+                console.log('세션 생성 성공:', data.session_status)
+                resolve(true)
+              } else {
+                console.error(`세션 생성 실패 (시도 ${retryAttempt + 1}/${maxRetries + 1}):`, data.message)
+                
+                // 재시도 로직
+                if (retryAttempt < maxRetries) {
+                  const nextAttempt = retryAttempt + 1
+                  setSessionRetryCount(nextAttempt)
+                  
+                  console.log(`${retryDelay/1000}초 후 세션 생성 재시도 (${nextAttempt}/${maxRetries})...`)
+                  
+                  setTimeout(async () => {
+                    await createUserSession(true, nextAttempt)
+                  }, retryDelay)
+                  
+                  resolve(false)
+                } else {
+                  console.error('세션 생성 최대 재시도 횟수 초과')
+                  setIsAutoRetrying(false)
+                  resolve(false)
+                }
+              }
+            }
+          } catch (error) {
+            console.error('Session created message parsing error:', error)
+          }
         }
-      }
+        
+        // 이벤트 리스너 등록
+        wsRef.current?.addEventListener('message', handleSessionCreated)
+        
+        // 세션 생성 요청 전송
+        wsRef.current?.send(JSON.stringify({ type: 'create_session' }))
+        
+        // 타임아웃 설정 (30초)
+        setTimeout(() => {
+          wsRef.current?.removeEventListener('message', handleSessionCreated)
+          console.error('세션 생성 타임아웃')
+          resolve(false)
+        }, 30000)
+      })
     } catch (error) {
       console.error(`세션 생성 오류 (시도 ${retryAttempt + 1}/${maxRetries + 1}):`, error)
       
@@ -360,91 +508,12 @@ export default function ImageGeneratorPage() {
     await createUserSession(false, 0) // 수동 호출
   }
 
-  const checkSessionStatus = async () => {
-    try {
-      const currentToken = accessToken || tokenUtils.getToken()
-      if (!currentToken) {
-        console.error('인증 토큰이 없습니다.')
-        return
-      }
-      
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
-      const response = await fetch(`${backendUrl}/api/v1/user-sessions/status`, {
-        headers: {
-          'Authorization': `Bearer ${currentToken}`,
-        }
-      })
-      
-      if (response.ok) {
-        const data = await response.json()
-        
-        // 세션이 없는 경우 처리
-        if (!data || !data.pod_id) {
-          // 이전에 세션이 있었고 15분이 지나서 자연스럽게 만료된 경우 자동 재생성하지 않음
-          if (lastKnownSessionStatus && lastKnownSessionStatus.pod_id) {
-            console.log('세션이 정상적으로 만료되었습니다. 사용자가 수동으로 재시작해야 합니다.')
-            setSessionExpiredNaturally(true)
-            setSessionStatus(null) // 세션 상태를 null로 설정
-            return
-          }
-          
-          // 페이지 로드 시 처음부터 세션이 없었거나 생성 실패인 경우에만 자동 생성
-          if (!sessionExpiredNaturally && !sessionLoading && !isAutoRetrying) {
-            console.log('초기 세션이 없습니다. 자동으로 새 세션을 생성합니다.')
-            await createUserSession(true, 0) // 자동 재시도로 세션 생성
-          }
-          return
-        }
-        
-        // 유효한 세션이 있는 경우
-        setLastKnownSessionStatus(data) // 마지막 알려진 세션 상태 저장
-        setSessionExpiredNaturally(false) // 자연 만료 플래그 리셋
-        setSessionStatus(data)
-        
-        // 클라이언트 사이드 타이머 업데이트
-        setClientSessionTime(data.session_remaining_seconds || null)
-        setClientProcessingTime(data.processing_remaining_seconds || null)
-        
-      } else {
-        console.error('세션 상태 확인 실패:', response.statusText)
-        
-        // API 오류 시에는 자연 만료가 아닌 경우에만 세션 생성 시도
-        if (!sessionExpiredNaturally && !sessionLoading && !isAutoRetrying) {
-          console.log('세션 상태 확인 실패. 새 세션 생성을 시도합니다.')
-          await createUserSession(true, 0)
-        }
-      }
-    } catch (error) {
-      console.error('세션 상태 확인 오류:', error)
-      
-      // 네트워크 오류 시에는 자연 만료가 아닌 경우에만 세션 생성 시도
-      if (!sessionExpiredNaturally && !sessionLoading && !isAutoRetrying) {
-        console.log('네트워크 오류. 새 세션 생성을 시도합니다.')
-        await createUserSession(true, 0)
-      }
-    }
-  }
+  // HTTP status 체크 제거 - WebSocket으로만 세션 상태 관리
 
-  // 페이지 로드 시 세션 상태 확인 (자동 생성하지 않음)
-  useEffect(() => {
-    let isActive = true
-    const initializeSession = async () => {
-      if (accessToken && isActive) {
-        // 페이지 로드 시에는 세션 상태만 확인하고 자동 생성은 checkSessionStatus에서 처리
-        await checkSessionStatus()
-      }
-    }
-    initializeSession()
-    return () => { isActive = false }
-  }, [accessToken])
+  // 페이지 로드 시 세션 상태는 WebSocket 연결 후 자동으로 받음
+  // HTTP 요청 제거
 
-  // 세션 상태 폴링 (5초마다)
-  useEffect(() => {
-    if (!sessionStatus?.has_session) return
-
-    const interval = setInterval(checkSessionStatus, 5000)
-    return () => clearInterval(interval)
-  }, [sessionStatus?.has_session])
+  // HTTP polling 제거 - WebSocket으로만 세션 상태 관리
 
   // 클라이언트 사이드 타이머 (1초마다 감소)
   useEffect(() => {
@@ -477,32 +546,7 @@ export default function ImageGeneratorPage() {
   const lastPointRef = useRef<{x: number, y: number} | null>(null)
 
 
-  // 생성된 이미지 목록 가져오기
-  const fetchImages = async () => {
-    try {
-      const token = localStorage.getItem('access_token')
-      if (!token) {
-        console.error('No access token found')
-        return
-      }
-
-      const response = await fetch('/api/image-generation/my-images', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      })
-      const data = await response.json()
-      if (data.success) {
-        setImages(data.images)
-      }
-    } catch (error) {
-      console.error('Failed to fetch images:', error)
-    }
-  }
-
-  useEffect(() => {
-    fetchImages()
-  }, [])
+  // my-images 요청 제거 - 갤러리 페이지에서만 이미지 목록 조회
 
   // 프롬프트 최적화 테스트 함수
   const handleTestPrompt = async () => {
@@ -565,11 +609,55 @@ ${testData.message}
     }
   }
 
+  // WebSocket을 통해 이미지 생성 완료 처리
+  const handleGenerationComplete = (data: any) => {
+    setIsGenerating(false)
+    setGenerationProgress(null)
+    
+    if (data.success && data.s3_url) {
+      const newImage: GeneratedImage = {
+        id: data.storage_id || Date.now().toString(),
+        prompt: data.prompt || prompt,  // 백엔드에서 받은 원본 프롬프트 사용
+        width: data.width || 1024,
+        height: data.height || 1024,
+        image_url: data.s3_url,
+        created_at: new Date().toISOString(),
+        status: 'completed'
+      }
+      
+      setImages(prev => [newImage, ...prev])
+      setPreviewImage(newImage)
+      setShowImageModal(true)
+      
+      // 재생성이 아닌 일반 생성의 경우에만 프롬프트 초기화
+      if (!isGenerating || prompt !== '') {
+        setPrompt("")
+      }
+      
+      // 세션 상태는 WebSocket을 통해 자동으로 업데이트됨
+    } else {
+      alert(data.message || '이미지 생성 실패')
+    }
+  }
+
   const handleGenerateImage = async () => {
-    if (!prompt.trim()) return
+    if (!prompt.trim() && !getCombinedPromptKeywords()) {
+      alert('프롬프트를 입력하거나 스타일을 선택해주세요.')
+      return
+    }
+
+    // WebSocket 연결 확인
+    if (!wsConnected || !wsRef.current) {
+      alert('WebSocket 연결이 끊어졌습니다. 페이지를 새로고침해주세요.')
+      return
+    }
 
     setIsGenerating(true)
-    setGenerationProgress(0)
+    setGenerationProgress({
+      status: 'starting',
+      progress: 0,
+      message: '이미지 생성 준비 중...'
+    })
 
     // 선택값을 명시적으로 전달
     const selectedSizeData = PRESET_SIZES.find(size => size.id === selectedSize)
@@ -577,175 +665,30 @@ ${testData.message}
     // 프론트엔드 로그: 요청 파라미터
     console.log('[이미지 생성 요청] 파라미터:', {
       prompt,
-      style: selectedMainCategory,
-      category: selectedCategory,
-      subcategory: selectedSubcategory,
-      detailStyle: selectedDetailStyle,
-      landscape: selectedLandscape,
-      width: selectedSizeData?.width || 512,
-      height: selectedSizeData?.height || 512,
-      workflow_id: selectedWorkflow || 'basic_txt2img',
+      selected_styles: getSelectedStylesForAPI(),
+      width: selectedSizeData?.width || 1024,
+      height: selectedSizeData?.height || 1024,
     })
 
     try {
-      const token = localStorage.getItem('access_token')
-      if (!token) {
-        throw new Error('No access token found')
-      }
-
-      const response = await fetch('/api/image-generation/generate', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          prompt: prompt.trim() || getCombinedPromptKeywords(), // 사용자 입력 프롬프트 우선
-          selected_styles: getSelectedStylesForAPI(), // 스타일 선택 정보 추가
+      // WebSocket으로 이미지 생성 요청
+      wsRef.current.send(JSON.stringify({
+        type: 'generate_image',
+        data: {
+          prompt: prompt.trim() || getCombinedPromptKeywords(),
+          selected_styles: getSelectedStylesForAPI(),
           width: selectedSizeData?.width || 1024,
           height: selectedSizeData?.height || 1024,
-          steps: 8,  // Flux 기본 스텝 수
-          guidance: 3.5,  // Flux 가이던스 스케일
-          seed: null  // 랜덤 시드
-        })
-      })
-
-      console.log('Request body:', {
-        prompt: prompt.trim() || getCombinedPromptKeywords(),
-        selected_styles: getSelectedStylesForAPI(),
-        width: selectedSizeData?.width || 1024,
-        height: selectedSizeData?.height || 1024,
-        steps: 8,
-        guidance: 3.5,
-        seed: null
-      })
-
-      // 프론트엔드 로그: 응답 상태
-      console.log('[이미지 생성 응답] status:', response.status)
-      const data = await response.json()
-      console.log('[이미지 생성 응답] data:', data)
-
-      if (data.success) {
-        // 진행률 시뮬레이션 (실제로는 백엔드에서 진행률을 받아와야 함)
-        const progressInterval = setInterval(() => {
-          setGenerationProgress(prev => {
-            if (prev >= 90) {
-              clearInterval(progressInterval)
-              return prev
-            }
-            return prev + Math.random() * 10
-          })
-        }, 200)
-
-        // 2초 후 완료 처리 (실제로는 백엔드 응답을 기다려야 함)
-        setTimeout(() => {
-          setIsGenerating(false)
-          setGenerationProgress(100)
-          
-          // 1x1 투명 이미지인 경우 placeholder 이미지로 교체
-          let imageUrl = data.image_url
-          if (data.image_url.includes('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==')) {
-            imageUrl = '/api/placeholder-image'
-          }
-          
-          const newImage: GeneratedImage = {
-            id: data.storage_id || Date.now().toString(),
-            prompt,
-            width: selectedSizeData?.width || 512,
-            height: selectedSizeData?.height || 512,
-            image_url: imageUrl,
-            created_at: new Date().toISOString(),
-            status: 'completed'
-          }
-          
-          setImages(prev => [newImage, ...prev])
-          setPreviewImage(newImage)
-          setShowImageModal(true)
-          setPrompt("")
-
-          return
-        }, 2000);
-        
-        if (!data.storage_id) {
-          console.error('No job ID received from backend')
-          setIsGenerating(false)
-          return
+          steps: 8,
+          guidance: 3.5,
+          seed: null
         }
-        
-        let pollCount = 0
-        const maxPollCount = 120 // 최대 2분 (120초)
-        
-        const pollProgress = setInterval(async () => {
-          try {
-            pollCount++
-            
-            // 최대 재시도 횟수 초과 시 중단
-            if (pollCount > maxPollCount) {
-              clearInterval(pollProgress)
-              setIsGenerating(false)
-              console.error('Generation timeout after 2 minutes')
-              return
-            }
-            
-            const progressResponse = await fetch(`/api/comfyui/progress/${data.storage_id}`)
-            
-            if (!progressResponse.ok) {
-              console.error('Progress check failed:', progressResponse.status)
-              return
-            }
-            
-            const progressData = await progressResponse.json()
-            
-            if (progressData.success) {
-              setGenerationProgress(progressData.progress)
-              
-              if (progressData.status === 'completed') {
-                clearInterval(pollProgress)
-                setIsGenerating(false)
-                setGenerationProgress(100)
-                
-                // 새로운 이미지를 목록에 추가
-                const newImage: GeneratedImage = {
-                  id: progressData.image_id || data.storage_id,
-                  prompt,
-                  width: selectedSizeData?.width || 512,
-                  height: selectedSizeData?.height || 512,
-                  image_url: progressData.image_url || '/placeholder-image.jpg',
-                  created_at: new Date().toISOString(),
-                  status: 'completed'
-                }
-                
-                setImages(prev => [newImage, ...prev])
-                setPrompt("")
-              } else if (progressData.status === 'failed') {
-                clearInterval(pollProgress)
-                setIsGenerating(false)
-                console.error('Image generation failed:', progressData.error)
-              }
-            }
-          } catch (error) {
-            console.error('Failed to poll progress:', error)
-            
-            // 연속 실패 시 중단
-            if (pollCount > 10) {
-              clearInterval(pollProgress)
-              setIsGenerating(false)
-              console.error('Too many polling failures, stopping')
-            }
-          }
-        }, 1000)
-        
-        // 타임아웃 설정 (5분)
-        setTimeout(() => {
-          clearInterval(pollProgress)
-          setIsGenerating(false)
-        }, 300000)
-      }
+      }))
     } catch (error) {
-      console.error('[이미지 생성 에러]', error)
+      console.error('Failed to send image generation request:', error)
       setIsGenerating(false)
-      setGenerationProgress(0)
-      alert('이미지 생성에 실패했습니다: ' + (error instanceof Error ? error.message : '알 수 없는 오류'))
+      setGenerationProgress(null)
+      alert('이미지 생성 요청 중 오류가 발생했습니다.')
     }
   }
 
@@ -1076,46 +1019,58 @@ ${testData.message}
 
   // 재생성 기능
   const handleRegenerate = () => {
-    if (previewImage) {
-      // 이전 이미지를 DB에 저장 (이미지 목록에 추가)
-      setImages(prev => [previewImage, ...prev])
+    if (!previewImage) return
+    
+    // WebSocket 연결 확인
+    if (!wsConnected || !wsRef.current) {
+      alert('WebSocket 연결이 끊어졌습니다. 페이지를 새로고침해주세요.')
+      return
+    }
+    
+    // 이전 이미지를 임시 저장
+    const previousImage = previewImage
+    const previousPrompt = previewImage.prompt || prompt
+    
+    // 모달에서 로딩 상태로 변경
+    setPreviewImage(null)
+    setIsGenerating(true)
+    setGenerationProgress({
+      status: 'starting',
+      progress: 0,
+      message: '이미지 재생성 준비 중...'
+    })
+    
+    try {
+      // 선택된 크기 데이터 가져오기
+      const selectedSizeData = PRESET_SIZES.find(size => size.id === selectedSize)
       
-      // 모달에서 로딩 상태로 변경
-      setPreviewImage(null)
-      setIsGenerating(true)
-      setGenerationProgress(0)
-      
-      // 진행률 시뮬레이션
-      const progressInterval = setInterval(() => {
-        setGenerationProgress(prev => {
-          if (prev >= 90) {
-            clearInterval(progressInterval)
-            return prev
-          }
-          return prev + Math.random() * 10
-        })
-      }, 200)
-      
-      // 새로운 이미지 생성
-      setTimeout(() => {
-        clearInterval(progressInterval)
-        setIsGenerating(false)
-        setGenerationProgress(100)
-        
-        const selectedSizeData = PRESET_SIZES.find(size => size.id === selectedSize)
-        
-        const newTestImage: GeneratedImage = {
-          id: `img_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-          prompt: previewImage?.prompt || prompt,
-          width: selectedSizeData?.width || 512,
-          height: selectedSizeData?.height || 512,
-          image_url: 'https://picsum.photos/512/512?random=' + Date.now(), // 새로운 랜덤 이미지
-          created_at: new Date().toISOString(),
-          status: 'completed'
+      // WebSocket으로 이미지 재생성 요청
+      wsRef.current.send(JSON.stringify({
+        type: 'generate_image',
+        data: {
+          prompt: previousPrompt,
+          selected_styles: getSelectedStylesForAPI(),
+          width: selectedSizeData?.width || 1024,
+          height: selectedSizeData?.height || 1024,
+          steps: 8,
+          guidance: 3.5,
+          seed: null  // 새로운 시드로 재생성
         }
-        
-        setPreviewImage(newTestImage) // 모달에 새 이미지 표시
-      }, 2000) // 2초 후 완료
+      }))
+      
+      console.log('[이미지 재생성 요청] 파라미터:', {
+        prompt: previousPrompt,
+        selected_styles: getSelectedStylesForAPI(),
+        width: selectedSizeData?.width || 1024,
+        height: selectedSizeData?.height || 1024,
+        previousImage: previousImage
+      })
+    } catch (error) {
+      console.error('Failed to send regeneration request:', error)
+      setIsGenerating(false)
+      setGenerationProgress(null)
+      setPreviewImage(previousImage) // 실패 시 이전 이미지 복원
+      alert('이미지 재생성 요청 중 오류가 발생했습니다.')
     }
   }
 
@@ -1445,8 +1400,19 @@ ${testData.message}
 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <div className="mb-8">
-            <h1 className="text-3xl font-bold text-gray-900">이미지 생성 & 수정</h1>
-            <p className="text-gray-600 mt-2">ComfyUI를 사용하여 AI 이미지를 생성하고 수정하세요</p>
+            <div className="flex justify-between items-start">
+              <div>
+                <h1 className="text-3xl font-bold text-gray-900">이미지 생성 & 수정</h1>
+                <p className="text-gray-600 mt-2">ComfyUI를 사용하여 AI 이미지를 생성하고 수정하세요</p>
+              </div>
+              {/* WebSocket 연결 상태 표시 */}
+              <div className="flex items-center space-x-2">
+                <div className={`w-3 h-3 rounded-full ${wsConnected ? 'bg-green-500' : 'bg-red-500'}`} />
+                <span className="text-sm text-gray-600">
+                  {wsConnected ? 'WebSocket 연결됨' : 'WebSocket 연결 끊김'}
+                </span>
+              </div>
+            </div>
           </div>
 
           <div className="space-y-6">
@@ -1493,7 +1459,7 @@ ${testData.message}
                 {activeTab === "generate" && (
                   <div className="space-y-6">
                   {/* 세션 상태 카드 */}
-                  {sessionStatus ? (
+                  {(sessionStatus && sessionStatus.pod_id && sessionStatus.pod_status !== 'none') ? (
                     <Card className={`border-2 ${
                       sessionStatus.pod_status === 'ready' || sessionStatus.pod_status === 'running' ? 'border-blue-300' : 
                       sessionStatus.pod_status === 'starting' ? 'border-gray-200' :
@@ -1515,7 +1481,14 @@ ${testData.message}
                         </CardTitle>
                       </CardHeader>
                       <CardContent>
-                        <p className="text-sm mb-2">{sessionStatus.message}</p>
+                        <p className="text-sm mb-2">
+                          {sessionStatus?.pod_status === 'ready' || sessionStatus?.pod_status === 'running' ? '✅ 세션이 활성 상태입니다' :
+                           sessionStatus?.pod_status === 'starting' ? '🚀 세션을 시작하고 있습니다...' :
+                           sessionStatus?.pod_status === 'processing' ? '🎨 이미지를 생성하고 있습니다...' :
+                           sessionStatus?.pod_status === 'failed' ? '❌ 세션 시작에 실패했습니다' :
+                           sessionStatus?.pod_status === 'none' || !sessionStatus?.pod_id ? '🔄 세션이 없습니다' :
+                           '🔍 세션 상태를 확인하고 있습니다...'}
+                        </p>
                         {clientSessionTime !== null && clientSessionTime > 0 && (
                           <p className="text-xs text-gray-600">
                             세션 시간: {Math.floor(clientSessionTime / 60)}분 {clientSessionTime % 60}초
@@ -1936,8 +1909,11 @@ ${testData.message}
                                     <div className="text-center">
                                       <Loader2 className="h-8 w-8 animate-spin text-blue-600 mx-auto mb-2" />
                                       <p className="text-sm text-gray-600">생성 중...</p>
-                                      <Progress value={generationProgress} className="mt-2" />
-                                      <p className="text-xs text-gray-500 mt-1">{generationProgress}%</p>
+                                      <Progress value={generationProgress?.progress || 0} className="mt-2" />
+                                      <p className="text-xs text-gray-500 mt-1">{generationProgress?.progress || 0}%</p>
+                                      {generationProgress?.message && (
+                                        <p className="text-xs text-gray-600 mt-1">{generationProgress.message}</p>
+                                      )}
                                     </div>
                                   ) : previewImage ? (
                                     <div className="relative w-full h-full">
@@ -2565,7 +2541,7 @@ ${testData.message}
                   <div className="space-y-6">
                     <div className="flex justify-between items-center">
                 <h2 className="text-xl font-semibold">생성된 이미지</h2>
-                <Button variant="outline" onClick={fetchImages}>
+                <Button variant="outline" onClick={() => window.location.reload()}>
                   <RefreshCw className="h-4 w-4 mr-2" />
                   새로고침
                 </Button>
@@ -2662,14 +2638,20 @@ ${testData.message}
                 
                 {/* 이미지 정보 */}
                 <div className="space-y-4">
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                  <div className="space-y-3">
                     <div>
-                      <span className="text-gray-500">모델:</span>
-                      <p className="font-medium">{previewImage.prompt}</p>
+                      <span className="text-gray-500">프롬프트:</span>
+                      <p className="font-medium text-sm mt-1">{previewImage.prompt}</p>
                     </div>
-                    <div>
-                      <span className="text-gray-500">크기:</span>
-                      <p className="font-medium">{previewImage.width} × {previewImage.height}</p>
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div>
+                        <span className="text-gray-500">크기:</span>
+                        <p className="font-medium">{previewImage.width} × {previewImage.height}</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-500">생성일:</span>
+                        <p className="font-medium">{new Date(previewImage.created_at).toLocaleString()}</p>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -2699,8 +2681,11 @@ ${testData.message}
                   <div className="text-center">
                     <Loader2 className="h-16 w-16 animate-spin text-blue-600 mx-auto mb-4" />
                     <p className="text-lg font-medium text-gray-900 mb-2">이미지 생성 중...</p>
-                    <Progress value={generationProgress} className="w-64 mx-auto" />
-                    <p className="text-sm text-gray-500 mt-2">{generationProgress}%</p>
+                    <Progress value={generationProgress?.progress || 0} className="w-64 mx-auto" />
+                    <p className="text-sm text-gray-500 mt-2">{generationProgress?.progress || 0}%</p>
+                    {generationProgress?.message && (
+                      <p className="text-sm text-gray-600 mt-2">{generationProgress.message}</p>
+                    )}
                   </div>
                 </div>
                 
@@ -2829,13 +2814,42 @@ ${testData.message}
                           variant="outline"
                           onClick={(e) => {
                             e.stopPropagation()
+                            
+                            // WebSocket 연결 확인
+                            if (!wsConnected || !wsRef.current) {
+                              alert('WebSocket 연결이 끊어졌습니다. 페이지를 새로고침해주세요.')
+                              return
+                            }
+                            
                             const originalPrompt = image.prompt
+                            
+                            // 생성 탭으로 이동하고 모달 열기
                             setActiveTab("generate")
+                            setPrompt(originalPrompt)
+                            setShowImageModal(true)
+                            setIsGenerating(true)
+                            setGenerationProgress({
+                              status: 'starting',
+                              progress: 0,
+                              message: '이미지 재생성 준비 중...'
+                            })
+                            
+                            // WebSocket으로 재생성 요청
                             setTimeout(() => {
-                              setPrompt(originalPrompt)
-                              setTimeout(() => {
-                                handleGenerateImage()
-                              }, 100)
+                              const selectedSizeData = PRESET_SIZES.find(size => size.id === selectedSize)
+                              
+                              wsRef.current?.send(JSON.stringify({
+                                type: 'generate_image',
+                                data: {
+                                  prompt: originalPrompt,
+                                  selected_styles: getSelectedStylesForAPI(),
+                                  width: selectedSizeData?.width || 1024,
+                                  height: selectedSizeData?.height || 1024,
+                                  steps: 8,
+                                  guidance: 3.5,
+                                  seed: null
+                                }
+                              }))
                             }, 100)
                           }}
                           className="flex-1 text-xs"
@@ -2918,18 +2932,20 @@ ${testData.message}
                 {/* 이미지 정보 */}
                 <div className="space-y-4">
                   
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                  <div className="space-y-3">
                     <div>
-                      <span className="text-gray-500">모델:</span>
-                      <p className="font-medium">{previewImage.prompt}</p>
+                      <span className="text-gray-500">프롬프트:</span>
+                      <p className="font-medium text-sm mt-1">{previewImage.prompt}</p>
                     </div>
-                    <div>
-                      <span className="text-gray-500">크기:</span>
-                      <p className="font-medium">{previewImage.width} × {previewImage.height}</p>
-                    </div>
-                    <div>
-                      <span className="text-gray-500">생성일:</span>
-                      <p className="font-medium">{new Date(previewImage.created_at).toLocaleDateString()}</p>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+                      <div>
+                        <span className="text-gray-500">크기:</span>
+                        <p className="font-medium">{previewImage.width} × {previewImage.height}</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-500">생성일:</span>
+                        <p className="font-medium">{new Date(previewImage.created_at).toLocaleDateString()}</p>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -2945,18 +2961,46 @@ ${testData.message}
                   </Button>
                   <Button
                     onClick={() => {
-                      // 동일한 프롬프트로 재생성
-                      const originalPrompt = previewImage.prompt
+                      // 갤러리 모달 닫고 생성 탭으로 이동
                       setShowGalleryImageModal(false)
-                      setActiveTab("generate") // 생성 탭으로 이동
+                      setActiveTab("generate")
                       
-                      // 프롬프트 설정 후 이미지 생성 실행
+                      // 프롬프트 설정
+                      const originalPrompt = previewImage.prompt
+                      setPrompt(originalPrompt)
+                      
+                      // 이미지 생성 모달 열기
+                      setShowImageModal(true)
+                      setIsGenerating(true)
+                      setGenerationProgress({
+                        status: 'starting',
+                        progress: 0,
+                        message: '이미지 재생성 준비 중...'
+                      })
+                      
+                      // WebSocket으로 재생성 요청
                       setTimeout(() => {
-                        setPrompt(originalPrompt)
-                        // 생성 버튼 자동 클릭을 위해 약간의 딜레이
-                        setTimeout(() => {
-                          handleGenerateImage()
-                        }, 100)
+                        if (wsConnected && wsRef.current) {
+                          const selectedSizeData = PRESET_SIZES.find(size => size.id === selectedSize)
+                          
+                          wsRef.current.send(JSON.stringify({
+                            type: 'generate_image',
+                            data: {
+                              prompt: originalPrompt,
+                              selected_styles: getSelectedStylesForAPI(),
+                              width: selectedSizeData?.width || 1024,
+                              height: selectedSizeData?.height || 1024,
+                              steps: 8,
+                              guidance: 3.5,
+                              seed: null
+                            }
+                          }))
+                        } else {
+                          alert('WebSocket 연결이 끊어졌습니다. 페이지를 새로고침해주세요.')
+                          setIsGenerating(false)
+                          setGenerationProgress(null)
+                          setShowImageModal(false)
+                        }
                       }, 100)
                     }}
                     variant="outline"

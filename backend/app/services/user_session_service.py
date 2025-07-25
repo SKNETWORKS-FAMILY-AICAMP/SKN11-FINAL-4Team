@@ -395,7 +395,8 @@ class UserSessionService:
             bool: 종료 성공 여부
         """
         try:
-            user = self._get_user(user_id, db)
+            result = db.execute(select(User).where(User.user_id == user_id))
+            user = result.scalar_one_or_none()
             if not user:
                 logger.error(f"User not found: {user_id}")
                 return False
