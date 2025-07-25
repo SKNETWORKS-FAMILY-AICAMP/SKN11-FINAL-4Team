@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Navigation } from "@/components/navigation"
 import { RequireAdmin } from "@/components/auth/protected-route"
 import { Button } from "@/components/ui/button"
@@ -68,10 +68,16 @@ export default function AdministratorPage() {
   const [chunkOverlap, setChunkOverlap] = useState(200)
   const [topK, setTopK] = useState(5)
 
+  const isFetchingDataRef = useRef(false)
+  const isFetchingTokensRef = useRef(false)
+
   // API에서 데이터 로드
   useEffect(() => {
     const fetchData = async () => {
+      if (isFetchingDataRef.current) return
+      
       try {
+        isFetchingDataRef.current = true
         setLoading(true)
         const [teamsData, usersData] = await Promise.all([
           AdminService.getTeams(),
@@ -87,6 +93,7 @@ export default function AdministratorPage() {
         setError(err.message || '데이터를 불러오는데 실패했습니다.')
       } finally {
         setLoading(false)
+        isFetchingDataRef.current = false
       }
     }
 
@@ -100,7 +107,10 @@ export default function AdministratorPage() {
 
   // HF 토큰 데이터 로드
   const fetchHFTokens = async () => {
+    if (isFetchingTokensRef.current) return
+    
     try {
+      isFetchingTokensRef.current = true
       setLoadingTokens(true)
       const tokensData = await AdminService.getHFTokens({ include_assigned: true })
       setHfTokens(tokensData)
@@ -109,6 +119,7 @@ export default function AdministratorPage() {
       setError(err.message || 'HF 토큰을 불러오는데 실패했습니다.')
     } finally {
       setLoadingTokens(false)
+      isFetchingTokensRef.current = false
     }
   }
 
