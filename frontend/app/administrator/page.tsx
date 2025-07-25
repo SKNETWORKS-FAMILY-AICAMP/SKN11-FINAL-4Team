@@ -42,6 +42,7 @@ export default function AdministratorPage() {
   const [inputUsername, setInputUsername] = useState("")
   const [selectedTeamForToken, setSelectedTeamForToken] = useState<number | null>(null)
   const [creatingToken, setCreatingToken] = useState(false)
+  const [isTeamDropdownOpen, setIsTeamDropdownOpen] = useState(false)
 
   const [selectedTokenDetail, setSelectedTokenDetail] = useState<AdminHFToken | null>(null)
   const [isTokenDetailOpen, setIsTokenDetailOpen] = useState(false)
@@ -937,20 +938,48 @@ export default function AdministratorPage() {
                               </div>
                               <div>
                                 <Label htmlFor="team-select">팀 할당 (선택사항)</Label>
-                                <select
-                                  id="team-select"
-                                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                                  value={selectedTeamForToken || ""}
-                                  onChange={e => setSelectedTeamForToken(e.target.value ? Number(e.target.value) : null)}
-                                  disabled={creatingToken}
-                                >
-                                  <option value="">할당하지 않음</option>
-                                  {teams.map(team => (
-                                    <option key={team.group_id} value={team.group_id}>
-                                      {team.group_name}
-                                    </option>
-                                  ))}
-                                </select>
+                                <div className="relative">
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={() => setIsTeamDropdownOpen(!isTeamDropdownOpen)}
+                                    disabled={creatingToken}
+                                    className="w-full justify-between h-9 px-3 py-1 text-sm border border-gray-300 bg-white hover:bg-gray-50"
+                                  >
+                                    <span className="text-left">
+                                      {selectedTeamForToken 
+                                        ? teams.find(t => t.group_id === selectedTeamForToken)?.group_name 
+                                        : "팀을 선택하세요"}
+                                    </span>
+                                    <ChevronDown className="h-4 w-4 text-gray-500" />
+                                  </Button>
+                                  
+                                  {isTeamDropdownOpen && (
+                                    <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-auto">
+                                      <div
+                                        className="px-3 py-2 text-sm text-gray-500 hover:bg-gray-100 cursor-pointer border-b"
+                                        onClick={() => {
+                                          setSelectedTeamForToken(null)
+                                          setIsTeamDropdownOpen(false)
+                                        }}
+                                      >
+                                        할당하지 않음
+                                      </div>
+                                      {teams.map(team => (
+                                        <div
+                                          key={team.group_id}
+                                          className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer"
+                                          onClick={() => {
+                                            setSelectedTeamForToken(team.group_id)
+                                            setIsTeamDropdownOpen(false)
+                                          }}
+                                        >
+                                          {team.group_name}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                 </div>
                               </div>
                             </div>
                             <div className="flex justify-end mt-4">
