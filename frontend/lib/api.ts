@@ -37,7 +37,7 @@ class APIClient {
     } = options
 
     const url = `${this.baseURL}${endpoint}`
-    console.log('🌐 API 요청:', { method: fetchOptions.method || 'GET', url, requireAuth })
+    // 에러는 catch 블록에서만 남김
 
     const headers: Record<string, string> = {
       ...(customHeaders as Record<string, string>)
@@ -56,7 +56,6 @@ class APIClient {
         throw new APIError('No authentication token found', 401)
       }
       headers.Authorization = `Bearer ${token}`
-      console.log('🔑 인증 토큰 추가됨')
     }
 
     // 타임아웃 설정
@@ -80,13 +79,6 @@ class APIClient {
       } else {
         data = await response.text()
       }
-
-      console.log('📡 API 응답:', { 
-        status: response.status, 
-        ok: response.ok, 
-        contentType: response.headers.get('content-type'),
-        data: data 
-      })
 
       if (!response.ok) {
         console.error('❌ API 오류 응답:', { 

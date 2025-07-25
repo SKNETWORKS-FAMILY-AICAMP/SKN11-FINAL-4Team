@@ -24,7 +24,6 @@ export class MBTIDebugger {
     responseTime: number
     cacheUsed: boolean
   }> {
-    console.log('🔍 Direct MBTI API Test Starting...')
     const startTime = Date.now()
     
     try {
@@ -47,12 +46,6 @@ export class MBTIDebugger {
       this.cache = Array.isArray(data) ? data : []
       this.lastFetchTime = Date.now()
       
-      console.log('✅ API Success:', {
-        dataCount: this.cache.length,
-        responseTime: `${responseTime}ms`,
-        firstItem: this.cache[0] || null
-      })
-      
       return { success: true, data: this.cache, responseTime, cacheUsed: false }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
@@ -74,18 +67,11 @@ export class MBTIDebugger {
     responseTime: number
     cacheUsed: boolean
   }> {
-    console.log('🔍 ModelService MBTI Test Starting...')
     const startTime = Date.now()
     
     try {
       const data = await ModelService.getMBTIList()
       const responseTime = Date.now() - startTime
-      
-      console.log('✅ ModelService Success:', {
-        dataCount: data.length,
-        responseTime: `${responseTime}ms`,
-        firstItem: data[0] || null
-      })
       
       return { success: true, data, responseTime, cacheUsed: false }
     } catch (error) {
@@ -177,19 +163,15 @@ export class MBTIDebugger {
     
     try {
       // 1. API 연결 테스트
-      console.log('1️⃣ Direct API 테스트...')
       const directResult = await this.testDirectAPI()
       
       // 2. 서비스 레이어 테스트
-      console.log('2️⃣ ModelService 테스트...')
       const serviceResult = await this.testModelService()
       
       // 3. 데이터 유효성 검증
-      console.log('3️⃣ 데이터 유효성 검증...')
       const validation = this.validateData(directResult.data)
       
       // 4. 캐시 상태 확인
-      console.log('4️⃣ 캐시 상태 확인...')
       const cacheInfo = this.getCacheInfo()
       
       // 종합 리포트 생성

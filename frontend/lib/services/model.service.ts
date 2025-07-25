@@ -318,13 +318,10 @@ export class ModelService {
    * API 키 생성 또는 업데이트
    */
   static async generateApiKey(influencerId: string): Promise<APIKeyResponse> {
-    console.log('🔧 ModelService.generateApiKey 호출:', influencerId)
     try {
       const result = await apiClient.post<APIKeyResponse>(`/api/v1/influencers/${influencerId}/api-key/generate`)
-      console.log('✅ ModelService.generateApiKey 성공:', result)
       return result
     } catch (error) {
-      console.error('❌ ModelService.generateApiKey 실패:', error)
       throw error
     }
   }
@@ -333,13 +330,10 @@ export class ModelService {
    * API 키 조회
    */
   static async getApiKey(influencerId: string): Promise<APIKeyInfo> {
-    console.log('🔍 ModelService.getApiKey 호출:', influencerId)
     try {
       const result = await apiClient.get<APIKeyInfo>(`/api/v1/influencers/${influencerId}/api-key`)
-      console.log('✅ ModelService.getApiKey 성공:', result)
       return result
     } catch (error) {
-      console.error('❌ ModelService.getApiKey 실패:', error)
       throw error
     }
   }
@@ -420,7 +414,7 @@ export class ModelService {
                 return
               }
             } catch (e) {
-              console.warn('스트리밍 데이터 파싱 실패:', line)
+              // 필요시 에러 핸들링만 남김
             }
           }
         }
