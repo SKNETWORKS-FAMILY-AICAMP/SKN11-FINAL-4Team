@@ -133,8 +133,9 @@ export function PostCard({
 
     const allHashtags = hashtags.length > 0 ? hashtags : boardHashtags
 
-    // content variant일 때는 최대 3개만 표시
-    const displayHashtags = variant === "content" ? allHashtags.slice(0, 3) : allHashtags
+    // variant에 따라 표시 개수 제한
+    const maxDisplayCount = variant === "content" ? 3 : 5
+    const displayHashtags = allHashtags.slice(0, maxDisplayCount)
 
     return (
       <div className="flex flex-wrap gap-1 mb-3">
@@ -143,9 +144,9 @@ export function PostCard({
             {tag}
           </span>
         ))}
-        {variant === "content" && allHashtags.length > 3 && (
+        {allHashtags.length > maxDisplayCount && (
           <span className="text-xs text-gray-500 px-2 py-1">
-            +{allHashtags.length - 3}개 더
+            +{allHashtags.length - maxDisplayCount}개 더
           </span>
         )}
       </div>
