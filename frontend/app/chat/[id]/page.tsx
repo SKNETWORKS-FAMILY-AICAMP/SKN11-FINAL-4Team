@@ -209,15 +209,6 @@ export default function ChatPage() {
     };
   }, [model]);
 
-  // 재연결 함수
-  const reconnect = () => {
-    if (wsRef.current) {
-      wsRef.current.close();
-    }
-    setConnectionStatus('connecting');
-    // useEffect가 다시 실행되어 새로운 연결을 시도합니다
-  };
-
   // 메시지 전송
   const sendMessage = async () => {
     if (!inputMessage.trim() || isLoading) return;
@@ -419,22 +410,6 @@ export default function ChatPage() {
                           connectionStatus === 'error' ? '연결 오류' : '연결 끊김'}
                     </span>
                   </div>
-                  {/* 재연결 버튼 */}
-                  {connectionStatus !== 'connected' && (
-                    <Button
-                      onClick={reconnect}
-                      size="sm"
-                      variant="outline"
-                      disabled={connectionStatus === 'connecting'}
-                      className="flex-shrink-0"
-                    >
-                      {connectionStatus === 'connecting' ? (
-                        <Loader2 className="h-3 w-3 animate-spin" />
-                      ) : (
-                        '재연결'
-                      )}
-                    </Button>
-                  )}
                 </div>
               </div>
             </div>
@@ -506,8 +481,8 @@ export default function ChatPage() {
                 <div className="text-center py-4">
                   <p className="text-gray-500 text-sm">
                     {connectionStatus === 'connecting' ? '서버에 연결 중입니다...' :
-                      connectionStatus === 'error' ? '연결에 실패했습니다. 재연결 버튼을 눌러주세요.' :
-                        '연결이 끊어졌습니다. 재연결 버튼을 눌러주세요.'}
+                      connectionStatus === 'error' ? '연결에 실패했습니다.' :
+                        '연결이 끊어졌습니다.'}
                   </p>
                 </div>
               ) : (

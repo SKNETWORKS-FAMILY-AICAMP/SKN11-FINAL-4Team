@@ -34,6 +34,11 @@ export class BackendAuthService {
     return await apiClient.get<User>('/api/v1/auth/me')
   }
 
+  static async getTeamsByNames(teamNames: string[]): Promise<{teams: any[]}> {
+    const namesString = teamNames.join(',')
+    return await apiClient.get<{teams: any[]}>(`/api/v1/auth/teams/by-names?team_names=${encodeURIComponent(namesString)}`)
+  }
+
   static async authenticateWithUserInfo(provider: string, userInfo: any): Promise<BackendAuthResponse> {
     const data: SocialLoginRequest = {
       provider,

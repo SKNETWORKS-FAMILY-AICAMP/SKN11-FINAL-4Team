@@ -67,21 +67,50 @@ export const getUserFromToken = (token: string): User | null => {
   try {
     const payload = parseJWT(token)
     
-    return {
+    // JWT 토큰의 teams 정보를 User.teams 형태로 변환
+    const teams = payload.teams ? payload.teams.map((teamName: string, index: number) => ({
+      group_id: index + 1, // 임시 ID (실제 ID는 나중에 필요시 조회)
+      group_name: teamName,
+      group_description: undefined
+    })) : []
+    
+    const user = {
       user_id: payload.sub,
-      provider_id: payload.sub, // JWT에서는 sub가 provider_id 역할을 함
+      provider_id: payload.sub,
       provider: payload.provider,
       user_name: payload.name || '',
       email: payload.email || '',
       created_at: undefined,
       updated_at: undefined,
-      teams: [] // JWT에서는 groups가 string[]이므로 빈 배열로 초기화
+      teams: teams
     }
+    
+    return user
   } catch (error) {
+    console.error('Error parsing JWT token:', error)
     return null
   }
 }
 
+// 실제 팀 ID가 필요한 경우에만 호출하는 함수
+export const getRealTeamIds = async (teamNames: string[]): Promise<{[key: string]: number}> => {
+  try {
+    if (teamNames.length === 0) return {}
+    
+    const { BackendAuthService } = await import('./backend-auth')
+    const response = await BackendAuthService.getTeamsByNames(teamNames)
+    
+    const teamIdMap: {[key: string]: number} = {}
+    response.teams.forEach(team => {
+      teamIdMap[team.group_name] = team.group_id
+    })
+    
+    return teamIdMap
+  } catch (error) {
+    console.warn('실제 팀 ID 조회 실패:', error)
+    return {}
+  }
+}
 
 
 export const hasPermission = (
@@ -97,6 +126,21 @@ export const hasPermission = (
 export const hasGroup = (user: User | null, groupName: string): boolean => {
   if (!user || !user.teams) return false
   return user.teams.some(team => team.group_id.toString() === groupName || team.group_name === groupName)
+}
+
+// 실제 팀 ID로 권한 체크가 필요한 경우 사용
+export const hasGroupWithRealId = async (user: User | null, groupId: number): Promise<boolean> => {
+  if (!user || !user.teams) return false
+  
+  // 이미 실제 ID가 있는지 확인
+  const hasRealId = user.teams.some(team => team.group_id === groupId)
+  if (hasRealId) return true
+  
+  // 실제 ID가 없으면 API로 조회
+  const teamNames = user.teams.map(team => team.group_name)
+  const teamIdMap = await getRealTeamIds(teamNames)
+  
+  return Object.values(teamIdMap).includes(groupId)
 }
 
 export const hasAnyGroup = (user: User | null, groupNames: string[]): boolean => {

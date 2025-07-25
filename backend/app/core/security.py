@@ -46,6 +46,22 @@ class SecurityLogger:
         )
 
 
+def mask_token_for_logging(token: str) -> str:
+    """
+    로그용 JWT 토큰 마스킹 - 보안 강화
+    
+    Args:
+        token: JWT 토큰 문자열
+        
+    Returns:
+        str: 마스킹된 토큰 (앞 20자 + "...")
+    """
+    if not token or len(token) <= 20:
+        return "[TOKEN_MASKED]"
+    
+    return f"{token[:20]}..."
+
+
 # 비밀번호 해싱 함수
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """비밀번호 검증"""
@@ -89,8 +105,6 @@ def verify_token(token: str) -> Optional[dict]:
         payload = jwt.decode(
             token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
         )
-        
-        logger.info(f"✅ Token verification successful for user: {payload.get('sub', 'unknown')}")
         return payload
     except JWTError as e:
         logger.error(f"❌ JWT verification failed: {str(e)}")
@@ -117,15 +131,28 @@ async def get_current_user(
 ) -> Dict:
     """현재 인증된 사용자 정보 반환 (전체 JWT 페이로드 포함)"""
     token = credentials.credentials
-    print("token", token)
+    
+    # 보안 로깅: 토큰 마스킹 처리 (DEBUG 로그 제거 - 너무 빈번함)
+    masked_token = mask_token_for_logging(token)
+    # logger.debug(f"🔐 인증 토큰 검증 시작: {masked_token}")
+    
     payload = verify_token(token)
-    print("payload", payload)
+    
     if payload is None:
+        logger.warning(f"❌ JWT 토큰 검증 실패: {masked_token}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authentication credentials",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    
+    # 페이로드에서 민감하지 않은 정보만 로깅
+    user_info = {
+        "user_id": payload.get("sub", "unknown"),
+        "provider": payload.get("provider", "unknown"),
+        "groups": payload.get("groups", [])
+    }
+    # logger.debug(f"✅ JWT 토큰 검증 성공: {user_info}")  # DEBUG 로그 제거 - 너무 빈번함
 
     return payload
 
