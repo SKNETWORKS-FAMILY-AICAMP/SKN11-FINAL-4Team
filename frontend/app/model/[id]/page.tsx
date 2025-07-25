@@ -2705,8 +2705,10 @@ function ModelDetailContent() {
                               <div className="flex items-center justify-between absolute inset-0 z-10">
                                 <button
                                   onClick={() => {
+                                    const urls = selectedPost.media?.urls ?? [];
+                                    if (urls.length === 0) return;
                                     const currentIndex = carouselIndices[selectedPost.id || ''] || 0;
-                                    const newIndex = currentIndex > 0 ? currentIndex - 1 : selectedPost.media.urls.length - 1;
+                                    const newIndex = currentIndex > 0 ? currentIndex - 1 : urls.length - 1;
                                     setCarouselIndices(prev => ({
                                       ...prev,
                                       [selectedPost.id || '']: newIndex
@@ -2720,8 +2722,10 @@ function ModelDetailContent() {
                                 </button>
                                 <button
                                   onClick={() => {
+                                    const urls = selectedPost.media?.urls ?? [];
+                                    if (urls.length === 0) return;
                                     const currentIndex = carouselIndices[selectedPost.id || ''] || 0;
-                                    const newIndex = currentIndex < selectedPost.media.urls.length - 1 ? currentIndex + 1 : 0;
+                                    const newIndex = currentIndex < urls.length - 1 ? currentIndex + 1 : 0;
                                     setCarouselIndices(prev => ({
                                       ...prev,
                                       [selectedPost.id || '']: newIndex
