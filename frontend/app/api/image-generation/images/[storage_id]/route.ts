@@ -2,10 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { storage_id: string } }
+  { params }: { params: Promise<{ storage_id: string }> }
 ) {
   try {
-    const { storage_id } = params
+    const { storage_id } = await params
     
     const backendUrl = process.env.BACKEND_URL || 'http://localhost:8000'
     const authHeader = request.headers.get('Authorization')

@@ -468,13 +468,6 @@ export default function ImageGeneratorPage() {
         
         // 세션 생성 요청 전송
         wsRef.current?.send(JSON.stringify({ type: 'create_session' }))
-        
-        // 타임아웃 설정 (30초)
-        setTimeout(() => {
-          wsRef.current?.removeEventListener('message', handleSessionCreated)
-          console.error('세션 생성 타임아웃')
-          resolve(false)
-        }, 30000)
       })
     } catch (error) {
       console.error(`세션 생성 오류 (시도 ${retryAttempt + 1}/${maxRetries + 1}):`, error)

@@ -2,6 +2,11 @@ import logging
 import os
 import dotenv
 import traceback
+import subprocess
+import sys
+import signal
+import asyncio
+import atexit
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,11 +25,14 @@ logger = logging.getLogger(__name__)
 # 환경 변수 로드
 dotenv.load_dotenv()
 
+
 # FastAPI 앱 생성
 app = FastAPI(
     title="vLLM LoRA Influencer API", 
     version="1.0.0",
-    description="vLLM 엔진을 사용한 LoRA 파인튜닝 및 추론 API"
+    description="vLLM 엔진을 사용한 LoRA 파인튜닝 및 추론 API",
+    docs_url=None,  # Swagger UI 비활성화
+    redoc_url=None  # ReDoc 비활성화
 )
 
 # CORS 설정
@@ -40,11 +48,17 @@ app.add_middleware(
 async def on_startup():
     logger.info("🚀 FastAPI 서버 시작 중...")
     try:
+        # vLLM 코어 초기화
         await startup_event()
         logger.info("✅ FastAPI 서버 초기화 완료")
     except Exception as e:
         logger.error(f"❌ FastAPI 서버 초기화 실패: {e}")
         # 서버는 계속 실행하되 초기화 실패를 로그에 남김
+
+@app.on_event("shutdown")
+async def on_shutdown():
+    """서버 종료 시 정리 작업"""
+    logger.info("🛑 FastAPI 서버 종료 중...")
 
 @app.get("/")
 async def root():
@@ -96,4 +110,4 @@ app.include_router(finetuning.router, tags=["FineTuning"])
 app.include_router(speech.router, prefix="/speech", tags=["Speech Generator"])
 app.include_router(qa_generation.router, prefix="/qa", tags=["QA Generation"])
 app.include_router(backend_utils.router, prefix="/api/v1", tags=["Backend Utils"])
-app.include_router(zonos_tts_async.router, prefix="/zonos", tags=["Zonos TTS Async"])
+app.include_router(zonos_tts_async.router, prefix="/zonos", tags=["Zonos TTS"])

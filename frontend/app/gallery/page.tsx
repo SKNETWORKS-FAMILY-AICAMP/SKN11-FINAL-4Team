@@ -165,10 +165,12 @@ export default function GalleryPage() {
 
     // 검색어 필터링 (created_at 날짜로 검색)
     if (searchTerm) {
-      filtered = filtered.filter(img => 
-        new Date(img.created_at).toLocaleDateString().includes(searchTerm) ||
-        new Date(img.created_at).toLocaleTimeString().includes(searchTerm)
-      )
+      filtered = filtered.filter(img => {
+        if (!img.created_at) return false
+        const date = new Date(img.created_at)
+        return date.toLocaleDateString().includes(searchTerm) ||
+               date.toLocaleTimeString().includes(searchTerm)
+      })
     }
 
     setFilteredImages(filtered)
@@ -336,7 +338,9 @@ export default function GalleryPage() {
                           variant="destructive"
                           onClick={(e) => {
                             e.stopPropagation()
-                            handleDelete(image.storage_id)
+                            if (image.storage_id) {
+                              handleDelete(image.storage_id)
+                            }
                           }}
                         >
                           <Trash2 className="w-4 h-4 mr-1" />
@@ -410,7 +414,7 @@ export default function GalleryPage() {
             </div>
             <div className="p-4">
               <p className="text-sm text-gray-600">
-                생성일: {new Date(selectedImage.created_at).toLocaleString()}
+                생성일: {new Date(selectedImage.created_at || selectedImage.last_modified || '').toLocaleString()}
               </p>
               {selectedImage.team_name && (
                 <p className="text-sm text-blue-600">
@@ -430,7 +434,9 @@ export default function GalleryPage() {
                   <Button
                     variant="destructive"
                     onClick={() => {
-                      handleDelete(selectedImage.storage_id)
+                      if (selectedImage.storage_id) {
+                        handleDelete(selectedImage.storage_id)
+                      }
                       setSelectedImage(null)
                     }}
                   >

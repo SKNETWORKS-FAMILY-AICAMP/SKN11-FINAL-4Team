@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo, useEffect } from "react"
+import { useState, useMemo, useEffect, useRef } from "react"
 import Link from "next/link"
 import { Navigation } from "@/components/navigation"
 import { Button } from "@/components/ui/button"
@@ -31,6 +31,7 @@ import {
 } from "@/components/ui/dialog"
 
 export default function DashboardPage() {
+  const fetchedRef = useRef(false)
   const [influencers, setInfluencers] = useState<AIInfluencer[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -53,6 +54,10 @@ export default function DashboardPage() {
       setLoading(false)
       return
     }
+
+    // 중복 API 호출 방지
+    if (fetchedRef.current) return
+    fetchedRef.current = true
 
     const fetchInfluencers = async () => {
       try {

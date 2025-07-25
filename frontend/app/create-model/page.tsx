@@ -2,13 +2,13 @@
 
 import type React from "react"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { Navigation } from "@/components/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { ModelService, StylePreset, ToneGenerationRequest, ConversationExample } from "@/lib/services/model.service"
+import { ModelService, StylePreset, ToneGenerationRequest, ConversationExample, ModelMBTI } from "@/lib/services/model.service"
 import { useAuth } from "@/hooks/use-auth"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -35,10 +35,10 @@ interface FormDataType {
   selectedPresetId: string;
   huggingFaceToken: string;
   systemPrompt: string;
-  uploadedImageUrl?: string; // S3에 업로드된 이미지 URL
 }
 
 export default function CreateModelPage() {
+  const fetchedRef = useRef(false)
   const [formData, setFormData] = useState<FormDataType>({
     name: "",
     description: "",
@@ -72,24 +72,14 @@ export default function CreateModelPage() {
   const [generatedTones, setGeneratedTones] = useState<ConversationExample[]>([])
   const [huggingFaceTokens, setHuggingFaceTokens] = useState<any[]>([])
   const [loadingTokens, setLoadingTokens] = useState(false)
-  const [uploadingImage, setUploadingImage] = useState(false)
-  // 1. 상태 선언부에 MBTI 목록 추가
-  const [mbtiList, setMbtiList] = useState<{ mbti_id: number, mbti_name: string }[]>([]);
-
-  // 2. useEffect로 MBTI 목록 불러오기
-  useEffect(() => {
-    const fetchMBTIList = async () => {
-      try {
-        const list = await ModelService.getMBTIList();
-        setMbtiList(list);
-      } catch (e) {
-        // 에러 처리
-      }
-    };
-    fetchMBTIList();
-  }, []);
+  const [mbtiList, setMbtiList] = useState<ModelMBTI[]>([])
+  const [loadingMbti, setLoadingMbti] = useState(false)
 
   useEffect(() => {
+    // 중복 API 호출 방지
+    if (fetchedRef.current) return;
+    fetchedRef.current = true;
+
     // 실제 API에서 프리셋 데이터 가져오기
     const fetchStylePresets = async () => {
       setLoadingPresets(true);
@@ -115,6 +105,11 @@ export default function CreateModelPage() {
       try {
         const tokens = await ModelService.getHuggingFaceTokens(user.teams[0].group_id);
         setHuggingFaceTokens(tokens);
+        
+        // 토큰이 있고 기본값이 설정되지 않은 경우 첫 번째 토큰을 기본값으로 설정
+        if (tokens.length > 0 && !formData.huggingFaceToken) {
+          setFormData(prev => ({ ...prev, huggingFaceToken: tokens[0].hf_manage_id }));
+        }
       } catch (error) {
         // 허깅페이스 토큰 데이터 로드 실패 처리
       } finally {
@@ -122,8 +117,22 @@ export default function CreateModelPage() {
       }
     };
 
+    // MBTI 목록 가져오기
+    const fetchMbtiList = async () => {
+      setLoadingMbti(true);
+      try {
+        const mbtiData = await ModelService.getMBTIList();
+        setMbtiList(mbtiData);
+      } catch (error) {
+        // MBTI 데이터 로드 실패 처리
+      } finally {
+        setLoadingMbti(false);
+      }
+    };
+
     fetchStylePresets();
     fetchHuggingFaceTokens();
+    fetchMbtiList();
   }, [user]) // user가 변경될 때마다 토큰 다시 가져오기
 
   // 성격(personality)이 바뀌면 추천 말투 숨김
@@ -156,7 +165,6 @@ export default function CreateModelPage() {
           return {
             ...prev,
             [field]: value,
-            uploadedImageUrl: undefined,
           }
         }
       }
@@ -189,35 +197,8 @@ export default function CreateModelPage() {
       if (type === 'imageSamples') {
         const urls = fileArray.map(file => URL.createObjectURL(file))
         setImagePreviewUrls(urls)
-        
-        // 첫 번째 이미지를 S3에 즉시 업로드
-        if (fileArray.length > 0) {
-          setUploadingImage(true);
-          try {
-            const file = fileArray[0];
-            const formData = new FormData();
-            formData.append('file', file);
-            
-            // 인플루언서 이미지 업로드 API 호출
-            const uploadResponse = await fetch('/api/v1/influencers/upload-image', {
-              method: 'POST',
-              body: formData,
-            });
-
-            if (uploadResponse.ok) {
-              const uploadResult = await uploadResponse.json();
-              console.log('인플루언서 이미지 S3 업로드 성공:', uploadResult.file_url);
-              // 업로드된 S3 URL을 상태에 저장 (나중에 인플루언서 생성 시 사용)
-              setFormData(prev => ({ ...prev, uploadedImageUrl: uploadResult.file_url }));
-            } else {
-              console.warn('인플루언서 이미지 S3 업로드 실패');
-            }
-          } catch (error) {
-            console.warn('인플루언서 이미지 S3 업로드 중 오류:', error);
-          } finally {
-            setUploadingImage(false);
-          }
-        }
+        // 이미지 파일들을 상태에 저장 (인플루언서 생성 시 함께 업로드)
+        console.log('이미지 파일 선택됨:', fileArray.length, '개');
       }
     }
   }
@@ -262,7 +243,7 @@ export default function CreateModelPage() {
           tone: preset.influencer_speech || "",
           customTones: [preset.influencer_speech || ""],
           mbti: preset.mbti_id ? String(preset.mbti_id) : "none",
-          gender: preset.influencer_gender === 0 ? "male" : preset.influencer_gender === 1 ? "female" : "other",
+          gender: String(preset.influencer_gender),
           age: preset.influencer_age_group ? String(preset.influencer_age_group * 10) : "",
           hairStyle: preset.influencer_hairstyle || "",
           mood: preset.influencer_style || "",
@@ -296,7 +277,7 @@ export default function CreateModelPage() {
       }
     } else {
       // 직접 입력 모드 검증
-      if (!formData.modelType) {
+      if (!formData.modelType && !formData.imageMethod) {
         alert("모델 유형을 선택해주세요.");
         return;
       }
@@ -353,6 +334,7 @@ export default function CreateModelPage() {
           createInfluencerData.style_preset_id = formData.selectedPresetId;
           createInfluencerData.personality = selectedPreset.influencer_personality;
           createInfluencerData.tone = selectedPreset.influencer_speech;
+          createInfluencerData.system_prompt = formData.systemPrompt || selectedPreset.system_prompt; // 프리셋의 시스템 프롬프트 추가
           createInfluencerData.model_type = selectedPreset.influencer_type === 1 ? "character" : selectedPreset.influencer_type === 2 ? "human" : "objects";
           createInfluencerData.mbti = selectedPreset.mbti_name;
           createInfluencerData.gender = selectedPreset.influencer_gender === 0 ? "male" : selectedPreset.influencer_gender === 1 ? "female" : "other";
@@ -368,7 +350,7 @@ export default function CreateModelPage() {
         createInfluencerData.system_prompt = formData.systemPrompt; // Use the stored systemPrompt
         createInfluencerData.model_type = formData.modelType;
         createInfluencerData.mbti = formData.mbti !== "none" ? formData.mbti : undefined;
-        createInfluencerData.gender = formData.gender !== "none" ? formData.gender : undefined;
+        createInfluencerData.gender = formData.gender !== "none" ? (formData.gender === "0" ? "male" : formData.gender === "1" ? "female" : formData.gender === "2" ? "other" : formData.gender) : undefined;
         createInfluencerData.age = formData.age;
 
         // 이미지 생성 방법에 따른 데이터 추가
@@ -378,16 +360,22 @@ export default function CreateModelPage() {
         }
       }
 
-      // 이미지 URL 설정 (이미 S3에 업로드된 경우 사용)
-      let imageUrl = formData.uploadedImageUrl;
-
-      // 이미지 URL을 인플루언서 생성 데이터에 추가
-      if (imageUrl) {
-        createInfluencerData.image_url = imageUrl;
+      // 이미지가 있는 경우 FormData로 전송
+      if (files.imageSamples && files.imageSamples.length > 0) {
+        const formData = new FormData();
+        
+        // 인플루언서 데이터를 JSON 문자열로 변환하여 추가
+        formData.append('influencer_data', JSON.stringify(createInfluencerData));
+        
+        // 첫 번째 이미지 파일 추가
+        formData.append('image', files.imageSamples[0]);
+        
+        // ModelService의 createInfluencerWithImage 메서드 사용
+        await ModelService.createInfluencerWithImage(formData);
+      } else {
+        // 이미지가 없는 경우 기존 방식으로 전송
+        await ModelService.createInfluencer(createInfluencerData);
       }
-
-      // 실제 인플루언서 생성 API 호출
-      const response = await ModelService.createInfluencer(createInfluencerData)
 
       // 성공 알림 표시
       let successMessage = `🎉 AI 인플루언서 "${formData.name}"가 생성되었습니다!\n\n`
@@ -448,8 +436,8 @@ export default function CreateModelPage() {
         personality: personality,
         name: formData.name || undefined,
         description: formData.description || undefined,
-        mbti: formData.mbti !== "none" ? formData.mbti : undefined,
-        gender: formData.gender !== "none" ? formData.gender : undefined,
+        mbti: formData.mbti !== "none" ? mbtiList.find(m => String(m.mbti_id) === formData.mbti)?.mbti_name : undefined,
+        gender: formData.gender !== "none" ? (formData.gender === "0" ? "male" : formData.gender === "1" ? "female" : formData.gender === "2" ? "other" : formData.gender) : undefined,
         age: formData.age || undefined
       }
 
@@ -636,26 +624,24 @@ export default function CreateModelPage() {
 
   const conversationExamples = generatedTones.length > 0 ? generatedTones : generateStaticConversationExamples(formData.personality)
 
-  // 프리셋 기반 동적 옵션 추출
-  // Note: influencer_type, influencer_gender, influencer_age_group은 StylePreset 모델에 정의된 필드입니다.
-  // ModelService.getStylePresets()에서 이 필드들을 포함하여 반환해야 합니다.
-  const uniqueModelTypes = Array.from(new Set(stylePresets.map(p => p.influencer_type))).filter(Boolean);
-  const uniqueModelTypeOptions = uniqueModelTypes.map(type => ({
-    value: String(type),
-    label: type === 1 ? "캐릭터" : type === 2 ? "사람" : type === 3 ? "사물" : `기타(${type})`
-  }));
-  const uniqueGenders = Array.from(new Set(stylePresets.map(p => p.influencer_gender))).filter(Boolean);
-  const uniqueGenderOptions = uniqueGenders.map(gender => ({
-    value: String(gender),
-    label: gender === 0 ? "남성" : gender === 1 ? "여성" : gender === 2 ? "기타" : `기타(${gender})`
-  }));
-  const uniqueAges = Array.from(new Set(stylePresets.map(p => p.influencer_age_group))).filter(Boolean);
-  const uniqueAgeOptions = uniqueAges.map(age => ({
-    value: String(age),
-    label: age === 1 ? "10대" : age === 2 ? "20대" : age === 3 ? "30대" : age === 4 ? "40대" : age === 5 ? "50대 이상" : `기타(${age})`
-  }));
-  const uniquePersonalities = Array.from(new Set(stylePresets.map(p => p.influencer_personality).filter(Boolean)));
-  const uniqueTones = Array.from(new Set(stylePresets.map(p => p.influencer_speech).filter(Boolean)));
+  // 프리셋 기반 동적 옵션 추출은 현재 사용되지 않음 (주석 처리)
+  // const uniqueModelTypes = Array.from(new Set(stylePresets.map(p => p.influencer_type))).filter(Boolean);
+  // const uniqueModelTypeOptions = uniqueModelTypes.map(type => ({
+  //   value: String(type),
+  //   label: type === 1 ? "캐릭터" : type === 2 ? "사람" : type === 3 ? "사물" : `기타(${type})`
+  // }));
+  // const uniqueGenders = Array.from(new Set(stylePresets.map(p => p.influencer_gender))).filter(Boolean);
+  // const uniqueGenderOptions = uniqueGenders.map(gender => ({
+  //   value: String(gender),
+  //   label: gender === 0 ? "남성" : gender === 1 ? "여성" : gender === 2 ? "기타" : `기타(${gender})`
+  // }));
+  // const uniqueAges = Array.from(new Set(stylePresets.map(p => p.influencer_age_group))).filter(Boolean);
+  // const uniqueAgeOptions = uniqueAges.map(age => ({
+  //   value: String(age),
+  //   label: age === 1 ? "10대" : age === 2 ? "20대" : age === 3 ? "30대" : age === 4 ? "40대" : age === 5 ? "50대 이상" : `기타(${age})`
+  // }));
+  // const uniquePersonalities = Array.from(new Set(stylePresets.map(p => p.influencer_personality).filter(Boolean)));
+  // const uniqueTones = Array.from(new Set(stylePresets.map(p => p.influencer_speech).filter(Boolean)));
 
   // 말투 추가 함수
   const handleAddCustomTone = () => {
@@ -761,17 +747,20 @@ export default function CreateModelPage() {
                   <Label htmlFor="mbti">MBTI (선택사항)</Label>
                   <Select value={formData.mbti} onValueChange={(value) => handleInputChange("mbti", value)}>
                     <SelectTrigger>
-                      <SelectValue placeholder="MBTI 선택 (선택사항)" />
+                      <SelectValue placeholder={loadingMbti ? "MBTI 로딩 중..." : "MBTI 선택 (선택사항)"} />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">선택 안함</SelectItem>
-                      {mbtiList.map(mbti => (
+                      {mbtiList.map((mbti) => (
                         <SelectItem key={mbti.mbti_id} value={String(mbti.mbti_id)}>
-                          {mbti.mbti_name}
+                          {mbti.mbti_name} - {mbti.mbti_traits}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
+                  {loadingMbti && (
+                    <p className="text-xs text-gray-500 mt-1">MBTI 목록을 불러오는 중...</p>
+                  )}
                 </div>
                 <div>
                   <Label htmlFor="gender">성별*</Label>
@@ -780,10 +769,9 @@ export default function CreateModelPage() {
                       <SelectValue placeholder="성별을 선택하세요" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="none">선택 안함</SelectItem>
-                      <SelectItem value="male">남성</SelectItem>
-                      <SelectItem value="female">여성</SelectItem>
-                      <SelectItem value="other">기타</SelectItem>
+                      <SelectItem value="0">남성</SelectItem>
+                      <SelectItem value="1">여성</SelectItem>
+                      <SelectItem value="2">기타</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -807,7 +795,6 @@ export default function CreateModelPage() {
                     <SelectValue placeholder="허깅페이스 토큰을 선택하세요" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="none">선택 안함</SelectItem>
                     {huggingFaceTokens.map(token => (
                       <SelectItem key={token.hf_manage_id} value={token.hf_manage_id}>
                         {token.hf_token_nickname}
@@ -1067,18 +1054,6 @@ export default function CreateModelPage() {
                             <div className="flex items-center justify-between mb-4">
                               <Label className="text-base font-medium">프로필 이미지</Label>
                               <div className="flex gap-2">
-                                {uploadingImage && (
-                                  <div className="flex items-center gap-2 text-sm text-blue-600">
-                                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
-                                    업로드 중...
-                                  </div>
-                                )}
-                                {formData.uploadedImageUrl && (
-                                  <div className="flex items-center gap-2 text-sm text-green-600">
-                                    <div className="w-2 h-2 bg-green-600 rounded-full"></div>
-                                    업로드 완료
-                                  </div>
-                                )}
                                 <input
                                   type="file"
                                   multiple
@@ -1124,10 +1099,8 @@ export default function CreateModelPage() {
                                     // 해당 이미지 제거
                                     const newFiles = files.imageSamples?.filter((_, i) => i !== index) || []
                                     const newUrls = imagePreviewUrls.filter((_, i) => i !== index)
-                                    setFiles(prev => ({ ...prev, imageSamples: newFiles }))
+                                    setFiles(prev => ({ ...prev, imageSamples: newFiles.length > 0 ? newFiles : null }))
                                     setImagePreviewUrls(newUrls)
-                                    // 업로드된 이미지 URL도 제거
-                                    setFormData(prev => ({ ...prev, uploadedImageUrl: undefined }))
                                     // 기존 URL 해제
                                     URL.revokeObjectURL(url)
                                   }}
