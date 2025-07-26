@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo, useEffect, useRef } from "react"
+import { useState, useMemo, useEffect, useRef, useCallback } from "react"
 import Link from "next/link"
 import { Navigation } from "@/components/navigation"
 import { Button } from "@/components/ui/button"
@@ -76,34 +76,37 @@ export default function DashboardPage() {
   }, [hasValidGroup])
 
   // 필터 적용된 인플루언서 목록
-  const filteredInfluencers = influencers.filter(
-    (influencer) => {
-      const matchesSearch = influencer.influencer_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (influencer.style_preset?.style_preset_name || '').toLowerCase().includes(searchTerm.toLowerCase())
-      const matchesStatus = statusFilter === "all" ||
-        (statusFilter === "learning" && influencer.learning_status === 0) ||
-        (statusFilter === "ready" && influencer.learning_status === 1) ||
-        (statusFilter === "error" && influencer.learning_status === 2)
-      const matchesPlatform = platformFilter === "all" ||
-        (platformFilter === "instagram" && influencer.instagram_is_active) ||
-        (platformFilter === "not_connected" && !influencer.instagram_is_active)
-      return matchesSearch && matchesStatus && matchesPlatform
-    }
-  )
+  const filteredInfluencers = useMemo(() => {
+    return influencers.filter(
+      (influencer) => {
+        const matchesSearch = influencer.influencer_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          (influencer.style_preset?.style_preset_name || '').toLowerCase().includes(searchTerm.toLowerCase())
+        const matchesStatus = statusFilter === "all" ||
+          (statusFilter === "learning" && influencer.learning_status === 0) ||
+          (statusFilter === "ready" && influencer.learning_status === 1) ||
+          (statusFilter === "error" && influencer.learning_status === 2)
+        const matchesPlatform = platformFilter === "all" ||
+          (platformFilter === "instagram" && influencer.instagram_is_active) ||
+          (platformFilter === "not_connected" && !influencer.instagram_is_active)
+        return matchesSearch && matchesStatus && matchesPlatform
+      }
+    )
+  }, [influencers, searchTerm, statusFilter, platformFilter])
 
   // 필터 적용 핸들러
-  const handleApplyFilters = () => {
+  const handleApplyFilters = useCallback(() => {
     setStatusFilter(tempStatusFilter)
     setPlatformFilter(tempPlatformFilter)
     setIsFilterModalOpen(false)
-  }
-  const handleOpenFilterModal = () => {
+  }, [tempStatusFilter, tempPlatformFilter])
+
+  const handleOpenFilterModal = useCallback(() => {
     setTempStatusFilter(statusFilter)
     setTempPlatformFilter(platformFilter)
     setIsFilterModalOpen(true)
-  }
+  }, [statusFilter, platformFilter])
 
-  const handleDeleteInfluencer = async (influencerId: string) => {
+  const handleDeleteInfluencer = useCallback(async (influencerId: string) => {
     const influencer = influencers.find(i => i.influencer_id === influencerId)
     if (influencer && (hasPermission('model', 'delete') || influencer.user_id === user?.user_id)) {
       try {
@@ -114,13 +117,13 @@ export default function DashboardPage() {
         setError('인플루언서 삭제에 실패했습니다.')
       }
     }
-  }
+  }, [influencers, hasPermission, user?.user_id])
 
-  const canDeleteInfluencer = (influencer: AIInfluencer) => {
+  const canDeleteInfluencer = useCallback((influencer: AIInfluencer) => {
     return hasPermission('model', 'delete') || influencer.user_id === user?.user_id
-  }
+  }, [hasPermission, user?.user_id])
 
-  const getStatusBadge = (learning_status: number) => {
+  const getStatusBadge = useCallback((learning_status: number) => {
     switch (learning_status) {
       case 1:
         return <Badge className="bg-green-100 text-green-800">사용 가능</Badge>
@@ -131,13 +134,13 @@ export default function DashboardPage() {
       default:
         return <Badge variant="secondary">알 수 없음</Badge>
     }
-  }
+  }, [])
 
   // 문자열이 너무 길면 ...으로 자르는 유틸 함수
-  function truncateText(text: string | undefined | null, maxLength = 60) {
+  const truncateText = useCallback((text: string | undefined | null, maxLength = 60) => {
     if (!text) return '-';
     return text.length > maxLength ? text.slice(0, maxLength - 3) + '...' : text;
-  }
+  }, [])
 
   // 그룹이 할당되지 않은 사용자는 빈 대시보드 표시
   if (!hasValidGroup) {

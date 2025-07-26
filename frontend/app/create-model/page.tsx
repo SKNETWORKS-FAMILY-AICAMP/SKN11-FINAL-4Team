@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { Navigation } from "@/components/navigation"
 import { Button } from "@/components/ui/button"
@@ -147,7 +147,7 @@ export default function CreateModelPage() {
     }
   }, [formData.tone]);
 
-  const handleInputChange = (field: string, value: string | string[]) => {
+  const handleInputChange = useCallback((field: string, value: string | string[]) => {
     setFormData((prev) => {
       // 이미지 메서드가 변경되는 경우 관련 필드들 초기화
       if (field === "imageMethod") {
@@ -186,7 +186,7 @@ export default function CreateModelPage() {
         imagePreviewUrls.forEach(url => URL.revokeObjectURL(url))
       }
     }
-  }
+  }, [])
 
   const handleFileUpload = async (type: keyof typeof files, uploadedFiles: FileList | null) => {
     if (uploadedFiles) {

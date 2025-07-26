@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, Suspense, useEffect, useRef } from "react";
+import { useState, Suspense, useEffect, useRef, useCallback } from "react";
 import { AlertCircle } from "lucide-react";
 import React, { FC } from "react";
 import { useParams, useSearchParams, useRouter } from "next/navigation";
@@ -262,161 +262,8 @@ function ModelDetailContent() {
     }>
   >([]);
 
-  // 7일간 API 호출수 데이터 로드
-  const loadWeeklyChartData = async () => {
-    try {
-      const apiUsageResponse = (await apiClient.get(
-        `/api/v1/analytics/api-calls/`,
-      )) as any;
-
-      // 특정 인플루언서의 API 호출 데이터 필터링
-      const influencerApiCalls = apiUsageResponse.filter(
-        (call: any) => call.influencer_id === params.id?.toString(),
-      );
-
-      // 최근 7일간 데이터 생성
-      const last7Days = [];
-      for (let i = 6; i >= 0; i--) {
-        const date = new Date();
-        date.setDate(date.getDate() - i);
-        const dateStr = date.toISOString().split("T")[0];
-
-        // 해당 날짜의 API 호출수 찾기
-        const dayCalls = influencerApiCalls
-          .filter((call: any) => call.created_at?.startsWith(dateStr))
-          .reduce(
-            (sum: number, call: any) => sum + (call.daily_call_count || 0),
-            0,
-          );
-
-        last7Days.push({
-          date: dateStr,
-          calls: dayCalls,
-        });
-      }
-
-      setWeeklyChartData(last7Days);
-    } catch (error) {
-      console.error("7일간 차트 데이터 로드 실패:", error);
-      setWeeklyChartData([]);
-    }
-  };
-
-  // Instagram 상태 변경 시 처리
-  React.useEffect(() => {
-    // Instagram 상태 업데이트 처리
-  }, [instagramStatus]);
-
-  // 게시글 데이터 로드
-  const loadPostsData = async () => {
-    setIsPostsLoading(true);
-    try {
-      // 특정 인플루언서의 게시글만 조회
-      const boardData = await apiClient.get<any[]>(
-        `/api/v1/boards?influencer_id=${params.id}`,
-      );
-
-      // 인플루언서 정보 조회
-      const influencerResponse = await apiClient.get(`/api/v1/influencers/${params.id}`);
-      const influencerData = influencerResponse as any;
-
-      // 게시글 데이터 변환
-      const transformedPosts: ContentPost[] = boardData.map((board: any) => {
-        // 인플루언서 ID를 통해 인플루언서 정보 사용
-        const influencerName =
-          board.influencer_name || influencerData?.influencer_name || "AI 인플루언서";
-        const influencerDescription =
-          board.influencer_description || influencerData?.influencer_description || "";
-
-        const basePost = {
-          id: board.board_id,
-          title: board.board_topic || "제목 없음",
-          content: board.board_description || "",
-          platform: getPlatformName(board.board_platform),
-          status: getStatusName(board.board_status),
-          publishedAt: board.published_at || board.created_at || "",
-          scheduledAt: board.reservation_at || "",
-          hashtags: board.board_hash_tag
-            ? board.board_hash_tag
-              .split(" ")
-              .filter((tag: string) => tag.trim())
-              .map((tag: string) => (tag.startsWith("#") ? tag : `#${tag}`))
-            : [],
-          media: {
-            type: board.image_url && board.image_url.split(",").length > 1 ? "carousel" as const : "image" as const,
-            urls: board.image_url
-              ? board.image_url.split(",").map((url: string) => url.trim()).filter(Boolean)
-              : ["/placeholder.svg?height=400&width=400"],
-            thumbnailUrl: board.image_url ? board.image_url.split(",")[0]?.trim() || "/placeholder.svg?height=400&width=400" : "/placeholder.svg?height=400&width=400",
-          },
-          // 인플루언서 정보: 조회한 값 사용
-          influencerId: board.influencer_id,
-          influencerName: influencerName,
-          influencerDescription: influencerDescription,
-          // Instagram 링크 추가
-          instagram_link: board.instagram_link || undefined,
-        };
-
-        // 인스타그램 통계 정보 추가
-        const instagramStats = board.instagram_stats || {
-          like_count: 0,
-          comments_count: 0,
-        };
-
-        return {
-          ...basePost,
-          engagement: {
-            likes: instagramStats.like_count || 0,
-            comments: instagramStats.comments_count || 0,
-          },
-        };
-      });
-
-      setPosts(transformedPosts);
-    } catch (error) {
-      // 에러 시 빈 배열로 설정
-      setPosts([]);
-    } finally {
-      setIsPostsLoading(false);
-    }
-  };
-
-  // 플랫폼 번호를 이름으로 변환
-  const getPlatformName = (platformNumber: number) => {
-    switch (platformNumber) {
-      case 0:
-        return "Instagram";
-      case 1:
-        return "Blog";
-      case 2:
-        return "Facebook";
-      case 3:
-        return "Twitter";
-      case 4:
-        return "TikTok";
-      case 5:
-        return "YouTube";
-      default:
-        return "Instagram";
-    }
-  };
-
-  // 상태 번호를 이름으로 변환
-  const getStatusName = (statusNumber: number) => {
-    switch (statusNumber) {
-      case 1:
-        return "draft" as const; // 임시저장
-      case 2:
-        return "scheduled" as const; // 예약됨
-      case 3:
-        return "published" as const; // 발행됨
-      default:
-        return "draft" as const;
-    }
-  };
-
   // 분석 데이터 로드 - 게시글 데이터 기반으로 계산
-  const loadAnalyticsData = async () => {
+  const loadAnalyticsData = useCallback(async () => {
     try {
       // 게시글 데이터가 로드된 후 분석 데이터 계산
       const publishedPosts = posts.filter((p) => p.status === "published");
@@ -489,7 +336,47 @@ function ModelDetailContent() {
         totalComments: 0,
       });
     }
-  };
+  }, [posts, params.id]);
+
+  // 7일간 API 호출수 데이터 로드
+  const loadWeeklyChartData = useCallback(async () => {
+    try {
+      const apiUsageResponse = (await apiClient.get(
+        `/api/v1/analytics/api-calls/`,
+      )) as any;
+
+      // 특정 인플루언서의 API 호출 데이터 필터링
+      const influencerApiCalls = apiUsageResponse.filter(
+        (call: any) => call.influencer_id === params.id?.toString(),
+      );
+
+      // 최근 7일간 데이터 생성
+      const last7Days = [];
+      for (let i = 6; i >= 0; i--) {
+        const date = new Date();
+        date.setDate(date.getDate() - i);
+        const dateStr = date.toISOString().split("T")[0];
+
+        // 해당 날짜의 API 호출수 찾기
+        const dayCalls = influencerApiCalls
+          .filter((call: any) => call.created_at?.startsWith(dateStr))
+          .reduce(
+            (sum: number, call: any) => sum + (call.daily_call_count || 0),
+            0,
+          );
+
+        last7Days.push({
+          date: dateStr,
+          calls: dayCalls,
+        });
+      }
+
+      setWeeklyChartData(last7Days);
+    } catch (error) {
+      console.error("7일간 차트 데이터 로드 실패:", error);
+      setWeeklyChartData([]);
+    }
+  }, [params.id]);
 
   // 게시글 데이터가 로드된 후 분석 데이터 업데이트
   React.useEffect(() => {
@@ -498,10 +385,10 @@ function ModelDetailContent() {
       loadAnalyticsData();
       loadWeeklyChartData(); // 7일간 차트 데이터도 함께 로드
     }
-  }, [posts]);
+  }, [loadAnalyticsData, loadWeeklyChartData]);
 
   // 모델 데이터 로드
-  const loadModelData = async () => {
+  const loadModelData = useCallback(async () => {
     setIsModelLoading(true);
     try {
       const data = await ModelService.getInfluencer(params.id as string);
@@ -534,10 +421,10 @@ function ModelDetailContent() {
     } finally {
       setIsModelLoading(false);
     }
-  };
+  }, [params.id]);
 
   // API 키 정보 로드
-  const loadApiKeyInfo = async () => {
+  const loadApiKeyInfo = useCallback(async () => {
     // 현재 로그인한 사용자 정보 확인
     const token = localStorage.getItem("access_token");
     if (token) {
@@ -599,7 +486,115 @@ function ModelDetailContent() {
         setApiKeyInfo(null);
       }
     }
-  };
+  }, [params.id]);
+
+  // 게시글 데이터 로드
+  const loadPostsData = useCallback(async () => {
+    setIsPostsLoading(true);
+    try {
+      // 특정 인플루언서의 게시글만 조회
+      const boardData = await apiClient.get<any[]>(
+        `/api/v1/boards?influencer_id=${params.id}`,
+      );
+
+      // 인플루언서 정보 조회
+      const influencerResponse = await apiClient.get(`/api/v1/influencers/${params.id}`);
+      const influencerData = influencerResponse as any;
+
+      // 게시글 데이터 변환
+      const transformedPosts: ContentPost[] = boardData.map((board: any) => {
+        // 인플루언서 ID를 통해 인플루언서 정보 사용
+        const influencerName =
+          board.influencer_name || influencerData?.influencer_name || "AI 인플루언서";
+        const influencerDescription =
+          board.influencer_description || influencerData?.influencer_description || "";
+
+        const basePost = {
+          id: board.board_id,
+          title: board.board_topic || "제목 없음",
+          content: board.board_description || "",
+          platform: getPlatformName(board.board_platform),
+          status: getStatusName(board.board_status),
+          publishedAt: board.published_at || board.created_at || "",
+          scheduledAt: board.reservation_at || "",
+          hashtags: board.board_hash_tag
+            ? board.board_hash_tag
+              .split(" ")
+              .filter((tag: string) => tag.trim())
+              .map((tag: string) => (tag.startsWith("#") ? tag : `#${tag}`))
+            : [],
+          media: {
+            type: board.image_url && board.image_url.split(",").length > 1 ? "carousel" as const : "image" as const,
+            urls: board.image_url
+              ? board.image_url.split(",").map((url: string) => url.trim()).filter(Boolean)
+              : ["/placeholder.svg?height=400&width=400"],
+            thumbnailUrl: board.image_url ? board.image_url.split(",")[0]?.trim() || "/placeholder.svg?height=400&width=400" : "/placeholder.svg?height=400&width=400",
+          },
+          // 인플루언서 정보: 조회한 값 사용
+          influencerId: board.influencer_id,
+          influencerName: influencerName,
+          influencerDescription: influencerDescription,
+          // Instagram 링크 추가
+          instagram_link: board.instagram_link || undefined,
+        };
+
+        // 인스타그램 통계 정보 추가
+        const instagramStats = board.instagram_stats || {
+          like_count: 0,
+          comments_count: 0,
+        };
+
+        return {
+          ...basePost,
+          engagement: {
+            likes: instagramStats.like_count || 0,
+            comments: instagramStats.comments_count || 0,
+          },
+        };
+      });
+
+      setPosts(transformedPosts);
+    } catch (error) {
+      // 에러 시 빈 배열로 설정
+      setPosts([]);
+    } finally {
+      setIsPostsLoading(false);
+    }
+  }, [params.id]);
+
+  // 플랫폼 번호를 이름으로 변환
+  const getPlatformName = useCallback((platformNumber: number) => {
+    switch (platformNumber) {
+      case 0:
+        return "Instagram";
+      case 1:
+        return "Blog";
+      case 2:
+        return "Facebook";
+      case 3:
+        return "Twitter";
+      case 4:
+        return "TikTok";
+      case 5:
+        return "YouTube";
+      default:
+        return "Instagram";
+    }
+  }, []);
+
+  // 상태 번호를 이름으로 변환
+  const getStatusName = useCallback((statusNumber: number) => {
+    switch (statusNumber) {
+      case 1:
+        return "draft" as const; // 임시저장
+      case 2:
+        return "scheduled" as const; // 예약됨
+      case 3:
+        return "published" as const; // 발행됨
+      default:
+        return "draft" as const;
+    }
+  }, []);
 
   // 이미지 파일 처리 공통 함수
   const processImageFile = async (file: File) => {
@@ -1091,13 +1086,13 @@ function ModelDetailContent() {
   };
 
   // 컴포넌트 마운트 시 모델 데이터 로드
-  React.useEffect(() => {
+  useEffect(() => {
     const loadData = async () => {
       await loadModelData();
       await loadPostsData();
     };
     loadData();
-  }, [params.id]);
+  }, [loadModelData, loadPostsData]);
 
   // 모델 데이터 로드 후 Instagram 상태 확인
   // 컴포넌트 언마운트 시 오디오 정리
@@ -1110,7 +1105,7 @@ function ModelDetailContent() {
     };
   }, []);
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (!isModelLoading && model) {
       // 베이스 음성 확인
       checkBaseVoice();
@@ -1158,14 +1153,14 @@ function ModelDetailContent() {
 
   // 예약된 게시글이 있을 때 주기적으로 상태 확인 (30초마다)
   // 음성 탭이 선택되었을 때 음성 히스토리 로드
-  React.useEffect(() => {
+  useEffect(() => {
     if (activeTab === "voice" && !isLoadingVoiceHistory) {
       loadVoiceHistory();
     }
-  }, [activeTab]);
+  }, [activeTab, isLoadingVoiceHistory]);
 
   // pending 상태의 음성이 있을 때 주기적으로 상태 확인 (3초마다)
-  React.useEffect(() => {
+  useEffect(() => {
     // 현재 상태를 ref에 저장
     voiceHistory.forEach((voice) => {
       if (voice.id && voice.status) {
@@ -1187,7 +1182,7 @@ function ModelDetailContent() {
           const updatedVoices = response.map((voice: any) => ({
             id: voice.id,
             text: voice.text,
-            url: voice.url || voice.s3_url,
+            url: voice.audio_url || voice.s3_url,
             duration: voice.duration,
             createdAt: voice.createdAt || voice.created_at,
             status: voice.status || "completed",
@@ -1209,19 +1204,16 @@ function ModelDetailContent() {
           // 상태 업데이트
           setVoiceHistory(updatedVoices);
 
-          // 알림 표시
+          // 새로 완료된 음성이 있으면 알림
           if (newlyCompletedVoices.length > 0) {
             toast({
               title: "음성 생성 완료",
-              description: `${newlyCompletedVoices.length}개의 음성이 성공적으로 생성되었습니다.`,
+              description: `${newlyCompletedVoices.length}개의 음성이 생성되었습니다.`,
+              variant: "default",
             });
-
-            // 첫 번째 완료된 음성 자동 재생 (선택사항)
-            if (newlyCompletedVoices[0]?.url) {
-              handlePlayVoice(newlyCompletedVoices[0].url);
-            }
           }
 
+          // 새로 실패한 음성이 있으면 알림
           if (newlyFailedVoices.length > 0) {
             toast({
               title: "음성 생성 실패",
@@ -1236,7 +1228,7 @@ function ModelDetailContent() {
     }
   }, [voiceHistory, activeTab, params.id]);
 
-  React.useEffect(() => {
+  useEffect(() => {
     const hasScheduledPosts = posts.some((post) => post.status === "scheduled");
 
     if (hasScheduledPosts) {
@@ -1266,9 +1258,7 @@ function ModelDetailContent() {
                 ? board.board_hash_tag
                   .split(" ")
                   .filter((tag: string) => tag.trim())
-                  .map((tag: string) =>
-                    tag.startsWith("#") ? tag : `#${tag}`,
-                  )
+                  .map((tag: string) => (tag.startsWith("#") ? tag : `#${tag}`))
                 : [],
               media: {
                 type: "image" as const,
@@ -1323,7 +1313,7 @@ function ModelDetailContent() {
 
       return () => clearInterval(interval);
     }
-  }, [posts, params.id, model]);
+  }, [posts, params.id, model, loadPostsData, loadAnalyticsData, getPlatformName, getStatusName]);
 
   const getStatusBadge = (status: ContentPost["status"]) => {
     switch (status) {

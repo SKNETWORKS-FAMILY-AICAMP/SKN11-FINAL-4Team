@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef, Suspense } from "react"
+import { useState, useEffect, useRef, Suspense, useCallback } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
 import Link from "next/link"
 import { Navigation } from "@/components/navigation"
@@ -74,7 +74,7 @@ function PostListContent() {
   const router = useRouter()
 
   // API에서 게시글 목록 가져오기
-  const fetchPosts = async () => {
+  const fetchPosts = useCallback(async () => {
     if (isFetchingRef.current) return
 
     try {
@@ -104,97 +104,83 @@ function PostListContent() {
             }
           }
 
+          // 게시글 데이터 변환
           const basePost = {
-            ...board,
             id: board.board_id,
-            title: board.board_topic,
-            content: board.board_description,
-            createdAt: board.created_at,
-            platform: getPlatformName(board.board_platform),
-            hashtags: board.board_hash_tag ? board.board_hash_tag.split(' ').filter((tag: string) => tag.trim()).map((tag: string) => tag.startsWith('#') ? tag : `#${tag}`) : [],
-            status: getStatusName(board.board_status),
+            board_id: board.board_id,
+            title: board.board_topic || '제목 없음',
+            board_topic: board.board_topic || '제목 없음',
+            content: board.board_description || '',
+            board_description: board.board_description || '',
             author: influencerName,
             modelName: influencerName,
-            scheduledAt: board.reservation_at,
-            publishedAt: board.published_at,
-            // 인플루언서 정보: 별도 조회한 값 사용
-            influencerName: influencerName,
-            influencerDescription: influencerDescription,
+            status: getStatusName(board.board_status),
+            createdAt: board.created_at || new Date().toISOString(),
+            created_at: board.created_at || new Date().toISOString(),
+            updated_at: board.updated_at || new Date().toISOString(),
+            platform: getPlatformName(board.board_platform),
+            board_platform: board.board_platform,
+            board_status: board.board_status,
+            influencer_id: board.influencer_id,
+            user_id: board.user_id,
+            team_id: board.team_id,
+            group_id: board.group_id,
+            board_hash_tag: board.board_hash_tag || '',
+            image_url: board.image_url || '/placeholder.svg?height=400&width=400',
+            engagement: {
+              likes: board.instagram_stats?.like_count || 0,
+              comments: board.instagram_stats?.comments_count || 0,
+            },
+            hashtags: board.board_hash_tag
+              ? board.board_hash_tag.split(' ').filter(tag => tag.trim()).map(tag => tag.startsWith('#') ? tag : `#${tag}`)
+              : [],
             media: {
-              type: board.image_url && board.image_url.split(",").length > 1 ? "carousel" as const : "image" as const,
-              urls: board.image_url ? board.image_url.split(",").map((url: string) => url.trim()).filter(Boolean) : ["/placeholder.svg?height=400&width=400"],
-              thumbnailUrl: board.image_url ? board.image_url.split(",")[0]?.trim() || "/placeholder.svg?height=400&width=400" : "/placeholder.svg?height=400&width=400"
+              type: 'image' as const,
+              urls: [board.image_url || '/placeholder.svg?height=400&width=400']
             }
           }
 
-          // 백엔드에서 제공하는 인스타그램 통계 사용
-          const instagramStats = board.instagram_stats || {
-            like_count: 0,
-            comments_count: 0,
-            impressions: 0,
-            reach: 0,
-            profile_views: 0,
-            follower_count: 0,
-            saved_count: 0,
-            video_views: 0
-          }
-
-          return {
-            ...basePost,
-            engagement: {
-              likes: instagramStats.like_count || 0,
-              comments: instagramStats.comments_count || 0
-            },
-            instagram_stats: {
-              impressions: instagramStats.impressions || 0,
-              reach: instagramStats.reach || 0,
-              profile_views: instagramStats.profile_views || 0,
-              follower_count: instagramStats.follower_count || 0,
-              saved_count: instagramStats.saved_count || 0,
-              video_views: instagramStats.video_views || 0
-            },
-            instagram_link: board.instagram_link || null
-          }
+          return basePost
         })
       )
 
       setPosts(transformedPosts)
     } catch (error) {
-      toast({
-        title: "게시글 목록 불러오기 실패",
-        description: error instanceof Error ? error.message : "알 수 없는 오류가 발생했습니다.",
-        variant: "destructive",
-      })
+      console.error('게시글 목록 로드 실패:', error)
+      setPosts([])
     } finally {
       setLoading(false)
       isFetchingRef.current = false
     }
-  }
+  }, [])
 
   // 플랫폼 번호를 이름으로 변환
-  const getPlatformName = (platformNumber: number) => {
+  const getPlatformName = useCallback((platformNumber: number) => {
     switch (platformNumber) {
       case 0: return 'Instagram'
       case 1: return 'Blog'
       case 2: return 'Facebook'
+      case 3: return 'Twitter'
+      case 4: return 'TikTok'
+      case 5: return 'YouTube'
       default: return 'Instagram'
     }
-  }
+  }, [])
 
   // 상태 번호를 이름으로 변환
-  const getStatusName = (statusNumber: number) => {
+  const getStatusName = useCallback((statusNumber: number) => {
     switch (statusNumber) {
-      case 1: return 'draft' as const     // 임시저장
-      case 2: return 'scheduled' as const // 예약됨
-      case 3: return 'published' as const // 발행됨
+      case 1: return 'draft' as const
+      case 2: return 'scheduled' as const
+      case 3: return 'published' as const
       default: return 'draft' as const
     }
-  }
+  }, [])
 
   // 컴포넌트 마운트 시 데이터 가져오기
   useEffect(() => {
     fetchPosts()
-  }, [])
+  }, [fetchPosts])
 
   // 예약된 게시글이 있을 때 주기적으로 상태 확인 (60초마다)
   useEffect(() => {
@@ -207,7 +193,7 @@ function PostListContent() {
 
       return () => clearInterval(interval)
     }
-  }, [posts])
+  }, [posts, fetchPosts])
 
   // 새 게시글 처리
   useEffect(() => {
