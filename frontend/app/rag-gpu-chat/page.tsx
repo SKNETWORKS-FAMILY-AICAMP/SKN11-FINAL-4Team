@@ -54,6 +54,8 @@ export default function RAGGPUChatPage() {
   const [influencerName, setInfluencerName] = useState("AI");
   const [topK, setTopK] = useState(5);
   const [similarityThreshold, setSimilarityThreshold] = useState(0.5);
+  const [maxTokens, setMaxTokens] = useState(2048);
+  const [selectedModel, setSelectedModel] = useState("gpt-4");
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -74,8 +76,8 @@ export default function RAGGPUChatPage() {
 
   const checkVectorStats = async () => {
     try {
-      const response = await apiClient.get("/api/v1/rag-gpu/vector_stats");
-      setVectorStats(response.data);
+      const response = await apiClient.get("/api/v1/rag/vector_stats", { requireAuth: false });
+      setVectorStats(response);
     } catch (error) {
       console.error("벡터 스토어 상태 확인 실패:", error);
     }
@@ -111,27 +113,27 @@ export default function RAGGPUChatPage() {
       formData.append("system_message", systemMessage);
       formData.append("influencer_name", influencerName);
 
-      const response = await apiClient.post("/api/v1/rag-gpu/upload_document_gpu", formData, {
-        headers: {
-          "Content-Type": "multipart/form-data",
-        },
-      });
+      const response = await apiClient.post("/api/v1/rag/upload_document_gpu", formData, { requireAuth: false });
+      
+      console.log("API 응답:", response);
 
-      if (response.data.success) {
+      if (response && response.success) {
         setUploadedFile(file.name);
         toast({
           title: "성공",
-          description: `문서가 VLLM GPU 벡터 스토어에 업로드되었습니다. (${response.data.qa_pairs_count}개 QA 쌍)`,
+          description: `문서가 VLLM GPU 벡터 스토어에 업로드되었습니다. (${response.qa_pairs_count}개 QA 쌍)`,
         });
         checkVectorStats(); // 상태 업데이트
       } else {
-        throw new Error("업로드 실패");
+        console.log("응답 데이터 구조:", response);
+        throw new Error(response?.message || "업로드 실패");
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("파일 업로드 실패:", error);
+      const errorMessage = error.response?.data?.detail || error.message || "파일 업로드에 실패했습니다.";
       toast({
         title: "오류",
-        description: "파일 업로드에 실패했습니다.",
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {
@@ -154,27 +156,43 @@ export default function RAGGPUChatPage() {
     setIsLoading(true);
 
     try {
-      const response = await apiClient.post("/api/v1/rag-gpu/chat_gpu", {
+      const requestData = {
         query: input,
         top_k: topK,
         similarity_threshold: similarityThreshold,
         include_sources: true,
+        max_tokens: maxTokens,
+        model: selectedModel
+      };
+      
+      console.log("채팅 요청 데이터:", requestData);
+      
+      const response = await apiClient.post("/api/v1/rag/chat_gpu", requestData, { 
+        requireAuth: false,
+        headers: {
+          'Content-Type': 'application/json'
+        }
       });
 
-      const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        type: "assistant",
-        content: response.data.response,
-        timestamp: new Date(),
-        sources: response.data.sources,
-      };
+      if (response && response.response) {
+        const assistantMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          type: "assistant",
+          content: response.response,
+          timestamp: new Date(),
+          sources: response.sources,
+        };
 
-      setMessages(prev => [...prev, assistantMessage]);
-    } catch (error) {
+        setMessages(prev => [...prev, assistantMessage]);
+      } else {
+        throw new Error("응답 데이터가 올바르지 않습니다.");
+      }
+    } catch (error: any) {
       console.error("채팅 실패:", error);
+      const errorMessage = error.response?.data?.detail || error.message || "메시지 전송에 실패했습니다.";
       toast({
         title: "오류",
-        description: "메시지 전송에 실패했습니다.",
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {
@@ -191,7 +209,7 @@ export default function RAGGPUChatPage() {
 
   const clearVectorStore = async () => {
     try {
-      await apiClient.delete("/api/v1/rag-gpu/clear_vector_store");
+      await apiClient.delete("/api/v1/rag/clear_vector_store", { requireAuth: false });
       setUploadedFile(null);
       setMessages([]);
       toast({
@@ -212,9 +230,9 @@ export default function RAGGPUChatPage() {
   return (
     <div className="container mx-auto p-4 max-w-6xl">
       <div className="mb-6">
-        <h1 className="text-3xl font-bold mb-2">VLLM GPU 벡터 검색 RAG 챗봇</h1>
+        <h1 className="text-3xl font-bold mb-2">VLLM GPU 벡터 검색 + OpenAI RAG 챗봇</h1>
         <p className="text-muted-foreground">
-          CUDA 기반 고성능 벡터 검색을 사용한 문서 기반 챗봇
+          VLLM GPU 메모리 + OpenAI 답변 생성
         </p>
       </div>
 
@@ -249,7 +267,7 @@ export default function RAGGPUChatPage() {
             </div>
           </div>
           
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
             <div>
               <Label htmlFor="topK">검색 결과 수 (Top-K)</Label>
               <Input
@@ -272,6 +290,31 @@ export default function RAGGPUChatPage() {
                 min={0}
                 max={1}
               />
+            </div>
+            <div>
+              <Label htmlFor="maxTokens">최대 토큰 수</Label>
+              <Input
+                id="maxTokens"
+                type="number"
+                value={maxTokens}
+                onChange={(e) => setMaxTokens(Number(e.target.value))}
+                min={512}
+                max={4096}
+                step={512}
+              />
+            </div>
+            <div>
+              <Label htmlFor="selectedModel">AI 모델</Label>
+              <select
+                id="selectedModel"
+                value={selectedModel}
+                onChange={(e) => setSelectedModel(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="gpt-4">GPT-4</option>
+                <option value="gpt-4-turbo">GPT-4 Turbo</option>
+                <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
+              </select>
             </div>
             <div className="flex items-end">
               <Button

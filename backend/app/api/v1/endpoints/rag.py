@@ -1,15 +1,13 @@
 """
 RAG (Retrieval-Augmented Generation) API 엔드포인트
-프로젝트 구조에 맞게 재구성된 RAG API
+VLLM GPU 메모리 기반 통합 RAG API
 """
 
-from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, Query, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from typing import Optional, Dict, List
-import json
 import logging
-import base64
 import os
 import tempfile
 from datetime import datetime
@@ -17,13 +15,15 @@ from datetime import datetime
 # Backend imports
 from app.database import get_db
 from app.core.config import settings
-from app.services.rag_service import get_rag_service, RAGConfig
+from app.services.rag_service import get_rag_service
 from app.services.vllm_client import vllm_health_check
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+
+# ==================== Pydantic Models ====================
 
 class DocumentUploadResponse(BaseModel):
     """문서 업로드 응답 모델"""
@@ -50,27 +50,31 @@ class RAGChatResponse(BaseModel):
     error: Optional[str] = None
 
 
-class RAGPipelineInfo(BaseModel):
-    """RAG 파이프라인 정보 모델"""
-    group_id: int
-    pdf_path: str
-    qa_count: int
-    system_message: str
-    influencer_name: str
-    created_at: str
+class ChatRequest(BaseModel):
+    """OpenAI 기반 채팅 요청"""
+    query: str
+    top_k: int = 5
+    similarity_threshold: float = 0.5
+    include_sources: bool = True
+    max_tokens: int = 2048
+    model: str = "gpt-4"
 
 
-class RAGHealthResponse(BaseModel):
-    """RAG 상태 응답 모델"""
-    status: str
-    vllm_server: str
-    active_pipelines: int
-    pipeline_groups: List[int]
-    timestamp: str
+class ChatResponse(BaseModel):
+    """OpenAI 기반 채팅 응답"""
+    response: str
+    sources: List[Dict]
+    query: str
+    search_results: List[Dict]
 
 
-# RAG는 공개 모델 사용하므로 토큰 관련 함수 제거
+class VectorStatsResponse(BaseModel):
+    """벡터 통계 응답"""
+    stats: Dict
+    health: Dict
 
+
+# ==================== Utility Functions ====================
 
 async def _check_vllm_server_with_retry(max_retries: int = 3) -> bool:
     """VLLM 서버 상태 확인 (재시도 포함)"""
@@ -88,6 +92,8 @@ async def _check_vllm_server_with_retry(max_retries: int = 3) -> bool:
     return False
 
 
+# ==================== Document Upload Endpoints ====================
+
 @router.post("/upload_document", response_model=DocumentUploadResponse)
 async def upload_document(
     file: UploadFile = File(..., description="PDF 파일"),
@@ -99,7 +105,7 @@ async def upload_document(
     influencer_name: Optional[str] = Form("AI", description="AI 캐릭터 이름"),
     db: Session = Depends(get_db)
 ):
-    """문서 업로드 및 RAG 파이프라인 생성"""
+    """문서 업로드 및 RAG 파이프라인 생성 (VLLM 기반)"""
     try:
         # 파일 유효성 검사
         if not file.filename.lower().endswith('.pdf'):
@@ -121,8 +127,7 @@ async def upload_document(
                 detail="VLLM 서버에 연결할 수 없습니다. 서버 상태를 확인해주세요."
             )
         
-        # RAG는 공개 모델 사용하므로 토큰 불필요
-        logger.info(f"RAG 파이프라인 생성: group_id={group_id}")
+        logger.info(f"VLLM GPU RAG 파이프라인 생성: group_id={group_id}")
         
         # 임시 파일로 저장
         with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
@@ -146,7 +151,7 @@ async def upload_document(
                 pipeline_info = rag_service.get_pipeline_info(group_id)
                 return DocumentUploadResponse(
                     status="success",
-                    message=f"문서 업로드 완료: {pipeline_info['qa_count']}개 QA 쌍 생성",
+                    message=f"VLLM GPU 문서 업로드 완료: {pipeline_info['qa_count']}개 QA 쌍 생성",
                     pipeline_info=pipeline_info
                 )
             else:
@@ -169,9 +174,87 @@ async def upload_document(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/upload_document_gpu", response_model=DocumentUploadResponse)
+async def upload_document_gpu(
+    file: UploadFile = File(..., description="PDF 파일"),
+    group_id: int = Form(..., description="그룹 ID"),
+    system_message: Optional[str] = Form(
+        "당신은 제공된 참고 문서의 정확한 정보와 사실을 바탕으로 답변하는 AI 어시스턴트입니다.",
+        description="시스템 메시지"
+    ),
+    influencer_name: Optional[str] = Form("AI", description="AI 캐릭터 이름"),
+    db: Session = Depends(get_db)
+):
+    """PDF 문서를 VLLM GPU 벡터 스토어에 업로드 (OpenAI 기반)"""
+    try:
+        logger.info(f"📥 GPU 문서 업로드 시작: {file.filename}")
+        
+        # 파일 검증
+        if not file.filename.lower().endswith('.pdf'):
+            raise HTTPException(status_code=400, detail="PDF 파일만 업로드 가능합니다.")
+        
+        if file.size > 10 * 1024 * 1024:  # 10MB 제한
+            raise HTTPException(status_code=400, detail="파일 크기는 10MB를 초과할 수 없습니다.")
+        
+        logger.info(f"✅ 파일 검증 통과: {file.filename} ({file.size} bytes)")
+        
+        # 임시 파일로 저장
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
+            content = await file.read()
+            temp_file.write(content)
+            temp_file_path = temp_file.name
+            logger.info(f"📁 임시 파일 저장: {temp_file_path}")
+        
+        try:
+            # RAG 서비스로 문서 처리
+            logger.info("🔄 RAG 서비스 문서 처리 시작")
+            rag_service = get_rag_service()
+            qa_pairs = await rag_service.document_processor.process_pdf(temp_file_path)
+            
+            logger.info(f"📄 QA 쌍 생성 완료: {len(qa_pairs)}개")
+            
+            if not qa_pairs:
+                raise HTTPException(status_code=500, detail="QA 쌍 생성에 실패했습니다.")
+            
+            # VLLM GPU 메모리에 저장
+            source_file = file.filename
+            logger.info("💾 VLLM GPU 메모리 저장 시작")
+            success = await rag_service.vector_store.store_qa_data(qa_pairs, source_file)
+            
+            if not success:
+                raise HTTPException(status_code=500, detail="VLLM GPU 메모리 저장에 실패했습니다.")
+            
+            logger.info("✅ VLLM GPU 메모리 저장 완료")
+            
+            return DocumentUploadResponse(
+                status="success",
+                message=f"문서가 VLLM GPU 벡터 스토어에 성공적으로 업로드되었습니다.",
+                pipeline_info={
+                    "qa_count": len(qa_pairs),
+                    "source_file": source_file
+                }
+            )
+            
+        finally:
+            # 임시 파일 정리
+            if os.path.exists(temp_file_path):
+                os.unlink(temp_file_path)
+                logger.info(f"🗑️ 임시 파일 삭제: {temp_file_path}")
+                
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ GPU 문서 업로드 실패: {e}")
+        import traceback
+        logger.error(f"❌ 상세 오류: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"문서 업로드 실패: {str(e)}")
+
+
+# ==================== Chat Endpoints ====================
+
 @router.post("/chat", response_model=RAGChatResponse)
 async def rag_chat(req: RAGChatRequest, db: Session = Depends(get_db)):
-    """RAG 기반 채팅 (비스트리밍)"""
+    """VLLM GPU RAG 기반 채팅 (VLLM 기반)"""
     try:
         # RAG 서비스 가져오기
         rag_service = get_rag_service()
@@ -186,188 +269,165 @@ async def rag_chat(req: RAGChatRequest, db: Session = Depends(get_db)):
         return RAGChatResponse(**result)
         
     except Exception as e:
-        logger.error(f"[RAG CHAT] 채팅 실패: {e}")
+        logger.error(f"[VLLM GPU RAG CHAT] 채팅 실패: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.websocket("/chat/{group_id}")
-async def rag_chat_websocket(
-    websocket: WebSocket, 
-    group_id: int, 
-    lora_repo: str = Query(...), 
-    influencer_id: str = Query(None), 
-    db: Session = Depends(get_db)
-):
-    """RAG 기반 웹소켓 채팅"""
-    # lora_repo 디코딩
+@router.post("/chat_gpu", response_model=ChatResponse)
+async def chat_gpu(chat_request: ChatRequest):
+    """VLLM GPU 벡터 검색을 사용한 채팅 (OpenAI 기반)"""
     try:
-        lora_repo_decoded = base64.b64decode(lora_repo).decode()
-    except Exception as e:
-        await websocket.accept()
-        await websocket.send_text(json.dumps({
-            "error_code": "LORA_REPO_DECODE_ERROR", 
-            "message": f"lora_repo 디코딩 실패: {e}"
-        }))
-        await websocket.close()
-        return
-    
-    await websocket.accept()
-    
-    try:
-        # VLLM 서버 상태 확인
-        if not await _check_vllm_server_with_retry():
-            logger.warning(f"[RAG WS] VLLM 서버 연결 불안정하지만 계속 진행")
-            await websocket.send_text(json.dumps({
-                "type": "warning",
-                "message": "VLLM 서버 연결이 불안정합니다. 응답이 지연될 수 있습니다."
-            }))
+        query = chat_request.query
+        top_k = chat_request.top_k
+        similarity_threshold = chat_request.similarity_threshold
+        include_sources = chat_request.include_sources
+        max_tokens = chat_request.max_tokens
+        model = chat_request.model
         
-        # RAG 서비스 가져오기
+        logger.info(f"🔍 GPU 벡터 검색 시작: query='{query}', top_k={top_k}, similarity_threshold={similarity_threshold}")
+        
+        # VLLM GPU 메모리 검색
         rag_service = get_rag_service()
+        search_results = await rag_service.vector_store.search_similar(query, top_k)
         
-        # 파이프라인 확인
-        pipeline_info = rag_service.get_pipeline_info(group_id)
-        if not pipeline_info:
-            await websocket.send_text(json.dumps({
-                "error_code": "RAG_PIPELINE_NOT_FOUND",
-                "message": f"그룹 {group_id}에 대한 RAG 파이프라인이 없습니다. 먼저 문서를 업로드해주세요."
-            }))
-            await websocket.close()
-            return
-        
-        # 인플루언서 정보 가져오기 (필요시)
-        system_prompt = pipeline_info.get("system_message", "당신은 도움이 되는 AI 어시스턴트입니다.")
-        influencer_name = pipeline_info.get("influencer_name", "AI")
-        
-        # WebSocket 프록시 모드
-        while True:
-            try:
-                data = await websocket.receive_text()
-                logger.info(f"[RAG WS] 메시지 수신: {data[:100]}...")
-                
-                # RAG 채팅 실행
-                result = await rag_service.chat(
-                    group_id=group_id,
-                    query=data,
-                    include_sources=True
-                )
-                
-                if "error" in result:
-                    await websocket.send_text(json.dumps({
-                        "type": "error",
-                        "message": result["error"]
-                    }))
-                    continue
-                
-                # 응답 전송
-                await websocket.send_text(json.dumps({
-                    "type": "response",
-                    "content": result["response"],
-                    "sources": result.get("sources", []),
-                    "context_preview": result.get("context_preview", "")
-                }))
-                
-            except WebSocketDisconnect:
-                logger.info(f"[RAG WS] WebSocket 연결 종료: group_id={group_id}")
-                break
-            except Exception as e:
-                logger.error(f"[RAG WS] 오류 발생: {e}")
-                await websocket.send_text(json.dumps({
-                    "type": "error",
-                    "message": f"채팅 중 오류가 발생했습니다: {str(e)}"
-                }))
-                break
-                
-    except Exception as e:
-        logger.error(f"[RAG WS] 초기화 실패: {e}")
-        await websocket.send_text(json.dumps({
-            "error_code": "INITIALIZATION_ERROR",
-            "message": f"초기화 중 오류가 발생했습니다: {str(e)}"
-        }))
-        await websocket.close()
-
-
-@router.get("/status/{group_id}", response_model=Optional[RAGPipelineInfo])
-async def get_rag_status(group_id: int):
-    """RAG 파이프라인 상태 조회"""
-    try:
-        rag_service = get_rag_service()
-        pipeline_info = rag_service.get_pipeline_info(group_id)
-        
-        if pipeline_info:
-            return RAGPipelineInfo(group_id=group_id, **pipeline_info)
-        else:
-            return None
-            
-    except Exception as e:
-        logger.error(f"[RAG STATUS] 상태 조회 실패: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.delete("/cleanup/{group_id}")
-async def cleanup_rag_pipeline(group_id: int):
-    """RAG 파이프라인 정리"""
-    try:
-        rag_service = get_rag_service()
-        success = await rag_service.cleanup_pipeline(group_id)
-        
-        if success:
-            return {"status": "success", "message": f"파이프라인 정리 완료: group_id={group_id}"}
-        else:
-            raise HTTPException(
-                status_code=404,
-                detail=f"그룹 {group_id}에 대한 파이프라인을 찾을 수 없습니다."
+        if not search_results:
+            return ChatResponse(
+                response="죄송합니다. 관련된 정보를 찾을 수 없습니다.",
+                sources=[],
+                query=query,
+                search_results=[]
             )
+        
+        # 컨텍스트 구성 (길이 제한)
+        context_parts = []
+        sources = []
+        total_length = 0
+        max_context_length = 1500  # 토큰 제한을 고려한 문자 길이 제한
+        
+        for result in search_results:
+            text = result["text"]
+            if total_length + len(text) > max_context_length:
+                # 남은 공간에 맞게 텍스트 자르기
+                remaining_length = max_context_length - total_length
+                if remaining_length > 100:  # 최소 100자 이상 남은 경우에만 추가
+                    text = text[:remaining_length] + "..."
+                else:
+                    break
+            
+            context_parts.append(text)
+            total_length += len(text)
+            
+            if include_sources:
+                sources.append({
+                    "text": result["text"],
+                    "score": result["score"],
+                    "type": result["metadata"].get("type", "unknown"),
+                    "chunk_id": result["metadata"].get("chunk_id", "unknown"),
+                    "metadata": result["metadata"]
+                })
+        
+        context = "\n\n".join(context_parts)
+        logger.info(f"📝 컨텍스트 길이: {len(context)} 문자")
+        
+        # OpenAI API로 답변 생성
+        from openai import OpenAI
+        
+        if not settings.OPENAI_API_KEY:
+            raise HTTPException(status_code=500, detail="OpenAI API 키가 설정되지 않았습니다.")
+        
+        client = OpenAI(api_key=settings.OPENAI_API_KEY)
+        
+        system_message = (
+            "당신은 제공된 참고 문서의 정확한 정보와 사실을 바탕으로 답변하는 AI 어시스턴트입니다. "
+            "문서에 포함된 모든 내용을 정확히 그대로 포함하여 답변하세요.\n\n"
+            "참고 문서:\n" + context
+        )
+        
+        try:
+            response = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": system_message},
+                    {"role": "user", "content": query}
+                ],
+                max_tokens=max_tokens,
+                temperature=0.8
+            )
+            
+            response_text = response.choices[0].message.content
+        except Exception as e:
+            logger.error(f"❌ OpenAI API 호출 실패: {e}")
+            response_text = "죄송합니다. 응답을 생성할 수 없습니다."
+        
+        # 검색 결과를 딕셔너리로 변환
+        search_results_dict = []
+        for result in search_results:
+            search_results_dict.append({
+                "text": result["text"],
+                "score": result["score"],
+                "chunk_id": result["metadata"].get("chunk_id", "unknown"),
+                "metadata": result["metadata"]
+            })
+        
+        return ChatResponse(
+            response=response_text,
+            sources=sources,
+            query=query,
+            search_results=search_results_dict
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ GPU 채팅 실패: {e}")
+        raise HTTPException(status_code=500, detail=f"채팅 실패: {str(e)}")
+
+
+# ==================== Vector Store Management ====================
+
+@router.get("/vector_stats", response_model=VectorStatsResponse)
+async def get_vector_stats():
+    """VLLM GPU 메모리 벡터 스토어 통계 및 상태 확인"""
+    try:
+        rag_service = get_rag_service()
+        
+        # VLLM GPU 메모리 상태 확인
+        total_chunks = len(rag_service.vector_store.chunks)
+        
+        # 기본 통계 정보
+        stats = {
+            "total_chunks": total_chunks,
+            "embedding_dimension": 1024,  # BGE-M3 기본 차원
+            "device": "vllm_gpu",
+            "tensor_shape": None
+        }
+        
+        health = {
+            "status": "healthy",
+            "device": "vllm_gpu",
+            "total_chunks": total_chunks,
+            "embedding_model_loaded": True
+        }
+        
+        return VectorStatsResponse(
+            stats=stats,
+            health=health
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ VLLM GPU 벡터 통계 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail=f"통계 조회 실패: {str(e)}")
+
+
+@router.delete("/clear_vector_store")
+async def clear_vector_store():
+    """VLLM GPU 메모리 벡터 스토어 정리"""
+    try:
+        rag_service = get_rag_service()
+        rag_service.vector_store.chunks.clear()
+        
+        return {"success": True, "message": "VLLM GPU 메모리 벡터 스토어가 정리되었습니다."}
             
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"[RAG CLEANUP] 파이프라인 정리 실패: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/health", response_model=RAGHealthResponse)
-async def check_rag_health():
-    """RAG 서비스 전체 상태 확인"""
-    try:
-        # VLLM 서버 상태 확인
-        vllm_status = await _check_vllm_server_with_retry(max_retries=1)
-        
-        # RAG 서비스 가져오기
-        rag_service = get_rag_service()
-        pipelines = rag_service.list_pipelines()
-        
-        return RAGHealthResponse(
-            status="healthy",
-            vllm_server="connected" if vllm_status else "disconnected",
-            active_pipelines=len(pipelines),
-            pipeline_groups=[p["group_id"] for p in pipelines],
-            timestamp=datetime.now().isoformat()
-        )
-        
-    except Exception as e:
-        logger.error(f"[RAG HEALTH] 상태 확인 실패: {e}")
-        return RAGHealthResponse(
-            status="unhealthy",
-            vllm_server="unknown",
-            active_pipelines=0,
-            pipeline_groups=[],
-            timestamp=datetime.now().isoformat()
-        )
-
-
-@router.get("/pipelines", response_model=List[RAGPipelineInfo])
-async def list_rag_pipelines():
-    """모든 RAG 파이프라인 목록 조회"""
-    try:
-        rag_service = get_rag_service()
-        pipelines = rag_service.list_pipelines()
-        
-        return [
-            RAGPipelineInfo(**pipeline)
-            for pipeline in pipelines
-        ]
-        
-    except Exception as e:
-        logger.error(f"[RAG PIPELINES] 파이프라인 목록 조회 실패: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) 
+        logger.error(f"❌ VLLM GPU 메모리 벡터 스토어 정리 실패: {e}")
+        raise HTTPException(status_code=500, detail=f"벡터 스토어 정리 실패: {str(e)}") 

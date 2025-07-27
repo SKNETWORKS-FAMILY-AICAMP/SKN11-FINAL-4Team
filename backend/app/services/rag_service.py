@@ -5,6 +5,7 @@ RAG (Retrieval-Augmented Generation) 서비스
 
 import os
 import logging
+import re
 from typing import List, Dict, Optional, Any
 from dataclasses import dataclass
 from pathlib import Path
@@ -131,7 +132,7 @@ class RAGDocumentProcessor:
 
 
 class RAGVectorStore:
-    """RAG 벡터 스토어 (VLLM 기반)"""
+    """RAG 벡터 스토어 (VLLM GPU 메모리 기반)"""
     
     def __init__(self, config: RAGConfig):
         self.config = config
@@ -139,9 +140,9 @@ class RAGVectorStore:
         self.chunks: List[Dict] = []
     
     async def store_qa_data(self, qa_data: List[Dict], source_file: str = "document.pdf") -> bool:
-        """QA 데이터를 벡터 스토어에 저장"""
+        """QA 데이터를 VLLM GPU 메모리에 저장"""
         try:
-            logger.info(f"💾 QA 데이터 저장 시작: {len(qa_data)}개")
+            logger.info(f"💾 VLLM GPU QA 데이터 저장 시작: {len(qa_data)}개")
             
             # 텍스트 추출
             texts = []
@@ -183,15 +184,15 @@ class RAGVectorStore:
                 self.chunks.extend([question_chunk, answer_chunk])
                 chunk_index += 2
             
-            logger.info(f"✅ QA 데이터 저장 완료: {len(self.chunks)}개 청크")
+            logger.info(f"✅ VLLM GPU QA 데이터 저장 완료: {len(self.chunks)}개 청크")
             return True
             
         except Exception as e:
-            logger.error(f"❌ QA 데이터 저장 실패: {e}")
+            logger.error(f"❌ VLLM GPU QA 데이터 저장 실패: {e}")
             return False
     
     async def search_similar(self, query: str, top_k: int = 5) -> List[Dict]:
-        """유사한 문서 검색"""
+        """VLLM GPU 메모리에서 유사한 문서 검색"""
         try:
             if not self.chunks:
                 logger.warning("⚠️ 저장된 청크가 없습니다.")
@@ -223,11 +224,11 @@ class RAGVectorStore:
                         "metadata": item["chunk"]["metadata"]
                     })
             
-            logger.info(f"🔍 검색 완료: {len(results)}개 결과")
+            logger.info(f"🔍 VLLM GPU 검색 완료: {len(results)}개 결과")
             return results
             
         except Exception as e:
-            logger.error(f"❌ 검색 실패: {e}")
+            logger.error(f"❌ VLLM GPU 검색 실패: {e}")
             return []
     
     def _cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
@@ -309,14 +310,14 @@ class RAGService:
     async def create_pipeline(self, group_id: int, pdf_path: str, 
                             system_message: str = None, 
                             influencer_name: str = None) -> bool:
-        """RAG 파이프라인 생성"""
+        """VLLM GPU RAG 파이프라인 생성"""
         try:
-            logger.info(f"🚀 RAG 파이프라인 생성 시작: group_id={group_id}")
+            logger.info(f"🚀 VLLM GPU RAG 파이프라인 생성 시작: group_id={group_id}")
             
             # 1. 문서 처리
             qa_data = await self.document_processor.process_pdf(pdf_path)
             
-            # 2. 벡터 스토어에 저장
+            # 2. VLLM GPU 메모리에 저장
             success = await self.vector_store.store_qa_data(qa_data, pdf_path)
             
             if success:
@@ -329,19 +330,19 @@ class RAGService:
                     "created_at": datetime.now().isoformat()
                 }
                 
-                logger.info(f"✅ RAG 파이프라인 생성 완료: group_id={group_id}")
+                logger.info(f"✅ VLLM GPU RAG 파이프라인 생성 완료: group_id={group_id}")
                 return True
             else:
-                logger.error(f"❌ RAG 파이프라인 생성 실패: group_id={group_id}")
+                logger.error(f"❌ VLLM GPU RAG 파이프라인 생성 실패: group_id={group_id}")
                 return False
                 
         except Exception as e:
-            logger.error(f"❌ RAG 파이프라인 생성 중 오류: {e}")
+            logger.error(f"❌ VLLM GPU RAG 파이프라인 생성 중 오류: {e}")
             return False
     
     async def chat(self, group_id: int, query: str, 
                   include_sources: bool = True) -> Dict:
-        """RAG 채팅"""
+        """VLLM GPU RAG 채팅"""
         try:
             # 파이프라인 확인
             if group_id not in self._pipelines:
@@ -355,7 +356,7 @@ class RAGService:
             
             pipeline_info = self._pipelines[group_id]
             
-            # 1. 유사한 문서 검색
+            # 1. VLLM GPU 메모리에서 유사한 문서 검색
             search_results = await self.vector_store.search_similar(
                 query, top_k=self.config.search_top_k
             )
@@ -398,9 +399,9 @@ class RAGService:
             return result
             
         except Exception as e:
-            logger.error(f"❌ RAG 채팅 실패: {e}")
+            logger.error(f"❌ VLLM GPU RAG 채팅 실패: {e}")
             return {
-                "error": f"채팅 중 오류가 발생했습니다: {str(e)}",
+                "error": f"VLLM GPU 채팅 중 오류가 발생했습니다: {str(e)}",
                 "query": query,
                 "response": "",
                 "sources": [],
