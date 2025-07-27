@@ -15,6 +15,7 @@ from app.api.v1.endpoints import (
     hf_tokens,
     admin,
     chatbot,  # 챗봇 활성화
+    rag,  # RAG API 추가
     comfyui,
     tts,
     mcp,
@@ -53,6 +54,9 @@ api_router.include_router(chat.router, prefix="/chat", tags=["Chat"])
 
 # 챗봇 WebSocket API
 api_router.include_router(chatbot.router, prefix="/chatbot", tags=["Chatbot"])
+
+# RAG API
+api_router.include_router(rag.router, prefix="/rag", tags=["RAG"])
 
 # 분석 및 집계 API
 api_router.include_router(analytics.router, prefix="/analytics", tags=["Analytics"])
