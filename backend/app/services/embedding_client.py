@@ -129,21 +129,28 @@ def get_embedding_client() -> VLLMEmbeddingClient:
     
     if _embedding_client is None:
         from app.core.config import settings
-        vllm_url = getattr(settings, 'VLLM_SERVER_URL', 'http://localhost:8001')
+        # VLLM_BASE_URL 사용 (VLLM 클라이언트와 동일한 설정)
+        vllm_url = getattr(settings, 'VLLM_BASE_URL', 'http://localhost:8001')
         _embedding_client = VLLMEmbeddingClient(base_url=vllm_url)
     
     return _embedding_client
 
 async def generate_embeddings(texts: List[str], **kwargs) -> List[List[float]]:
     """간편한 임베딩 생성 함수"""
-    client = get_embedding_client()
+    from app.core.config import settings
+    # 매번 새로운 클라이언트 생성
+    vllm_url = getattr(settings, 'VLLM_BASE_URL', 'http://localhost:8001')
+    client = VLLMEmbeddingClient(base_url=vllm_url)
     async with client:
         response = await client.generate_embeddings(texts, **kwargs)
         return response.embeddings
 
 async def batch_generate_embeddings(texts: List[str], **kwargs) -> List[List[float]]:
     """간편한 배치 임베딩 생성 함수"""
-    client = get_embedding_client()
+    from app.core.config import settings
+    # 매번 새로운 클라이언트 생성
+    vllm_url = getattr(settings, 'VLLM_BASE_URL', 'http://localhost:8001')
+    client = VLLMEmbeddingClient(base_url=vllm_url)
     async with client:
         response = await client.batch_embedding(texts, **kwargs)
         return response.embeddings 

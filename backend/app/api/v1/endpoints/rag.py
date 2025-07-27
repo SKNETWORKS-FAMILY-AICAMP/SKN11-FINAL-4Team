@@ -3,19 +3,19 @@ RAG (Retrieval-Augmented Generation) API 엔드포인트
 프로젝트 구조에 맞게 재구성된 RAG API
 """
 
-from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, Query
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, Query, UploadFile, File, Form
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from typing import Optional, Dict, List
 import json
 import logging
 import base64
+import os
+import tempfile
 from datetime import datetime
 
 # Backend imports
 from app.database import get_db
-from app.models.user import HFTokenManage
-from app.core.encryption import decrypt_sensitive_data
 from app.core.config import settings
 from app.services.rag_service import get_rag_service, RAGConfig
 from app.services.vllm_client import vllm_health_check
@@ -25,15 +25,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-class DocumentUploadRequest(BaseModel):
-    """문서 업로드 요청 모델"""
-    group_id: int = Field(..., description="그룹 ID")
-    pdf_path: str = Field(..., description="PDF 파일 경로")
-    system_message: Optional[str] = Field(
-        "당신은 제공된 참고 문서의 정확한 정보와 사실을 바탕으로 답변하는 AI 어시스턴트입니다.",
-        description="시스템 메시지"
-    )
-    influencer_name: Optional[str] = Field("AI", description="AI 캐릭터 이름")
+class DocumentUploadResponse(BaseModel):
+    """문서 업로드 응답 모델"""
+    status: str
+    message: str
+    pipeline_info: Optional[Dict] = None
 
 
 class RAGChatRequest(BaseModel):
@@ -73,24 +69,7 @@ class RAGHealthResponse(BaseModel):
     timestamp: str
 
 
-async def _get_hf_token_by_group(group_id: int, db: Session) -> Optional[str]:
-    """그룹별 HF 토큰 가져오기"""
-    try:
-        # 그룹에 해당하는 HF 토큰 조회
-        hf_token_record = db.query(HFTokenManage).filter(
-            HFTokenManage.group_id == group_id,
-            HFTokenManage.is_active == True
-        ).first()
-        
-        if hf_token_record and hf_token_record.hf_token:
-            # 암호화된 토큰 복호화
-            return decrypt_sensitive_data(hf_token_record.hf_token)
-        
-        return None
-        
-    except Exception as e:
-        logger.error(f"HF 토큰 조회 실패: {e}")
-        return None
+# RAG는 공개 모델 사용하므로 토큰 관련 함수 제거
 
 
 async def _check_vllm_server_with_retry(max_retries: int = 3) -> bool:
@@ -109,10 +88,32 @@ async def _check_vllm_server_with_retry(max_retries: int = 3) -> bool:
     return False
 
 
-@router.post("/upload_document", response_model=Dict)
-async def upload_document(req: DocumentUploadRequest, db: Session = Depends(get_db)):
+@router.post("/upload_document", response_model=DocumentUploadResponse)
+async def upload_document(
+    file: UploadFile = File(..., description="PDF 파일"),
+    group_id: int = Form(..., description="그룹 ID"),
+    system_message: Optional[str] = Form(
+        "당신은 제공된 참고 문서의 정확한 정보와 사실을 바탕으로 답변하는 AI 어시스턴트입니다.",
+        description="시스템 메시지"
+    ),
+    influencer_name: Optional[str] = Form("AI", description="AI 캐릭터 이름"),
+    db: Session = Depends(get_db)
+):
     """문서 업로드 및 RAG 파이프라인 생성"""
     try:
+        # 파일 유효성 검사
+        if not file.filename.lower().endswith('.pdf'):
+            raise HTTPException(
+                status_code=400,
+                detail="PDF 파일만 업로드 가능합니다."
+            )
+        
+        if file.size > 10 * 1024 * 1024:  # 10MB 제한
+            raise HTTPException(
+                status_code=400,
+                detail="파일 크기는 10MB 이하여야 합니다."
+            )
+        
         # VLLM 서버 상태 확인
         if not await _check_vllm_server_with_retry():
             raise HTTPException(
@@ -120,34 +121,46 @@ async def upload_document(req: DocumentUploadRequest, db: Session = Depends(get_
                 detail="VLLM 서버에 연결할 수 없습니다. 서버 상태를 확인해주세요."
             )
         
-        # HF 토큰 가져오기
-        hf_token = await _get_hf_token_by_group(req.group_id, db)
-        if not hf_token:
-            logger.warning(f"그룹 {req.group_id}에 대한 HF 토큰이 없습니다.")
+        # RAG는 공개 모델 사용하므로 토큰 불필요
+        logger.info(f"RAG 파이프라인 생성: group_id={group_id}")
         
-        # RAG 서비스 가져오기
-        rag_service = get_rag_service()
+        # 임시 파일로 저장
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
+            content = await file.read()
+            temp_file.write(content)
+            temp_file_path = temp_file.name
         
-        # 파이프라인 생성
-        success = await rag_service.create_pipeline(
-            group_id=req.group_id,
-            pdf_path=req.pdf_path,
-            system_message=req.system_message,
-            influencer_name=req.influencer_name
-        )
-        
-        if success:
-            pipeline_info = rag_service.get_pipeline_info(req.group_id)
-            return {
-                "status": "success",
-                "message": f"문서 업로드 완료: {pipeline_info['qa_count']}개 QA 쌍 생성",
-                "pipeline_info": pipeline_info
-            }
-        else:
-            raise HTTPException(
-                status_code=500,
-                detail="문서 업로드에 실패했습니다."
+        try:
+            # RAG 서비스 가져오기
+            rag_service = get_rag_service()
+            
+            # 파이프라인 생성
+            success = await rag_service.create_pipeline(
+                group_id=group_id,
+                pdf_path=temp_file_path,
+                system_message=system_message,
+                influencer_name=influencer_name
             )
+            
+            if success:
+                pipeline_info = rag_service.get_pipeline_info(group_id)
+                return DocumentUploadResponse(
+                    status="success",
+                    message=f"문서 업로드 완료: {pipeline_info['qa_count']}개 QA 쌍 생성",
+                    pipeline_info=pipeline_info
+                )
+            else:
+                raise HTTPException(
+                    status_code=500,
+                    detail="문서 업로드에 실패했습니다."
+                )
+                
+        finally:
+            # 임시 파일 정리
+            try:
+                os.unlink(temp_file_path)
+            except Exception as e:
+                logger.warning(f"임시 파일 정리 실패: {e}")
             
     except HTTPException:
         raise

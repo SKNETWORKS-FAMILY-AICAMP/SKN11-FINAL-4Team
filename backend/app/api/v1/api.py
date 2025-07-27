@@ -16,6 +16,7 @@ from app.api.v1.endpoints import (
     admin,
     chatbot,  # 챗봇 활성화
     rag,  # RAG API 추가
+    rag_gpu,  # GPU RAG API 추가
     comfyui,
     tts,
     mcp,
@@ -57,6 +58,9 @@ api_router.include_router(chatbot.router, prefix="/chatbot", tags=["Chatbot"])
 
 # RAG API
 api_router.include_router(rag.router, prefix="/rag", tags=["RAG"])
+
+# GPU RAG API
+api_router.include_router(rag_gpu.router, prefix="/rag-gpu", tags=["GPU RAG"])
 
 # 분석 및 집계 API
 api_router.include_router(analytics.router, prefix="/analytics", tags=["Analytics"])
