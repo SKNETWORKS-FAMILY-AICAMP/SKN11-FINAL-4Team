@@ -56,15 +56,16 @@ from app.services.vllm_client import (
 from chatbot_pipeline import RAGChatbotPipeline, PipelineConfig
 from embed_store import EmbeddingStore, EmbeddingConfig, MilvusConfig
 from rag_search import RAGSearcher, SearchConfig
+from app.services.hf_token_resolver import get_token_by_group
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
 class DocumentUploadRequest(BaseModel):
-    """문서 업로드 요청 모델"""
+    """문서 업로드 요청 모델 (다중 파일 지원)"""
     group_id: int = Field(..., description="그룹 ID")
-    pdf_path: str = Field(..., description="PDF 파일 경로")
+    pdf_paths: List[str] = Field(..., description="PDF 파일 경로 리스트")  # 단일 파일에서 리스트로 변경
     lora_adapter: Optional[str] = Field("khj0816/EXAONE-Ian", description="LoRA 어댑터 이름")
     system_message: Optional[str] = Field("당신은 도움이 되는 AI 어시스턴트입니다.", description="시스템 메시지")
     influencer_name: Optional[str] = Field("AI", description="AI 캐릭터 이름")
@@ -95,7 +96,7 @@ class RAGChatbotManager:
     
     async def create_pipeline(self, 
                             group_id: int, 
-                            pdf_path: str, 
+                            pdf_paths: List[str], 
                             lora_adapter: str,
                             hf_token: str,
                             system_message: str = (
@@ -111,7 +112,7 @@ class RAGChatbotManager:
                             ),
                             influencer_name: str = "AI",
                             temperature: float = 0.8) -> bool:
-        """그룹별 RAG 파이프라인 생성"""
+        """그룹별 RAG 파이프라인 생성 (다중 파일 지원)"""
         try:
             # 기존 파이프라인이 있으면 정리
             if group_id in self._pipelines:
@@ -121,9 +122,9 @@ class RAGChatbotManager:
             system_message = normalize_text(system_message)
             influencer_name = normalize_text(influencer_name)
             
-            # 설정 생성
+            # 설정 생성 (첫 번째 파일을 기본으로 사용)
             config = PipelineConfig(
-                pdf_path=pdf_path,
+                pdf_path=pdf_paths[0] if pdf_paths else "",
                 output_dir=self._get_group_output_dir(group_id),
                 use_vllm=True,
                 vllm_base_url=os.getenv("VLLM_BASE_URL", "http://localhost:8000"),
@@ -135,12 +136,12 @@ class RAGChatbotManager:
             # 파이프라인 생성
             pipeline = RAGChatbotPipeline(config, lora_adapter, hf_token)
             
-            # 문서 인제스트
-            success = pipeline.ingest_document(pdf_path)
+            # 다중 문서 인제스트
+            success = pipeline.ingest_multiple_documents(pdf_paths)
             
             if success:
                 self._pipelines[group_id] = pipeline
-                logger.info(f"✅ RAG 파이프라인 생성 성공: group_id={group_id}")
+                logger.info(f"✅ RAG 파이프라인 생성 성공: group_id={group_id}, 파일 수: {len(pdf_paths)}")
                 return True
             else:
                 logger.error(f"❌ RAG 파이프라인 생성 실패: group_id={group_id}")
@@ -149,6 +150,8 @@ class RAGChatbotManager:
         except Exception as e:
             logger.error(f"❌ RAG 파이프라인 생성 중 오류: group_id={group_id}, error={e}")
             return False
+    
+
     
     def get_pipeline(self, group_id: int) -> Optional[RAGChatbotPipeline]:
         """그룹의 파이프라인 가져오기"""
@@ -179,20 +182,20 @@ _rag_manager = RAGChatbotManager()
 
 
 async def _get_hf_token_by_group(group_id: int, db: Session) -> Optional[str]:
-    """그룹 ID로 HF 토큰 가져오기"""
+    """그룹 ID로 HF 토큰 가져오기 (중앙화된 리졸버 사용)"""
     try:
-        hf_token_manage = db.query(HFTokenManage).filter(
-            HFTokenManage.group_id == group_id
-        ).order_by(HFTokenManage.created_at.desc()).first()
+        # 중앙화된 토큰 리졸버 사용
+        hf_token, hf_username = await get_token_by_group(group_id, db)
         
-        if hf_token_manage:
-            return decrypt_sensitive_data(str(hf_token_manage.hf_token_value))
+        if hf_token:
+            logger.info(f"✅ 그룹 {group_id}의 HF 토큰 조회 성공: {hf_username}")
+            return hf_token
         else:
-            logger.warning(f"그룹 {group_id}에 등록된 HF 토큰이 없습니다.")
+            logger.warning(f"⚠️ 그룹 {group_id}에 등록된 HF 토큰이 없습니다.")
             return None
             
     except Exception as e:
-        logger.error(f"HF 토큰 조회 실패: {e}")
+        logger.error(f"❌ HF 토큰 조회 실패: {e}")
         return None
 
 
@@ -224,7 +227,7 @@ async def _check_vllm_server_with_retry(max_retries: int = 3) -> bool:
 
 @router.post("/rag/upload_document")
 async def upload_document(req: DocumentUploadRequest, db: Session = Depends(get_db)):
-    """RAG용 문서 업로드 및 파이프라인 생성"""
+    """RAG용 문서 업로드 및 파이프라인 생성 (다중 파일 지원)"""
     try:
         # HF 토큰 가져오기
         hf_token = await _get_hf_token_by_group(req.group_id, db)
@@ -236,18 +239,19 @@ async def upload_document(req: DocumentUploadRequest, db: Session = Depends(get_
             logger.warning("⚠️ VLLM 서버가 응답하지 않지만 문서 업로드를 계속 진행합니다.")
             # 서버가 응답하지 않아도 계속 진행 (문서 처리는 가능)
         
-        # PDF 파일 존재 확인
-        if not Path(req.pdf_path).exists():
-            raise HTTPException(status_code=404, detail=f"PDF 파일을 찾을 수 없습니다: {req.pdf_path}")
+        # PDF 파일들 존재 확인
+        for pdf_path in req.pdf_paths:
+            if not Path(pdf_path).exists():
+                raise HTTPException(status_code=404, detail=f"PDF 파일을 찾을 수 없습니다: {pdf_path}")
         
         # 입력 텍스트 정규화
         system_message = normalize_text(req.system_message or "당신은 도움이 되는 AI 어시스턴트입니다.")
         influencer_name = normalize_text(req.influencer_name or "AI")
         
-        # RAG 파이프라인 생성
+        # RAG 파이프라인 생성 (다중 파일 지원)
         success = await _rag_manager.create_pipeline(
             group_id=req.group_id,
-            pdf_path=req.pdf_path,
+            pdf_paths=req.pdf_paths,  # 전체 파일 리스트 전달
             lora_adapter=req.lora_adapter,
             hf_token=hf_token,
             system_message=system_message,
@@ -258,9 +262,10 @@ async def upload_document(req: DocumentUploadRequest, db: Session = Depends(get_
         if success:
             return {
                 "success": True,
-                "message": "RAG 파이프라인이 성공적으로 생성되었습니다.",
+                "message": f"RAG 파이프라인이 성공적으로 생성되었습니다. (처리된 파일: {len(req.pdf_paths)}개)",
                 "group_id": req.group_id,
-                "pdf_path": req.pdf_path,
+                "pdf_paths": req.pdf_paths,
+                "processed_files_count": len(req.pdf_paths),
                 "lora_adapter": req.lora_adapter,
                 "system_message": system_message,
                 "influencer_name": influencer_name

@@ -20,15 +20,15 @@ sys.path.append(str(backend_path))
 
 try:
     from app.core.config import settings
-    DYNAMIC_VLLM_URL = settings.VLLM_SERVER_URL  # .env의 VLLM_SERVER_URL 사용
+    DYNAMIC_VLLM_URL = settings.VLLM_BASE_URL  # .env의 VLLM_BASE_URL 사용
     print(f"✅ Backend 설정에서 VLLM URL 로드: {DYNAMIC_VLLM_URL}")
 except ImportError as e:
     print(f"❌ Backend 설정 import 실패: {e}")
-    print("💡 backend/.env 파일에 VLLM_SERVER_URL을 설정해주세요")
+    print("💡 backend/.env 파일에 VLLM_BASE_URL을 설정해주세요")
     DYNAMIC_VLLM_URL = "http://localhost:8000"  # 기본값
 except AttributeError as e:
-    print(f"⚠️ VLLM_SERVER_URL이 설정되지 않음: {e}")
-    print("💡 backend/.env 파일에 VLLM_SERVER_URL=your_url을 추가해주세요")
+    print(f"⚠️ VLLM_BASE_URL이 설정되지 않음: {e}")
+    print("💡 backend/.env 파일에 VLLM_BASE_URL=your_url을 추가해주세요")
     DYNAMIC_VLLM_URL = "http://localhost:8000"  # 기본값
 
 # 환경변수에도 설정 (전체 시스템 동기화)
@@ -50,12 +50,87 @@ from chat_generator import (
     generate_response, vllm_chat
 )
 
+# 중앙화된 토큰 리졸버 (선택적 사용)
+try:
+    from app.services.hf_token_resolver import get_token_by_group
+    HF_TOKEN_RESOLVER_AVAILABLE = True
+    logger.info("✅ 중앙화된 HF 토큰 리졸버 사용 가능")
+except ImportError:
+    HF_TOKEN_RESOLVER_AVAILABLE = False
+    logger.warning("⚠️ 중앙화된 HF 토큰 리졸버를 사용할 수 없습니다. 직접 토큰 조회를 사용합니다.")
+
 # 로깅 설정
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+def get_hf_token_for_group(group_id: int, db_session=None) -> Optional[str]:
+    """
+    그룹 ID로 HF 토큰 조회 (중앙화된 리졸버 우선 사용)
+    
+    Args:
+        group_id: 그룹 ID
+        db_session: 데이터베이스 세션 (중앙화된 리졸버 사용 시 필요)
+        
+    Returns:
+        복호화된 HF 토큰 또는 None
+    """
+    try:
+        # 중앙화된 토큰 리졸버 사용 가능한 경우
+        if HF_TOKEN_RESOLVER_AVAILABLE and db_session:
+            import asyncio
+            try:
+                # 비동기 함수를 동기적으로 실행
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                hf_token, hf_username = loop.run_until_complete(
+                    get_token_by_group(group_id, db_session)
+                )
+                loop.close()
+                
+                if hf_token:
+                    logger.info(f"✅ 중앙화된 리졸버로 그룹 {group_id}의 HF 토큰 조회 성공: {hf_username}")
+                    return hf_token
+                else:
+                    logger.warning(f"⚠️ 중앙화된 리졸버로 그룹 {group_id}의 HF 토큰을 찾을 수 없습니다.")
+                    return None
+                    
+            except Exception as e:
+                logger.error(f"❌ 중앙화된 토큰 리졸버 사용 실패: {e}")
+                # 실패 시 직접 조회로 fallback
+        
+        # 직접 토큰 조회 (fallback)
+        logger.info(f"🔍 직접 토큰 조회: 그룹 {group_id}")
+        
+        # HFTokenManage 모델 import
+        try:
+            from app.models.user import HFTokenManage
+            from app.core.encryption import decrypt_sensitive_data
+        except ImportError:
+            logger.error("❌ HFTokenManage 모델을 import할 수 없습니다.")
+            return None
+        
+        # 데이터베이스 세션이 있는 경우 직접 조회
+        if db_session:
+            hf_token_manage = db_session.query(HFTokenManage).filter(
+                HFTokenManage.group_id == group_id
+            ).order_by(HFTokenManage.created_at.desc()).first()
+            
+            if hf_token_manage:
+                decrypted_token = decrypt_sensitive_data(str(hf_token_manage.hf_token_value))
+                if decrypted_token:
+                    logger.info(f"✅ 직접 조회로 그룹 {group_id}의 HF 토큰 조회 성공: {hf_token_manage.hf_token_nickname}")
+                    return decrypted_token
+        
+        logger.warning(f"⚠️ 그룹 {group_id}에 등록된 HF 토큰이 없습니다.")
+        return None
+        
+    except Exception as e:
+        logger.error(f"❌ HF 토큰 조회 실패: {e}")
+        return None
 
 
 # Single Responsibility Principle: 설정 검증 전용 클래스
@@ -653,8 +728,9 @@ class RAGChatbotPipeline:
                 logger.error("❌ QA 데이터 생성 실패")
                 return False
             
-            # 2. 벡터 스토어에 저장
-            success = self.vector_store_manager.store_qa_data(qa_data, pdf_path)
+            # 2. 벡터 스토어에 저장 (파일명을 소스로 사용)
+            source_file = Path(pdf_path).name  # 파일명만 추출
+            success = self.vector_store_manager.store_qa_data(qa_data, source_file)
             
             if success:
                 # 3. 챗봇 엔진 초기화 (LoRA 어댑터 포함)
@@ -678,6 +754,42 @@ class RAGChatbotPipeline:
                 
         except Exception as e:
             logger.error(f"❌ 문서 인제스트 중 오류: {e}")
+            return False
+    
+    def ingest_multiple_documents(self, pdf_paths: List[str]) -> bool:
+        """다중 문서 인제스트 (여러 PDF → QA → 벡터 저장)"""
+        try:
+            logger.info(f"📋 다중 문서 인제스트 시작: {len(pdf_paths)}개 파일")
+            
+            total_success = 0
+            
+            for i, pdf_path in enumerate(pdf_paths):
+                try:
+                    logger.info(f"📄 문서 {i+1}/{len(pdf_paths)} 처리 중: {pdf_path}")
+                    
+                    # 개별 문서 인제스트
+                    success = self.ingest_document(pdf_path)
+                    
+                    if success:
+                        total_success += 1
+                        logger.info(f"✅ 문서 {i+1} 처리 완료: {pdf_path}")
+                    else:
+                        logger.error(f"❌ 문서 {i+1} 처리 실패: {pdf_path}")
+                        
+                except Exception as e:
+                    logger.error(f"❌ 문서 {i+1} 처리 중 오류: {pdf_path}, error={e}")
+                    continue
+            
+            # 최소 하나의 문서라도 성공하면 True 반환
+            if total_success > 0:
+                logger.info(f"🎉 다중 문서 인제스트 완료! 성공: {total_success}/{len(pdf_paths)}")
+                return True
+            else:
+                logger.error("❌ 모든 문서 처리 실패")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ 다중 문서 인제스트 중 오류: {e}")
             return False
     
     def chat(self, query: str) -> Dict:
@@ -832,6 +944,58 @@ def create_vllm_pipeline(pdf_path: str,
     return RAGChatbotPipeline(config, lora_adapter, hf_token)
 
 
+def create_vllm_pipeline_with_group(pdf_path: str, 
+                                   lora_adapter: str, 
+                                   group_id: int,
+                                   db_session=None,
+                                   vllm_base_url: str = DYNAMIC_VLLM_URL,
+                                   system_message: str = (
+                                       "당신은 제공된 참고 문서의 정확한 정보와 사실을 바탕으로 답변하는 AI 어시스턴트입니다. "
+                                       "**중요**: 문서에 포함된 모든 내용은 절대 요약하거나 생략하지 말고, 원문 그대로 완전히 포함해야 합니다. "
+                                       "사실, 수치, 날짜, 정책 내용, 세부 사항 등 모든 정보를 정확히 그대로 유지해주세요. "
+                                       "문서 내용의 완전성과 정확성이 최우선이며, 말투와 표현 방식만 캐릭터 스타일로 조정해주세요. "
+                                       "문서 내용을 임의로 변경, 요약, 추가하지 말고, 오직 제공된 정보를 완전히 그대로 사용해 답변해주세요. "
+                                       "\n\n**캐릭터 정체성**: 당신은 {influencer_name} 캐릭터입니다. "
+                                       "자기소개를 할 때나 '너 누구야?', '당신은 누구인가요?', '이름이 뭐야?' 같은 질문을 받으면 "
+                                       "반드시 '나는 {influencer_name}이야!' 또는 '저는 {influencer_name}입니다!'라고 답변해야 합니다. "
+                                       "항상 {influencer_name}의 정체성을 유지하며 그 캐릭터답게 행동하세요."
+                                   ),
+                                   influencer_name: str = "AI",
+                                   temperature: float = 0.8) -> RAGChatbotPipeline:
+    """
+    그룹 ID를 받아서 자동으로 HF 토큰을 조회하는 VLLM 기반 RAG 파이프라인 생성 함수
+    
+    Args:
+        pdf_path: PDF 파일 경로
+        lora_adapter: LoRA 어댑터 이름
+        group_id: 그룹 ID (토큰 조회용)
+        db_session: 데이터베이스 세션 (토큰 조회용)
+        vllm_base_url: VLLM 서버 URL
+        system_message: 시스템 메시지
+        influencer_name: AI 캐릭터 이름
+        temperature: 생성 온도
+        
+    Returns:
+        RAGChatbotPipeline 인스턴스
+    """
+    # 그룹 ID로 HF 토큰 자동 조회
+    hf_token = get_hf_token_for_group(group_id, db_session)
+    
+    if not hf_token:
+        logger.warning(f"⚠️ 그룹 {group_id}의 HF 토큰을 찾을 수 없어 기본 모델로 진행합니다.")
+    
+    config = PipelineConfig(
+        pdf_path=pdf_path,
+        use_vllm=True,
+        vllm_base_url=vllm_base_url,
+        system_message=system_message,
+        influencer_name=influencer_name,
+        response_temperature=temperature
+    )
+    
+    return RAGChatbotPipeline(config, lora_adapter, hf_token)
+
+
 def main():
     """메인 함수"""
     parser = argparse.ArgumentParser(description="RAG 챗봇 파이프라인 (VLLM 지원, SOLID 원칙 적용)")
@@ -922,7 +1086,7 @@ if __name__ == "__main__":
         print("\n💡 VLLM 서버를 먼저 시작해야 합니다:")
         print("  python -m vllm.entrypoints.openai.api_server --model LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct --enable-lora")
         print("\n📋 Backend .env 파일에 VLLM_SERVER_URL을 설정하세요:")
-        print("  echo 'VLLM_SERVER_URL=https://your-vllm-server-url' >> backend/.env")
+        print("  echo 'VLLM_BASE_URL=https://your-vllm-base-url' >> backend/.env")
         sys.exit(1)
     
     main()
