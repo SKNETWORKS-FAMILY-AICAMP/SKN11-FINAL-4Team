@@ -98,9 +98,12 @@ class ModelIdValidator:
 @dataclass
 class VLLMGenerationConfig:
     """VLLM 전용 생성 설정 클래스"""
-    max_new_tokens: int = 512
+    max_new_tokens: int = 1024
     temperature: float = 0.8
-    system_message: str = (
+    influencer_name: str = "AI"
+    model_id: Optional[str] = None  # 수정: None으로 기본값 변경
+    vllm_config: Optional[VLLMConfig] = None
+    system_prompt: str = (
         "당신은 제공된 참고 문서의 정확한 정보와 사실을 바탕으로 답변하는 AI 어시스턴트입니다. "
         "**중요**: 문서에 포함된 모든 내용은 절대 요약하거나 생략하지 말고, 원문 그대로 완전히 포함해야 합니다. "
         "사실, 수치, 날짜, 정책 내용, 세부 사항 등 모든 정보를 정확히 그대로 유지해주세요. "
@@ -111,18 +114,17 @@ class VLLMGenerationConfig:
         "반드시 '나는 {influencer_name}이야!' 또는 '저는 {influencer_name}입니다!'라고 답변해야 합니다. "
         "항상 {influencer_name}의 정체성을 유지하며 그 캐릭터답게 행동하세요."
     )
-    influencer_name: str = "AI"
-    model_id: Optional[str] = None  # 수정: None으로 기본값 변경
-    vllm_config: Optional[VLLMConfig] = None
     
     def __post_init__(self):
         """초기화 후 검증"""
         # 모델 ID 검증 및 정리
         self.model_id = ModelIdValidator.validate_model_id(self.model_id)
         
-        # 시스템 메시지와 인플루언서 이름 정규화
-        self.system_message = TextNormalizer.normalize(self.system_message)
+        # 인플루언서 이름 정규화
         self.influencer_name = TextNormalizer.normalize(self.influencer_name)
+        
+        # system_prompt에 influencer_name 적용
+        self.system_prompt = self.system_prompt.format(influencer_name=self.influencer_name)
         
         # 온도 값 검증
         if not 0.1 <= self.temperature <= 2.0:
@@ -366,7 +368,7 @@ class VLLMGenerator(ITextGenerator):
                 result = await asyncio.wait_for(
                     client.generate_response(
                         user_message=prompt,
-                        system_message=generation_config.system_message,
+                        system_message=generation_config.system_prompt,
                         influencer_name=generation_config.influencer_name,
                         model_id=model_id_to_use,  # 수정: 검증된 model_id 사용
                         max_new_tokens=generation_config.max_new_tokens,
@@ -677,6 +679,29 @@ def vllm_chat(query: str, context: str = "", temperature: float = 0.8, adapter_n
         logger.error(f"VLLM 채팅 실패: {e}")
         return f"죄송합니다. VLLM 채팅 중 오류가 발생했습니다: {str(e)}"
 
+# 히스토리 자르기 유틸 함수 (문자 수 기준)
+MAX_HISTORY_CHARS = 1000
+
+def truncate_history_by_char(history: list, max_chars=MAX_HISTORY_CHARS):
+    """
+    최신 메시지부터 최대 max_chars만큼 누적하여 히스토리를 자릅니다.
+    """
+    reversed_history = history[::-1]  # 최신 메시지부터
+    total_chars = 0
+    truncated = []
+
+    for message in reversed_history:
+        # query와 response의 총 길이 계산
+        query_length = len(message.get("query", ""))
+        response_length = len(message.get("response", ""))
+        total_message_length = query_length + response_length
+        
+        if total_chars + total_message_length > max_chars:
+            break
+        total_chars += total_message_length
+        truncated.append(message)
+
+    return truncated[::-1]  # 순서 복원
 
 # 사용 예시
 if __name__ == "__main__":
