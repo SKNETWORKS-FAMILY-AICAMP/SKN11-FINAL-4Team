@@ -27,13 +27,18 @@ logger = logging.getLogger(__name__)
 class RAGConfig:
     """RAG 설정"""
 
+    def __init__(self):
+        self.chunk_size = 500  # 더 세분화된 청크
+        self.chunk_overlap = 100  # 오버랩도 줄임
+        self.score_threshold = 0.4  # 다른 레이어와 통일
+
     # 문서 처리
     min_paragraph_length: int = 30
     max_qa_pairs: int = 100
 
     # 검색 설정
     search_top_k: int = 3
-    score_threshold: float = 0.3
+    score_threshold: float = 0.4  # 의미 있는 유사도 임계값
     max_context_length: int = 2000
 
     # 생성 설정
@@ -100,7 +105,7 @@ class RAGDocumentProcessor:
             if len(paragraph) < self.config.min_paragraph_length:
                 continue
 
-            if len(current_chunk + paragraph) > 1000:  # 청크 크기 제한
+            if len(current_chunk + paragraph) > 500:  # 청크 크기를 500으로 축소
                 if current_chunk:
                     chunks.append(current_chunk.strip())
                 current_chunk = paragraph

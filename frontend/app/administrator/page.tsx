@@ -65,8 +65,8 @@ export default function AdministratorPage() {
 
   // RAG 고급 설정 관련 상태들
   const [showAdvancedSettings, setShowAdvancedSettings] = useState(false)
-  const [chunkSize, setChunkSize] = useState(1000)
-  const [chunkOverlap, setChunkOverlap] = useState(200)
+  const [chunkSize, setChunkSize] = useState(500)
+  const [chunkOverlap, setChunkOverlap] = useState(100)
   const [topK, setTopK] = useState(5)
 
   const isFetchingDataRef = useRef(false)
@@ -1421,7 +1421,7 @@ export default function AdministratorPage() {
                                         if (result.success) {
                                           toast({
                                             title: "업로드 완료",
-                                            description: `${result.stored_count}개의 문서 청크가 성공적으로 벡터DB에 저장되었습니다.`,
+                                            description: `벡터DB가 초기화되고 ${result.stored_count}개의 문서 청크가 성공적으로 저장되었습니다.`,
                                             variant: "default",
                                           })
                                           setSelectedFiles([])

@@ -81,13 +81,14 @@ export class VectorDBService {
         return apiClient.post<SearchResult[]>(`${this.baseUrl}/rag/search_documents`, request)
     }
 
-    // 통합 검색 (임베딩 + 검색) - 백엔드 프록시 사용
-    static async embedAndSearch(query: string, top_k: number = 5, score_threshold: number = 0.3): Promise<SearchResult[]> {
-        return apiClient.post<SearchResult[]>(`${this.baseUrl}/rag/embed_and_search`, {
+    // 임베딩 생성 및 검색
+    static async embedAndSearch(query: string, topK: number = 5, scoreThreshold: number = 0.7): Promise<any> {
+        const params = new URLSearchParams({
             query,
-            top_k,
-            score_threshold
+            top_k: topK.toString(),
+            score_threshold: scoreThreshold.toString()
         })
+        return apiClient.post<any>(`${this.baseUrl}/rag/embed_and_search?${params}`)
     }
 
     // 벡터DB 통계 - 백엔드 프록시 사용

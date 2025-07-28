@@ -55,11 +55,11 @@ class RAGChatResponse(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    """OpenAI 기반 채팅 요청"""
+    """채팅 요청"""
 
     query: str
     top_k: int = 5
-    similarity_threshold: float = 0.3
+    similarity_threshold: float = 0.4  # 임시로 낮춤
     include_sources: bool = True
     max_tokens: int = 2048
     model: str = "gpt-4"
@@ -191,9 +191,11 @@ async def upload_document_gpu(
     influencer_name: Optional[str] = Form("AI", description="AI 캐릭터 이름"),
     db: Session = Depends(get_db),
 ):
-    """PDF 문서를 VLLM GPU 벡터 스토어에 업로드 (OpenAI 기반)"""
+    """PDF 문서를 VLLM GPU 벡터 스토어에 업로드 (자동 벡터DB 초기화 포함)"""
     try:
-        logger.info(f"📥 GPU 문서 업로드 시작: {file.filename}")
+        logger.info(
+            f"📥 GPU 문서 업로드 시작 (벡터DB 자동 초기화 포함): {file.filename}"
+        )
 
         # 파일 검증
         if not file.filename.lower().endswith(".pdf"):
@@ -251,9 +253,22 @@ async def upload_document_gpu(
             # vLLM 서버의 벡터DB API 호출
             vllm_url = settings.VLLM_BASE_URL or "http://localhost:8001"
             logger.info(f"🔗 vLLM 서버 URL: {vllm_url}")
-            logger.info(f"📊 저장할 문서 수: {len(documents)}개")
 
             async with httpx.AsyncClient(timeout=60.0) as client:
+                # 1. 벡터DB 초기화
+                logger.info("🗑️ 벡터DB 초기화 시작")
+                clear_response = await client.delete(f"{vllm_url}/vector-db/clear")
+
+                if clear_response.status_code == 200:
+                    logger.info("✅ 벡터DB 초기화 완료")
+                else:
+                    logger.warning(
+                        f"⚠️ 벡터DB 초기화 실패: {clear_response.status_code}"
+                    )
+                    # 초기화 실패해도 계속 진행
+
+                # 2. 문서 저장
+                logger.info(f"📊 저장할 문서 수: {len(documents)}개")
                 logger.info(
                     f"📤 vLLM 서버로 요청 전송: {vllm_url}/vector-db/embed-and-store"
                 )
@@ -276,7 +291,7 @@ async def upload_document_gpu(
 
             return DocumentUploadResponse(
                 status="success",
-                message=f"문서가 vLLM 서버의 Milvus 벡터DB에 성공적으로 업로드되었습니다.",
+                message=f"벡터DB가 초기화되고 문서가 vLLM 서버의 Milvus 벡터DB에 성공적으로 업로드되었습니다.",
                 pipeline_info={"qa_count": len(qa_pairs), "source_file": source_file},
             )
 
@@ -440,7 +455,7 @@ async def chat_gpu(chat_request: ChatRequest):
 
 
 @router.post("/embed_and_search")
-async def embed_and_search(query: str, top_k: int = 5, score_threshold: float = 0.3):
+async def embed_and_search(query: str, top_k: int = 5, score_threshold: float = 0.4):
     """임베딩 생성 및 벡터 검색"""
     try:
         logger.info(

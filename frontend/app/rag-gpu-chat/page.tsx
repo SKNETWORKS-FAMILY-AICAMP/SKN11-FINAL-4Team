@@ -64,7 +64,7 @@ export default function RAGGPUChatPage() {
 
   const [vectorStats, setVectorStats] = useState<VectorStats | null>(null);
   const [topK, setTopK] = useState(5);
-  const [similarityThreshold, setSimilarityThreshold] = useState(0.5);
+  const [similarityThreshold, setSimilarityThreshold] = useState(0.4);
   const [maxTokens, setMaxTokens] = useState(2048);
   const [selectedModel, setSelectedModel] = useState("gpt-4");
 
