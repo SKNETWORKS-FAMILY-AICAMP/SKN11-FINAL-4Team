@@ -280,12 +280,14 @@ class UserSessionService:
         try:
             user = await self._get_user(user_id, db)
             if not user:
+                logger.error(f"User not found in database: {user_id}")
                 return None
             
             now = datetime.now(timezone.utc)
             
             # 세션이 없으면 None 반환
             if not user.current_pod_id or user.pod_status == "none":
+                logger.info(f"No active session for user {user_id}: pod_id={user.current_pod_id}, status={user.pod_status}")
                 return None
             
             # Failed 상태인 Pod는 재확인 시도 (ComfyUI가 늦게 준비될 수 있음)
@@ -501,7 +503,10 @@ class UserSessionService:
         """사용자 조회"""
         try:
             result = await db.execute(select(User).where(User.user_id == user_id))
-            return result.scalar_one_or_none()
+            user = result.scalar_one_or_none()
+            if user:
+                await db.refresh(user)
+            return user
         except Exception as e:
             logger.error(f"Failed to get user {user_id}: {e}")
             return None

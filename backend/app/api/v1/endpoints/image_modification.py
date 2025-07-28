@@ -887,7 +887,7 @@ async def synthesize_images(
     steps: int = Form(20, description="생성 스텝 수"),
     image1_storage_id: Optional[str] = Form(None, description="첫 번째 갤러리 이미지 ID"),
     image2_storage_id: Optional[str] = Form(None, description="두 번째 갤러리 이미지 ID"),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -911,7 +911,7 @@ async def synthesize_images(
         from app.models.user import User
         from sqlalchemy.orm import selectinload
         from sqlalchemy import select
-        user_result = db.execute(
+        user_result = await db.execute(
             select(User).options(selectinload(User.teams)).where(User.user_id == user_id)
         )
         user = user_result.scalar_one_or_none()
@@ -931,9 +931,11 @@ async def synthesize_images(
             logger.info(f"📸 갤러리 이미지 1 가져오기: {image1_storage_id}")
             # DB에서 이미지 정보 조회
             from app.models.image_storage import ImageStorage
-            image1_record = db.query(ImageStorage).filter(
-                ImageStorage.storage_id == image1_storage_id
-            ).first()
+            from sqlalchemy import select
+            result = await db.execute(
+                select(ImageStorage).where(ImageStorage.storage_id == image1_storage_id)
+            )
+            image1_record = result.scalar_one_or_none()
             
             if not image1_record:
                 raise HTTPException(status_code=404, detail="첫 번째 갤러리 이미지를 찾을 수 없습니다")
@@ -961,9 +963,10 @@ async def synthesize_images(
             logger.info(f"📸 갤러리 이미지 2 가져오기: {image2_storage_id}")
             # DB에서 이미지 정보 조회
             from app.models.image_storage import ImageStorage
-            image2_record = db.query(ImageStorage).filter(
-                ImageStorage.storage_id == image2_storage_id
-            ).first()
+            result = await db.execute(
+                select(ImageStorage).where(ImageStorage.storage_id == image2_storage_id)
+            )
+            image2_record = result.scalar_one_or_none()
             
             if not image2_record:
                 raise HTTPException(status_code=404, detail="두 번째 갤러리 이미지를 찾을 수 없습니다")
@@ -990,7 +993,13 @@ async def synthesize_images(
         from app.services.runpod_service import get_runpod_service
         
         user_session_service = get_user_session_service()
+        logger.info(f"🔍 사용자 {user_id}의 세션 상태 확인 중...")
+        
+        # 트랜잭션 격리를 위해 명시적으로 커밋된 데이터 읽기
+        await db.commit()
+        
         session_status = await user_session_service.get_session_status(user_id, db)
+        logger.info(f"📊 세션 상태: {session_status}")
         
         if not session_status:
             raise HTTPException(
