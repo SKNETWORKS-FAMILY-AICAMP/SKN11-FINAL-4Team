@@ -157,20 +157,33 @@ async def search_documents(request: SearchRequest):
         raise HTTPException(status_code=500, detail="벡터DB가 초기화되지 않았습니다")
 
     try:
-        # 1. 쿼리 임베딩 생성
-        from app.routers.embedding import embedding_model
-
-        if embedding_model is None:
+        # 1. 쿼리 임베딩 생성 (멀티프로세싱 API 호출)
+        from app.routers.embedding import embedding_request_queue, embedding_response_queue
+        
+        if embedding_request_queue is None:
             raise HTTPException(
                 status_code=500, detail="임베딩 모델이 초기화되지 않았습니다"
             )
 
-        query_embedding = embedding_model.encode(
-            [request.query],
-            batch_size=1,
-            show_progress_bar=False,
-            convert_to_numpy=True,
-        )[0].tolist()
+        # 임베딩 요청
+        import uuid
+        task_id = str(uuid.uuid4())
+        request_data = {
+            'type': 'generate_embeddings',
+            'task_id': task_id,
+            'texts': [request.query],
+            'batch_size': 1
+        }
+        
+        embedding_request_queue.put(request_data)
+        response = embedding_response_queue.get()
+        
+        if response['status'] != 'success':
+            raise HTTPException(
+                status_code=500, detail=f"임베딩 생성 실패: {response.get('error', 'Unknown error')}"
+            )
+        
+        query_embedding = response['embeddings'][0]
 
         # 2. 검색 실행
         results = milvus_client.search(
@@ -200,6 +213,8 @@ async def search_documents(request: SearchRequest):
                     )
                 )
 
+        logger.info(f"✅ 검색 완료: {len(search_results)}개 결과")
+
         return search_results
 
     except Exception as e:
@@ -219,21 +234,37 @@ async def embed_and_store_documents(request: StoreRequest):
         # 1. 텍스트 추출
         texts = [doc.text for doc in request.documents]
 
-        # 2. 임베딩 생성 (embedding.py의 모델 사용)
-        from app.routers.embedding import embedding_model
-
-        if embedding_model is None:
+        # 2. 임베딩 생성 (멀티프로세싱 API 호출)
+        from app.routers.embedding import embedding_request_queue, embedding_response_queue
+        
+        if embedding_request_queue is None:
             raise HTTPException(
                 status_code=500, detail="임베딩 모델이 초기화되지 않았습니다"
             )
 
-        embeddings = embedding_model.encode(
-            texts, batch_size=32, show_progress_bar=True, convert_to_numpy=True
-        )
+        # 임베딩 요청
+        import uuid
+        task_id = str(uuid.uuid4())
+        request_data = {
+            'type': 'generate_embeddings',
+            'task_id': task_id,
+            'texts': texts,
+            'batch_size': 32
+        }
+        
+        embedding_request_queue.put(request_data)
+        response = embedding_response_queue.get()
+        
+        if response['status'] != 'success':
+            raise HTTPException(
+                status_code=500, detail=f"임베딩 생성 실패: {response.get('error', 'Unknown error')}"
+            )
+        
+        embeddings = response['embeddings']
 
         # 3. 임베딩을 문서에 할당
         for i, doc in enumerate(request.documents):
-            doc.embedding = embeddings[i].tolist()
+            doc.embedding = embeddings[i]
 
         # 4. 벡터DB에 저장
         data = []
@@ -272,17 +303,33 @@ async def embed_and_search(query: str, top_k: int = 5, score_threshold: float = 
         raise HTTPException(status_code=500, detail="벡터DB가 초기화되지 않았습니다")
 
     try:
-        # 1. 쿼리 임베딩 생성 (embedding.py의 모델 사용)
-        from app.routers.embedding import embedding_model
-
-        if embedding_model is None:
+        # 1. 쿼리 임베딩 생성 (멀티프로세싱 API 호출)
+        from app.routers.embedding import embedding_request_queue, embedding_response_queue
+        
+        if embedding_request_queue is None:
             raise HTTPException(
                 status_code=500, detail="임베딩 모델이 초기화되지 않았습니다"
             )
 
-        query_embedding = embedding_model.encode(
-            [query], batch_size=1, show_progress_bar=False, convert_to_numpy=True
-        )[0].tolist()
+        # 임베딩 요청
+        import uuid
+        task_id = str(uuid.uuid4())
+        request_data = {
+            'type': 'generate_embeddings',
+            'task_id': task_id,
+            'texts': [query],
+            'batch_size': 1
+        }
+        
+        embedding_request_queue.put(request_data)
+        response = embedding_response_queue.get()
+        
+        if response['status'] != 'success':
+            raise HTTPException(
+                status_code=500, detail=f"임베딩 생성 실패: {response.get('error', 'Unknown error')}"
+            )
+        
+        query_embedding = response['embeddings'][0]
 
         # 2. 검색 실행
         results = milvus_client.search(
@@ -312,11 +359,13 @@ async def embed_and_search(query: str, top_k: int = 5, score_threshold: float = 
                     )
                 )
 
+        logger.info(f"✅ 검색 완료: {len(search_results)}개 결과")
+
         return search_results
 
     except Exception as e:
-        logger.error(f"❌ 임베딩 및 검색 실패: {e}")
-        raise HTTPException(status_code=500, detail=f"처리 실패: {str(e)}")
+        logger.error(f"❌ 검색 실패: {e}")
+        raise HTTPException(status_code=500, detail=f"검색 실패: {str(e)}")
 
 
 @router.get("/vector-db/stats", response_model=Dict[str, Any])

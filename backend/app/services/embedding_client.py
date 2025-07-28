@@ -39,11 +39,11 @@ class VLLMEmbeddingClient:
         try:
             request_data = EmbeddingRequest(
                 texts=texts,
-                device="cuda:1",  # RAG 전용 GPU 1 사용
+                # device 파라미터 제거 (멀티프로세싱에서 자동으로 GPU 1 사용)
                 **kwargs
             )
             
-            logger.info(f"🔄 VLLM 임베딩 API 호출: {len(texts)}개 텍스트 (GPU 1)")
+            logger.info(f"🔄 VLLM 임베딩 API 호출: {len(texts)}개 텍스트 (멀티프로세싱 GPU 1)")
             
             response = await self.client.post(
                 f"{self.base_url}/embedding/embed",
@@ -68,11 +68,11 @@ class VLLMEmbeddingClient:
         try:
             request_data = EmbeddingRequest(
                 texts=texts,
-                device="cuda:1",  # RAG 전용 GPU 1 사용
+                # device 파라미터 제거 (멀티프로세싱에서 자동으로 GPU 1 사용)
                 **kwargs
             )
             
-            logger.info(f"🔄 VLLM 배치 임베딩 API 호출: {len(texts)}개 텍스트 (GPU 1)")
+            logger.info(f"🔄 VLLM 배치 임베딩 API 호출: {len(texts)}개 텍스트 (멀티프로세싱 GPU 1)")
             
             response = await self.client.post(
                 f"{self.base_url}/embedding/embed/batch",
@@ -140,11 +140,13 @@ def get_embedding_client() -> VLLMEmbeddingClient:
 async def generate_embeddings(texts: List[str], **kwargs) -> List[List[float]]:
     """VLLM 서버를 통한 임베딩 생성 (간편 함수)"""
     async with get_embedding_client() as client:
-        response = await client.generate_embeddings(texts, device="cuda:1", **kwargs)
+        # device 파라미터 제거 (멀티프로세싱에서 자동으로 GPU 1 사용)
+        response = await client.generate_embeddings(texts, **kwargs)
         return response.embeddings
 
 async def batch_generate_embeddings(texts: List[str], **kwargs) -> List[List[float]]:
     """VLLM 서버를 통한 배치 임베딩 생성 (간편 함수)"""
     async with get_embedding_client() as client:
-        response = await client.batch_embedding(texts, device="cuda:1", **kwargs)
+        # device 파라미터 제거 (멀티프로세싱에서 자동으로 GPU 1 사용)
+        response = await client.batch_embedding(texts, **kwargs)
         return response.embeddings 
