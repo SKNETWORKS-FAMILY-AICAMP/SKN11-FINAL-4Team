@@ -23,6 +23,7 @@ from app.services.prompt_optimization_service import get_prompt_optimization_ser
 from app.services.image_analysis_service import get_image_analysis_service
 from app.core.config import settings
 from app.websocket.manager import WebSocketManager
+from app.services.comfyui_synthesis_service import get_comfyui_synthesis_service
 
 logger = logging.getLogger(__name__)
 
@@ -872,3 +873,140 @@ async def handle_websocket_image_modification(
                 "message": f"이미지 수정 실패: {str(e)}"
             }
         })
+
+
+@router.post("/synthesize")
+async def synthesize_images(
+    request: Request,
+    image1: UploadFile = File(..., description="첫 번째 이미지"),
+    image2: UploadFile = File(..., description="두 번째 이미지"),
+    prompt: str = Form(..., description="합성 프롬프트"),
+    width: int = Form(1024, description="출력 이미지 너비"),
+    height: int = Form(720, description="출력 이미지 높이"),
+    guidance: float = Form(2.5, description="가이던스 스케일"),
+    steps: int = Form(20, description="생성 스텝 수"),
+    db: Session = Depends(get_db)
+):
+    """
+    두 개의 이미지를 합성하여 새로운 이미지 생성
+    
+    - **image1**: 첫 번째 이미지 파일
+    - **image2**: 두 번째 이미지 파일
+    - **prompt**: 이미지 합성 설명 (예: "The two images embrace each other")
+    - **width**: 출력 이미지 너비 (기본값: 1024)
+    - **height**: 출력 이미지 높이 (기본값: 720)
+    - **guidance**: 가이던스 스케일 (기본값: 2.5)
+    - **steps**: 생성 스텝 수 (기본값: 20)
+    """
+    try:
+        # 1. 사용자 인증
+        from app.api.dependencies.auth import get_user_session
+        user_session = await get_user_session(request, db)
+        user_id = user_session.get("user_id")
+        team_id = user_session.get("team_id")
+        
+        if not user_id or not team_id:
+            raise HTTPException(status_code=401, detail="인증되지 않은 사용자")
+        
+        logger.info(f"🎨 이미지 합성 요청 - User: {user_id}, Prompt: {prompt[:50]}...")
+        
+        # 2. 이미지 파일 검증
+        valid_types = ["image/jpeg", "image/jpg", "image/png", "image/webp"]
+        if image1.content_type not in valid_types or image2.content_type not in valid_types:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"지원되지 않는 파일 형식. 지원 형식: {', '.join(valid_types)}"
+            )
+        
+        # 3. 이미지 데이터 읽기
+        image1_data = await image1.read()
+        image2_data = await image2.read()
+        
+        # 4. RunPod 세션 정보 확인
+        from app.services.runpod_session_service import get_runpod_session_service
+        runpod_session_service = get_runpod_session_service()
+        runpod_endpoint = await runpod_session_service.get_active_session_endpoint(user_id, db)
+        
+        if not runpod_endpoint:
+            raise HTTPException(
+                status_code=400,
+                detail="활성 RunPod 세션이 없습니다. 먼저 새 세션을 시작하세요."
+            )
+        
+        # 5. 프롬프트 최적화 (OpenAI 사용)
+        prompt_service = get_prompt_optimization_service()
+        optimized_prompt = await prompt_service.optimize_image_modification_prompt(prompt)
+        
+        logger.info(f"🤖 최적화된 프롬프트: {optimized_prompt}")
+        
+        # 6. ComfyUI 이미지 합성 서비스 호출
+        synthesis_service = get_comfyui_synthesis_service()
+        result = await synthesis_service.synthesize_images(
+            image1_data=image1_data,
+            image2_data=image2_data,
+            prompt=optimized_prompt,
+            comfyui_endpoint=runpod_endpoint,
+            width=width,
+            height=height,
+            guidance=guidance,
+            steps=steps
+        )
+        
+        if not result:
+            raise HTTPException(status_code=500, detail="이미지 합성 실패")
+        
+        # 7. 생성된 이미지 다운로드
+        result_image_data = await synthesis_service.download_generated_image(
+            runpod_endpoint, result
+        )
+        
+        if not result_image_data:
+            raise HTTPException(status_code=500, detail="생성된 이미지 다운로드 실패")
+        
+        # 8. S3에 업로드
+        s3_service = get_s3_service()
+        storage_id = str(uuid.uuid4())
+        s3_key = f"synthesized_images/team_{team_id}/{user_id}/{storage_id}.png"
+        
+        s3_url = await s3_service.upload_image_data(
+            image_data=result_image_data,
+            key=s3_key,
+            content_type="image/png",
+            return_presigned=False
+        )
+        
+        if not s3_url:
+            raise HTTPException(status_code=500, detail="S3 업로드 실패")
+        
+        # 9. DB에 저장
+        image_storage_service = get_image_storage_service()
+        await image_storage_service.save_generated_image_url(
+            s3_url=s3_url,
+            group_id=team_id,
+            db=db
+        )
+        
+        # 10. Presigned URL 생성
+        presigned_url = await s3_service.generate_presigned_url(s3_key)
+        
+        if not presigned_url:
+            logger.warning("Presigned URL 생성 실패, 원본 S3 URL 사용")
+            presigned_url = s3_url
+        
+        # 11. 결과 반환
+        return {
+            "success": True,
+            "storage_id": storage_id,
+            "s3_url": presigned_url,
+            "width": width,
+            "height": height,
+            "prompt": prompt,
+            "optimized_prompt": optimized_prompt,
+            "message": "이미지 합성이 완료되었습니다"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"이미지 합성 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

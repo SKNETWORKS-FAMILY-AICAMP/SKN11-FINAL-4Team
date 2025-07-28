@@ -1349,32 +1349,9 @@ ${testData.message}
   }
 
   const selectMethod2 = () => {
-    setMaskMode(true)
-    setSelectedMethod(2)
-    // 방법 2: 마스킹 수정 모드로 전환 (이미지 1개 필요)
-    if (selectedImages.length > 1) {
-      // 첫 번째 이미지만 유지하고 나머지는 제거
-      const firstImage = selectedImages[0]
-      selectedImages.slice(1).forEach(image => {
-        if (image.type === 'upload' && image.url) {
-          URL.revokeObjectURL(image.url)
-        }
-      })
-      setSelectedImages([firstImage])
-    }
-  }
-
-  const selectMethod3 = () => {
     setMaskMode(false)
-    setSelectedMethod(3)
-    // 방법 3: 이미지 합성 모드로 전환 (이미지 2개 필요)
-    // 이미지가 2개 미만이면 추가 선택 안내
-  }
-
-  const selectMethod4 = () => {
-    setMaskMode(true)
-    setSelectedMethod(4)
-    // 방법 4: 복합 마스킹 모드로 전환 (이미지 2개 필요)
+    setSelectedMethod(2)
+    // 방법 2: 이미지 합성 모드로 전환 (이미지 2개 필요)
     // 이미지가 2개 미만이면 추가 선택 안내
   }
 
@@ -1385,9 +1362,9 @@ ${testData.message}
 
   // 선택된 방법에 따른 필요한 이미지 개수
   const getRequiredImageCount = () => {
-    if (selectedMethod === 1 || selectedMethod === 2) {
+    if (selectedMethod === 1) {
       return 1
-    } else if (selectedMethod === 3 || selectedMethod === 4) {
+    } else if (selectedMethod === 2) {
       return 2
     }
     return 0
@@ -2166,18 +2143,18 @@ ${testData.message}
                         <p className="text-xs text-gray-500">기존 이미지를 설명으로 전체 수정</p>
                       </button>
 
-                      {/* 방법 3: 이미지 합성 */}
+                      {/* 방법 2: 이미지 합성 */}
                       <button
-                        onClick={selectMethod3}
+                        onClick={selectMethod2}
                         className={`p-4 rounded-lg border-2 transition-all text-left ${
-                          selectedMethod === 3
+                          selectedMethod === 2
                             ? 'border-purple-500 bg-purple-50' 
                             : 'border-gray-200 hover:border-gray-300'
                         }`}
                       >
                         <div className="flex items-center gap-3 mb-2">
                           <div className="w-6 h-6 bg-purple-100 rounded-full flex items-center justify-center">
-                            <span className="text-purple-600 font-medium text-xs">3</span>
+                            <span className="text-purple-600 font-medium text-xs">2</span>
                           </div>
                           <div>
                             <h4 className="font-medium text-sm">이미지 합성</h4>
@@ -2480,9 +2457,7 @@ ${testData.message}
                         </div>
                         <h3 className="text-lg font-medium">
                           {getCurrentMethod() === 1 && "수정 실행"}
-                          {getCurrentMethod() === 2 && "마스킹 도구"}
-                          {getCurrentMethod() === 3 && "합성 실행"}
-                          {getCurrentMethod() === 4 && "마스킹 도구"}
+                          {getCurrentMethod() === 2 && "합성 실행"}
                         </h3>
                       </div>
                       
@@ -2675,8 +2650,112 @@ ${testData.message}
                               } finally {
                                 setIsGenerating(false)
                               }
+                            } 
+                            
+                            // 이미지 합성 (방법 2)
+                            else if (getCurrentMethod() === 2 && selectedImages.length >= 2) {
+                              try {
+                                setIsGenerating(true)
+                                
+                                // 두 개의 이미지 파일 가져오기
+                                let imageFile1: File | null = null
+                                let imageFile2: File | null = null
+                                
+                                // 첫 번째 이미지
+                                if (selectedImages[0].type === 'upload' && selectedImages[0].file) {
+                                  imageFile1 = selectedImages[0].file
+                                } else if (selectedImages[0].type === 'gallery' && selectedImages[0].url) {
+                                  const response = await fetch(selectedImages[0].url)
+                                  const blob = await response.blob()
+                                  imageFile1 = new File([blob], `image1_${Date.now()}.png`, { type: 'image/png' })
+                                }
+                                
+                                // 두 번째 이미지
+                                if (selectedImages[1].type === 'upload' && selectedImages[1].file) {
+                                  imageFile2 = selectedImages[1].file
+                                } else if (selectedImages[1].type === 'gallery' && selectedImages[1].url) {
+                                  const response = await fetch(selectedImages[1].url)
+                                  const blob = await response.blob()
+                                  imageFile2 = new File([blob], `image2_${Date.now()}.png`, { type: 'image/png' })
+                                }
+                                
+                                if (!imageFile1 || !imageFile2) {
+                                  throw new Error('이미지 파일을 찾을 수 없습니다')
+                                }
+                                
+                                // FormData 생성
+                                const formData = new FormData()
+                                formData.append('image1', imageFile1)
+                                formData.append('image2', imageFile2)
+                                formData.append('prompt', editPrompt)
+                                formData.append('width', '1024')
+                                formData.append('height', '720')
+                                formData.append('guidance', '2.5')
+                                formData.append('steps', '20')
+                                
+                                // 토큰 가져오기
+                                const token = tokenUtils.getToken()
+                                if (!token) {
+                                  throw new Error('로그인이 필요합니다')
+                                }
+                                
+                                // API 호출
+                                const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/image-modification/synthesize`, {
+                                  method: 'POST',
+                                  headers: {
+                                    Authorization: `Bearer ${token}`,
+                                  },
+                                  body: formData,
+                                })
+                                
+                                if (!response.ok) {
+                                  const error = await response.json()
+                                  throw new Error(error.detail || '이미지 합성에 실패했습니다')
+                                }
+                                
+                                const result = await response.json()
+                                
+                                // 결과를 갤러리에 추가
+                                const newImage: GeneratedImage = {
+                                  id: result.storage_id,
+                                  prompt: result.prompt,
+                                  width: result.width,
+                                  height: result.height,
+                                  image_url: result.s3_url,
+                                  created_at: new Date().toISOString(),
+                                  status: 'completed'
+                                }
+                                
+                                setImages(prev => [newImage, ...prev])
+                                setPreviewImage(newImage)
+                                setShowGalleryImageModal(true)
+                                
+                                // 성공 메시지
+                                toast({
+                                  title: "합성 완료",
+                                  description: '이미지 합성이 완료되었습니다!',
+                                  duration: 3000,
+                                })
+                                
+                                // 입력 초기화
+                                const textArea = document.getElementById('edit-prompt') as HTMLTextAreaElement
+                                if (textArea) textArea.value = ''
+                                setSelectedImages([])
+                                setSelectedMethod(0)
+                                
+                              } catch (error) {
+                                console.error('이미지 합성 실패:', error)
+                                toast({
+                                  title: "합성 실패",
+                                  description: error instanceof Error ? error.message : '이미지 합성에 실패했습니다.',
+                                  variant: "destructive",
+                                  duration: 5000,
+                                })
+                              } finally {
+                                setIsGenerating(false)
+                              }
                             } else {
-                              // TODO: 다른 수정 방법들 구현
+                              // 기타 경우
                               toast({
                                 title: "준비 중",
                                 description: '해당 수정 방법은 아직 준비 중입니다.',
@@ -2696,9 +2775,7 @@ ${testData.message}
                             <>
                               <Wand2 className="h-4 w-4 mr-2" />
                               {getCurrentMethod() === 1 && "이미지 수정"}
-                              {getCurrentMethod() === 2 && "마스킹 수정"}
-                              {getCurrentMethod() === 3 && "이미지 합성"}
-                              {getCurrentMethod() === 4 && "복합 마스킹"}
+                              {getCurrentMethod() === 2 && "이미지 합성"}
                             </>
                           )}
                         </Button>
