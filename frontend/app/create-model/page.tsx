@@ -73,6 +73,20 @@ export default function CreateModelPage() {
   const [mbtiList, setMbtiList] = useState<ModelMBTI[]>([])
   const [loadingMbti, setLoadingMbti] = useState(false)
 
+  // 한글 초성 검증 함수
+  const containsOnlyChoseong = (text: string): boolean => {
+    // 한글 초성만 있는지 확인하는 정규식
+    const choseongPattern = /^[ㄱ-ㅎㅏ-ㅣ]*$/
+    return choseongPattern.test(text)
+  }
+
+  // 한글 완성형 문자 검증 함수
+  const hasCompleteKorean = (text: string): boolean => {
+    // 한글 완성형 문자가 있는지 확인하는 정규식
+    const completeKoreanPattern = /[가-힣]/
+    return completeKoreanPattern.test(text)
+  }
+
   useEffect(() => {
     // 중복 API 호출 방지
     if (fetchedRef.current) return;
@@ -153,6 +167,54 @@ export default function CreateModelPage() {
   }, [formData.tone]);
 
   const handleInputChange = (field: string, value: string | string[]) => {
+    // 한글 초성만 입력된 경우 검증
+    if (typeof value === 'string') {
+      // 이름, 설명, 성격, 말투 필드에서 초성만 입력된 경우 경고
+      if (['name', 'description', 'personality', 'tone'].includes(field)) {
+        if (containsOnlyChoseong(value) && value.length > 0) {
+          toast({
+            title: "입력 오류",
+            description: "초성만 입력할 수 없습니다. 완성된 한글로 입력해주세요.",
+            variant: "destructive",
+            duration: 3000,
+          })
+          return // 입력을 차단
+        }
+        
+        // 한글이 포함된 경우 완성형 한글이 있는지 확인
+        if (value.includes('ㄱ') || value.includes('ㄴ') || value.includes('ㄷ') || 
+            value.includes('ㄹ') || value.includes('ㅁ') || value.includes('ㅂ') || 
+            value.includes('ㅅ') || value.includes('ㅇ') || value.includes('ㅈ') || 
+            value.includes('ㅊ') || value.includes('ㅋ') || value.includes('ㅌ') || 
+            value.includes('ㅍ') || value.includes('ㅎ') || value.includes('ㅏ') || 
+            value.includes('ㅑ') || value.includes('ㅓ') || value.includes('ㅕ') || 
+            value.includes('ㅗ') || value.includes('ㅛ') || value.includes('ㅜ') || 
+            value.includes('ㅠ') || value.includes('ㅡ') || value.includes('ㅣ') || 
+            value.includes('ㅆ') || value.includes('ㄲ') || value.includes('ㄸ') || 
+            value.includes('ㅉ') || value.includes('ㅃ') || value.includes('ㅙ') || 
+            value.includes('ㅚ') || value.includes('ㅝ') || value.includes('ㅄ') ||
+            value.includes('ㅞ') || value.includes('ㅟ') || value.includes('ㅢ') ||
+            value.includes('ㅡ') || value.includes('ㅣ') || value.includes('ㅐ') ||
+            value.includes('ㅒ') || value.includes('ㅔ') || value.includes('ㅖ') ||
+            value.includes('ㅘ') || value.includes('ㅙ') || value.includes('ㅚ') ||
+            value.includes('ㅝ') || value.includes('ㅞ') || value.includes('ㅟ') ||
+            value.includes('ㄶ') || value.includes('ㄺ') || value.includes('ㄻ') || 
+            value.includes('ㄼ') || value.includes('ㄽ') || value.includes('ㄾ') || 
+            value.includes('ㄿ') || value.includes('ㅀ')) {
+          
+          if (!hasCompleteKorean(value)) {
+            toast({
+              title: "입력 오류",
+              description: "초성과 모음만 입력할 수 없습니다. 완성된 한글로 입력해주세요.",
+              variant: "destructive",
+              duration: 3000,
+            })
+            return // 입력을 차단
+          }
+        }
+      }
+    }
+    
     setFormData((prev) => {
       // imageMethod 변경 관련 로직 제거 (항상 upload로 고정)
       
@@ -680,6 +742,50 @@ export default function CreateModelPage() {
   const handleAddCustomTone = () => {
     const value = customToneInput.trim();
     if (!value) return;
+    
+    // 초성만 입력된 경우 검증
+    if (containsOnlyChoseong(value)) {
+      toast({
+        title: "입력 오류",
+        description: "초성만 입력할 수 없습니다. 완성된 한글로 입력해주세요.",
+        variant: "destructive",
+        duration: 3000,
+      })
+      return
+    }
+    
+    // 한글이 포함된 경우 완성형 한글이 있는지 확인
+    if (value.includes('ㄱ') || value.includes('ㄴ') || value.includes('ㄷ') || 
+        value.includes('ㄹ') || value.includes('ㅁ') || value.includes('ㅂ') || 
+        value.includes('ㅅ') || value.includes('ㅇ') || value.includes('ㅈ') || 
+        value.includes('ㅊ') || value.includes('ㅋ') || value.includes('ㅌ') || 
+        value.includes('ㅍ') || value.includes('ㅎ') || value.includes('ㅏ') || 
+        value.includes('ㅑ') || value.includes('ㅓ') || value.includes('ㅕ') || 
+        value.includes('ㅗ') || value.includes('ㅛ') || value.includes('ㅜ') || 
+        value.includes('ㅠ') || value.includes('ㅡ') || value.includes('ㅣ') || 
+        value.includes('ㅆ') || value.includes('ㄲ') || value.includes('ㄸ') || 
+        value.includes('ㅉ') || value.includes('ㅃ') || value.includes('ㅙ') || 
+        value.includes('ㅚ') || value.includes('ㅝ') || value.includes('ㅄ') ||
+        value.includes('ㅞ') || value.includes('ㅟ') || value.includes('ㅢ') ||
+        value.includes('ㅡ') || value.includes('ㅣ') || value.includes('ㅐ') ||
+        value.includes('ㅒ') || value.includes('ㅔ') || value.includes('ㅖ') ||
+        value.includes('ㅘ') || value.includes('ㅙ') || value.includes('ㅚ') ||
+        value.includes('ㅝ') || value.includes('ㅞ') || value.includes('ㅟ') ||
+        value.includes('ㄶ') || value.includes('ㄺ') || value.includes('ㄻ') || 
+        value.includes('ㄼ') || value.includes('ㄽ') || value.includes('ㄾ') || 
+        value.includes('ㄿ') || value.includes('ㅀ')) {
+      
+      if (!hasCompleteKorean(value)) {
+        toast({
+          title: "입력 오류",
+          description: "초성과 모음만 입력할 수 없습니다. 완성된 한글로 입력해주세요.",
+          variant: "destructive",
+          duration: 3000,
+        })
+        return
+      }
+    }
+    
     setFormData((prev) => ({
       ...prev,
       customTones: [...(prev.customTones || []), value],
