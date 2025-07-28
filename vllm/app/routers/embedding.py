@@ -19,6 +19,9 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field, validator
 import aiofiles
 
+# 멀티프로세싱 시작 방식 설정
+mp.set_start_method('spawn', force=True)
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -91,12 +94,19 @@ def embedding_worker_process(request_queue: Queue, response_queue: Queue):
     # 모델 초기화
     try:
         if torch.cuda.is_available():
+            # CUDA 초기화 전에 디바이스 설정
             torch.cuda.set_device(0)  # 격리된 환경에서는 항상 0
             device = torch.device("cuda:0")
             logger.info(f"🔧 임베딩 워커 초기화 중... (격리된 GPU {rag_gpu_id}, 디바이스: cuda:0)")
+            
+            # CUDA 메모리 정리
+            torch.cuda.empty_cache()
         else:
             device = torch.device("cpu")
             logger.warning("⚠️ CUDA를 사용할 수 없습니다. CPU를 사용합니다.")
+        
+        # 토크나이저 병렬화 비활성화
+        os.environ['TOKENIZERS_PARALLELISM'] = 'false'
         
         embedding_model = SentenceTransformer("BAAI/bge-m3", device=device)
         logger.info("✅ 임베딩 워커 모델 초기화 완료")
@@ -158,6 +168,9 @@ def initialize_embedding_multiprocessing():
     global embedding_process, embedding_request_queue, embedding_response_queue
     
     if embedding_process is None:
+        # 환경 변수 설정
+        os.environ['TOKENIZERS_PARALLELISM'] = 'false'
+        
         embedding_request_queue = Queue()
         embedding_response_queue = Queue()
         
