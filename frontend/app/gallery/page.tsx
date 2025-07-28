@@ -11,17 +11,10 @@ import { useToast } from '@/hooks/use-toast'
 import { useAuth } from '@/hooks/use-auth'
 
 interface GeneratedImage {
-  id: number
   storage_id: string
   s3_url: string
-  team_id: number
-  user_id: string
-  prompt?: string
-  width: number
-  height: number
+  group_id: number
   created_at: string
-  workflow_name?: string
-  model_name?: string
 }
 
 interface PaginationInfo {
@@ -180,15 +173,25 @@ export default function GalleryPage() {
   const handleDownload = async (s3Url: string, storageId: string) => {
     try {
       const response = await fetch(s3Url)
-      const blob = await response.blob()
-      const url = window.URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `image-${storageId}.png`
-      document.body.appendChild(a)
-      a.click()
-      window.URL.revokeObjectURL(url)
-      document.body.removeChild(a)
+      
+      // presigned URL이 만료된 경우 새로 요청
+      if (!response.ok && response.status === 403) {
+        const newUrl = await fetchNewPresignedUrl(storageId)
+        if (newUrl) {
+          const newResponse = await fetch(newUrl)
+          if (newResponse.ok) {
+            const blob = await newResponse.blob()
+            downloadBlob(blob, `image-${storageId}.png`)
+            return
+          }
+        }
+      } else if (response.ok) {
+        const blob = await response.blob()
+        downloadBlob(blob, `image-${storageId}.png`)
+        return
+      }
+      
+      throw new Error('Download failed')
     } catch (error) {
       // console.error('Failed to download image:', error)
       toast({
@@ -198,6 +201,40 @@ export default function GalleryPage() {
         duration: 3000,
       })
     }
+  }
+
+  // Blob을 다운로드하는 헬퍼 함수
+  const downloadBlob = (blob: Blob, filename: string) => {
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    window.URL.revokeObjectURL(url)
+    document.body.removeChild(a)
+  }
+
+  // 새로운 presigned URL 가져오기
+  const fetchNewPresignedUrl = async (storageId: string): Promise<string | null> => {
+    try {
+      const token = localStorage.getItem('access_token')
+      if (!token) return null
+
+      const response = await fetch(`/api/v1/gallery/images/${storageId}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        return data.s3_url
+      }
+    } catch (error) {
+      console.error('Failed to fetch new presigned URL:', error)
+    }
+    return null
   }
 
   // 초기 로드 및 팀 변경시 이미지 가져오기
@@ -264,10 +301,23 @@ export default function GalleryPage() {
                   <div className="relative aspect-square">
                     <Image
                       src={image.s3_url}
-                      alt={image.prompt || `Generated image ${image.storage_id}`}
+                      alt={`Generated image ${image.storage_id}`}
                       fill
                       className="object-cover cursor-pointer transition-transform group-hover:scale-105"
                       onClick={() => setSelectedImage(image)}
+                      onError={async (e) => {
+                        const imgElement = e.target as HTMLImageElement
+                        const newUrl = await fetchNewPresignedUrl(image.storage_id)
+                        if (newUrl) {
+                          imgElement.src = newUrl
+                          // 이미지 목록에서도 URL 업데이트
+                          setImages(prev => prev.map(img => 
+                            img.storage_id === image.storage_id 
+                              ? { ...img, s3_url: newUrl }
+                              : img
+                          ))
+                        }
+                      }}
                     />
                     <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-20 transition-opacity" />
                     <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-2">
@@ -290,10 +340,7 @@ export default function GalleryPage() {
                     </div>
                   </div>
                   <CardContent className="p-4">
-                    <p className="text-sm text-gray-600 truncate">
-                      {image.prompt || '프롬프트 없음'}
-                    </p>
-                    <p className="text-xs text-gray-400 mt-1">
+                    <p className="text-xs text-gray-400">
                       {new Date(image.created_at).toLocaleDateString()}
                     </p>
                   </CardContent>
@@ -344,28 +391,32 @@ export default function GalleryPage() {
             <div className="relative">
               <Image
                 src={selectedImage.s3_url}
-                alt={selectedImage.prompt || 'Generated image'}
-                width={selectedImage.width || 512}
-                height={selectedImage.height || 512}
+                alt={'Generated image'}
+                width={512}
+                height={512}
                 className="max-h-[70vh] object-contain"
+                onError={async (e) => {
+                  const imgElement = e.target as HTMLImageElement
+                  const newUrl = await fetchNewPresignedUrl(selectedImage.storage_id)
+                  if (newUrl) {
+                    imgElement.src = newUrl
+                    // 선택된 이미지의 URL도 업데이트
+                    setSelectedImage(prev => prev ? { ...prev, s3_url: newUrl } : null)
+                    // 이미지 목록에서도 URL 업데이트
+                    setImages(prev => prev.map(img => 
+                      img.storage_id === selectedImage.storage_id 
+                        ? { ...img, s3_url: newUrl }
+                        : img
+                    ))
+                  }
+                }}
               />
             </div>
             <div className="p-4">
               <h3 className="font-semibold mb-2">이미지 정보</h3>
               <p className="text-sm text-gray-600 mb-1">
-                <strong>프롬프트:</strong> {selectedImage.prompt || '없음'}
-              </p>
-              <p className="text-sm text-gray-600 mb-1">
-                <strong>크기:</strong> {selectedImage.width} x {selectedImage.height}
-              </p>
-              <p className="text-sm text-gray-600 mb-1">
                 <strong>생성일:</strong> {new Date(selectedImage.created_at).toLocaleString()}
               </p>
-              {selectedImage.model_name && (
-                <p className="text-sm text-gray-600 mb-1">
-                  <strong>모델:</strong> {selectedImage.model_name}
-                </p>
-              )}
               <div className="flex gap-2 mt-4">
                 <Button
                   onClick={() => handleDownload(selectedImage.s3_url, selectedImage.storage_id)}

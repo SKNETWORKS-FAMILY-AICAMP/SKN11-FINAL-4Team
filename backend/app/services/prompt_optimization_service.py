@@ -375,6 +375,12 @@ Output: {"optimized_instruction": "Replace the background with a tropical beach 
                 "차가운": "cool color temperature, crisp lighting, blue tones",
                 "신비로운": "mysterious atmosphere, soft lighting, ethereal mood",
                 "역동적": "dynamic composition, energetic movement, action scene"
+            },
+            "인종스타일": {
+                "동양인": "asian features, korean beauty, east asian aesthetic",
+                "서양인": "western features, european aesthetic, caucasian appearance",
+                "혼합": "mixed features, diverse appearance, global aesthetic",
+                "기본": ""
             }
         }
         

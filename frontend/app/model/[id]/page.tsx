@@ -34,7 +34,6 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
@@ -557,12 +556,12 @@ function ModelDetailContent() {
     } catch (error: any) {
       // console.error("❌ API 키 조회 실패:", {
       //   error: error,
-        status: error.status,
-        detail: error.data?.detail,
-        message: error.message,
-        influencer_id: params.id,
-        stack: error.stack,
-      });
+      //   status: error.status,
+      //   detail: error.data?.detail,
+      //   message: error.message,
+      //   influencer_id: params.id,
+      //   stack: error.stack,
+      // });
 
       // API 키가 없는 경우 (404)에만 자동 생성 시도
       if (error.status === 404 && error.data?.detail === "API key not found") {
@@ -588,8 +587,8 @@ function ModelDetailContent() {
         // 다른 오류 (인플루언서를 찾을 수 없음 등)는 그대로 표시
         // console.error(
         //   "API 키 조회 실패:",
-          error.response?.data?.detail || error.message,
-        );
+        //   error.response?.data?.detail || error.message,
+        // );
         setApiKeyInfo(null);
       }
     }

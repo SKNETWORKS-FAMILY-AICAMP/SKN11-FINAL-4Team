@@ -225,146 +225,287 @@ export default function ImageGeneratorPage() {
   // 인증 상태 추가
   const { token, isAuthenticated } = useAuth()
 
-  // 웹소켓 훅 사용
-  const { isConnected: wsConnected, send: wsSend } = useWebSocket({
-    onSessionStatus: (status: SessionStatus) => {
-      setSessionStatus(status)
-      if (status.session_remaining_seconds !== undefined) {
-        setClientSessionTime(status.session_remaining_seconds)
-      }
-      if (status.processing_remaining_seconds !== undefined) {
-        setClientProcessingTime(status.processing_remaining_seconds)
-      }
-    },
-    onGenerationProgress: (progress: any) => {
-      setGenerationProgress(progress)
-    },
-    onGenerationComplete: (data: any) => {
-      handleGenerationComplete(data)
-    },
-    onMessage: (message: any) => {
-      switch (message.type) {
-        case 'pod_ready':
-          if (message.data) {
-            setSessionStatus(prev => ({
-              ...prev,
-              pod_status: 'ready',
-              pod_id: message.data.pod_id || prev?.pod_id
-            }))
-            toast({
-              title: "Pod 준비 완료",
-              description: message.data.message || 'Pod가 준비되었습니다. 이미지 생성이 가능합니다.',
-              duration: 3000,
-            })
-          }
-          break
-          
-        case 'pod_failed':
-          if (message.data) {
-            setSessionStatus(prev => ({
-              ...prev,
-              pod_status: 'failed'
-            }))
-            toast({
-              title: "Pod 준비 실패",
-              description: message.data.message || 'Pod 준비에 실패했습니다. 다시 시도해주세요.',
-              variant: "destructive",
-              duration: 3000,
-            })
-          }
-          break
-          
-        case 'modification_progress':
-          if (message.data) {
-            toast({
-              title: "이미지 수정 중",
-              description: `${message.data.message} (${message.data.progress}%)`,
-              duration: 1000,
-            })
-          }
-          break
-          
-        case 'modification_complete':
-          if (message.data && message.data.success) {
-            if (message.data.lora_settings) {
-              console.log('이미지 수정에 사용된 LoRA 설정:', message.data.lora_settings)
-            }
-            
-            const newImage: GeneratedImage = {
-              id: message.data.storage_id,
-              prompt: `[Modified] ${message.data.edit_instruction}`,
-              width: message.data.width,
-              height: message.data.height,
-              image_url: message.data.s3_url,
-              created_at: new Date().toISOString(),
-              status: 'completed'
-            }
-            
-            setImages(prev => [newImage, ...prev])
-            setPreviewImage(newImage)
-            
-            if (activeTab === "modify") {
-              setShowGalleryImageModal(true)
-            } else {
-              setShowImageModal(true)
-            }
-            
-            toast({
-              title: "수정 완료",
-              description: '이미지가 성공적으로 수정되었습니다.',
-              duration: 3000,
-            })
-            
-            const textArea = document.getElementById('edit-prompt') as HTMLTextAreaElement
-            if (textArea) textArea.value = ''
-            setSelectedImages([])
-            setSelectedMethod(0)
-            setIsGenerating(false)
-          }
-          break
-          
-        case 'session_created':
-          if (message.data) {
-            const data = message.data
-            if (data.success) {
-              setSessionStatus(data.session_status)
-              setClientSessionTime(data.session_status?.session_remaining_seconds || null)
-              setClientProcessingTime(data.session_status?.processing_remaining_seconds || null)
-              setSessionRetryCount(0)
-              setIsAutoRetrying(false)
-              toast({
-                title: "세션 생성 성공",
-                description: '이미지 생성이 가능합니다.',
-                duration: 3000,
-              })
-            } else {
-              // 세션 생성 실패 처리
-              toast({
-                title: "세션 생성 실패",
-                description: data.message || '세션 생성에 실패했습니다.',
-                variant: "destructive",
-                duration: 3000,
-              })
-            }
-          }
-          break
-      }
-    },
-    onError: (error: any) => {
-      if (error?.message) {
-        toast({
-          title: "오류",
-          description: error.message,
-          variant: "destructive",
-          duration: 3000,
-        })
-      }
-    },
-    onConnect: () => {
-      // 연결되면 세션 상태 요청
-      wsSend({ type: 'session_status' })
+  // WebSocket 연결 초기화
+  useEffect(() => {
+    if (!accessToken) return
+
+    // 이미 연결되어 있으면 재연결하지 않음
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      // WebSocket already connected, skipping reconnection
+      return
     }
-  })
+
+    const connectWebSocket = () => {
+      try {
+        // 토큰 유효성 검사
+        if (!accessToken) {
+          console.error('No access token available')
+          return
+        }
+        
+        // JWT 토큰 디코딩하여 만료 시간 확인
+        try {
+          const tokenParts = accessToken.split('.')
+          if (tokenParts.length === 3) {
+            const payload = JSON.parse(atob(tokenParts[1]))
+            const exp = payload.exp * 1000 // exp는 초 단위이므로 밀리초로 변환
+            if (Date.now() >= exp) {
+              console.error('Token expired')
+              tokenUtils.removeToken()
+              window.location.href = '/login'
+              return
+            }
+          }
+        } catch (e) {
+          console.error('Failed to decode token:', e)
+        }
+        
+        // 기존 연결이 있으면 정리
+        if (wsRef.current) {
+          wsRef.current.close()
+          wsRef.current = null
+        }
+
+        // WebSocket URL 구성 - 백엔드가 HTTP면 ws, HTTPS면 wss 사용
+        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
+        const wsProtocol = backendUrl.startsWith('https') ? 'wss:' : 'ws:'
+        const wsHost = backendUrl.replace(/^https?:\/\//, '')
+        const wsUrl = `${wsProtocol}//${wsHost}/api/v1/image-generation/ws?token=${accessToken}`
+        
+        // Connecting to WebSocket
+        const ws = new WebSocket(wsUrl)
+        
+        ws.onopen = () => {
+          // WebSocket connected
+          setWsConnected(true)
+          setReconnectAttempts(0) // 연결 성공 시 재연결 시도 횟수 리셋
+          
+          // 재연결 타이머가 있으면 정리
+          if (reconnectTimeoutRef.current) {
+            clearTimeout(reconnectTimeoutRef.current)
+            reconnectTimeoutRef.current = null
+          }
+          
+          // 초기 세션 상태 요청
+          ws.send(JSON.stringify({ type: 'session_status' }))
+        }
+        
+        ws.onmessage = (event) => {
+          try {
+            const message = JSON.parse(event.data) as WSMessage
+            
+            switch (message.type) {
+              case 'session_status':
+                if (message.data) {
+                  const status = message.data as SessionStatus
+                  setSessionStatus(status)
+                  
+                  // 세션 시간 업데이트
+                  if (status.session_remaining_seconds !== undefined) {
+                    setClientSessionTime(status.session_remaining_seconds)
+                  }
+                  if (status.processing_remaining_seconds !== undefined) {
+                    setClientProcessingTime(status.processing_remaining_seconds)
+                  }
+                }
+                break
+                
+              case 'generation_progress':
+                if (message.data) {
+                  setGenerationProgress(message.data)
+                }
+                break
+                
+              case 'generation_complete':
+                if (message.data) {
+                  handleGenerationComplete(message.data)
+                }
+                break
+                
+              case 'pod_ready':
+                if (message.data) {
+                  // Pod ready
+                  setSessionStatus(prev => ({
+                    ...prev,
+                    pod_status: 'ready',
+                    pod_id: message.data.pod_id || prev.pod_id
+                  }))
+                  toast({
+                    title: "Pod 준비 완료",
+                    description: message.data.message || 'Pod가 준비되었습니다. 이미지 생성이 가능합니다.',
+                    duration: 3000,
+                  })
+                }
+                break
+                
+              case 'pod_failed':
+                if (message.data) {
+                  // Pod failed
+                  setSessionStatus(prev => ({
+                    ...prev,
+                    pod_status: 'failed'
+                  }))
+                  toast({
+                    title: "Pod 준비 실패",
+                    description: message.data.message || 'Pod 준비에 실패했습니다. 다시 시도해주세요.',
+                    variant: "destructive",
+                    duration: 3000,
+                  })
+                }
+                break
+                
+              case 'error':
+                if (message.data?.message) {
+                  // WebSocket error
+                  toast({
+                    title: "오류",
+                    description: message.data.message,
+                    variant: "destructive",
+                    duration: 3000,
+                  })
+                }
+                break
+                
+              case 'session_created':
+                // 세션 생성 응답은 createUserSession 함수에서 처리
+                break
+                
+              case 'modification_progress':
+                if (message.data) {
+                  // 이미지 수정 진행 상황
+                  toast({
+                    title: "이미지 수정 중",
+                    description: `${message.data.message} (${message.data.progress}%)`,
+                    duration: 1000,
+                  })
+                }
+                break
+                
+              case 'modification_complete':
+                if (message.data && message.data.success) {
+                  // LoRA 설정 정보 로깅
+                  if (message.data.lora_settings) {
+                    console.log('이미지 수정에 사용된 LoRA 설정:', message.data.lora_settings)
+                    console.log('- 분석 결과:', message.data.lora_settings.analysis)
+                    console.log('- LoRA 1 (동양인):', message.data.lora_settings.lora_1_enabled ? `활성화 (강도: ${message.data.lora_settings.lora_1_strength})` : '비활성화')
+                    console.log('- LoRA 2 (서양인):', message.data.lora_settings.lora_2_enabled ? `활성화 (강도: ${message.data.lora_settings.lora_2_strength})` : '비활성화')
+                  }
+                  
+                  // 이미지 수정 완료
+                  const newImage: GeneratedImage = {
+                    id: message.data.storage_id,
+                    prompt: `[Modified] ${message.data.edit_instruction}`,
+                    width: message.data.width,
+                    height: message.data.height,
+                    image_url: message.data.s3_url,
+                    created_at: new Date().toISOString(),
+                    status: 'completed'
+                  }
+                  
+                  setImages(prev => [newImage, ...prev])
+                  setPreviewImage(newImage)
+                  
+                  // 현재 탭에 따라 적절한 모달 열기
+                  if (activeTab === "modify") {
+                    setShowGalleryImageModal(true)  // 수정 탭에서는 갤러리 모달 사용
+                  } else {
+                    setShowImageModal(true)  // 생성 탭에서는 생성 모달 사용
+                  }
+                  
+                  toast({
+                    title: "수정 완료",
+                    description: '이미지가 성공적으로 수정되었습니다.',
+                    duration: 3000,
+                  })
+                  
+                  // 입력 초기화
+                  const textArea = document.getElementById('edit-prompt') as HTMLTextAreaElement
+                  if (textArea) textArea.value = ''
+                  setSelectedImages([])
+                  setSelectedMethod(0)
+                  setIsGenerating(false)
+                }
+                break
+            }
+          } catch (error) {
+            // WebSocket message parsing error
+          }
+        }
+        
+        ws.onerror = (error) => {
+          // WebSocket error
+          setWsConnected(false)
+        }
+        
+        ws.onclose = (event) => {
+          // WebSocket disconnected
+          setWsConnected(false)
+          wsRef.current = null
+          
+          // 403 오류(인증 실패)인 경우 재연결 시도하지 않음
+          if (event.code === 1008 || event.reason?.includes('403')) {
+            console.error('WebSocket authentication failed. Please login again.')
+            toast({
+              title: "인증 오류",
+              description: '다시 로그인해주세요.',
+              variant: "destructive",
+              duration: 5000,
+            })
+            // 토큰 제거 및 로그인 페이지로 리다이렉트
+            tokenUtils.removeToken()
+            window.location.href = '/login'
+            return
+          }
+          
+          // 정상적인 종료가 아닌 경우에만 재연결 시도 (최대 3번)
+          if (event.code !== 1000 && reconnectAttempts < 3) {
+            setReconnectAttempts(prev => prev + 1)
+            // 5초 후 재연결 시도 (연결이 없을 때만)
+            reconnectTimeoutRef.current = setTimeout(() => {
+              if (accessToken && (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN)) {
+                console.log(`WebSocket reconnect attempt ${reconnectAttempts + 1}/3`)
+                connectWebSocket()
+              }
+            }, 5000)
+          } else if (reconnectAttempts >= 3) {
+            console.error('WebSocket reconnection failed after 3 attempts')
+            toast({
+              title: "연결 실패",
+              description: '서버 연결에 실패했습니다. 페이지를 새로고침해주세요.',
+              variant: "destructive",
+              duration: 5000,
+            })
+          }
+        }
+        
+        wsRef.current = ws
+      } catch (error) {
+        // WebSocket connection error
+        setWsConnected(false)
+      }
+    }
+    
+    connectWebSocket()
+    
+    // Cleanup
+    return () => {
+      // WebSocket 연결 종료
+      if (wsRef.current) {
+        wsRef.current.close(1000, 'Component unmounting')
+        wsRef.current = null
+      }
+      
+      // 재연결 타이머 정리
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current)
+        reconnectTimeoutRef.current = null
+      }
+      
+      // 상태 초기화
+      setWsConnected(false)
+      setReconnectAttempts(0)
+    }
+  }, [accessToken])
   
   // 생성 파라미터
   const [prompt, setPrompt] = useState("")
@@ -430,7 +571,7 @@ export default function ImageGeneratorPage() {
       }
       
       // WebSocket 연결 확인
-      if (!wsConnected) {
+      if (!wsConnected || !wsRef.current) {
         // WebSocket 연결이 없습니다
         toast({
           title: "연결 오류",
@@ -442,11 +583,62 @@ export default function ImageGeneratorPage() {
       }
       
       // WebSocket으로 세션 생성 요청
-      wsSend({ type: 'create_session' })
-      
-      // 세션 생성 요청 후 상태를 기다리지 않고 바로 리턴
-      // onMessage 핸들러에서 session_created 이벤트를 처리함
-      return true
+      return new Promise((resolve) => {
+        // 임시 이벤트 리스너 설정
+        const handleSessionCreated = (event: MessageEvent) => {
+          try {
+            const message = JSON.parse(event.data)
+            if (message.type === 'session_created') {
+              // 리스너 제거
+              wsRef.current?.removeEventListener('message', handleSessionCreated)
+              
+              const data = message.data
+              if (data.success) {
+                setSessionStatus(data.session_status)
+                
+                // 클라이언트 사이드 타이머 업데이트
+                setClientSessionTime(data.session_status?.session_remaining_seconds || null)
+                setClientProcessingTime(data.session_status?.processing_remaining_seconds || null)
+                
+                // 성공 시 재시도 카운트 리셋
+                setSessionRetryCount(0)
+                setIsAutoRetrying(false)
+                
+                // 세션 생성 성공
+                resolve(true)
+              } else {
+                // 세션 생성 실패
+                
+                // 재시도 로직
+                if (retryAttempt < maxRetries) {
+                  const nextAttempt = retryAttempt + 1
+                  setSessionRetryCount(nextAttempt)
+                  
+                  // 세션 재시도 예정
+                  
+                  setTimeout(async () => {
+                    await createUserSession(true, nextAttempt)
+                  }, retryDelay)
+                  
+                  resolve(false)
+                } else {
+                  // 세션 생성 최대 재시도 횟수 초과
+                  setIsAutoRetrying(false)
+                  resolve(false)
+                }
+              }
+            }
+          } catch (error) {
+            // Session created message parsing error
+          }
+        }
+        
+        // 이벤트 리스너 등록
+        wsRef.current?.addEventListener('message', handleSessionCreated)
+        
+        // 세션 생성 요청 전송
+        wsRef.current?.send(JSON.stringify({ type: 'create_session' }))
+      })
     } catch (error) {
       // 세션 생성 오류
       
@@ -716,7 +908,7 @@ ${testData.message}
     }
 
     // WebSocket 연결 확인
-    if (!wsConnected) {
+    if (!wsConnected || !wsRef.current) {
       toast({
         title: "연결 오류",
         description: 'WebSocket 연결이 끊어졌습니다. 페이지를 새로고침해주세요.',
@@ -746,7 +938,7 @@ ${testData.message}
 
     try {
       // WebSocket으로 이미지 생성 요청
-      wsSend({
+      wsRef.current.send(JSON.stringify({
         type: 'generate_image',
         data: {
           prompt: prompt.trim() || getCombinedPromptKeywords(),
@@ -757,7 +949,7 @@ ${testData.message}
           guidance: 3.5,
           seed: null
         }
-      })
+      }))
     } catch (error) {
       // console.error('Failed to send image generation request:', error)
       setIsGenerating(false)
@@ -1143,7 +1335,7 @@ ${testData.message}
     if (!previewImage) return
     
     // WebSocket 연결 확인
-    if (!wsConnected) {
+    if (!wsConnected || !wsRef.current) {
       toast({
         title: "연결 오류",
         description: 'WebSocket 연결이 끊어졌습니다. 페이지를 새로고침해주세요.',
@@ -1171,7 +1363,7 @@ ${testData.message}
       const selectedSizeData = PRESET_SIZES.find(size => size.id === selectedSize)
       
       // WebSocket으로 이미지 재생성 요청
-      wsSend({
+      wsRef.current.send(JSON.stringify({
         type: 'generate_image',
         data: {
           prompt: previousPrompt,
@@ -1182,7 +1374,7 @@ ${testData.message}
           guidance: 3.5,
           seed: null  // 새로운 시드로 재생성
         }
-      })
+      }))
       
       // console.log('[이미지 재생성 요청] 파라미터:', {
       //   prompt: previousPrompt,
@@ -1398,8 +1590,6 @@ ${testData.message}
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
   const [selectedSubcategory, setSelectedSubcategory] = useState<string | null>(null)
   const [selectedDetailStyle, setSelectedDetailStyle] = useState<string | null>(null)
-  // 인종 스타일 선택 상태
-  const [selectedEthnicityStyle, setSelectedEthnicityStyle] = useState<string>("기본")
   // 풍경 선택 상태
   const [selectedLandscape, setSelectedLandscape] = useState<string | null>(null)
 
@@ -1408,15 +1598,22 @@ ${testData.message}
     setSelectedMainCategory(mainId)
     setSelectedCategory(null)
     setSelectedSubcategory(null)
+    setSelectedDetailStyle(null)
     setSelectedLandscape(null)  // 풍경 선택도 초기화
   }
   const handleCategorySelect = (categoryId: string | null) => {
     setSelectedCategory(categoryId)
     setSelectedSubcategory(null)
+    setSelectedDetailStyle(null)
     setSelectedLandscape(null)  // 풍경 선택도 초기화
   }
   const handleSubcategorySelect = (subcategoryId: string | null) => {
     setSelectedSubcategory(subcategoryId)
+    setSelectedDetailStyle(null)
+    setSelectedLandscape(null)  // 풍경 선택도 초기화
+  }
+  const handleDetailStyleSelect = (styleId: string | null) => {
+    setSelectedDetailStyle(styleId)
     setSelectedLandscape(null)  // 풍경 선택도 초기화
   }
   const handleLandscapeSelect = (landscapeId: string) => {
@@ -1425,12 +1622,14 @@ ${testData.message}
     setSelectedMainCategory(null)
     setSelectedCategory(null)
     setSelectedSubcategory(null)
+    setSelectedDetailStyle(null)
   }
   const handleLandscapeOptionSelect = (optionId: string) => {
     if (selectedLandscape === 'landscape') {
       setSelectedCategory(optionId)
       setSelectedMainCategory(null)
       setSelectedSubcategory(null)
+      setSelectedDetailStyle(null)
     }
   }
 
@@ -1445,7 +1644,7 @@ ${testData.message}
 
     // 사람인 경우
     if (selectedMainCategory === 'person') {
-      if (selectedCategory && selectedSubcategory) {
+      if (selectedCategory && selectedSubcategory && selectedDetailStyle) {
         // 스타일 키워드 추가
         const styleId = selectedCategory // real, movie, anime, webtoon, digital
         if (PROMPT_KEYWORDS.styles[styleId as keyof typeof PROMPT_KEYWORDS.styles]) {
@@ -1456,6 +1655,12 @@ ${testData.message}
         const genderId = selectedSubcategory // man, woman
         if (PROMPT_KEYWORDS.gender[genderId as keyof typeof PROMPT_KEYWORDS.gender]) {
           keywords.push(PROMPT_KEYWORDS.gender[genderId as keyof typeof PROMPT_KEYWORDS.gender])
+        }
+
+        // 지역 키워드 추가
+        const regionId = selectedDetailStyle.includes('east') ? 'east' : 'west'
+        if (PROMPT_KEYWORDS.region[regionId]) {
+          keywords.push(PROMPT_KEYWORDS.region[regionId])
         }
       }
     }
@@ -1510,14 +1715,23 @@ ${testData.message}
       selectedStyles['대분류'] = categoryMapping[selectedMainCategory] || '선택안함'
     }
     
+    // 세부스타일 매핑 (예시로 기본적인 매핑만 구현)
+    if (selectedDetailStyle) {
+      const styleMapping: Record<string, string> = {
+        'realistic': '사실적',
+        'anime': '애니메이션',
+        'cartoon': '만화',
+        'painting': '유화',
+        'watercolor': '수채화',
+        'digital': '디지털아트',
+        'minimal': '미니멀',
+        'fantasy': '판타지'
+      }
+      selectedStyles['세부스타일'] = styleMapping[selectedDetailStyle] || '사실적'
+    }
     
     // 분위기 매핑 (기본값으로 밝은 사용)
     selectedStyles['분위기'] = '밝은'  // 디폴트
-    
-    // 인종 스타일 추가
-    if (selectedEthnicityStyle) {
-      selectedStyles['인종스타일'] = selectedEthnicityStyle
-    }
     
     // console.log('🎨 선택된 스타일 정보:', selectedStyles)
     return selectedStyles
@@ -1743,6 +1957,7 @@ ${testData.message}
                                           setSelectedMainCategory("")
                                           setSelectedCategory("")
                                           setSelectedSubcategory("")
+                                          setSelectedDetailStyle("")
                                           setSelectedLandscape("")
                                         }}
                                         className={
@@ -1781,6 +1996,7 @@ ${testData.message}
                                           onClick={() => {
                                             setSelectedCategory("")
                                             setSelectedSubcategory("")
+                                            setSelectedDetailStyle("")
                                           }}
                                           className={
                                             "p-3 rounded-xl border text-center transition-colors min-w-[120px] min-h-[40px] text-base font-semibold " +
@@ -1822,6 +2038,7 @@ ${testData.message}
                                         <button
                                           onClick={() => {
                                             setSelectedSubcategory("")
+                                            setSelectedDetailStyle("")
                                           }}
                                           className={
                                             "p-3 rounded-xl border text-center transition-colors min-w-[120px] min-h-[40px] text-base font-semibold " +
@@ -1857,55 +2074,57 @@ ${testData.message}
                                       </div>
                                     </div>
                                   ) : <div />}
+                                  {/* 4단계: 세부 스타일(동양/서양 등) */}
+                                  {selectedMainCategory === "person" && selectedCategory && selectedSubcategory ? (
+                                    <div>
+                                      <Label className="block mb-2">세부 스타일</Label>
+                                      <div className="flex flex-col gap-2 min-w-[120px]">
+                                        <button
+                                          onClick={() => setSelectedDetailStyle("")}
+                                          className={
+                                            "p-3 rounded-xl border text-center transition-colors min-w-[120px] min-h-[40px] text-base font-semibold " +
+                                            (selectedDetailStyle === ""
+                                              ? "bg-blue-100 border-blue-300 text-blue-700 ring-2 ring-blue-300 scale-105 shadow"
+                                              : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50 hover:scale-105")
+                                          }
+                                        >
+                                          선택안함
+                                        </button>
+                                        {(() => {
+                                          const main = STYLE_CATEGORIES.find((m: any) => m.id === selectedMainCategory)
+                                          const cat = main?.subcategories?.find((c: any) => c.id === selectedCategory)
+                                          const sub = (cat as any)?.subcategories?.find((s: any) => s.id === selectedSubcategory)
+                                          if (sub && Array.isArray(sub.styles)) {
+                                            return sub.styles.map((style: { id: string; name: string }) => (
+                                              <button
+                                                key={style.id}
+                                                onClick={() => handleDetailStyleSelect(style.id)}
+                                                className={
+                                                  "p-3 rounded-xl border text-center transition-colors min-w-[120px] min-h-[40px] text-base font-semibold " +
+                                                  (selectedDetailStyle === style.id
+                                                    ? "bg-blue-100 border-blue-300 text-blue-700 ring-2 ring-blue-300 scale-105 shadow"
+                                                    : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50 hover:scale-105")
+                                                }
+                                              >
+                                                <div>{style.name}</div>
+                                              </button>
+                                            ))
+                                          }
+                                          return null
+                                        })()}
+                                      </div>
+                                    </div>
+                                  ) : <div />}
                                 </div>
                               </CardContent>
                             </Card>
-
-                            {/* 인종 스타일 선택 - 사람 카테고리가 선택된 경우에만 표시 */}
-                            {selectedMainCategory === "person" && (
-                              <Card className="border-0 shadow-none bg-gray-50 mt-4">
-                                <CardHeader className="pb-3">
-                                  <CardTitle className="flex items-center gap-2 text-base">
-                                    <Palette className="h-4 w-4" />
-                                    인종 스타일 선택
-                                  </CardTitle>
-                                  <CardDescription className="text-xs text-gray-500 mt-1">
-                                    생성할 인물의 인종 특성을 선택하세요.
-                                  </CardDescription>
-                                </CardHeader>
-                                <CardContent className="space-y-4">
-                                  <div className="flex gap-3 flex-wrap">
-                                    {[
-                                      { id: '기본', name: '기본', description: '지정하지 않음' },
-                                      { id: '동양인', name: '동양인', description: '한국, 일본, 중국 등' },
-                                      { id: '서양인', name: '서양인', description: '유럽, 북미 등' },
-                                      { id: '혼합', name: '혼합', description: '다양한 특성 혼합' }
-                                    ].map(style => (
-                                      <button
-                                        key={style.id}
-                                        onClick={() => setSelectedEthnicityStyle(style.id)}
-                                        className={
-                                          "p-4 rounded-xl border text-center transition-colors min-w-[140px] " +
-                                          (selectedEthnicityStyle === style.id
-                                            ? "bg-blue-100 border-blue-300 text-blue-700 ring-2 ring-blue-300 scale-105 shadow"
-                                            : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50 hover:scale-105")
-                                        }
-                                      >
-                                        <div className="font-semibold text-base">{style.name}</div>
-                                        <div className="text-xs text-gray-400 mt-1">{style.description}</div>
-                                      </button>
-                                    ))}
-                                  </div>
-                                </CardContent>
-                              </Card>
-                            )}
 
                             {/* 스타일 선택이 모두 끝난 경우에만 풍경 선택 카드 표시 */}
                             {(
                               // 대분류가 '선택안함'이면 바로 풍경 선택 카드 표시
                               selectedMainCategory === "" ||
-                              // 사람 (3단계: 카테고리와 서브카테고리까지만 선택하면 됨)
-                              (selectedMainCategory === "person" && selectedCategory !== null && selectedSubcategory !== null) ||
+                              // 사람
+                              (selectedMainCategory === "person" && selectedCategory !== null && selectedSubcategory !== null && selectedDetailStyle !== null) ||
                               // 동물/사물 (2단계만 있으므로 분류까지만 선택하면 됨)
                               ((selectedMainCategory === "animal" || selectedMainCategory === "object") && selectedCategory !== null)
                             ) && (
@@ -2639,20 +2858,20 @@ ${testData.message}
                                 }
                                 
                                 // 기존 WebSocket 연결 사용
-                                if (wsConnected) {
+                                if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
                                   // 이미지를 Base64로 변환
                                   const reader = new FileReader()
                                   reader.onload = () => {
                                     const base64Data = reader.result?.toString().split(',')[1]
                                     
                                     // WebSocket으로 이미지 수정 요청 전송
-                                    wsSend({
+                                    wsRef.current?.send(JSON.stringify({
                                       type: 'modify_image',
                                       data: {
                                         image: base64Data,
                                         edit_instruction: editPrompt
                                       }
-                                    })
+                                    }))
                                     
                                     toast({
                                       title: "이미지 수정 중",
@@ -3046,7 +3265,7 @@ ${testData.message}
                             e.stopPropagation()
                             
                             // WebSocket 연결 확인
-                            if (!wsConnected) {
+                            if (!wsConnected || !wsRef.current) {
                               toast({
           title: "연결 오류",
           description: 'WebSocket 연결이 끊어졌습니다. 페이지를 새로고침해주세요.',
@@ -3073,7 +3292,7 @@ ${testData.message}
                             setTimeout(() => {
                               const selectedSizeData = PRESET_SIZES.find(size => size.id === selectedSize)
                               
-                              wsSend({
+                              wsRef.current?.send(JSON.stringify({
                                 type: 'generate_image',
                                 data: {
                                   prompt: originalPrompt,
@@ -3084,7 +3303,7 @@ ${testData.message}
                                   guidance: 3.5,
                                   seed: null
                                 }
-                              })
+                              }))
                             }, 100)
                           }}
                           className="flex-1 text-xs"
@@ -3215,10 +3434,10 @@ ${testData.message}
                       
                       // WebSocket으로 재생성 요청
                       setTimeout(() => {
-                        if (wsConnected) {
+                        if (wsConnected && wsRef.current) {
                           const selectedSizeData = PRESET_SIZES.find(size => size.id === selectedSize)
                           
-                          wsSend({
+                          wsRef.current.send(JSON.stringify({
                             type: 'generate_image',
                             data: {
                               prompt: originalPrompt,
@@ -3229,7 +3448,7 @@ ${testData.message}
                               guidance: 3.5,
                               seed: null
                             }
-                          })
+                          }))
                         } else {
                           toast({
           title: "연결 오류",

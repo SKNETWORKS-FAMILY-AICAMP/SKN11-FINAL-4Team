@@ -25,6 +25,7 @@ class GeneratedImage(Base):
     extra_metadata = Column(JSON, nullable=True, default={})
     
     # 파일 정보
+    s3_url = Column(String(500), nullable=True)  # S3 URL (not presigned)
     file_size = Column(Integer, nullable=True)  # bytes
     mime_type = Column(String(50), nullable=True, default="image/png")
     

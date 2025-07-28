@@ -24,7 +24,6 @@ from app.services.image_storage_service import get_image_storage_service
 from app.services.comfyui_flux_service import get_comfyui_flux_service
 from app.services.prompt_optimization_service import get_prompt_optimization_service
 from app.services.s3_service import get_s3_service
-from app.services.generated_image_service import get_generated_image_service
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
@@ -130,7 +129,34 @@ async def generate_image(
             # 최적화 실패 시 원본 프롬프트 사용
             optimized_prompt = request.prompt
         
-        # 4. Flux 워크플로우로 이미지 생성
+        # 4. 인종 스타일 설정 준비
+        lora_settings = None
+        if request.selected_styles and "인종스타일" in request.selected_styles:
+            ethnicity_style = request.selected_styles.get("인종스타일", "기본")
+            if ethnicity_style == "동양인":
+                lora_settings = {
+                    "style_type": "asian",
+                    "lora_strength": 0.6
+                }
+            elif ethnicity_style == "서양인":
+                lora_settings = {
+                    "style_type": "western", 
+                    "lora_strength": 1.0
+                }
+            elif ethnicity_style == "혼합":
+                lora_settings = {
+                    "style_type": "mixed",
+                    "lora_strength": 0.3
+                }
+            else:
+                lora_settings = {
+                    "style_type": "default",
+                    "lora_strength": 0.0
+                }
+            
+            logger.info(f"🎨 인종 스타일 설정: {ethnicity_style} -> {lora_settings}")
+        
+        # 5. Flux 워크플로우로 이미지 생성
         try:
             flux_service = get_comfyui_flux_service()
             
@@ -163,14 +189,15 @@ async def generate_image(
             comfyui_endpoint = pod_info.endpoint_url
             logger.info(f"🚀 Flux 워크플로우 실행: {comfyui_endpoint}")
             
-            # 최적화된 프롬프트로 Flux 워크플로우 실행
+            # 최적화된 프롬프트로 Flux 워크플로우 실행 (LoRA 설정 포함)
             flux_result = await flux_service.generate_image_with_prompt(
                 prompt=optimized_prompt,  # 최적화된 프롬프트 사용
                 comfyui_endpoint=comfyui_endpoint,
                 width=request.width,
                 height=request.height,
                 guidance=request.guidance,
-                steps=request.steps
+                steps=request.steps,
+                lora_settings=lora_settings  # LoRA 설정 추가
             )
             
             if not flux_result:
@@ -193,7 +220,7 @@ async def generate_image(
             await user_session_service.complete_image_generation(user_id, db)
             raise HTTPException(status_code=500, detail=f"이미지 생성 실패: {str(e)}")
         
-        # 4. S3에 이미지 업로드
+        # 6. S3에 이미지 업로드
         try:
             s3_service = get_s3_service()
             
@@ -223,9 +250,9 @@ async def generate_image(
             await user_session_service.complete_image_generation(user_id, db)
             raise HTTPException(status_code=500, detail=f"이미지 저장 실패: {str(e)}")
         
-        # 5. 이미지 메타데이터 DB 저장
+        # 7. 이미지 메타데이터 DB 저장
         try:
-            # 기존 IMAGE_STORAGE 테이블에 저장 (호환성 유지)
+            # IMAGE_STORAGE 테이블에 저장
             image_storage_service = get_image_storage_service()
             await image_storage_service.save_generated_image_url(
                 s3_url=s3_url,
@@ -233,34 +260,14 @@ async def generate_image(
                 db=db
             )
             
-            # 새로운 generated_images 테이블에 저장
-            generated_image_service = get_generated_image_service()
-            await generated_image_service.save_generated_image(
-                db=db,
-                storage_id=storage_id,
-                team_id=group_id,
-                user_id=user_id,
-                prompt=prompt,
-                negative_prompt=None,  # 추후 구현
-                width=512,  # 워크플로우에서 설정된 값
-                height=512,  # 워크플로우에서 설정된 값
-                workflow_name="t2i_generate_ComfyUI_Flux_Nunchaku_flux.1-dev",
-                model_name="flux.1-dev",
-                metadata={
-                    "workflow_id": workflow_name,
-                    "comfyui_prompt_id": flux_result.get("prompt_id") if isinstance(flux_result, dict) else None
-                },
-                file_size=len(image_data)
-            )
-            
         except Exception as e:
             logger.warning(f"Failed to save image metadata: {e}")
             # 메타데이터 저장 실패해도 이미지 생성은 성공으로 처리
         
-        # 6. 세션 완료 처리 (10분 연장)
+        # 8. 세션 완료 처리 (10분 연장)
         await user_session_service.complete_image_generation(user_id, db)
         
-        # 7. 현재 세션 상태 조회
+        # 9. 현재 세션 상태 조회
         session_status = await user_session_service.get_session_status(user_id, db)
         
         generation_time = time.time() - start_time
@@ -631,6 +638,16 @@ async def websocket_endpoint(
                         db=db
                     )
                 
+                elif message_type == "modify_image":
+                    # 이미지 수정 요청 처리
+                    from app.api.v1.endpoints.image_modification import handle_websocket_image_modification
+                    await handle_websocket_image_modification(
+                        websocket=websocket,
+                        user_id=user_id,
+                        request_data=data.get("data", {}),
+                        db=db
+                    )
+                
                 elif message_type == "get_my_images":
                     # 사용자 이미지 목록 조회
                     try:
@@ -902,7 +919,34 @@ async def handle_websocket_image_generation(
         
         comfyui_endpoint = pod_info.endpoint_url
         
-        # 6. 이미지 생성
+        # 6. 인종 스타일 설정
+        lora_settings = None
+        if request.selected_styles and "인종스타일" in request.selected_styles:
+            ethnicity_style = request.selected_styles.get("인종스타일", "기본")
+            if ethnicity_style == "동양인":
+                lora_settings = {
+                    "style_type": "asian",
+                    "lora_strength": 0.6
+                }
+            elif ethnicity_style == "서양인":
+                lora_settings = {
+                    "style_type": "western", 
+                    "lora_strength": 1.0
+                }
+            elif ethnicity_style == "혼합":
+                lora_settings = {
+                    "style_type": "mixed",
+                    "lora_strength": 0.3
+                }
+            else:
+                lora_settings = {
+                    "style_type": "default",
+                    "lora_strength": 0.0
+                }
+            
+            logger.info(f"🎨 WebSocket 인종 스타일 설정: {ethnicity_style} -> {lora_settings}")
+        
+        # 7. 이미지 생성
         await send_progress("generating", 50, "이미지 생성 중... (약 30초 소요)")
         
         flux_result = await flux_service.generate_image_with_prompt(
@@ -911,13 +955,14 @@ async def handle_websocket_image_generation(
             width=request.width,
             height=request.height,
             guidance=request.guidance,
-            steps=request.steps
+            steps=request.steps,
+            lora_settings=lora_settings  # LoRA 설정 추가
         )
         
         if not flux_result:
             raise Exception("이미지 생성 실패")
         
-        # 7. 이미지 다운로드
+        # 8. 이미지 다운로드
         await send_progress("downloading", 70, "생성된 이미지 다운로드 중...")
         
         image_data = await flux_service.download_generated_image(
@@ -928,7 +973,7 @@ async def handle_websocket_image_generation(
         if not image_data:
             raise Exception("이미지 다운로드 실패")
         
-        # 8. S3 업로드
+        # 9. S3 업로드
         await send_progress("uploading", 85, "이미지 저장 중...")
         
         s3_service = get_s3_service()
@@ -945,7 +990,7 @@ async def handle_websocket_image_generation(
         if not s3_url:
             raise Exception("이미지 업로드 실패")
         
-        # 9. 데이터베이스 저장
+        # 10. 데이터베이스 저장
         await send_progress("saving", 95, "데이터베이스 저장 중...")
         
         image_storage_service = get_image_storage_service()
@@ -955,7 +1000,7 @@ async def handle_websocket_image_generation(
             db=db
         )
         
-        # 10. 완료
+        # 11. 완료
         await user_session_service.complete_image_generation(user_id, db)
         
         await send_progress("completed", 100, "이미지 생성 완료!")

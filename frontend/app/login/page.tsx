@@ -119,24 +119,6 @@ export default function LoginPage() {
             )}
           </Button>
 
-          {/* 네이버 로그인 버튼 */}
-          <Button
-            onClick={() => handleOAuthLogin("naver")}
-            disabled={isLoading !== null || isRedirecting}
-            className="w-full bg-[#03C75A] hover:bg-[#02B351] text-white flex items-center justify-center space-x-3 py-3"
-          >
-            {isLoading === "naver" ? (
-              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-            ) : (
-              <>
-                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M16.273 12.845 7.376 0H0v24h7.726V11.156L16.624 24H24V0h-7.727v12.845Z" />
-                </svg>
-                <span className="font-medium">네이버로 시작하기</span>
-              </>
-            )}
-          </Button>
-
           <div className="mt-6 text-center">
             <p className="text-xs text-gray-500">
               계속 진행하시면{" "}

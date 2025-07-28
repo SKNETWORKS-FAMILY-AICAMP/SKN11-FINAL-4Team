@@ -29,7 +29,8 @@ class GeneratedImageService:
         model_name: Optional[str] = None,
         extra_metadata: Optional[Dict[str, Any]] = None,
         file_size: Optional[int] = None,
-        mime_type: str = "image/png"
+        mime_type: str = "image/png",
+        s3_url: Optional[str] = None
     ) -> GeneratedImage:
         """생성된 이미지 정보를 DB에 저장"""
         try:
@@ -45,6 +46,7 @@ class GeneratedImageService:
                 workflow_name=workflow_name,
                 model_name=model_name,
                 extra_metadata=extra_metadata or {},
+                s3_url=s3_url,
                 file_size=file_size,
                 mime_type=mime_type
             )
@@ -104,9 +106,19 @@ class GeneratedImageService:
             images_with_urls = []
             
             for image in images:
-                # S3 key 생성 (storage_id 기반)
-                s3_key = f"generate_image/team_{image.team_id}/{image.user_id}/{image.storage_id}.png"
-                presigned_url = await s3_service.generate_presigned_url(s3_key)
+                # S3 URL에서 키 추출 또는 기본 패턴 사용
+                if image.s3_url:
+                    # S3 URL에서 버킷 이름 다음 부분을 키로 추출
+                    # 예: https://bucket-name.s3.amazonaws.com/path/to/file -> path/to/file
+                    url_parts = image.s3_url.split('/', 3)
+                    if len(url_parts) > 3:
+                        s3_key = url_parts[3]
+                    else:
+                        s3_key = f"generate_image/team_{image.team_id}/{image.user_id}/{image.storage_id}.png"
+                else:
+                    s3_key = f"generate_image/team_{image.team_id}/{image.user_id}/{image.storage_id}.png"
+                
+                presigned_url = s3_service.generate_presigned_url(s3_key)
                 
                 image_dict = {
                     "id": image.id,
@@ -120,7 +132,7 @@ class GeneratedImageService:
                     "seed": image.seed,
                     "workflow_name": image.workflow_name,
                     "model_name": image.model_name,
-                    "metadata": image.metadata,
+                    "metadata": image.extra_metadata,
                     "file_size": image.file_size,
                     "mime_type": image.mime_type,
                     "created_at": image.created_at.isoformat() if image.created_at else None,
