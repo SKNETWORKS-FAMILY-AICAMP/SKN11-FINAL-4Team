@@ -43,6 +43,15 @@ export interface VectorStoreResponse {
     success: boolean
 }
 
+export interface DocumentUploadResponse {
+    status: string
+    message: string
+    pipeline_info?: {
+        qa_count: number
+        source_file: string
+    }
+}
+
 export class VectorDBService {
     private static baseUrl = '/api/v1'
 
@@ -53,9 +62,18 @@ export class VectorDBService {
         return apiClient.post<VectorDBResponse>(`${this.baseUrl}/rag/init_vector_db`, config)
     }
 
-    // 문서 저장 (임베딩 포함)
+    // 문서 저장 (임베딩 포함) - FormData 형태로 변경
     static async storeDocuments(request: StoreRequest): Promise<VectorStoreResponse> {
-        return apiClient.post<VectorStoreResponse>(`${this.baseUrl}/rag/store_documents`, request)
+        // StoreRequest를 FormData로 변환
+        const formData = new FormData()
+
+        // 파일이 있다면 추가
+        if (request.documents && request.documents.length > 0) {
+            // 실제로는 파일 업로드가 필요하므로 다른 방식으로 처리
+            throw new Error("문서 저장은 파일 업로드를 통해 처리해야 합니다.")
+        }
+
+        return apiClient.post<VectorStoreResponse>(`${this.baseUrl}/rag/upload_document_gpu`, formData)
     }
 
     // 문서 검색
@@ -63,8 +81,8 @@ export class VectorDBService {
         return apiClient.post<SearchResult[]>(`${this.baseUrl}/rag/search_documents`, request)
     }
 
-    // 통합 검색 (임베딩 + 검색)
-    static async embedAndSearch(query: string, top_k: number = 5, score_threshold: number = 0.7): Promise<SearchResult[]> {
+    // 통합 검색 (임베딩 + 검색) - 백엔드 프록시 사용
+    static async embedAndSearch(query: string, top_k: number = 5, score_threshold: number = 0.3): Promise<SearchResult[]> {
         return apiClient.post<SearchResult[]>(`${this.baseUrl}/rag/embed_and_search`, {
             query,
             top_k,
@@ -72,12 +90,12 @@ export class VectorDBService {
         })
     }
 
-    // 벡터DB 통계
+    // 벡터DB 통계 - 백엔드 프록시 사용
     static async getStats(): Promise<any> {
         return apiClient.get<any>(`${this.baseUrl}/rag/vector_stats`)
     }
 
-    // 벡터DB 초기화
+    // 벡터DB 초기화 - 백엔드 프록시 사용
     static async clearVectorDB(): Promise<VectorDBResponse> {
         return apiClient.delete<VectorDBResponse>(`${this.baseUrl}/rag/clear_vector_store`)
     }
@@ -88,39 +106,24 @@ export class VectorDBService {
         chunkSize: number = 1000,
         chunkOverlap: number = 200
     ): Promise<VectorStoreResponse> {
-        // 파일을 텍스트로 변환하고 청크로 분할
-        const documents: DocumentChunk[] = []
+        // 백엔드의 upload_document_gpu 엔드포인트에 맞게 FormData로 전송
+        const formData = new FormData()
 
-        for (const file of files) {
-            try {
-                // 파일을 텍스트로 읽기 (PDF의 경우 PDF.js 사용 필요)
-                const text = await this.readFileAsText(file)
-
-                // 텍스트를 청크로 분할
-                const chunks = this.splitTextIntoChunks(text, chunkSize, chunkOverlap)
-
-                // 청크를 DocumentChunk로 변환
-                chunks.forEach((chunk, index) => {
-                    documents.push({
-                        id: `${file.name}_${index}`,
-                        text: chunk,
-                        metadata: {
-                            filename: file.name,
-                            filesize: file.size,
-                            chunk_index: index,
-                            total_chunks: chunks.length,
-                            chunk_size: chunkSize,
-                            chunk_overlap: chunkOverlap
-                        }
-                    })
-                })
-            } catch (error) {
-                console.error(`Error processing file ${file.name}:`, error)
-            }
+        // 첫 번째 파일만 처리 (백엔드가 단일 파일만 지원)
+        if (files.length > 0) {
+            formData.append('file', files[0])
+            formData.append('system_message', '당신은 제공된 참고 문서의 정확한 정보와 사실을 바탕으로 답변하는 AI 어시스턴트입니다.')
+            formData.append('influencer_name', 'AI')
         }
 
-        // 벡터DB에 저장
-        return this.storeDocuments({ documents })
+        // 백엔드 엔드포인트 호출
+        const response = await apiClient.post<DocumentUploadResponse>(`${this.baseUrl}/rag/upload_document_gpu`, formData)
+
+        return {
+            stored_count: response.pipeline_info?.qa_count || 0,
+            total_chunks: response.pipeline_info?.qa_count || 0,
+            success: response.status === 'success'
+        }
     }
 
     // 파일을 텍스트로 읽기

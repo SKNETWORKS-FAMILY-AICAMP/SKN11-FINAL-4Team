@@ -42,6 +42,19 @@ interface VectorStats {
   };
 }
 
+interface ChatResponse {
+  response: string;
+  sources: Array<{
+    text: string;
+    score: number;
+    type?: string;
+    chunk_id?: string;
+    metadata?: any;
+  }>;
+  query: string;
+  search_results: any[];
+}
+
 
 
 export default function RAGGPUChatPage() {
@@ -50,10 +63,6 @@ export default function RAGGPUChatPage() {
   const [isLoading, setIsLoading] = useState(false);
 
   const [vectorStats, setVectorStats] = useState<VectorStats | null>(null);
-  const [systemMessage, setSystemMessage] = useState(
-    "당신은 제공된 참고 문서의 정확한 정보와 사실을 바탕으로 답변하는 AI 어시스턴트입니다."
-  );
-  const [influencerName, setInfluencerName] = useState("AI");
   const [topK, setTopK] = useState(5);
   const [similarityThreshold, setSimilarityThreshold] = useState(0.5);
   const [maxTokens, setMaxTokens] = useState(2048);
@@ -101,32 +110,28 @@ export default function RAGGPUChatPage() {
     setIsLoading(true);
 
     try {
-      // 벡터DB에서 관련 문서 검색
-      const searchResults = await VectorDBService.embedAndSearch(
-        input,
-        topK,
-        similarityThreshold
-      );
+      // 백엔드의 chat_gpu API 호출
+      const response = await apiClient.post<ChatResponse>('/api/v1/rag/chat_gpu', {
+        query: input,
+        top_k: topK,
+        similarity_threshold: similarityThreshold,
+        include_sources: true,
+        max_tokens: maxTokens,
+        model: selectedModel
+      });
 
-      // 검색 결과를 바탕으로 AI 응답 생성
-      const context = searchResults
-        .map(result => result.text)
-        .join('\n\n');
-
-      const prompt = `참고 문서:\n${context}\n\n사용자 질문: ${input}\n\n위 문서를 바탕으로 정확하고 도움이 되는 답변을 제공하세요.`;
-
-      // AI 응답 생성 (실제로는 vLLM API 호출)
+      // AI 응답 생성
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
         type: "assistant",
-        content: `검색된 관련 문서 ${searchResults.length}개를 바탕으로 답변드립니다:\n\n${prompt}`,
+        content: response.response,
         timestamp: new Date(),
-        sources: searchResults.map(result => ({
-          text: result.text,
-          score: result.score,
-          type: "vector_search",
-          chunk_id: result.id,
-          metadata: result.metadata
+        sources: response.sources.map((source) => ({
+          text: source.text,
+          score: source.score,
+          type: source.type || "vector_search",
+          chunk_id: source.chunk_id || "unknown",
+          metadata: source.metadata || {}
         })),
       };
 
@@ -188,29 +193,7 @@ export default function RAGGPUChatPage() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <Label htmlFor="systemMessage">시스템 메시지</Label>
-              <Textarea
-                id="systemMessage"
-                value={systemMessage}
-                onChange={(e) => setSystemMessage(e.target.value)}
-                placeholder="AI 어시스턴트의 역할을 정의하세요"
-                rows={3}
-              />
-            </div>
-            <div>
-              <Label htmlFor="influencerName">AI 캐릭터 이름</Label>
-              <Input
-                id="influencerName"
-                value={influencerName}
-                onChange={(e) => setInfluencerName(e.target.value)}
-                placeholder="AI"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div>
               <Label htmlFor="topK">검색 결과 수 (Top-K)</Label>
               <Input
