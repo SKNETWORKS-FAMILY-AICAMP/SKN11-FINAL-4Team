@@ -1,12 +1,9 @@
-import os
-import uuid
 import json
 from typing import List, Dict, Optional, Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 import logging
-from pymilvus import MilvusClient, DataType
-import numpy as np
+from pymilvus import MilvusClient
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -132,7 +129,6 @@ async def store_documents(request: StoreRequest):
                     "vector": doc.embedding,
                     "text": doc.text,
                     "metadata": json.dumps(doc.metadata, ensure_ascii=False),
-                    "original_id": doc.id,
                 }
             )
 
@@ -197,7 +193,7 @@ async def search_documents(request: SearchRequest):
 
                 search_results.append(
                     SearchResult(
-                        id=chunk_id,
+                        id=str(chunk_id),  # 문자열로 변환
                         text=text,
                         score=score,
                         metadata=metadata,
@@ -248,7 +244,6 @@ async def embed_and_store_documents(request: StoreRequest):
                     "vector": doc.embedding,
                     "text": doc.text,
                     "metadata": json.dumps(doc.metadata, ensure_ascii=False),
-                    "original_id": doc.id,
                 }
             )
 
@@ -310,7 +305,7 @@ async def embed_and_search(query: str, top_k: int = 5, score_threshold: float = 
 
                 search_results.append(
                     SearchResult(
-                        id=chunk_id,
+                        id=str(chunk_id),  # 문자열로 변환
                         text=text,
                         score=score,
                         metadata=metadata,
@@ -356,9 +351,10 @@ async def clear_vector_db():
         milvus_client.drop_collection(collection_name=collection_name)
 
         # 컬렉션 재생성
+        config = VectorDBConfig()
         milvus_client.create_collection(
             collection_name=collection_name,
-            dimension=1024,
+            dimension=config.dimension,
             metric_type="COSINE",
             index_type="AUTOINDEX",
         )
