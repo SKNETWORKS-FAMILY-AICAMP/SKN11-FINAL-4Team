@@ -148,7 +148,9 @@ api_router.include_router(
 )
 
 # 통합 이미지 API
-api_router.include_router(unified_images.router, prefix="/api/images", tags=["Unified Images"])
+api_router.include_router(
+    unified_images.router, prefix="/api/images", tags=["Unified Images"]
+)
 
 # TTS API
 api_router.include_router(tts.router, prefix="/tts", tags=["TTS"])

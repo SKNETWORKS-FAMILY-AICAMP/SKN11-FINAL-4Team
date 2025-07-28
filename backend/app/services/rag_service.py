@@ -28,21 +28,21 @@ class RAGConfig:
     """RAG 설정"""
 
     def __init__(self):
-        self.chunk_size = 200  # 더 세분화된 청크 (200자)
-        self.chunk_overlap = 30  # 오버랩도 줄임
-        self.score_threshold = 0.4  # 다른 레이어와 통일
+        self.chunk_size = 150  # 더 세분화된 청크 (150자)
+        self.chunk_overlap = 20  # 오버랩도 줄임
+        self.score_threshold = 0.5  # 고정 임계값 0.5
 
     # 문서 처리
     min_paragraph_length: int = 30
     max_qa_pairs: int = 100
 
     # 검색 설정
-    search_top_k: int = 3
-    score_threshold: float = 0.4  # 의미 있는 유사도 임계값
+    search_top_k: int = 5  # 고정 top-k 값
+    score_threshold: float = 0.5  # 고정 임계값
     max_context_length: int = 2000
 
     # 생성 설정
-    max_tokens: int = 512
+    max_tokens: int = 1024  # 고정 토큰 수
     temperature: float = 0.8
 
     # 시스템 메시지

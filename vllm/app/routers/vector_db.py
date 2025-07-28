@@ -264,7 +264,7 @@ async def embed_and_store_documents(request: StoreRequest):
 
 
 @router.post("/vector-db/embed-and-search", response_model=List[SearchResult])
-async def embed_and_search(query: str, top_k: int = 5, score_threshold: float = 0.4):
+async def embed_and_search(query: str, top_k: int = 5, score_threshold: float = 0.5):
     """쿼리 임베딩 생성 후 검색 (통합 API)"""
     global milvus_client
 

@@ -82,7 +82,11 @@ export class VectorDBService {
     }
 
     // 임베딩 생성 및 검색
-    static async embedAndSearch(query: string, topK: number = 5, scoreThreshold: number = 0.7): Promise<any> {
+    static async embedAndSearch(
+        query: string,
+        topK: number = 5,
+        scoreThreshold: number = 0.5
+    ): Promise<SearchResult[]> {
         const params = new URLSearchParams({
             query,
             top_k: topK.toString(),

@@ -17,6 +17,7 @@ from app.database import get_db
 from app.core.config import settings
 from app.services.rag_service import get_rag_service
 from app.services.vllm_client import vllm_health_check
+from app.services.rag_processor import process_with_rag, should_use_rag
 
 logger = logging.getLogger(__name__)
 
@@ -55,14 +56,11 @@ class RAGChatResponse(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    """채팅 요청"""
+    """채팅 요청 스키마"""
 
-    query: str
-    top_k: int = 5
-    similarity_threshold: float = 0.4  # 임시로 낮춤
-    include_sources: bool = True
-    max_tokens: int = 2048
-    model: str = "gpt-4"
+    message: str = Field(..., description="사용자 메시지")
+    similarity_threshold: float = Field(0.5, description="유사도 임계값")
+    max_tokens: int = Field(1024, description="최대 토큰 수")
 
 
 class ChatResponse(BaseModel):
@@ -335,26 +333,37 @@ async def rag_chat(req: RAGChatRequest, db: Session = Depends(get_db)):
 
 @router.post("/chat_gpu", response_model=ChatResponse)
 async def chat_gpu(chat_request: ChatRequest):
-    """VLLM GPU 벡터 검색을 사용한 채팅 (OpenAI 기반)"""
+    """VLLM GPU 벡터 검색을 사용한 채팅 (RAG 프로세서 기반)"""
     try:
-        query = chat_request.query
-        top_k = chat_request.top_k
+        query = chat_request.message
+        top_k = 5  # Default value from ChatRequest
         similarity_threshold = chat_request.similarity_threshold
-        include_sources = chat_request.include_sources
+        include_sources = True  # Default value from ChatRequest
         max_tokens = chat_request.max_tokens
-        model = chat_request.model
+        model = "gpt-4"  # Default value from ChatRequest
 
         logger.info(
-            f"🔍 GPU 벡터 검색 시작: query='{query}', top_k={top_k}, similarity_threshold={similarity_threshold}"
+            f"🔍 RAG 프로세서 시작: query='{query}', top_k={top_k}, similarity_threshold={similarity_threshold}"
         )
 
-        # VLLM GPU 메모리 검색
-        rag_service = get_rag_service()
-        search_results = await rag_service.vector_store.search_similar(
-            query, top_k, similarity_threshold
+        # RAG 프로세서 사용
+        response, sources, should_fallback_to_mcp = await process_with_rag(
+            message=query,
+            group_id=None,  # GPU 모드에서는 group_id 없음
+            influencer_name="AI 어시스턴트",
+            system_message="당신은 제공된 참고 문서의 정확한 정보와 사실을 바탕으로 답변하는 AI 어시스턴트입니다.",
         )
 
-        if not search_results:
+        if should_fallback_to_mcp:
+            logger.info("🔄 RAG 처리 실패, MCP로 전환 필요")
+            return ChatResponse(
+                response="RAG 처리 중 오류가 발생했습니다. 다른 방법으로 답변을 시도합니다.",
+                sources=[],
+                query=query,
+                search_results=[],
+            )
+
+        if not response:
             return ChatResponse(
                 response="죄송합니다. 관련된 정보를 찾을 수 없습니다.",
                 sources=[],
@@ -362,100 +371,101 @@ async def chat_gpu(chat_request: ChatRequest):
                 search_results=[],
             )
 
-        # 컨텍스트 구성 (길이 제한)
-        context_parts = []
-        sources = []
-        total_length = 0
-        max_context_length = 1500  # 토큰 제한을 고려한 문자 길이 제한
-
-        for result in search_results:
-            text = result["text"]
-            if total_length + len(text) > max_context_length:
-                # 남은 공간에 맞게 텍스트 자르기
-                remaining_length = max_context_length - total_length
-                if remaining_length > 100:  # 최소 100자 이상 남은 경우에만 추가
-                    text = text[:remaining_length] + "..."
-                else:
-                    break
-
-            context_parts.append(text)
-            total_length += len(text)
-
-            if include_sources:
-                sources.append(
-                    {
-                        "text": result["text"],
-                        "score": result["score"],
-                        "type": result["metadata"].get("type", "unknown"),
-                        "chunk_id": result["metadata"].get("chunk_id", "unknown"),
-                        "metadata": result["metadata"],
-                    }
-                )
-
-        context = "\n\n".join(context_parts)
-        logger.info(f"📝 컨텍스트 길이: {len(context)} 문자")
-
-        # OpenAI API로 답변 생성
-        from openai import OpenAI
-
-        if not settings.OPENAI_API_KEY:
-            raise HTTPException(
-                status_code=500, detail="OpenAI API 키가 설정되지 않았습니다."
-            )
-
-        client = OpenAI(api_key=settings.OPENAI_API_KEY)
-
-        system_message = (
-            "당신은 제공된 참고 문서의 정확한 정보와 사실을 바탕으로 답변하는 AI 어시스턴트입니다. "
-            "문서에 포함된 모든 내용을 정확히 그대로 포함하여 답변하세요.\n\n"
-            "참고 문서:\n" + context
-        )
-
-        try:
-            response = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": system_message},
-                    {"role": "user", "content": query},
-                ],
-                max_tokens=max_tokens,
-                temperature=0.8,
-            )
-
-            response_text = response.choices[0].message.content
-        except Exception as e:
-            logger.error(f"❌ OpenAI API 호출 실패: {e}")
-            response_text = "죄송합니다. 응답을 생성할 수 없습니다."
-
         # 검색 결과를 딕셔너리로 변환
         search_results_dict = []
-        for result in search_results:
+        for source in sources:
             search_results_dict.append(
                 {
-                    "text": result["text"],
-                    "score": result["score"],
-                    "chunk_id": result["metadata"].get("chunk_id", "unknown"),
-                    "metadata": result["metadata"],
+                    "text": source.get("text", ""),
+                    "score": source.get("score", 0),
+                    "metadata": source.get("metadata", {}),
                 }
             )
 
         return ChatResponse(
-            response=response_text,
+            response=response,
             sources=sources,
             query=query,
             search_results=search_results_dict,
         )
 
     except Exception as e:
-        logger.error(f"❌ GPU 채팅 실패: {e}")
-        raise HTTPException(status_code=500, detail=f"채팅 실패: {str(e)}")
+        logger.error(f"❌ RAG 프로세서 처리 실패: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/chat_gpu_processor", response_model=ChatResponse)
+async def chat_gpu_processor(chat_request: ChatRequest):
+    """RAG 프로세서 전용 엔드포인트 (4단계 분기처리)"""
+    try:
+        query = chat_request.message
+        top_k = 5  # Default value from ChatRequest
+        similarity_threshold = chat_request.similarity_threshold
+        include_sources = True  # Default value from ChatRequest
+        max_tokens = chat_request.max_tokens
+        model = "gpt-4"  # Default value from ChatRequest
+
+        logger.info(
+            f"🚀 RAG 프로세서 4단계 분기처리 시작: query='{query}', top_k={top_k}, similarity_threshold={similarity_threshold}"
+        )
+
+        # RAG 프로세서 사용 (4단계 분기처리)
+        response, sources, should_fallback_to_mcp = await process_with_rag(
+            message=query,
+            group_id=None,  # GPU 모드에서는 group_id 없음
+            influencer_name="AI 어시스턴트",
+            system_message="당신은 제공된 참고 문서의 정확한 정보와 사실을 바탕으로 답변하는 AI 어시스턴트입니다.",
+        )
+
+        if should_fallback_to_mcp:
+            logger.info("🔄 RAG 처리 실패, MCP로 전환 필요")
+            return ChatResponse(
+                response="RAG 처리 중 오류가 발생했습니다. 다른 방법으로 답변을 시도합니다.",
+                sources=[],
+                query=query,
+                search_results=[],
+            )
+
+        if not response:
+            return ChatResponse(
+                response="죄송합니다. 관련된 정보를 찾을 수 없습니다.",
+                sources=[],
+                query=query,
+                search_results=[],
+            )
+
+        # 검색 결과를 딕셔너리로 변환
+        search_results_dict = []
+        for source in sources:
+            search_results_dict.append(
+                {
+                    "text": source.get("text", ""),
+                    "score": source.get("score", 0),
+                    "metadata": source.get("metadata", {}),
+                }
+            )
+
+        return ChatResponse(
+            response=response,
+            sources=sources,
+            query=query,
+            search_results=search_results_dict,
+        )
+
+    except Exception as e:
+        logger.error(f"❌ RAG 프로세서 처리 실패: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ==================== Vector Search Endpoints ====================
 
 
-@router.post("/embed_and_search")
-async def embed_and_search(query: str, top_k: int = 5, score_threshold: float = 0.4):
+@router.post("/embed_and_search", response_model=List[SearchResult])
+async def embed_and_search(
+    query: str = Form(..., description="검색 쿼리"),
+    top_k: int = Form(5, description="검색할 상위 k개"),
+    score_threshold: float = Form(0.5, description="유사도 임계값"),
+):
     """임베딩 생성 및 벡터 검색"""
     try:
         logger.info(
