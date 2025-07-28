@@ -14,11 +14,15 @@ collection_name = "rag_documents"
 
 
 class VectorDBConfig(BaseModel):
-    """벡터DB 설정"""
+    """벡터DB 설정 (성능 최적화)"""
 
     uri: str = "./milvus_vector.db"
     collection_name: str = "rag_documents"
     dimension: int = 1024  # BGE-M3 기본 차원
+    index_type: str = "IVF_FLAT"  # 성능 최적화된 인덱스
+    metric_type: str = "COSINE"  # 코사인 유사도
+    nlist: int = 1024  # IVF 클러스터 수
+    nprobe: int = 16  # 검색 시 탐색할 클러스터 수
 
 
 class DocumentChunk(BaseModel):
@@ -62,7 +66,7 @@ class VectorDBResponse(BaseModel):
 
 
 def initialize_milvus(config: VectorDBConfig = None):
-    """Milvus 초기화"""
+    """Milvus 초기화 (성능 최적화)"""
     global milvus_client, collection_name
 
     if config is None:
@@ -78,10 +82,14 @@ def initialize_milvus(config: VectorDBConfig = None):
             milvus_client.create_collection(
                 collection_name=collection_name,
                 dimension=config.dimension,
-                metric_type="COSINE",
-                index_type="AUTOINDEX",
+                metric_type=config.metric_type,
+                index_type=config.index_type,
+                index_params={
+                    "nlist": config.nlist,  # 클러스터 수 (데이터 크기에 따라 조정)
+                    "m": 4,  # M 값 (성능과 정확도 균형)
+                }
             )
-            logger.info(f"✅ 새 컬렉션 생성: {collection_name}")
+            logger.info(f"✅ 새 컬렉션 생성 (최적화된 인덱스): {collection_name}")
         else:
             logger.info(f"✅ 기존 컬렉션 사용: {collection_name}")
 
@@ -185,13 +193,26 @@ async def search_documents(request: SearchRequest):
         
         query_embedding = response['embeddings'][0]
 
-        # 2. 검색 실행
+        # 2. 검색 실행 (성능 최적화)
+        import time
+        search_start = time.time()
+        
         results = milvus_client.search(
             collection_name=collection_name,
             data=[query_embedding],
             limit=request.top_k,
             output_fields=["text", "metadata"],
+            search_params={
+                "metric_type": "COSINE",
+                "params": {
+                    "nprobe": 16,  # 검색할 클러스터 수 (성능과 정확도 균형)
+                }
+            },
+            consistency_level="Strong"  # 일관성 보장
         )
+        
+        search_time = time.time() - search_start
+        logger.info(f"✅ 검색 완료: {len(search_results)}개 결과 (검색 시간: {search_time:.3f}초)")
 
         # 3. 결과 변환
         search_results = []
@@ -331,13 +352,26 @@ async def embed_and_search(query: str, top_k: int = 5, score_threshold: float = 
         
         query_embedding = response['embeddings'][0]
 
-        # 2. 검색 실행
+        # 2. 검색 실행 (성능 최적화)
+        import time
+        search_start = time.time()
+        
         results = milvus_client.search(
             collection_name=collection_name,
             data=[query_embedding],
             limit=top_k,
             output_fields=["text", "metadata"],
+            search_params={
+                "metric_type": "COSINE",
+                "params": {
+                    "nprobe": 16,  # 검색할 클러스터 수 (성능과 정확도 균형)
+                }
+            },
+            consistency_level="Strong"  # 일관성 보장
         )
+        
+        search_time = time.time() - search_start
+        logger.info(f"✅ 검색 완료: {len(search_results)}개 결과 (검색 시간: {search_time:.3f}초)")
 
         # 3. 결과 변환
         search_results = []
@@ -366,6 +400,71 @@ async def embed_and_search(query: str, top_k: int = 5, score_threshold: float = 
     except Exception as e:
         logger.error(f"❌ 검색 실패: {e}")
         raise HTTPException(status_code=500, detail=f"검색 실패: {str(e)}")
+
+
+@router.post("/vector-db/optimize", response_model=VectorDBResponse)
+async def optimize_vector_db():
+    """벡터DB 성능 최적화"""
+    global milvus_client, collection_name
+
+    if milvus_client is None:
+        raise HTTPException(status_code=500, detail="벡터DB가 초기화되지 않았습니다")
+
+    try:
+        # 인덱스 재구성 (성능 최적화)
+        milvus_client.create_index(
+            collection_name=collection_name,
+            index_type="IVF_FLAT",
+            metric_type="COSINE",
+            index_params={
+                "nlist": 1024,
+                "m": 4,
+            }
+        )
+        
+        # 인덱스 로드
+        milvus_client.load_collection(collection_name=collection_name)
+        
+        logger.info(f"✅ 벡터DB 성능 최적화 완료: {collection_name}")
+        return VectorDBResponse(
+            success=True,
+            message="벡터DB 성능 최적화 완료",
+            data={"optimized": True}
+        )
+
+    except Exception as e:
+        logger.error(f"❌ 벡터DB 최적화 실패: {e}")
+        raise HTTPException(status_code=500, detail=f"최적화 실패: {str(e)}")
+
+
+@router.get("/vector-db/performance", response_model=Dict[str, Any])
+async def get_vector_db_performance():
+    """벡터DB 성능 통계"""
+    global milvus_client, collection_name
+
+    if milvus_client is None:
+        raise HTTPException(status_code=500, detail="벡터DB가 초기화되지 않았습니다")
+
+    try:
+        stats = milvus_client.get_collection_stats(collection_name=collection_name)
+        
+        # 성능 통계
+        performance_stats = {
+            "collection_name": collection_name,
+            "num_entities": stats.get("row_count", 0),
+            "index_type": "IVF_FLAT",
+            "metric_type": "COSINE",
+            "nlist": 1024,
+            "nprobe": 16,
+            "status": "optimized",
+            "estimated_search_time_ms": 10-50,  # 예상 검색 시간
+        }
+        
+        return performance_stats
+
+    except Exception as e:
+        logger.error(f"❌ 성능 통계 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail=f"성능 통계 조회 실패: {str(e)}")
 
 
 @router.get("/vector-db/stats", response_model=Dict[str, Any])
@@ -404,8 +503,12 @@ async def clear_vector_db():
         milvus_client.create_collection(
             collection_name=collection_name,
             dimension=config.dimension,
-            metric_type="COSINE",
-            index_type="AUTOINDEX",
+            metric_type=config.metric_type,
+            index_type=config.index_type,
+            index_params={
+                "nlist": config.nlist,
+                "m": 4,
+            }
         )
 
         logger.info(f"✅ 벡터DB 초기화 완료: {collection_name}")

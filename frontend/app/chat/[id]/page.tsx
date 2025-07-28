@@ -20,6 +20,8 @@ import {
   Loader2,
   ChevronDown,
   ChevronUp,
+  History,
+  Trash2,
 } from "lucide-react"
 
 interface Message {
@@ -28,6 +30,15 @@ interface Message {
   sender: "user" | "bot"
   timestamp: Date
   isStreaming?: boolean // 스트리밍 중인 메시지를 위한 속성
+}
+
+interface ChatHistory {
+  query: string
+  response: string
+  context: string
+  sources: any[]
+  model_info: any
+  timestamp: string
 }
 
 interface ChatModel {
@@ -50,10 +61,36 @@ export default function ChatPage() {
   const [isModelLoading, setIsModelLoading] = useState(true)
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('connecting')
   const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false)
+  const [chatHistory, setChatHistory] = useState<ChatHistory[]>([])
+  const [showHistory, setShowHistory] = useState(false)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const timeoutRef = useRef<NodeJS.Timeout | null>(null)
+
+  // 히스토리 관련 함수들
+  const getHistory = () => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        type: "get_history"
+      }));
+    }
+  };
+
+  const clearHistory = () => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        type: "clear_history"
+      }));
+    }
+  };
+
+  const toggleHistory = () => {
+    setShowHistory(!showHistory);
+    if (!showHistory) {
+      getHistory();
+    }
+  };
 
   // 모델 데이터 로드
   const loadModelData = async () => {
@@ -165,6 +202,14 @@ export default function ChatPage() {
             sender: "bot",
             timestamp: new Date(),
           }]);
+        } else if (data.type === "history") {
+          // 히스토리 응답 처리
+          setChatHistory(data.data || []);
+          console.log("✅ 히스토리 로드 성공:", data.data);
+        } else if (data.type === "history_cleared") {
+          // 히스토리 초기화 응답 처리
+          setChatHistory([]);
+          console.log("✅ 히스토리 초기화 성공");
         } else {
           // 기존 일반 응답 처리 (하위 호환성)
           setIsLoading(false);
@@ -457,6 +502,25 @@ export default function ChatPage() {
                   </div>
                 </div>
                 <div className="flex items-center space-x-2 flex-shrink-0 ml-4">
+                  {/* 히스토리 버튼들 */}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={toggleHistory}
+                    className="h-8 px-2"
+                  >
+                    <History className="h-4 w-4 mr-1" />
+                    히스토리
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={clearHistory}
+                    className="h-8 px-2 text-red-600 hover:text-red-700"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                  
                   {/* 연결 상태 표시 */}
                   <div className="flex items-center space-x-1">
                     <div className={`w-2 h-2 rounded-full flex-shrink-0 ${connectionStatus === 'connected' ? 'bg-green-500' :
@@ -533,6 +597,42 @@ export default function ChatPage() {
 
               <div ref={messagesEndRef} />
             </div>
+
+            {/* 히스토리 영역 */}
+            {showHistory && (
+              <div className="border-t border-gray-200 bg-gray-50 p-3 max-h-48 overflow-y-auto">
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="text-sm font-medium text-gray-900">채팅 히스토리</h4>
+                  <span className="text-xs text-gray-500">{chatHistory.length}개</span>
+                </div>
+                {chatHistory.length === 0 ? (
+                  <p className="text-sm text-gray-500 text-center py-3">히스토리가 없습니다.</p>
+                ) : (
+                  <div className="space-y-1">
+                    {chatHistory.map((history, index) => (
+                      <div key={index} className="bg-white rounded p-2 border text-xs">
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium text-gray-900 truncate">
+                              {history.query}
+                            </p>
+                            <p className="text-gray-600 mt-1 line-clamp-1">
+                              {history.response}
+                            </p>
+                          </div>
+                          <span className="text-gray-400 ml-2 flex-shrink-0 text-xs">
+                            {new Date(history.timestamp).toLocaleTimeString('ko-KR', {
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            })}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* 입력 영역 */}
             <div className="border-t p-4 flex-shrink-0">
