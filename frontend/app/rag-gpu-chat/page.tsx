@@ -8,9 +8,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { Upload, Send, Loader2, FileText, Zap } from "lucide-react";
+import { Send, Loader2, Zap } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiClient } from "@/lib/api";
+import { VectorDBService } from "@/lib/services/vector-db.service";
 
 interface Message {
   id: string;
@@ -41,12 +42,13 @@ interface VectorStats {
   };
 }
 
+
+
 export default function RAGGPUChatPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
-  const [uploadedFile, setUploadedFile] = useState<string | null>(null);
+
   const [vectorStats, setVectorStats] = useState<VectorStats | null>(null);
   const [systemMessage, setSystemMessage] = useState(
     "당신은 제공된 참고 문서의 정확한 정보와 사실을 바탕으로 답변하는 AI 어시스턴트입니다."
@@ -56,9 +58,8 @@ export default function RAGGPUChatPage() {
   const [similarityThreshold, setSimilarityThreshold] = useState(0.5);
   const [maxTokens, setMaxTokens] = useState(2048);
   const [selectedModel, setSelectedModel] = useState("gpt-4");
-  
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
   const scrollToBottom = () => {
@@ -76,70 +77,14 @@ export default function RAGGPUChatPage() {
 
   const checkVectorStats = async () => {
     try {
-      const response = await apiClient.get("/api/v1/rag/vector_stats", { requireAuth: false });
-      setVectorStats(response);
+      const response = await VectorDBService.getStats();
+      setVectorStats(response as VectorStats);
     } catch (error) {
       console.error("벡터 스토어 상태 확인 실패:", error);
     }
   };
 
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
 
-    if (!file.name.toLowerCase().endsWith('.pdf')) {
-      toast({
-        title: "오류",
-        description: "PDF 파일만 업로드 가능합니다.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (file.size > 10 * 1024 * 1024) {
-      toast({
-        title: "오류",
-        description: "파일 크기는 10MB를 초과할 수 없습니다.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setIsUploading(true);
-    try {
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("group_id", "1"); // 임시 그룹 ID
-      formData.append("system_message", systemMessage);
-      formData.append("influencer_name", influencerName);
-
-      const response = await apiClient.post("/api/v1/rag/upload_document_gpu", formData, { requireAuth: false });
-      
-      console.log("API 응답:", response);
-
-      if (response && response.success) {
-        setUploadedFile(file.name);
-        toast({
-          title: "성공",
-          description: `문서가 VLLM GPU 벡터 스토어에 업로드되었습니다. (${response.qa_pairs_count}개 QA 쌍)`,
-        });
-        checkVectorStats(); // 상태 업데이트
-      } else {
-        console.log("응답 데이터 구조:", response);
-        throw new Error(response?.message || "업로드 실패");
-      }
-    } catch (error: any) {
-      console.error("파일 업로드 실패:", error);
-      const errorMessage = error.response?.data?.detail || error.message || "파일 업로드에 실패했습니다.";
-      toast({
-        title: "오류",
-        description: errorMessage,
-        variant: "destructive",
-      });
-    } finally {
-      setIsUploading(false);
-    }
-  };
 
   const handleSendMessage = async () => {
     if (!input.trim() || isLoading) return;
@@ -156,37 +101,36 @@ export default function RAGGPUChatPage() {
     setIsLoading(true);
 
     try {
-      const requestData = {
-        query: input,
-        top_k: topK,
-        similarity_threshold: similarityThreshold,
-        include_sources: true,
-        max_tokens: maxTokens,
-        model: selectedModel
+      // 벡터DB에서 관련 문서 검색
+      const searchResults = await VectorDBService.embedAndSearch(
+        input,
+        topK,
+        similarityThreshold
+      );
+
+      // 검색 결과를 바탕으로 AI 응답 생성
+      const context = searchResults
+        .map(result => result.text)
+        .join('\n\n');
+
+      const prompt = `참고 문서:\n${context}\n\n사용자 질문: ${input}\n\n위 문서를 바탕으로 정확하고 도움이 되는 답변을 제공하세요.`;
+
+      // AI 응답 생성 (실제로는 vLLM API 호출)
+      const assistantMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        type: "assistant",
+        content: `검색된 관련 문서 ${searchResults.length}개를 바탕으로 답변드립니다:\n\n${prompt}`,
+        timestamp: new Date(),
+        sources: searchResults.map(result => ({
+          text: result.text,
+          score: result.score,
+          type: "vector_search",
+          chunk_id: result.id,
+          metadata: result.metadata
+        })),
       };
-      
-      console.log("채팅 요청 데이터:", requestData);
-      
-      const response = await apiClient.post("/api/v1/rag/chat_gpu", requestData, { 
-        requireAuth: false,
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      });
 
-      if (response && response.response) {
-        const assistantMessage: Message = {
-          id: (Date.now() + 1).toString(),
-          type: "assistant",
-          content: response.response,
-          timestamp: new Date(),
-          sources: response.sources,
-        };
-
-        setMessages(prev => [...prev, assistantMessage]);
-      } else {
-        throw new Error("응답 데이터가 올바르지 않습니다.");
-      }
+      setMessages(prev => [...prev, assistantMessage]);
     } catch (error: any) {
       console.error("채팅 실패:", error);
       const errorMessage = error.response?.data?.detail || error.message || "메시지 전송에 실패했습니다.";
@@ -209,19 +153,18 @@ export default function RAGGPUChatPage() {
 
   const clearVectorStore = async () => {
     try {
-      await apiClient.delete("/api/v1/rag/clear_vector_store", { requireAuth: false });
-      setUploadedFile(null);
+      await VectorDBService.clearVectorDB();
       setMessages([]);
       toast({
         title: "성공",
-        description: "벡터 스토어가 정리되었습니다.",
+        description: "벡터DB가 정리되었습니다.",
       });
       checkVectorStats();
     } catch (error) {
-      console.error("벡터 스토어 정리 실패:", error);
+      console.error("벡터DB 정리 실패:", error);
       toast({
         title: "오류",
-        description: "벡터 스토어 정리에 실패했습니다.",
+        description: "벡터DB 정리에 실패했습니다.",
         variant: "destructive",
       });
     }
@@ -266,7 +209,7 @@ export default function RAGGPUChatPage() {
               />
             </div>
           </div>
-          
+
           <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
             <div>
               <Label htmlFor="topK">검색 결과 수 (Top-K)</Label>
@@ -360,44 +303,7 @@ export default function RAGGPUChatPage() {
         </Card>
       )}
 
-      {/* 파일 업로드 */}
-      <Card className="mb-6">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Upload className="h-5 w-5" />
-            PDF 문서 업로드
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center gap-4">
-            <Button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isUploading}
-              className="flex items-center gap-2"
-            >
-              {isUploading ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Upload className="h-4 w-4" />
-              )}
-              {isUploading ? "업로드 중..." : "PDF 파일 선택"}
-            </Button>
-            {uploadedFile && (
-              <div className="flex items-center gap-2">
-                <FileText className="h-4 w-4" />
-                <span className="text-sm">{uploadedFile}</span>
-              </div>
-            )}
-          </div>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".pdf"
-            onChange={handleFileUpload}
-            className="hidden"
-          />
-        </CardContent>
-      </Card>
+
 
       {/* 채팅 인터페이스 */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -412,16 +318,14 @@ export default function RAGGPUChatPage() {
                 {messages.map((message) => (
                   <div
                     key={message.id}
-                    className={`flex ${
-                      message.type === "user" ? "justify-end" : "justify-start"
-                    }`}
+                    className={`flex ${message.type === "user" ? "justify-end" : "justify-start"
+                      }`}
                   >
                     <div
-                      className={`max-w-[80%] rounded-lg p-3 ${
-                        message.type === "user"
-                          ? "bg-primary text-primary-foreground"
-                          : "bg-muted"
-                      }`}
+                      className={`max-w-[80%] rounded-lg p-3 ${message.type === "user"
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-muted"
+                        }`}
                     >
                       <p className="whitespace-pre-wrap">{message.content}</p>
                       {message.sources && message.sources.length > 0 && (

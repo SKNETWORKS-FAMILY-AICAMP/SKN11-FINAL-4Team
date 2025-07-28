@@ -16,6 +16,7 @@ import { Badge } from "@/components/ui/badge"
 
 import { useToast } from "@/hooks/use-toast"
 import { AdminService, type AdminTeam, type AdminUser, type AdminHFToken, type AdminCreateHFTokenRequest } from "@/lib/services/admin.service"
+import { VectorDBService } from "@/lib/services/vector-db.service"
 
 export default function AdministratorPage() {
   const { toast } = useToast()
@@ -61,7 +62,7 @@ export default function AdministratorPage() {
   const [loadingDocuments, setLoadingDocuments] = useState(false)
   const [uploadingDocument, setUploadingDocument] = useState(false)
   const [selectedFiles, setSelectedFiles] = useState<File[]>([])
-  
+
   // RAG 고급 설정 관련 상태들
   const [showAdvancedSettings, setShowAdvancedSettings] = useState(false)
   const [chunkSize, setChunkSize] = useState(1000)
@@ -75,7 +76,7 @@ export default function AdministratorPage() {
   useEffect(() => {
     const fetchData = async () => {
       if (isFetchingDataRef.current) return
-      
+
       try {
         isFetchingDataRef.current = true
         setLoading(true)
@@ -108,7 +109,7 @@ export default function AdministratorPage() {
   // HF 토큰 데이터 로드
   const fetchHFTokens = async () => {
     if (isFetchingTokensRef.current) return
-    
+
     try {
       isFetchingTokensRef.current = true
       setLoadingTokens(true)
@@ -472,26 +473,26 @@ export default function AdministratorPage() {
   const getTabInfo = (tab: string) => {
     switch (tab) {
       case "group":
-        return { 
-          title: "권한 그룹 관리", 
+        return {
+          title: "권한 그룹 관리",
           icon: <Users className="h-5 w-5 text-blue-600" />,
           description: "사용자를 드래그하여 그룹에 추가하거나 제거할 수 있습니다"
         }
       case "hf":
-        return { 
-          title: "허깅페이스 토큰 관리", 
+        return {
+          title: "허깅페이스 토큰 관리",
           icon: <Key className="h-5 w-5 text-yellow-600" />,
           description: "AI 모델 사용을 위한 토큰을 관리하세요"
         }
       case "documents":
-        return { 
-          title: "문서 관리", 
+        return {
+          title: "문서 관리",
           icon: <FileText className="h-5 w-5 text-green-600" />,
           description: "RAG 챗봇에서 사용할 문서를 업로드하고 관리할 수 있습니다"
         }
       default:
-        return { 
-          title: "관리자 설정", 
+        return {
+          title: "관리자 설정",
           icon: <ShieldCheck className="h-5 w-5 text-blue-600" />,
           description: "시스템 설정을 관리하세요"
         }
@@ -747,7 +748,7 @@ export default function AdministratorPage() {
                                   {/* 팀 리스트 스크롤 컨테이너 */}
                                   <div className="h-full overflow-y-auto custom-scrollbar space-y-4 py-2 px-2 border border-gray-200 rounded-lg shadow-inner">
                                     {teams
-                                      .filter(team => 
+                                      .filter(team =>
                                         team.group_name.toLowerCase().includes(teamSearchTerm.toLowerCase()) ||
                                         team.group_description?.toLowerCase().includes(teamSearchTerm.toLowerCase())
                                       )
@@ -877,18 +878,18 @@ export default function AdministratorPage() {
                                           </CardContent>
                                         </Card>
                                       ))}
-                                    
+
                                     {/* 검색 결과가 없을 때 */}
-                                    {teams.filter(team => 
+                                    {teams.filter(team =>
                                       team.group_name.toLowerCase().includes(teamSearchTerm.toLowerCase()) ||
                                       team.group_description?.toLowerCase().includes(teamSearchTerm.toLowerCase())
                                     ).length === 0 && teamSearchTerm && (
-                                      <div className="text-center py-8 text-gray-500">
-                                        <Users className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                                        <p className="text-sm">검색 결과가 없습니다.</p>
-                                        <p className="text-xs text-gray-400 mt-1">다른 검색어를 시도해보세요.</p>
-                                      </div>
-                                    )}
+                                        <div className="text-center py-8 text-gray-500">
+                                          <Users className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                                          <p className="text-sm">검색 결과가 없습니다.</p>
+                                          <p className="text-xs text-gray-400 mt-1">다른 검색어를 시도해보세요.</p>
+                                        </div>
+                                      )}
                                   </div>
                                 </CardContent>
                               </Card>
@@ -958,13 +959,13 @@ export default function AdministratorPage() {
                                     className="w-full justify-between h-9 px-3 py-1 text-sm border border-gray-300 bg-white hover:bg-gray-50"
                                   >
                                     <span className="text-left">
-                                      {selectedTeamForToken 
-                                        ? teams.find(t => t.group_id === selectedTeamForToken)?.group_name 
+                                      {selectedTeamForToken
+                                        ? teams.find(t => t.group_id === selectedTeamForToken)?.group_name
                                         : "팀을 선택하세요"}
                                     </span>
                                     <ChevronDown className="h-4 w-4 text-gray-500" />
                                   </Button>
-                                  
+
                                   {isTeamDropdownOpen && (
                                     <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-auto">
                                       <div
@@ -990,7 +991,7 @@ export default function AdministratorPage() {
                                       ))}
                                     </div>
                                   )}
-                                 </div>
+                                </div>
                               </div>
                             </div>
                             <div className="flex justify-end mt-4">
@@ -1168,7 +1169,7 @@ export default function AdministratorPage() {
                                 setSelectedFiles(prev => [...prev, ...pdfFiles])
                               }}
                             >
-                              <div 
+                              <div
                                 className={`
                                   relative overflow-hidden rounded-xl border-2 border-dashed transition-all duration-300
                                   ${selectedFiles.length > 0
@@ -1406,24 +1407,37 @@ export default function AdministratorPage() {
                                     모든 파일 제거
                                   </Button>
                                   <Button
-                                    onClick={() => {
-                                      // TODO: 실제 업로드 로직 구현 (RAG 설정 포함)
-                                      console.log('업로드할 파일들:', selectedFiles)
-                                      console.log('RAG 설정:', {
-                                        chunkSize,
-                                        chunkOverlap,
-                                        topK
-                                      })
-                                      setUploadingDocument(true)
-                                      setTimeout(() => {
-                                        setUploadingDocument(false)
-                                        setSelectedFiles([])
+                                    onClick={async () => {
+                                      try {
+                                        setUploadingDocument(true)
+
+                                        // 벡터DB에 문서 업로드
+                                        const result = await VectorDBService.uploadAndStoreDocuments(
+                                          selectedFiles,
+                                          chunkSize,
+                                          chunkOverlap
+                                        )
+
+                                        if (result.success) {
+                                          toast({
+                                            title: "업로드 완료",
+                                            description: `${result.stored_count}개의 문서 청크가 성공적으로 벡터DB에 저장되었습니다.`,
+                                            variant: "default",
+                                          })
+                                          setSelectedFiles([])
+                                        } else {
+                                          throw new Error('업로드 실패')
+                                        }
+                                      } catch (error) {
+                                        console.error('문서 업로드 실패:', error)
                                         toast({
-                                          title: "업로드 완료",
-                                          description: `${selectedFiles.length}개의 문서가 성공적으로 업로드되었습니다.`,
-                                          variant: "default",
+                                          title: "업로드 실패",
+                                          description: "문서 업로드 중 오류가 발생했습니다.",
+                                          variant: "destructive",
                                         })
-                                      }, 2000)
+                                      } finally {
+                                        setUploadingDocument(false)
+                                      }
                                     }}
                                     disabled={selectedFiles.length === 0 || uploadingDocument}
                                     className="bg-blue-600 hover:bg-blue-700 text-white"
@@ -1443,6 +1457,38 @@ export default function AdministratorPage() {
                                 </div>
                               </div>
                             )}
+                          </div>
+
+                          {/* 벡터DB 관리 섹션 */}
+                          <div className="mb-6 pb-6 border-b">
+                            <h4 className="font-medium text-gray-900 mb-4">벡터DB 관리</h4>
+                            <div className="flex gap-2">
+                              <Button
+                                onClick={async () => {
+                                  try {
+                                    const result = await VectorDBService.clearVectorDB()
+                                    if (result.success) {
+                                      toast({
+                                        title: "벡터DB 초기화 완료",
+                                        description: "벡터DB가 성공적으로 초기화되었습니다.",
+                                        variant: "default",
+                                      })
+                                    }
+                                  } catch (error) {
+                                    console.error('벡터DB 초기화 실패:', error)
+                                    toast({
+                                      title: "벡터DB 초기화 실패",
+                                      description: "벡터DB 초기화 중 오류가 발생했습니다.",
+                                      variant: "destructive",
+                                    })
+                                  }
+                                }}
+                                variant="outline"
+                                size="sm"
+                              >
+                                벡터DB 초기화
+                              </Button>
+                            </div>
                           </div>
 
                           {/* 문서 목록 섹션 */}

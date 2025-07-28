@@ -13,12 +13,21 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.core import startup_event
-from app.routers import lora, generation, finetuning, speech, qa_generation, backend_utils, zonos_tts_async, embedding, vector_search
+from app.routers import (
+    lora,
+    generation,
+    finetuning,
+    speech,
+    qa_generation,
+    backend_utils,
+    zonos_tts_async,
+    embedding,
+    vector_db,
+)
 
 # 로깅 설정
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -28,11 +37,11 @@ dotenv.load_dotenv()
 
 # FastAPI 앱 생성
 app = FastAPI(
-    title="vLLM LoRA Influencer API", 
+    title="vLLM LoRA Influencer API",
     version="1.0.0",
     description="vLLM 엔진을 사용한 LoRA 파인튜닝 및 추론 API",
     docs_url=None,  # Swagger UI 비활성화
-    redoc_url=None  # ReDoc 비활성화
+    redoc_url=None,  # ReDoc 비활성화
 )
 
 # CORS 설정
@@ -44,47 +53,58 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 @app.on_event("startup")
 async def on_startup():
     logger.info("🚀 FastAPI 서버 시작 중...")
     try:
         # vLLM 코어 초기화
         await startup_event()
+
+        # 벡터DB 자동 초기화
+        from app.routers.vector_db import init_vector_db_on_startup
+
+        init_vector_db_on_startup()
+
         logger.info("✅ FastAPI 서버 초기화 완료")
     except Exception as e:
         logger.error(f"❌ FastAPI 서버 초기화 실패: {e}")
         # 서버는 계속 실행하되 초기화 실패를 로그에 남김
+
 
 @app.on_event("shutdown")
 async def on_shutdown():
     """서버 종료 시 정리 작업"""
     logger.info("🛑 FastAPI 서버 종료 중...")
 
+
 @app.get("/")
 async def root():
     return {"message": "vLLM LoRA Influencer API가 실행 중입니다!"}
+
 
 @app.get("/health")
 async def health_check():
     """서버 상태 확인 엔드포인트"""
     from app.core import engine, finetuning_queue, speech_generator, tokenizer
-    
+
     status = "ok"
     components = {
         "engine": engine is not None,
         "tokenizer": tokenizer is not None,
         "finetuning_queue": finetuning_queue is not None,
-        "speech_generator": speech_generator is not None
+        "speech_generator": speech_generator is not None,
     }
-    
+
     if not all(components.values()):
         status = "initializing"
-    
+
     return {
         "status": status,
         "message": "vLLM LoRA Influencer API 서버가 정상적으로 실행 중입니다.",
-        "components": components
+        "components": components,
     }
+
 
 # 전역 예외 핸들러
 @app.exception_handler(Exception)
@@ -93,15 +113,16 @@ async def global_exception_handler(request: Request, exc: Exception):
     logger.error(f"❌ 예외 타입: {type(exc).__name__}")
     logger.error(f"❌ 예외 메시지: {str(exc)}")
     logger.error(f"❌ 전체 스택 트레이스: {traceback.format_exc()}")
-    
+
     return JSONResponse(
         status_code=500,
         content={
             "detail": f"서버 내부 오류: {str(exc)}",
             "type": type(exc).__name__,
-            "url": str(request.url)
-        }
+            "url": str(request.url),
+        },
     )
+
 
 # 라우터 등록
 app.include_router(lora.router, prefix="/lora", tags=["LoRA Adapters"])
@@ -112,4 +133,4 @@ app.include_router(qa_generation.router, prefix="/qa", tags=["QA Generation"])
 app.include_router(backend_utils.router, prefix="/api/v1", tags=["Backend Utils"])
 app.include_router(zonos_tts_async.router, prefix="/zonos", tags=["Zonos TTS"])
 app.include_router(embedding.router, prefix="/embedding", tags=["Embedding"])
-app.include_router(vector_search.router, tags=["Vector Search"])
+app.include_router(vector_db.router, tags=["Vector Database"])
