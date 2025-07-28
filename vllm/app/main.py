@@ -66,6 +66,11 @@ async def on_startup():
 
         init_vector_db_on_startup()
 
+        # 임베딩 모델 자동 초기화
+        from app.routers.embedding import initialize_embedding_model
+
+        initialize_embedding_model()
+
         logger.info("✅ FastAPI 서버 초기화 완료")
     except Exception as e:
         logger.error(f"❌ FastAPI 서버 초기화 실패: {e}")
