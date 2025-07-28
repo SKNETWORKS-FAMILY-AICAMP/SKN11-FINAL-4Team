@@ -27,33 +27,18 @@ logger = logging.getLogger(__name__)
 class RAGConfig:
     """RAG 설정"""
 
-    def __init__(self):
-        self.chunk_size = 150  # 더 세분화된 청크 (150자)
-        self.chunk_overlap = 20  # 오버랩도 줄임
-        self.score_threshold = 0.5  # 고정 임계값 0.5
+    # 문서 처리 설정
+    chunk_size: int = 1000
+    chunk_overlap: int = 200
+    max_chunks: int = 50
 
-    # 문서 처리
-    min_paragraph_length: int = 30
-    max_qa_pairs: int = 100
-
-    # 검색 설정
-    search_top_k: int = 5  # 고정 top-k 값
-    score_threshold: float = 0.5  # 고정 임계값
-    max_context_length: int = 2000
-
-    # 생성 설정
-    max_tokens: int = 1024  # 고정 토큰 수
-    temperature: float = 0.8
+    # 벡터 검색 설정
+    search_top_k: int = 5
+    score_threshold: float = 0.7  # 0.3에서 0.7로 높임
 
     # 시스템 메시지
-    system_message: str = (
-        "당신은 제공된 참고 문서의 정확한 정보와 사실을 바탕으로 답변하는 AI 어시스턴트입니다. "
-        "**중요**: 문서에 포함된 모든 내용은 절대 요약하거나 생략하지 말고, 원문 그대로 완전히 포함해야 합니다. "
-        "사실, 수치, 날짜, 정책 내용, 세부 사항 등 모든 정보를 정확히 그대로 유지해주세요. "
-        "문서 내용의 완전성과 정확성이 최우선이며, 말투와 표현 방식만 캐릭터 스타일로 조정해주세요. "
-        "문서 내용을 임의로 변경, 요약, 추가하지 말고, 오직 제공된 정보를 완전히 그대로 사용해 답변해주세요."
-    )
-    influencer_name: str = "AI"
+    system_message: str = "당신은 제공된 참고 문서의 정확한 정보와 사실을 바탕으로 답변하는 AI 어시스턴트입니다."
+    influencer_name: str = "AI 어시스턴트"
 
 
 class RAGDocumentProcessor:
@@ -166,7 +151,7 @@ class RAGDocumentProcessor:
         """청크에서 QA 쌍 생성"""
         qa_pairs = []
 
-        for i, chunk in enumerate(chunks[: self.config.max_qa_pairs]):
+        for i, chunk in enumerate(chunks[: self.config.max_chunks]):
             # 간단한 QA 생성 (실제로는 더 정교한 방법 사용 가능)
             question = f"이 문서의 {i+1}번째 섹션에 대해 설명해주세요."
             answer = chunk

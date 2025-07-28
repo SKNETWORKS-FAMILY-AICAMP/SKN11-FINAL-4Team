@@ -10,6 +10,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { tokenUtils } from "@/lib/auth"
 import { ModelService } from "@/lib/services/model.service"
 import MCPService, { MCPChatResponse } from '@/lib/services/mcp.service'
+import { RAGService, RAGChatRequest } from '@/lib/services/rag.service'
 
 import {
   Send,
@@ -224,80 +225,138 @@ export default function ChatPage() {
     setInputMessage("");
     setIsLoading(true);
 
-    // 1. MCP REST 우선 시도
-    let mcpResult: string | null = null;
     try {
-      const mcpResponse: MCPChatResponse = await MCPService.processMessage({ message: currentMessage, influencer_id: model?.id || '' });
-      if (mcpResponse && mcpResponse.response && mcpResponse.response.trim()) {
-        mcpResult = mcpResponse.response.trim();
-      }
-    } catch (error: any) {
-      // MCP 오류는 fallback으로 처리
-    }
-
-    // 2. MCP 결과가 있으면, 그 결과를 LLM(WebSocket) 프롬프트로 넣어 답변 생성
-    if (mcpResult && connectionStatus === 'connected' && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      // 1단계: RAG 분기처리 (문서 검색)
+      let ragResult: string | null = null;
       try {
-        // MCP 결과를 LLM에 프롬프트로 넣어 자연스러운 답변 생성 요청
-        const prompt = `사용자 질문: ${currentMessage}\n도구 결과: ${mcpResult}\n위 정보를 바탕으로, 친근하고 자연스럽게 답변해 주세요.`;
-        wsRef.current.send(prompt);
-        // 타임아웃 설정 (30초)
-        timeoutRef.current = setTimeout(() => {
+        const ragRequest: RAGChatRequest = {
+          message: currentMessage,  // query를 message로 변경
+          include_sources: true
+        };
+        
+        const ragResponse = await RAGService.chat(ragRequest);
+        if (ragResponse && ragResponse.response && ragResponse.response.trim()) {
+          ragResult = ragResponse.response.trim();
+          console.log("✅ RAG 처리 성공:", ragResult.substring(0, 100) + "...");
+        } else {
+          console.log("❌ RAG 처리 실패 또는 문서 없음, MCP로 전환");
+        }
+      } catch (error: any) {
+        console.log("❌ RAG 처리 중 오류:", error.message);
+        // RAG 오류는 MCP로 fallback
+      }
+
+      // 2단계: RAG 결과가 있으면 SLLM으로 자연스러운 답변 생성
+      if (ragResult && connectionStatus === 'connected' && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        try {
+          const prompt = `사용자 질문: ${currentMessage}\n참고 문서 내용: ${ragResult}\n위 문서 내용을 바탕으로 답변해 주세요.`;
+          wsRef.current.send(prompt);
+          
+          // 타임아웃 설정 (30초)
+          timeoutRef.current = setTimeout(() => {
+            setIsLoading(false);
+            setMessages(prev => [...prev, {
+              id: (Date.now() + 1).toString(),
+              content: "응답 시간이 초과되었습니다. 다시 시도해주세요.",
+              sender: "bot",
+              timestamp: new Date(),
+            }]);
+          }, 30000);
+          return;
+        } catch (error) {
+          console.error("RAG 결과 처리 중 오류:", error);
+          // RAG 결과 처리 실패 시 MCP로 fallback
+        }
+      }
+
+      // 3단계: MCP 분기처리 (도구 사용)
+      let mcpResult: string | null = null;
+      try {
+        const mcpResponse: MCPChatResponse = await MCPService.processMessage({ 
+          message: currentMessage, 
+          influencer_id: model?.id || '' 
+        });
+        if (mcpResponse && mcpResponse.response && mcpResponse.response.trim()) {
+          mcpResult = mcpResponse.response.trim();
+          console.log("✅ MCP 처리 성공:", mcpResult.substring(0, 100) + "...");
+        } else {
+          console.log("❌ MCP 처리 실패 또는 도구 불필요, SLLM으로 전환");
+        }
+      } catch (error: any) {
+        console.log("❌ MCP 처리 중 오류:", error.message);
+        // MCP 오류는 SLLM으로 fallback
+      }
+
+      // 4단계: MCP 결과가 있으면 SLLM으로 자연스러운 답변 생성
+      if (mcpResult && connectionStatus === 'connected' && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        try {
+          const prompt = `사용자 질문: ${currentMessage}\n도구 결과: ${mcpResult}\n위 정보를 바탕으로 답변해 주세요.`;
+          wsRef.current.send(prompt);
+          
+          // 타임아웃 설정 (30초)
+          timeoutRef.current = setTimeout(() => {
+            setIsLoading(false);
+            setMessages(prev => [...prev, {
+              id: (Date.now() + 1).toString(),
+              content: "응답 시간이 초과되었습니다. 다시 시도해주세요.",
+              sender: "bot",
+              timestamp: new Date(),
+            }]);
+          }, 30000);
+          return;
+        } catch (error) {
+          console.error("MCP 결과 처리 중 오류:", error);
+          // MCP 결과 처리 실패 시 SLLM으로 fallback
+        }
+      }
+
+      // 5단계: SLLM fallback (일반 대화)
+      if (connectionStatus === 'connected' && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        try {
+          wsRef.current.send(currentMessage);
+          
+          // 타임아웃 설정 (30초)
+          timeoutRef.current = setTimeout(() => {
+            setIsLoading(false);
+            setMessages(prev => [...prev, {
+              id: (Date.now() + 1).toString(),
+              content: "응답 시간이 초과되었습니다. 다시 시도해주세요.",
+              sender: "bot",
+              timestamp: new Date(),
+            }]);
+          }, 30000);
+        } catch (error) {
+          console.error("SLLM 처리 중 오류:", error);
           setIsLoading(false);
           setMessages(prev => [...prev, {
             id: (Date.now() + 1).toString(),
-            content: "응답 시간이 초과되었습니다. 다시 시도해주세요.",
+            content: "메시지 전송에 실패했습니다. 다시 시도해주세요.",
             sender: "bot",
             timestamp: new Date(),
           }]);
-        }, 30000);
-        return;
-      } catch (error) {
-        setIsLoading(false);
-        setMessages(prev => [...prev, {
-          id: (Date.now() + 1).toString(),
-          content: "메시지 전송에 실패했습니다. 다시 시도해주세요.",
-          sender: "bot",
-          timestamp: new Date(),
-        }]);
+        }
         return;
       }
-    }
 
-    // 3. MCP 결과가 없으면 WebSocket LLM fallback (기존 질문 그대로)
-    if (connectionStatus === 'connected' && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      try {
-        wsRef.current.send(currentMessage);
-        // 타임아웃 설정 (30초)
-        timeoutRef.current = setTimeout(() => {
-          setIsLoading(false);
-          setMessages(prev => [...prev, {
-            id: (Date.now() + 1).toString(),
-            content: "응답 시간이 초과되었습니다. 다시 시도해주세요.",
-            sender: "bot",
-            timestamp: new Date(),
-          }]);
-        }, 30000);
-      } catch (error) {
-        setIsLoading(false);
-        setMessages(prev => [...prev, {
-          id: (Date.now() + 1).toString(),
-          content: "메시지 전송에 실패했습니다. 다시 시도해주세요.",
-          sender: "bot",
-          timestamp: new Date(),
-        }]);
-      }
-      return;
-    }
+      // 6단계: WebSocket 연결 불가
+      setIsLoading(false);
+      setMessages(prev => [...prev, {
+        id: (Date.now() + 1).toString(),
+        content: "서버와의 연결이 끊어졌습니다. 재연결 버튼을 눌러주세요.",
+        sender: "bot",
+        timestamp: new Date(),
+      }]);
 
-    // 4. WebSocket도 불가하면 연결 오류 메시지
-    setIsLoading(false);
-    setMessages(prev => [...prev, {
-      id: (Date.now() + 1).toString(),
-      content: "서버와의 연결이 끊어졌습니다. 재연결 버튼을 눌러주세요.",
-      sender: "bot",
-      timestamp: new Date(),
-    }]);
+    } catch (error) {
+      console.error("메시지 처리 중 오류:", error);
+      setIsLoading(false);
+      setMessages(prev => [...prev, {
+        id: (Date.now() + 1).toString(),
+        content: "메시지 처리 중 오류가 발생했습니다. 다시 시도해주세요.",
+        sender: "bot",
+        timestamp: new Date(),
+      }]);
+    }
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {

@@ -21,8 +21,9 @@ export interface RAGUploadResponse {
 }
 
 export interface RAGChatRequest {
-  query: string;
-  group_id: number;
+  message: string;  // query를 message로 변경
+  similarity_threshold?: number;  // 추가
+  max_tokens?: number;  // 추가
   include_sources?: boolean;
 }
 
@@ -65,17 +66,17 @@ export interface RAGHealthResponse {
 
 export class RAGService {
   /**
-   * 문서 업로드 및 RAG 파이프라인 생성
+   * 문서 업로드 및 RAG 파이프라인 생성 (GPU 기반)
    */
   static async uploadDocument(request: RAGUploadRequest): Promise<RAGUploadResponse> {
-    return await apiClient.post<RAGUploadResponse>('/api/v1/rag/upload_document', request);
+    return await apiClient.post<RAGUploadResponse>('/api/v1/rag/upload_document_gpu', request);
   }
 
   /**
-   * RAG 채팅 (비스트리밍)
+   * RAG 채팅 (GPU 기반)
    */
   static async chat(request: RAGChatRequest): Promise<RAGChatResponse> {
-    return await apiClient.post<RAGChatResponse>('/api/v1/rag/chat', request);
+    return await apiClient.post<RAGChatResponse>('/api/v1/rag/chat_gpu', request);
   }
 
   /**
@@ -115,7 +116,7 @@ export class RAGService {
   }
 
   /**
-   * 파일 업로드 (FormData 사용)
+   * 파일 업로드 (FormData 사용, GPU 기반)
    */
   static async uploadFile(
     file: File,
@@ -129,7 +130,7 @@ export class RAGService {
     if (systemMessage) formData.append('system_message', systemMessage);
     if (influencerName) formData.append('influencer_name', influencerName);
 
-    return await apiClient.post<RAGUploadResponse>('/api/v1/rag/upload_document', formData, {
+    return await apiClient.post<RAGUploadResponse>('/api/v1/rag/upload_document_gpu', formData, {
       headers: {}, // FormData는 자동으로 Content-Type 설정
     });
   }
