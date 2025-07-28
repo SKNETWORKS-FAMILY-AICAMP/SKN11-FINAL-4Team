@@ -65,7 +65,7 @@ export default function DashboardPage() {
         const data = await ModelService.getInfluencers()
         setInfluencers(data)
       } catch (err) {
-        console.error('Failed to fetch influencers:', err)
+        // console.error('Failed to fetch influencers:', err)
         setError('인플루언서 정보를 불러오는데 실패했습니다.')
       } finally {
         setLoading(false)
@@ -110,7 +110,7 @@ export default function DashboardPage() {
         await ModelService.deleteInfluencer(influencerId)
         setInfluencers((prev) => prev.filter((inf) => inf.influencer_id !== influencerId))
       } catch (err) {
-        console.error('Failed to delete influencer:', err)
+        // console.error('Failed to delete influencer:', err)
         setError('인플루언서 삭제에 실패했습니다.')
       }
     }

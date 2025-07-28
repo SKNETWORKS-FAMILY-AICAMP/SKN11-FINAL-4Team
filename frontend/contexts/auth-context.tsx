@@ -43,7 +43,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     try {
       await BackendAuthService.logout()
     } catch (error) {
-      console.warn('Backend logout failed:', error)
+      // console.warn('Backend logout failed:', error)
     }
     // 로컬 토큰 및 상태 정리
     tokenUtils.removeToken()
@@ -59,23 +59,25 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     const token = tokenUtils.getToken()
     
     if (!token) {
-      setAuthState({
+      setAuthState(prev => ({
+        ...prev,
         user: null,
         token: null,
         isAuthenticated: false,
         isLoading: false
-      })
+      }))
       return
     }
 
     if (tokenUtils.isTokenExpired(token)) {
       tokenUtils.removeToken()
-      setAuthState({
+      setAuthState(prev => ({
+        ...prev,
         user: null,
         token: null,
         isAuthenticated: false,
         isLoading: false
-      })
+      }))
       return
     }
 
@@ -83,59 +85,70 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       // JWT 토큰에서 직접 사용자 정보 가져오기
       const user = getUserFromToken(token)
       if (user) {
-        setAuthState({
+        setAuthState(prev => ({
+          ...prev,
           user,
           token,
           isAuthenticated: true,
           isLoading: false
-        })
+        }))
       } else {
         // JWT 파싱 실패 시 백엔드에서 사용자 정보 가져오기
         const backendUser = await BackendAuthService.verifyToken()
-        setAuthState({
+        setAuthState(prev => ({
+          ...prev,
           user: backendUser,
           token,
           isAuthenticated: true,
           isLoading: false
-        })
+        }))
       }
     } catch (error) {
-      console.error('Failed to verify token:', error)
+      // console.error('Failed to verify token:', error)
       // Instagram API 오류 등으로 인한 일시적 실패 시 토큰을 제거하지 않음
       // 실제 인증 실패인 경우만 토큰 제거
       const errorStatus = (error as any)?.status
       if (errorStatus === 401 || errorStatus === 403) {
         tokenUtils.removeToken()
-        setAuthState({
+        setAuthState(prev => ({
+          ...prev,
           user: null,
           token: null,
           isAuthenticated: false,
           isLoading: false
-        })
+        }))
       } else {
         // 네트워크 오류 등 일시적 문제는 토큰 유지
-        setAuthState({
+        setAuthState(prev => ({
+          ...prev,
           user: null,
           token,
           isAuthenticated: false,
           isLoading: false
-        })
+        }))
       }
     }
   }, [])
 
+  // 초기 인증 상태 확인
   useEffect(() => {
     initializeAuth()
-    
-    const interval = setInterval(() => {
+  }, [])
+
+  // 토큰 만료 확인 (별도 effect로 분리)
+  useEffect(() => {
+    const checkTokenExpiry = () => {
       const token = tokenUtils.getToken()
       if (token && tokenUtils.isTokenExpired(token)) {
         logout()
       }
-    }, 60000)
+    }
+
+    // 1분마다 토큰 만료 확인
+    const interval = setInterval(checkTokenExpiry, 60000)
 
     return () => clearInterval(interval)
-  }, [initializeAuth, logout])
+  }, [logout])
 
   const login = useCallback(async (token: string) => {
     try {
@@ -161,7 +174,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         })
       }
     } catch (error) {
-      console.error('Login failed:', error)
+      // console.error('Login failed:', error)
       // 로그인 실패 시에만 토큰 제거
       const errorStatus = (error as any)?.status
       if (errorStatus === 401 || errorStatus === 403) {
@@ -185,7 +198,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         isLoading: false
       })
     } catch (error) {
-      console.error('Login with user info failed:', error)
+      // console.error('Login with user info failed:', error)
       // 로그인 실패 시에만 토큰 제거
       const errorStatus = (error as any)?.status
       if (errorStatus === 401 || errorStatus === 403) {

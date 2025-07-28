@@ -8,8 +8,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Bot } from "lucide-react"
 import { socialLogin } from "@/lib/social-auth"
 import { useAuth } from "@/hooks/use-auth"
+import { useToast } from "@/hooks/use-toast"
 
 export default function LoginPage() {
+  const { toast } = useToast()
   const [isLoading, setIsLoading] = useState<string | null>(null)
   const router = useRouter()
   const { login, isAuthenticated, isLoading: authLoading } = useAuth()
@@ -40,7 +42,12 @@ export default function LoginPage() {
       // 이 시점에서 페이지가 리다이렉트되므로 아래 코드는 실행되지 않음
     } catch (error) {
       console.error('로그인 시작 실패:', error)
-      alert('로그인을 시작할 수 없습니다. 다시 시도해주세요.')
+      toast({
+        title: "로그인 실패",
+        description: '로그인을 시작할 수 없습니다. 다시 시도해주세요.',
+        variant: "destructive",
+        duration: 3000,
+      })
       setIsLoading(null)
       setIsRedirecting(false)
     }
@@ -108,24 +115,6 @@ export default function LoginPage() {
                   />
                 </svg>
                 <span className="font-medium">구글로 시작하기</span>
-              </>
-            )}
-          </Button>
-
-          {/* 네이버 로그인 버튼 */}
-          <Button
-            onClick={() => handleOAuthLogin("naver")}
-            disabled={isLoading !== null || isRedirecting}
-            className="w-full bg-[#03C75A] hover:bg-[#02B351] text-white flex items-center justify-center space-x-3 py-3"
-          >
-            {isLoading === "naver" ? (
-              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-            ) : (
-              <>
-                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M16.273 12.845 7.376 0H0v24h7.726V11.156L16.624 24H24V0h-7.727v12.845Z" />
-                </svg>
-                <span className="font-medium">네이버로 시작하기</span>
               </>
             )}
           </Button>

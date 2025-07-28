@@ -34,7 +34,6 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
@@ -297,8 +296,7 @@ function ModelDetailContent() {
 
       setWeeklyChartData(last7Days);
     } catch (error) {
-      // 에러는 catch 블록에서만 남김
-      console.error("7일간 차트 데이터 로드 실패:", error);
+      // console.error("7일간 차트 데이터 로드 실패:", error);
       setWeeklyChartData([]);
     }
   };
@@ -531,8 +529,8 @@ function ModelDetailContent() {
       // API 키 정보 로드
       await loadApiKeyInfo();
     } catch (error) {
-      // 에러는 catch 블록에서만 남김
-      console.error("❌ 모델 데이터 로드 실패:", error);
+      // 에러 처리
+      // console.error("❌ 모델 데이터 로드 실패:", error);
     } finally {
       setIsModelLoading(false);
     }
@@ -563,15 +561,14 @@ function ModelDetailContent() {
         apiKey: apiKeyData.api_key,
       }));
     } catch (error: any) {
-      // 에러는 catch 블록에서만 남김
-      console.error("❌ API 키 조회 실패:", {
-        error: error,
-        status: error.status,
-        detail: error.data?.detail,
-        message: error.message,
-        influencer_id: params.id,
-        stack: error.stack,
-      });
+      // console.error("❌ API 키 조회 실패:", {
+      //   error: error,
+      //   status: error.status,
+      //   detail: error.data?.detail,
+      //   message: error.message,
+      //   influencer_id: params.id,
+      //   stack: error.stack,
+      // });
 
       // API 키가 없는 경우 (404)에만 자동 생성 시도
       if (error.status === 404 && error.data?.detail === "API key not found") {
@@ -595,10 +592,10 @@ function ModelDetailContent() {
         }
       } else {
         // 다른 오류 (인플루언서를 찾을 수 없음 등)는 그대로 표시
-        console.error(
-          "API 키 조회 실패:",
-          error.response?.data?.detail || error.message,
-        );
+        // console.error(
+        //   "API 키 조회 실패:",
+        //   error.response?.data?.detail || error.message,
+        // );
         setApiKeyInfo(null);
       }
     }
@@ -637,8 +634,12 @@ function ModelDetailContent() {
       };
       reader.readAsDataURL(file);
     } catch (error) {
-      // 에러는 catch 블록에서만 남김
-      console.error("Image processing error:", error);
+      toast({
+        title: "이미지 처리 오류",
+        description: "이미지 처리 중 오류가 발생했습니다.",
+        variant: "destructive",
+      });
+      // console.error("Image processing error:", error);
     }
   };
 
@@ -701,8 +702,7 @@ function ModelDetailContent() {
       const response = await apiClient.get("/api/v1/gallery/images");
       setGalleryImages(Array.isArray(response) ? response : []);
     } catch (error) {
-      // 에러는 catch 블록에서만 남김
-      console.error("갤러리 이미지 로드 실패:", error);
+      // console.error("갤러리 이미지 로드 실패:", error);
       toast({
         title: "갤러리 로드 실패",
         description: "이미지 목록을 불러오는데 실패했습니다.",
@@ -866,8 +866,7 @@ function ModelDetailContent() {
         variant: "default",
       });
     } catch (error) {
-      // 에러는 catch 블록에서만 남김
-      console.error("API key copy error:", error);
+      // console.error("API key copy error:", error);
       toast({
         title: "복사 실패",
         description: "API 키 복사에 실패했습니다. 수동으로 복사해주세요.",
@@ -893,8 +892,7 @@ function ModelDetailContent() {
         variant: "default",
       });
     } catch (error) {
-      // 에러는 catch 블록에서만 남김
-      console.error("API key generation error:", error);
+      // console.error("API key generation error:", error);
       toast({
         title: "API 키 생성 실패",
         description: "API 키 생성에 실패했습니다. 다시 시도해주세요.",
@@ -922,8 +920,7 @@ function ModelDetailContent() {
       });
       setTestResponse(response.response);
     } catch (error: any) {
-      // 에러는 catch 블록에서만 남김
-      console.error("Chatbot test error:", error);
+      // console.error("Chatbot test error:", error);
       setTestResponse(
         `오류: ${error.response?.data?.detail || error.message || "알 수 없는 오류"}`,
       );
@@ -959,8 +956,7 @@ function ModelDetailContent() {
         });
       }
     } catch (error: any) {
-      // 에러는 catch 블록에서만 남김
-      console.error("Chatbot toggle error:", error);
+      // console.error("Chatbot toggle error:", error);
       toast({
         title: "오류",
         description: "챗봇 상태 변경에 실패했습니다.",
@@ -1942,8 +1938,7 @@ function ModelDetailContent() {
         throw new Error("응답에 s3_url이 없습니다");
       }
     } catch (error: any) {
-      // 에러는 catch 블록에서만 남김
-      console.error("베이스 음성 업로드 실패:", error);
+      // console.error("베이스 음성 업로드 실패:", error);
       toast({
         title: "업로드 실패",
         description:
@@ -2020,8 +2015,7 @@ function ModelDetailContent() {
         }
       }
     } catch (error: any) {
-      // 에러는 catch 블록에서만 남김
-      console.error("음성 생성 실패:", error);
+      // console.error("음성 생성 실패:", error);
       toast({
         title: "음성 생성 실패",
         description:
@@ -2051,8 +2045,7 @@ function ModelDetailContent() {
         setBaseVoiceUrl(null);
       }
     } catch (error: any) {
-      // 에러는 catch 블록에서만 남김
-      console.error("베이스 음성 확인 중 오류:", error);
+      // console.error("베이스 음성 확인 중 오류:", error);
       setHasBaseVoice(false);
       setBaseVoiceUrl(null);
     }
@@ -2102,8 +2095,7 @@ function ModelDetailContent() {
         setVoiceHistory([]);
       }
     } catch (error) {
-      // 에러는 catch 블록에서만 남김
-      console.error("음성 목록 로드 실패:", error);
+      // console.error("음성 목록 로드 실패:", error);
       // 에러가 발생한 경우에만 실패 메시지 표시
       toast({
         title: "로드 실패",
@@ -2139,8 +2131,7 @@ function ModelDetailContent() {
           setPlayingVoiceUrl(url);
         })
         .catch((error) => {
-          // 에러는 catch 블록에서만 남김
-          console.error("오디오 재생 실패:", error);
+          // console.error("오디오 재생 실패:", error);
           toast({
             title: "재생 실패",
             description: "오디오를 재생할 수 없습니다.",
@@ -2171,8 +2162,7 @@ function ModelDetailContent() {
         throw new Error("음성 파일 URL이 없습니다");
       }
 
-      // 에러는 catch 블록에서만 남김
-      console.log("Download URL:", url);
+      // console.log("Download URL:", url);
 
       // 다운로드 시작 알림
       toast({
@@ -2207,8 +2197,7 @@ function ModelDetailContent() {
         // 진행률 로그 (필요시 UI에 표시 가능)
         if (total) {
           const progress = Math.round((receivedLength / total) * 100);
-          // 에러는 catch 블록에서만 남김
-          console.log(`다운로드 진행률: ${progress}%`);
+          // console.log(`다운로드 진행률: ${progress}%`);
         }
       }
 
@@ -2239,8 +2228,7 @@ function ModelDetailContent() {
         description: "음성 파일이 다운로드되었습니다.",
       });
     } catch (error: any) {
-      // 에러는 catch 블록에서만 남김
-      console.error("다운로드 실패:", error);
+      // console.error("다운로드 실패:", error);
       toast({
         title: "다운로드 실패",
         description: error.message || "음성 파일 다운로드에 실패했습니다.",
@@ -2266,8 +2254,7 @@ function ModelDetailContent() {
 
       setVoiceToDelete(null);
     } catch (error: any) {
-      // 에러는 catch 블록에서만 남김
-      console.error("음성 삭제 실패:", error);
+      // console.error("음성 삭제 실패:", error);
       toast({
         title: "삭제 실패",
         description:
@@ -2286,8 +2273,7 @@ function ModelDetailContent() {
     );
   }
 
-  // 에러는 catch 블록에서만 남김
-  console.log("[render] model.image_url:", model.image_url);
+  // console.log("[render] model.image_url:", model.image_url);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -3122,17 +3108,14 @@ const MCPServerSelector: FC<{ influencerId: string; model: any }> = ({
       });
 
       if (response.ok) {
-        // 에러는 catch 블록에서만 남김
-        console.log("선택된 MCP 서버 정보를 백엔드에 전송 완료:", selected);
+        // console.log("선택된 MCP 서버 정보를 백엔드에 전송 완료:", selected);
         // 쿼리 스트링 없이 챗봇 페이지로 이동
         window.open(`/chat/${influencerId}`, "_blank");
       } else {
-        // 에러는 catch 블록에서만 남김
-        console.error("서버 정보 전송 실패");
+        // console.error("서버 정보 전송 실패");
       }
     } catch (error) {
-      // 에러는 catch 블록에서만 남김
-      console.error("서버 정보 전송 중 오류:", error);
+      // console.error("서버 정보 전송 중 오류:", error);
     }
   };
 
