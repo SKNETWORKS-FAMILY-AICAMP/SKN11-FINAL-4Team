@@ -69,7 +69,8 @@ async def on_startup():
         # 임베딩 모델 자동 초기화
         from app.routers.embedding import initialize_embedding_model
 
-        initialize_embedding_model()
+        # RAG 전용 GPU 1 사용
+        initialize_embedding_model(device="cuda:1")
 
         logger.info("✅ FastAPI 서버 초기화 완료")
     except Exception as e:

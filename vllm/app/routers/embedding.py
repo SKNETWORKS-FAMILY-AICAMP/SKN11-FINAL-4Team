@@ -38,9 +38,15 @@ def initialize_embedding_model(model_name: str = "BAAI/bge-m3", device: str = No
         logger.info("✅ 임베딩 모델이 이미 초기화되어 있습니다.")
         return
     
-    # 디바이스 설정
+    # 디바이스 설정 - RAG 전용 GPU 1 사용
     if device is None:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        if torch.cuda.is_available():
+            # RAG 전용 GPU ID (기본값: 1)
+            rag_gpu_id = int(os.getenv('RAG_GPU_ID', '1'))
+            device = f"cuda:{rag_gpu_id}"
+            logger.info(f"🔧 RAG 임베딩 모델 GPU {rag_gpu_id} 사용")
+        else:
+            device = "cpu"
     
     embedding_device = device
     logger.info(f"🔄 임베딩 모델 초기화 중... (모델: {model_name}, 디바이스: {device})")
@@ -60,14 +66,16 @@ async def generate_embeddings(request: EmbeddingRequest):
     try:
         # 모델이 초기화되지 않았으면 초기화
         if embedding_model is None:
-            initialize_embedding_model(request.model_name, request.device)
+            # 요청된 디바이스가 없으면 GPU 1 사용
+            device = request.device if request.device else "cuda:1"
+            initialize_embedding_model(request.model_name, device)
         
         # 디바이스 변경이 필요한 경우
         if request.device and request.device != embedding_device:
             logger.info(f"🔄 임베딩 모델 디바이스 변경: {embedding_device} → {request.device}")
             initialize_embedding_model(request.model_name, request.device)
         
-        logger.info(f"🔄 {len(request.texts)}개 텍스트 임베딩 생성 중...")
+        logger.info(f"🔄 {len(request.texts)}개 텍스트 임베딩 생성 중... (디바이스: {embedding_device})")
         
         # 임베딩 생성
         embeddings = embedding_model.encode(
@@ -140,10 +148,12 @@ async def batch_embedding(request: EmbeddingRequest):
     global embedding_model
     
     if embedding_model is None:
-        initialize_embedding_model(request.model_name, request.device)
+        # 요청된 디바이스가 없으면 GPU 1 사용
+        device = request.device if request.device else "cuda:1"
+        initialize_embedding_model(request.model_name, device)
     
     try:
-        logger.info(f"🔄 배치 임베딩 생성 시작: {len(request.texts)}개 텍스트")
+        logger.info(f"🔄 배치 임베딩 생성 시작: {len(request.texts)}개 텍스트 (디바이스: {embedding_device})")
         
         # 배치 크기 조정
         batch_size = min(request.batch_size, 64)  # 최대 64개로 제한

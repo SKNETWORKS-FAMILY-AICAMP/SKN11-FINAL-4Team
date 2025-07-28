@@ -39,10 +39,11 @@ class VLLMEmbeddingClient:
         try:
             request_data = EmbeddingRequest(
                 texts=texts,
+                device="cuda:1",  # RAG 전용 GPU 1 사용
                 **kwargs
             )
             
-            logger.info(f"🔄 VLLM 임베딩 API 호출: {len(texts)}개 텍스트")
+            logger.info(f"🔄 VLLM 임베딩 API 호출: {len(texts)}개 텍스트 (GPU 1)")
             
             response = await self.client.post(
                 f"{self.base_url}/embedding/embed",
@@ -67,10 +68,11 @@ class VLLMEmbeddingClient:
         try:
             request_data = EmbeddingRequest(
                 texts=texts,
+                device="cuda:1",  # RAG 전용 GPU 1 사용
                 **kwargs
             )
             
-            logger.info(f"🔄 VLLM 배치 임베딩 API 호출: {len(texts)}개 텍스트")
+            logger.info(f"🔄 VLLM 배치 임베딩 API 호출: {len(texts)}개 텍스트 (GPU 1)")
             
             response = await self.client.post(
                 f"{self.base_url}/embedding/embed/batch",
@@ -136,21 +138,13 @@ def get_embedding_client() -> VLLMEmbeddingClient:
     return _embedding_client
 
 async def generate_embeddings(texts: List[str], **kwargs) -> List[List[float]]:
-    """간편한 임베딩 생성 함수"""
-    from app.core.config import settings
-    # 매번 새로운 클라이언트 생성
-    vllm_url = getattr(settings, 'VLLM_BASE_URL', 'http://localhost:8001')
-    client = VLLMEmbeddingClient(base_url=vllm_url)
-    async with client:
-        response = await client.generate_embeddings(texts, **kwargs)
+    """VLLM 서버를 통한 임베딩 생성 (간편 함수)"""
+    async with get_embedding_client() as client:
+        response = await client.generate_embeddings(texts, device="cuda:1", **kwargs)
         return response.embeddings
 
 async def batch_generate_embeddings(texts: List[str], **kwargs) -> List[List[float]]:
-    """간편한 배치 임베딩 생성 함수"""
-    from app.core.config import settings
-    # 매번 새로운 클라이언트 생성
-    vllm_url = getattr(settings, 'VLLM_BASE_URL', 'http://localhost:8001')
-    client = VLLMEmbeddingClient(base_url=vllm_url)
-    async with client:
-        response = await client.batch_embedding(texts, **kwargs)
+    """VLLM 서버를 통한 배치 임베딩 생성 (간편 함수)"""
+    async with get_embedding_client() as client:
+        response = await client.batch_embedding(texts, device="cuda:1", **kwargs)
         return response.embeddings 
