@@ -191,10 +191,14 @@ async def search_documents(request: SearchRequest):
             score = 1 - hit["distance"]  # 거리를 유사도로 변환
 
             if score >= request.score_threshold:
+                # 안전한 필드 접근
+                text = hit["entity"].get("text", "")
+                chunk_id = metadata.get("chunk_id", "unknown")
+
                 search_results.append(
                     SearchResult(
-                        id=hit["entity"]["original_id"],
-                        text=hit["entity"]["text"],
+                        id=chunk_id,
+                        text=text,
                         score=score,
                         metadata=metadata,
                     )
@@ -300,10 +304,14 @@ async def embed_and_search(query: str, top_k: int = 5, score_threshold: float = 
             score = 1 - hit["distance"]
 
             if score >= score_threshold:
+                # 안전한 필드 접근
+                text = hit["entity"].get("text", "")
+                chunk_id = metadata.get("chunk_id", "unknown")
+
                 search_results.append(
                     SearchResult(
-                        id=hit["entity"]["original_id"],
-                        text=hit["entity"]["text"],
+                        id=chunk_id,
+                        text=text,
                         score=score,
                         metadata=metadata,
                     )
