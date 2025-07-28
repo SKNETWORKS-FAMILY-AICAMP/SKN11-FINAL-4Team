@@ -14,7 +14,8 @@ const PUBLIC_ROUTES = [
   '/login',
   '/api/auth/callback/google',
   '/api/auth/callback/naver',
-  '/auth/instagram/callback'
+  '/auth/instagram/callback',
+  '/rag-test' // RAG 테스트 페이지 추가
 ]
 
 // 로딩 중 표시할 컴포넌트

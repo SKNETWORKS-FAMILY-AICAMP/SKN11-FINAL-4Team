@@ -116,3 +116,9 @@ websockets==15.0.1
 xxhash==3.5.0
 yarl==1.20.1
 yt-dlp==2025.6.9
+
+# RAG 관련 의존성 추가
+sentence-transformers>=2.2.0
+pymilvus[model]>=2.3.0
+PyPDF2>=3.0.0
+torch>=2.0.0
