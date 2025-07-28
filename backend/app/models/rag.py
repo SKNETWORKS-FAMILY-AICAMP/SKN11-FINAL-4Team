@@ -91,8 +91,8 @@ class RAGConfig(Base):
     DEFAULT_CONFIG = {
         "min_paragraph_length": 30,
         "max_qa_pairs": 100,
-        "chunk_size": 500,
-        "chunk_overlap": 100,
+        "chunk_size": 200,
+        "chunk_overlap": 30,
         "search_top_k": 3,
         "score_threshold": 0.4,
         "max_context_length": 2000,

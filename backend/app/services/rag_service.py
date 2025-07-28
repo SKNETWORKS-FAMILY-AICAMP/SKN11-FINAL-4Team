@@ -28,8 +28,8 @@ class RAGConfig:
     """RAG 설정"""
 
     def __init__(self):
-        self.chunk_size = 500  # 더 세분화된 청크
-        self.chunk_overlap = 100  # 오버랩도 줄임
+        self.chunk_size = 200  # 더 세분화된 청크 (200자)
+        self.chunk_overlap = 30  # 오버랩도 줄임
         self.score_threshold = 0.4  # 다른 레이어와 통일
 
     # 문서 처리
@@ -65,22 +65,32 @@ class RAGDocumentProcessor:
     async def process_pdf(self, pdf_path: str) -> List[Dict]:
         """PDF 문서 처리"""
         try:
-            from PyPDF2 import PdfReader
             import re
+
+            # PDF 처리 라이브러리 확인
+            try:
+                from PyPDF2 import PdfReader
+
+                PYPDF2_AVAILABLE = True
+            except ImportError:
+                PYPDF2_AVAILABLE = False
 
             logger.info(f"📄 PDF 처리 시작: {pdf_path}")
 
             # PDF 읽기
+            text_content = ""
+
             with open(pdf_path, "rb") as file:
                 reader = PdfReader(file)
-                text_content = ""
-
                 for page_num, page in enumerate(reader.pages):
                     page_text = page.extract_text()
                     text_content += f"\n--- 페이지 {page_num + 1} ---\n{page_text}\n"
 
+            # 텍스트 전처리 (PDF 텍스트 정리)
+            cleaned_text = self._preprocess_text(text_content)
+
             # 텍스트 청킹
-            chunks = self._create_chunks(text_content)
+            chunks = self._create_chunks(cleaned_text)
 
             # QA 쌍 생성
             qa_pairs = await self._generate_qa_pairs(chunks)
@@ -92,25 +102,60 @@ class RAGDocumentProcessor:
             logger.error(f"❌ PDF 처리 실패: {e}")
             raise
 
+    def _preprocess_text(self, text: str) -> str:
+        """텍스트 전처리 (PDF 텍스트 정리)"""
+        # 1. 모든 유니코드 문자 중 한글, 영문, 숫자, 기본 기호만 남기기
+        text = re.sub(
+            r"[^\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F\uA960-\uA97F\uAC00-\uD7AF\uD7B0-\uD7FFa-zA-Z0-9\s\.\,\!\?\;\:\-\(\)\[\]\{\}\n가-힣]",
+            "",
+            text,
+        )
+
+        # 2. 연속된 공백 제거
+        text = re.sub(r"\s+", " ", text)
+
+        # 3. 페이지 구분자 완전 제거
+        text = re.sub(r"--- 페이지 \d+ ---", "", text)
+
+        # 4. 빈 줄 제거
+        text = re.sub(r"\n\s*\n", "\n", text)
+
+        # 5. 앞뒤 공백 제거
+        text = text.strip()
+
+        # 6. 한글 문장만 남기기 (더 엄격한 필터링)
+        lines = text.split("\n")
+        cleaned_lines = []
+        for line in lines:
+            line = line.strip()
+            if line and len(line) > 10:  # 10자 이상인 라인만 유지
+                # 한글이 포함된 라인만 유지 (최소 3글자 이상)
+                korean_chars = re.findall(r"[가-힣]", line)
+                if len(korean_chars) >= 3:
+                    cleaned_lines.append(line)
+
+        return "\n".join(cleaned_lines)
+
     def _create_chunks(self, text: str) -> List[str]:
-        """텍스트를 청크로 분할"""
-        # 문단 단위로 분할
-        paragraphs = re.split(r"\n\s*\n", text)
+        """텍스트를 청크로 분할 (문장 단위)"""
+        # 문장 단위로 분할
+        sentences = re.split(r"[.!?]+", text)
 
         chunks = []
         current_chunk = ""
 
-        for paragraph in paragraphs:
-            paragraph = paragraph.strip()
-            if len(paragraph) < self.config.min_paragraph_length:
+        for sentence in sentences:
+            sentence = sentence.strip()
+            if len(sentence) < 10:  # 너무 짧은 문장 제외
                 continue
 
-            if len(current_chunk + paragraph) > 500:  # 청크 크기를 500으로 축소
+            # 청크 크기 제한 확인
+            if len(current_chunk + sentence) > self.config.chunk_size:
                 if current_chunk:
                     chunks.append(current_chunk.strip())
-                current_chunk = paragraph
+                current_chunk = sentence
             else:
-                current_chunk += "\n" + paragraph
+                current_chunk += " " + sentence
 
         if current_chunk:
             chunks.append(current_chunk.strip())

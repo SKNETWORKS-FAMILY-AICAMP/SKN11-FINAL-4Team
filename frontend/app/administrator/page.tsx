@@ -65,8 +65,8 @@ export default function AdministratorPage() {
 
   // RAG 고급 설정 관련 상태들
   const [showAdvancedSettings, setShowAdvancedSettings] = useState(false)
-  const [chunkSize, setChunkSize] = useState(500)
-  const [chunkOverlap, setChunkOverlap] = useState(100)
+  const [chunkSize, setChunkSize] = useState(200)
+  const [chunkOverlap, setChunkOverlap] = useState(30)
   const [topK, setTopK] = useState(5)
 
   const isFetchingDataRef = useRef(false)

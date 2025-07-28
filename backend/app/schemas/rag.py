@@ -100,8 +100,8 @@ class RAGConfigRequest(BaseModel):
 
     min_paragraph_length: Optional[int] = Field(30, description="최소 문단 길이")
     max_qa_pairs: Optional[int] = Field(100, description="최대 QA 쌍 수")
-    chunk_size: Optional[int] = Field(500, description="청크 크기")
-    chunk_overlap: Optional[int] = Field(100, description="청크 오버랩")
+    chunk_size: Optional[int] = Field(200, description="청크 크기")
+    chunk_overlap: Optional[int] = Field(30, description="청크 오버랩")
     search_top_k: Optional[int] = Field(3, description="검색 상위 k개")
     score_threshold: Optional[float] = Field(0.4, description="유사도 임계값")
     max_context_length: Optional[int] = Field(2000, description="최대 컨텍스트 길이")

@@ -13,8 +13,10 @@ import asyncio
 # PDF 처리 라이브러리
 try:
     from PyPDF2 import PdfReader
+
+    PYPDF2_AVAILABLE = True
 except ImportError:
-    PdfReader = None
+    PYPDF2_AVAILABLE = False
 
 # 텍스트 처리 라이브러리
 try:
@@ -36,8 +38,8 @@ class DocumentProcessor:
         self.config = config or {}
         self.min_paragraph_length = self.config.get("min_paragraph_length", 30)
         self.max_qa_pairs = self.config.get("max_qa_pairs", 100)
-        self.chunk_size = self.config.get("chunk_size", 500)  # 더 세분화된 청크
-        self.chunk_overlap = self.config.get("chunk_overlap", 100)  # 오버랩도 줄임
+        self.chunk_size = self.config.get("chunk_size", 200)  # 더 세분화된 청크 (200자)
+        self.chunk_overlap = self.config.get("chunk_overlap", 30)  # 오버랩도 줄임
 
         # NLTK 초기화 (가능한 경우)
         if NLTK_AVAILABLE:
@@ -49,19 +51,19 @@ class DocumentProcessor:
 
     async def process_pdf(self, pdf_path: str) -> List[Dict]:
         """PDF 문서 처리"""
-        if not PdfReader:
+        if not PYPDF2_AVAILABLE:
             raise ImportError(
-                "PyPDF2가 설치되지 않았습니다. pip install PyPDF2를 실행하세요."
+                "PDF 처리 라이브러리가 설치되지 않았습니다. pip install PyPDF2를 실행하세요."
             )
 
         try:
             logger.info(f"📄 PDF 처리 시작: {pdf_path}")
 
-            # PDF 읽기
+            # PDF 읽기 (pdfplumber 우선 사용)
+            text_content = ""
+
             with open(pdf_path, "rb") as file:
                 reader = PdfReader(file)
-                text_content = ""
-
                 for page_num, page in enumerate(reader.pages):
                     page_text = page.extract_text()
                     text_content += f"\n--- 페이지 {page_num + 1} ---\n{page_text}\n"
@@ -83,17 +85,38 @@ class DocumentProcessor:
             raise
 
     def _preprocess_text(self, text: str) -> str:
-        """텍스트 전처리"""
-        # 불필요한 공백 제거
+        """텍스트 전처리 (PDF 텍스트 정리)"""
+        # 1. 모든 유니코드 문자 중 한글, 영문, 숫자, 기본 기호만 남기기
+        text = re.sub(
+            r"[^\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F\uA960-\uA97F\uAC00-\uD7AF\uD7B0-\uD7FFa-zA-Z0-9\s\.\,\!\?\;\:\-\(\)\[\]\{\}\n가-힣]",
+            "",
+            text,
+        )
+
+        # 2. 연속된 공백 제거
         text = re.sub(r"\s+", " ", text)
 
-        # 특수 문자 정리
-        text = re.sub(r"[^\w\s\.\,\!\?\;\:\-\(\)\[\]\{\}]", "", text)
+        # 3. 페이지 구분자 완전 제거
+        text = re.sub(r"--- 페이지 \d+ ---", "", text)
 
-        # 문단 구분 정리
-        text = re.sub(r"\n\s*\n", "\n\n", text)
+        # 4. 빈 줄 제거
+        text = re.sub(r"\n\s*\n", "\n", text)
 
-        return text.strip()
+        # 5. 앞뒤 공백 제거
+        text = text.strip()
+
+        # 6. 한글 문장만 남기기 (더 엄격한 필터링)
+        lines = text.split("\n")
+        cleaned_lines = []
+        for line in lines:
+            line = line.strip()
+            if line and len(line) > 10:  # 10자 이상인 라인만 유지
+                # 한글이 포함된 라인만 유지 (최소 3글자 이상)
+                korean_chars = re.findall(r"[가-힣]", line)
+                if len(korean_chars) >= 3:
+                    cleaned_lines.append(line)
+
+        return "\n".join(cleaned_lines)
 
     def _create_chunks(self, text: str) -> List[str]:
         """텍스트를 청크로 분할"""
