@@ -24,6 +24,7 @@ from app.services.image_storage_service import get_image_storage_service
 from app.services.comfyui_flux_service import get_comfyui_flux_service
 from app.services.prompt_optimization_service import get_prompt_optimization_service
 from app.services.s3_service import get_s3_service
+from app.services.generated_image_service import get_generated_image_service
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
@@ -199,8 +200,12 @@ async def generate_image(
             
             import uuid
             from datetime import datetime
+            
+            # storage_id 생성 (UUID)
+            storage_id = str(uuid.uuid4())
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            image_filename = f"generate_image/team_{group_id}/{user_id}/{timestamp}_{str(uuid.uuid4())[:8]}.png"
+            # storage_id를 파일명에 포함
+            image_filename = f"generate_image/team_{group_id}/{user_id}/{storage_id}.png"
             
             # S3 업로드
             s3_url = await s3_service.upload_image_data(
@@ -218,22 +223,39 @@ async def generate_image(
             await user_session_service.complete_image_generation(user_id, db)
             raise HTTPException(status_code=500, detail=f"이미지 저장 실패: {str(e)}")
         
-        # 5. 이미지 저장 레코드 생성
+        # 5. 이미지 메타데이터 DB 저장
         try:
+            # 기존 IMAGE_STORAGE 테이블에 저장 (호환성 유지)
             image_storage_service = get_image_storage_service()
-            storage_id = await image_storage_service.save_generated_image_url(
+            await image_storage_service.save_generated_image_url(
                 s3_url=s3_url,
                 group_id=group_id,
                 db=db
             )
             
-            if not storage_id:
-                logger.warning(f"Failed to save image storage record for {s3_url}")
+            # 새로운 generated_images 테이블에 저장
+            generated_image_service = get_generated_image_service()
+            await generated_image_service.save_generated_image(
+                db=db,
+                storage_id=storage_id,
+                team_id=group_id,
+                user_id=user_id,
+                prompt=prompt,
+                negative_prompt=None,  # 추후 구현
+                width=512,  # 워크플로우에서 설정된 값
+                height=512,  # 워크플로우에서 설정된 값
+                workflow_name="t2i_generate_ComfyUI_Flux_Nunchaku_flux.1-dev",
+                model_name="flux.1-dev",
+                metadata={
+                    "workflow_id": workflow_name,
+                    "comfyui_prompt_id": flux_result.get("prompt_id") if isinstance(flux_result, dict) else None
+                },
+                file_size=len(image_data)
+            )
             
         except Exception as e:
-            logger.warning(f"Failed to save image storage record: {e}")
-            # 저장 레코드 실패해도 이미지 생성은 성공으로 처리
-            storage_id = None
+            logger.warning(f"Failed to save image metadata: {e}")
+            # 메타데이터 저장 실패해도 이미지 생성은 성공으로 처리
         
         # 6. 세션 완료 처리 (10분 연장)
         await user_session_service.complete_image_generation(user_id, db)
@@ -477,48 +499,9 @@ async def image_generation_health_check():
         )
 
 
-# WebSocket 연결 관리
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: Dict[str, WebSocket] = {}
-    
-    async def connect(self, websocket: WebSocket, user_id: str):
-        await websocket.accept()
-        self.active_connections[user_id] = websocket
-        logger.info(f"WebSocket connected for user: {user_id}")
-    
-    def disconnect(self, user_id: str):
-        if user_id in self.active_connections:
-            del self.active_connections[user_id]
-            logger.info(f"WebSocket disconnected for user: {user_id}")
-    
-    async def send_message(self, user_id: str, message: dict):
-        if user_id in self.active_connections:
-            try:
-                # datetime 객체를 문자열로 변환
-                import json
-                from datetime import datetime
-                
-                def datetime_handler(obj):
-                    if isinstance(obj, datetime):
-                        return obj.isoformat()
-                    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
-                
-                # JSON 직렬화 후 다시 파싱하여 datetime 문제 해결
-                json_str = json.dumps(message, default=datetime_handler)
-                await self.active_connections[user_id].send_text(json_str)
-            except Exception as e:
-                logger.error(f"Failed to send message to user {user_id}: {e}")
-    
-    async def broadcast(self, message: dict):
-        for user_id, connection in self.active_connections.items():
-            try:
-                await connection.send_json(message)
-            except Exception as e:
-                logger.error(f"Failed to broadcast to user {user_id}: {e}")
-
-
-manager = ConnectionManager()
+# WebSocket 연결 관리 - 글로벌 싱글톤 사용
+from app.websocket import get_ws_manager
+manager = get_ws_manager()
 
 
 @router.websocket("/ws")

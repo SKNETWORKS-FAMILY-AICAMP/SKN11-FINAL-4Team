@@ -99,7 +99,7 @@ export default function GalleryPage() {
         throw new Error('이미지 목록 조회 실패')
       }
     } catch (error) {
-      console.error('Failed to fetch images:', error)
+      // console.error('Failed to fetch images:', error)
       toast({
         title: "오류 발생",
         description: '이미지 목록을 불러오는데 실패했습니다.',
@@ -166,7 +166,7 @@ export default function GalleryPage() {
         })
       }
     } catch (error) {
-      console.error('Failed to delete image:', error)
+      // console.error('Failed to delete image:', error)
       toast({
         title: "오류 발생",
         description: '이미지 삭제 중 오류가 발생했습니다.',
@@ -190,7 +190,7 @@ export default function GalleryPage() {
       window.URL.revokeObjectURL(url)
       document.body.removeChild(a)
     } catch (error) {
-      console.error('Failed to download image:', error)
+      // console.error('Failed to download image:', error)
       toast({
         title: "다운로드 실패",
         description: '이미지 다운로드에 실패했습니다.',

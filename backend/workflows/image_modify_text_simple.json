@@ -1,0 +1,432 @@
+{
+  "1": {
+    "inputs": {
+      "image": "ComfyUI_temp_nhfph_00005_.png"
+    },
+    "class_type": "DiptychCreate",
+    "_meta": {
+      "title": "DiptychCreate~"
+    }
+  },
+  "2": {
+    "inputs": {
+      "images": [
+        "1",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "이미지 미리보기"
+    }
+  },
+  "3": {
+    "inputs": {
+      "mask": [
+        "1",
+        1
+      ]
+    },
+    "class_type": "MaskPreview+",
+    "_meta": {
+      "title": "🔧 Mask Preview"
+    }
+  },
+  "8": {
+    "inputs": {
+      "clip_name1": "t5xxl_fp16.safetensors",
+      "clip_name2": "clip_l.safetensors",
+      "type": "flux",
+      "device": "default"
+    },
+    "class_type": "DualCLIPLoader",
+    "_meta": {
+      "title": "이중 CLIP 로드"
+    }
+  },
+  "9": {
+    "inputs": {
+      "editText": "Make her hair sky blue and her clothes checked",
+      "speak_and_recognation": {
+        "__value__": [
+          false,
+          true
+        ]
+      },
+      "clip": [
+        "8",
+        0
+      ]
+    },
+    "class_type": "InContextEditInstruction",
+    "_meta": {
+      "title": "InContextEditInstruction~"
+    }
+  },
+  "10": {
+    "inputs": {
+      "guidance": 50,
+      "conditioning": [
+        "16",
+        0
+      ]
+    },
+    "class_type": "FluxGuidance",
+    "_meta": {
+      "title": "FLUX 가이드"
+    }
+  },
+  "11": {
+    "inputs": {
+      "conditioning": [
+        "16",
+        0
+      ]
+    },
+    "class_type": "ConditioningZeroOut",
+    "_meta": {
+      "title": "조건 (0으로 출력)"
+    }
+  },
+  "13": {
+    "inputs": {
+      "vae_name": "FLUX\\ae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "VAE 로드"
+    }
+  },
+  "14": {
+    "inputs": {
+      "anything": [
+        "13",
+        0
+      ]
+    },
+    "class_type": "Anything Everywhere",
+    "_meta": {
+      "title": "Anything Everywhere"
+    }
+  },
+  "15": {
+    "inputs": {
+      "In_context": [
+        "10",
+        0
+      ],
+      "negative": [
+        "11",
+        0
+      ],
+      "diptych": [
+        "1",
+        0
+      ],
+      "maskDiptych": [
+        "1",
+        1
+      ]
+    },
+    "class_type": "ICEFConditioning",
+    "_meta": {
+      "title": "ICEFConditioning~"
+    }
+  },
+  "16": {
+    "inputs": {
+      "anything": [
+        "9",
+        0
+      ]
+    },
+    "class_type": "easy cleanGpuUsed",
+    "_meta": {
+      "title": "Clean VRAM Used"
+    }
+  },
+  "17": {
+    "inputs": {
+      "samples": [
+        "38",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE 디코드"
+    }
+  },
+  "18": {
+    "inputs": {
+      "images": [
+        "21",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "이미지 미리보기"
+    }
+  },
+  "19": {
+    "inputs": {
+      "width": 512,
+      "height": 512,
+      "x": 512,
+      "y": 0,
+      "image": [
+        "21",
+        0
+      ]
+    },
+    "class_type": "ImageCrop",
+    "_meta": {
+      "title": "이미지 자르기"
+    }
+  },
+  "21": {
+    "inputs": {
+      "anything": [
+        "17",
+        0
+      ]
+    },
+    "class_type": "easy cleanGpuUsed",
+    "_meta": {
+      "title": "Clean VRAM Used"
+    }
+  },
+  "25": {
+    "inputs": {
+      "rgthree_comparer": {
+        "images": [
+          {
+            "name": "A",
+            "selected": true,
+            "url": "/api/view?filename=rgthree.compare._temp_cerbo_00001_.png&type=temp&subfolder=&rand=0.9232496268486581"
+          },
+          {
+            "name": "B",
+            "selected": true,
+            "url": "/api/view?filename=rgthree.compare._temp_cerbo_00002_.png&type=temp&subfolder=&rand=0.23379760726467325"
+          }
+        ]
+      },
+      "image_a": [
+        "1",
+        2
+      ],
+      "image_b": [
+        "32",
+        0
+      ]
+    },
+    "class_type": "Image Comparer (rgthree)",
+    "_meta": {
+      "title": "Image Comparer (rgthree)"
+    }
+  },
+  "26": {
+    "inputs": {
+      "upscale_by": 2,
+      "seed": 328399408193865,
+      "steps": 20,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 0.15000000000000002,
+      "mode_type": "Linear",
+      "tile_width": 512,
+      "tile_height": 512,
+      "mask_blur": 8,
+      "tile_padding": 32,
+      "seam_fix_mode": "None",
+      "seam_fix_denoise": 1,
+      "seam_fix_width": 64,
+      "seam_fix_mask_blur": 8,
+      "seam_fix_padding": 16,
+      "force_uniform_tiles": true,
+      "tiled_decode": false,
+      "image": [
+        "19",
+        0
+      ],
+      "model": [
+        "36",
+        0
+      ],
+      "positive": [
+        "37",
+        0
+      ],
+      "negative": [
+        "30",
+        0
+      ],
+      "upscale_model": [
+        "31",
+        0
+      ]
+    },
+    "class_type": "UltimateSDUpscale",
+    "_meta": {
+      "title": "Ultimate SD Upscale"
+    }
+  },
+  "29": {
+    "inputs": {
+      "text": "",
+      "speak_and_recognation": {
+        "__value__": [
+          false,
+          true
+        ]
+      },
+      "clip": [
+        "8",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP 텍스트 인코딩 (프롬프트)"
+    }
+  },
+  "30": {
+    "inputs": {
+      "conditioning": [
+        "29",
+        0
+      ]
+    },
+    "class_type": "ConditioningZeroOut",
+    "_meta": {
+      "title": "조건 (0으로 출력)"
+    }
+  },
+  "31": {
+    "inputs": {
+      "model_name": "8x_NMKD-Superscale_150000_G.pth"
+    },
+    "class_type": "UpscaleModelLoader",
+    "_meta": {
+      "title": "업스케일 모델 로드"
+    }
+  },
+  "32": {
+    "inputs": {
+      "anything": [
+        "26",
+        0
+      ]
+    },
+    "class_type": "easy cleanGpuUsed",
+    "_meta": {
+      "title": "Clean VRAM Used"
+    }
+  },
+  "34": {
+    "inputs": {
+      "model_path": "FLUX/svdq-int4_r32-flux.1-fill-dev.safetensors",
+      "cache_threshold": 0,
+      "attention": "nunchaku-fp16",
+      "cpu_offload": "auto",
+      "device_id": 0,
+      "data_type": "bfloat16",
+      "i2f_mode": "enabled"
+    },
+    "class_type": "NunchakuFluxDiTLoader",
+    "_meta": {
+      "title": "Nunchaku FLUX DiT Loader"
+    }
+  },
+  "35": {
+    "inputs": {
+      "lora_name":"FLUX/icedit2_svd__extracted_lora_rank_32-bf16-new.safetensors",
+      "lora_strength": 1,
+      "model": [
+        "34",
+        0
+      ]
+    },
+    "class_type": "NunchakuFluxLoraLoader",
+    "_meta": {
+      "title": "Nunchaku FLUX.1 LoRA Loader"
+    }
+  },
+  "36": {
+    "inputs": {
+      "model_path": "FLUX/svdq-int4_r32-flux.1-dev.safetensors",
+      "cache_threshold": 0.003000000000000001,
+      "attention": "nunchaku-fp16",
+      "cpu_offload": "auto",
+      "device_id": 0,
+      "data_type": "bfloat16",
+      "i2f_mode": "enabled"
+    },
+    "class_type": "NunchakuFluxDiTLoader",
+    "_meta": {
+      "title": "Nunchaku FLUX DiT Loader"
+    }
+  },
+  "37": {
+    "inputs": {
+      "guidance": 3.5,
+      "conditioning": [
+        "29",
+        0
+      ]
+    },
+    "class_type": "FluxGuidance",
+    "_meta": {
+      "title": "FLUX 가이드"
+    }
+  },
+  "38": {
+    "inputs": {
+      "add_noise": "enable",
+      "noise_seed": 1008143764565586,
+      "steps": 30,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "start_at_step": 0,
+      "end_at_step": 10000,
+      "return_with_leftover_noise": "disable",
+      "model": [
+        "35",
+        0
+      ],
+      "positive": [
+        "15",
+        0
+      ],
+      "negative": [
+        "15",
+        1
+      ],
+      "latent_image": [
+        "15",
+        2
+      ]
+    },
+    "class_type": "KSamplerAdvanced",
+    "_meta": {
+      "title": "고급 KSampler"
+    }
+  },
+  "39": {
+    "inputs": {
+      "filename_prefix": "modified_image",
+      "images": [
+        "19",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "이미지 저장"
+    }
+  }
+}

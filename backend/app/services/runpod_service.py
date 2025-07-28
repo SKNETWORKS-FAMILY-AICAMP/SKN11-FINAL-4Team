@@ -232,25 +232,17 @@ class RunPodService:
                 logger.info(f"  Proxy URL: {endpoint_url}")
                 logger.info(f"  볼륨: {settings.RUNPOD_VOLUME_ID} → /workspace")
                 
-                # Pod 생성 후 자동으로 시작
-                logger.info(f"🚀 Pod {pod_id} 자동 시작 중...")
+                # Pod는 이미 RUNNING 상태이므로 별도 시작 불필요
+                logger.info(f"✅ Pod {pod_id} 생성 완료 (RUNNING 상태)")
                 logger.info(f"   Template ID: {settings.RUNPOD_TEMPLATE_ID}")
                 logger.info(f"   Volume ID: {settings.RUNPOD_VOLUME_ID}")
                 logger.info(f"   Container Port: 8188 (ComfyUI)")
                 logger.info(f"   Proxy URL: {endpoint_url}")
-                
-                start_success = await self._start_pod(pod_id)
-                if start_success:
-                    logger.info(f"✅ Pod {pod_id} 자동 시작 성공")
-                    logger.info(f"   ComfyUI 접근: {endpoint_url}")
-                    logger.info(f"   예상 준비 시간: 60-90초")
-                else:
-                    logger.warning(f"⚠️ Pod {pod_id} 자동 시작 실패")
-                    logger.warning(f"   수동 시작이 필요할 수 있습니다")
+                logger.info(f"   예상 준비 시간: 60-90초")
                 
                 return RunPodPodResponse(
                     pod_id=pod_id,
-                    status="STARTING" if start_success else pod_data["desiredStatus"],
+                    status=pod_data["desiredStatus"],  # 이미 RUNNING 상태
                     runtime=pod_data.get("runtime", {}),
                     endpoint_url=endpoint_url,
                     cost_per_hour=successful_bid  # 실제 입찰가 반영

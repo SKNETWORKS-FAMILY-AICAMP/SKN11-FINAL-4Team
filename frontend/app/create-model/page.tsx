@@ -200,7 +200,7 @@ export default function CreateModelPage() {
         const urls = fileArray.map(file => URL.createObjectURL(file))
         setImagePreviewUrls(urls)
         // 이미지 파일들을 상태에 저장 (인플루언서 생성 시 함께 업로드)
-        console.log('이미지 파일 선택됨:', fileArray.length, '개');
+        // console.log('이미지 파일 선택됨:', fileArray.length, '개');
       }
     }
   }
@@ -447,7 +447,7 @@ export default function CreateModelPage() {
       router.push("/dashboard")
 
     } catch (error) {
-      console.error('인플루언서 생성 실패:', error)
+      // console.error('인플루언서 생성 실패:', error)
       setIsLoading(false)
 
       // 에러 알림 표시
@@ -510,7 +510,7 @@ export default function CreateModelPage() {
       setShowToneExamples(true)
 
     } catch (error) {
-      console.error('말투 생성 실패:', error)
+      // console.error('말투 생성 실패:', error)
       toast({
         title: "생성 실패",
         description: '말투 생성에 실패했습니다. 다시 시도해주세요.',

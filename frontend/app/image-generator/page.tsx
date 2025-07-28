@@ -241,7 +241,7 @@ export default function ImageGeneratorPage() {
 
     // 이미 연결되어 있으면 재연결하지 않음
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      console.log('WebSocket already connected, skipping reconnection')
+      // WebSocket already connected, skipping reconnection
       return
     }
 
@@ -259,11 +259,11 @@ export default function ImageGeneratorPage() {
         const wsHost = backendUrl.replace(/^https?:\/\//, '')
         const wsUrl = `${wsProtocol}//${wsHost}/api/v1/image-generation/ws?token=${accessToken}`
         
-        console.log('Connecting to WebSocket:', wsUrl)
+        // Connecting to WebSocket
         const ws = new WebSocket(wsUrl)
         
         ws.onopen = () => {
-          console.log('WebSocket connected')
+          // WebSocket connected
           setWsConnected(true)
           
           // 초기 세션 상태 요청
@@ -304,7 +304,7 @@ export default function ImageGeneratorPage() {
                 
               case 'pod_ready':
                 if (message.data) {
-                  console.log('Pod ready:', message.data)
+                  // Pod ready
                   setSessionStatus(prev => ({
                     ...prev,
                     pod_status: 'ready',
@@ -320,7 +320,7 @@ export default function ImageGeneratorPage() {
                 
               case 'pod_failed':
                 if (message.data) {
-                  console.error('Pod failed:', message.data)
+                  // Pod failed
                   setSessionStatus(prev => ({
                     ...prev,
                     pod_status: 'failed'
@@ -336,7 +336,7 @@ export default function ImageGeneratorPage() {
                 
               case 'error':
                 if (message.data?.message) {
-                  console.error('WebSocket error:', message.data.message)
+                  // WebSocket error
                   toast({
                     title: "오류",
                     description: message.data.message,
@@ -351,17 +351,17 @@ export default function ImageGeneratorPage() {
                 break
             }
           } catch (error) {
-            console.error('WebSocket message parsing error:', error)
+            // WebSocket message parsing error
           }
         }
         
         ws.onerror = (error) => {
-          console.error('WebSocket error:', error)
+          // WebSocket error
           setWsConnected(false)
         }
         
         ws.onclose = () => {
-          console.log('WebSocket disconnected')
+          // WebSocket disconnected
           setWsConnected(false)
           wsRef.current = null
           
@@ -375,7 +375,7 @@ export default function ImageGeneratorPage() {
         
         wsRef.current = ws
       } catch (error) {
-        console.error('WebSocket connection error:', error)
+        // WebSocket connection error
         setWsConnected(false)
       }
     }
@@ -455,7 +455,7 @@ export default function ImageGeneratorPage() {
       
       // WebSocket 연결 확인
       if (!wsConnected || !wsRef.current) {
-        console.error('WebSocket 연결이 없습니다.')
+        // WebSocket 연결이 없습니다
         toast({
           title: "연결 오류",
           description: 'WebSocket 연결이 끊어졌습니다. 페이지를 새로고침해주세요.',
@@ -487,17 +487,17 @@ export default function ImageGeneratorPage() {
                 setSessionRetryCount(0)
                 setIsAutoRetrying(false)
                 
-                console.log('세션 생성 성공:', data.session_status)
+                // 세션 생성 성공
                 resolve(true)
               } else {
-                console.error(`세션 생성 실패 (시도 ${retryAttempt + 1}/${maxRetries + 1}):`, data.message)
+                // 세션 생성 실패
                 
                 // 재시도 로직
                 if (retryAttempt < maxRetries) {
                   const nextAttempt = retryAttempt + 1
                   setSessionRetryCount(nextAttempt)
                   
-                  console.log(`${retryDelay/1000}초 후 세션 생성 재시도 (${nextAttempt}/${maxRetries})...`)
+                  // 세션 재시도 예정
                   
                   setTimeout(async () => {
                     await createUserSession(true, nextAttempt)
@@ -505,14 +505,14 @@ export default function ImageGeneratorPage() {
                   
                   resolve(false)
                 } else {
-                  console.error('세션 생성 최대 재시도 횟수 초과')
+                  // 세션 생성 최대 재시도 횟수 초과
                   setIsAutoRetrying(false)
                   resolve(false)
                 }
               }
             }
           } catch (error) {
-            console.error('Session created message parsing error:', error)
+            // Session created message parsing error
           }
         }
         
@@ -523,14 +523,14 @@ export default function ImageGeneratorPage() {
         wsRef.current?.send(JSON.stringify({ type: 'create_session' }))
       })
     } catch (error) {
-      console.error(`세션 생성 오류 (시도 ${retryAttempt + 1}/${maxRetries + 1}):`, error)
+      // 세션 생성 오류
       
       // 재시도 로직
       if (retryAttempt < maxRetries) {
         const nextAttempt = retryAttempt + 1
         setSessionRetryCount(nextAttempt)
         
-        console.log(`${retryDelay/1000}초 후 세션 생성 재시도 (${nextAttempt}/${maxRetries})...`)
+        // console.log(`${retryDelay/1000}초 후 세션 생성 재시도 (${nextAttempt}/${maxRetries})...`)
         
         setTimeout(async () => {
           await createUserSession(true, nextAttempt)
@@ -538,7 +538,7 @@ export default function ImageGeneratorPage() {
         
         return false
       } else {
-        console.error('세션 생성 최대 재시도 횟수 초과')
+        // console.error('세션 생성 최대 재시도 횟수 초과')
         setIsAutoRetrying(false)
         return false
       }
@@ -631,7 +631,7 @@ export default function ImageGeneratorPage() {
       setTotalImages(data.pagination.total_count)
       setCurrentPage(data.pagination.page)
     } catch (error) {
-      console.error('Failed to fetch gallery images:', error)
+      // Failed to fetch gallery images
       toast({
         title: "오류 발생",
         description: '이미지 목록을 불러오는데 실패했습니다.',
@@ -723,7 +723,7 @@ ${testData.message}
         })
         
         // 콘솔에도 상세 정보 출력
-        console.log('🤖 프롬프트 최적화 테스트 결과:', testData)
+        // 프롬프트 최적화 테스트 완료
       } else {
         toast({
           title: "프롬프트 테스트 실패",
@@ -733,7 +733,7 @@ ${testData.message}
         })
       }
     } catch (error) {
-      console.error('Prompt test failed:', error)
+      // Prompt test failed
       toast({
         title: "오류 발생",
         description: '프롬프트 테스트 중 오류가 발생했습니다.',
@@ -812,7 +812,7 @@ ${testData.message}
     const selectedSizeData = PRESET_SIZES.find(size => size.id === selectedSize)
 
     // 프론트엔드 로그: 요청 파라미터
-    console.log('[이미지 생성 요청] 파라미터:', {
+    // console.log('[이미지 생성 요청] 파라미터:', {
       prompt,
       selected_styles: getSelectedStylesForAPI(),
       width: selectedSizeData?.width || 1024,
@@ -834,7 +834,7 @@ ${testData.message}
         }
       }))
     } catch (error) {
-      console.error('Failed to send image generation request:', error)
+      // console.error('Failed to send image generation request:', error)
       setIsGenerating(false)
       setGenerationProgress(null)
       toast({
@@ -864,7 +864,7 @@ ${testData.message}
         fetchGalleryImages(currentPage)
       }
     } catch (error) {
-      console.error('Failed to delete image:', error)
+      // console.error('Failed to delete image:', error)
       toast({
         title: "삭제 실패",
         description: '이미지 삭제에 실패했습니다.',
@@ -887,7 +887,7 @@ ${testData.message}
       window.URL.revokeObjectURL(url)
       document.body.removeChild(a)
     } catch (error) {
-      console.error('Failed to download image:', error)
+      // console.error('Failed to download image:', error)
     }
   }
 
@@ -1201,7 +1201,7 @@ ${testData.message}
         })
       }
     } catch (error) {
-      console.error('Inpainting error:', error)
+      // console.error('Inpainting error:', error)
       toast({
         title: "오류 발생",
         description: '인페인팅 중 오류가 발생했습니다.',
@@ -1259,7 +1259,7 @@ ${testData.message}
         }
       }))
       
-      console.log('[이미지 재생성 요청] 파라미터:', {
+      // console.log('[이미지 재생성 요청] 파라미터:', {
         prompt: previousPrompt,
         selected_styles: getSelectedStylesForAPI(),
         width: selectedSizeData?.width || 1024,
@@ -1267,7 +1267,7 @@ ${testData.message}
         previousImage: previousImage
       })
     } catch (error) {
-      console.error('Failed to send regeneration request:', error)
+      // console.error('Failed to send regeneration request:', error)
       setIsGenerating(false)
       setGenerationProgress(null)
       setPreviewImage(previousImage) // 실패 시 이전 이미지 복원
@@ -1616,7 +1616,7 @@ ${testData.message}
     // 분위기 매핑 (기본값으로 밝은 사용)
     selectedStyles['분위기'] = '밝은'  // 디폴트
     
-    console.log('🎨 선택된 스타일 정보:', selectedStyles)
+    // console.log('🎨 선택된 스타일 정보:', selectedStyles)
     return selectedStyles
   }
 
@@ -2809,7 +2809,7 @@ ${testData.message}
                                   throw new Error(result.message || '이미지 수정에 실패했습니다')
                                 }
                               } catch (error) {
-                                console.error('이미지 수정 실패:', error)
+                                // console.error('이미지 수정 실패:', error)
                                 toast({
                                   title: "수정 실패",
                                   description: error instanceof Error ? error.message : '이미지 수정에 실패했습니다.',

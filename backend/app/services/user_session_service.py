@@ -696,31 +696,11 @@ class UserSessionService:
             pod_response = await self.runpod_service.create_pod(request_id=user_id)
             
             if pod_response and pod_response.pod_id:
-                logger.info(f"Background task: RunPod created for user {user_id} with pod_id {pod_response.pod_id}")
+                logger.info(f"✅ RunPod 생성 성공! user: {user_id}, pod_id: {pod_response.pod_id}")
+                logger.info(f"   🌐 Endpoint URL: {pod_response.endpoint_url}")
+                logger.info(f"   📊 Status: {pod_response.status}")
                 
-                # Pod 초기 건강성 체크 (5초 후)
-                await asyncio.sleep(5)
-                health_check = await self.runpod_service.check_pod_health(pod_response.pod_id)
-                logger.info(f"   📊 새 Pod 초기 건강성: {health_check}")
-                
-                # 리소스 부족 감지 시 즉시 재시작
-                if health_check.get("needs_restart") or not health_check.get("healthy", False):
-                    logger.warning(f"   ⚠️ 새 Pod {pod_response.pod_id} 리소스 부족 감지 - 재시작 시도...")
-                    
-                    restart_result = await self.runpod_service.force_restart_pod(
-                        pod_response.pod_id, 
-                        user_id
-                    )
-                    
-                    if restart_result.get("success"):
-                        logger.info(f"   ✅ Pod 재시작 성공: {restart_result['new_pod_id']}")
-                        pod_response.pod_id = restart_result["new_pod_id"]
-                        pod_response.status = restart_result["status"]
-                        pod_response.endpoint_url = restart_result["endpoint_url"]
-                    else:
-                        logger.error(f"   ❌ Pod 재시작 실패: {restart_result.get('error')}")
-                        # 실패해도 원래 Pod으로 계속 진행
-                
+                # 바로 DB 업데이트 진행 (건강성 체크 및 재시작 로직 제거)
                 # 비동기 데이터베이스 세션 사용
                 result = await db.execute(select(User).where(User.user_id == user_id))
                 user = result.scalar_one_or_none()
@@ -812,6 +792,23 @@ class UserSessionService:
                     user.pod_status = "ready"
                     await db.commit()
                     logger.info(f"✅ Pod {pod_id} is ready for user {user_id}")
+                    
+                    # WebSocket으로 준비 완료 메시지 전송
+                    try:
+                        from app.websocket import get_ws_manager
+                        ws_manager = get_ws_manager()
+                        await ws_manager.send_message(user_id, {
+                            "type": "pod_ready",
+                            "data": {
+                                "pod_id": pod_id,
+                                "pod_status": "ready",
+                                "endpoint_url": f"https://{pod_id}-8188.proxy.runpod.net",
+                                "message": "Pod가 준비되었습니다. 이미지 생성이 가능합니다."
+                            }
+                        })
+                        logger.info(f"📨 WebSocket으로 pod_ready 메시지 전송 완료: user {user_id}")
+                    except Exception as ws_error:
+                        logger.error(f"WebSocket 메시지 전송 실패: {ws_error}")
                 else:
                     logger.warning(f"User {user_id} not found or pod_id mismatch during ready update")
             else:
@@ -827,6 +824,22 @@ class UserSessionService:
                     await db.commit()
                     logger.error(f"❌ Pod {pod_id} failed to be ready for user {user_id}")
                     logger.info(f"🔄 Pod ID는 유지하여 나중에 재확인 가능하도록 설정")
+                    
+                    # WebSocket으로 실패 메시지 전송
+                    try:
+                        from app.websocket import get_ws_manager
+                        ws_manager = get_ws_manager()
+                        await ws_manager.send_message(user_id, {
+                            "type": "pod_failed",
+                            "data": {
+                                "pod_id": pod_id,
+                                "pod_status": "failed",
+                                "message": "Pod 준비에 실패했습니다. 다시 시도해주세요."
+                            }
+                        })
+                        logger.info(f"📨 WebSocket으로 pod_failed 메시지 전송 완료: user {user_id}")
+                    except Exception as ws_error:
+                        logger.error(f"WebSocket 메시지 전송 실패: {ws_error}")
                     
         except Exception as e:
             logger.error(f"Error waiting for pod ready for user {user_id}: {e}")

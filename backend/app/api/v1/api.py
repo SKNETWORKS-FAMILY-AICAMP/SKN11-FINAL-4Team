@@ -23,6 +23,8 @@ from app.api.v1.endpoints import (
     image_generation,  # 새로운 통합 이미진 생성 API
     unified_images,
     prompt_test,  # 프롬프트 최적화 테스트 API
+    gallery,  # 갤러리 API
+    image_modification,  # 이미지 수정 API
 )
 
 # 기존 복잡한 API들 임시 비활성화 (새로운 간소화된 API 사용)
@@ -148,3 +150,9 @@ api_router.include_router(unified_images.router, prefix="/api/images", tags=["Un
 
 # TTS API
 api_router.include_router(tts.router, prefix="/tts", tags=["TTS"])
+
+# 갤러리 API
+api_router.include_router(gallery.router, prefix="/gallery", tags=["Gallery"])
+
+# 이미지 수정 API
+api_router.include_router(image_modification.router, prefix="/image-modification", tags=["Image Modification"])
