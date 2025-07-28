@@ -38,16 +38,12 @@ def initialize_embedding_model(model_name: str = "BAAI/bge-m3", device: str = No
         logger.info("✅ 임베딩 모델이 이미 초기화되어 있습니다.")
         return
     
-    # 디바이스 설정 - RAG는 GPU 1 사용 (TTS와 같은 방식)
+    # 디바이스 설정 - RAG는 GPU 1 직접 사용
     if device is None:
         if torch.cuda.is_available():
-            # RAG 전용 GPU 1 사용 (멀티프로세싱 격리 방식)
-            rag_gpu_id = int(os.getenv('RAG_GPU_ID', '1'))
-            os.environ['CUDA_VISIBLE_DEVICES'] = str(rag_gpu_id)
-            
-            # 격리된 환경에서는 논리적 GPU 0 사용
-            device = "cuda:0"  # 물리적 GPU 1
-            logger.info(f"🔧 RAG 임베딩 모델 GPU {rag_gpu_id} 사용 (격리 모드)")
+            # RAG 전용 GPU 1 직접 사용
+            device = "cuda:1"  # 직접 GPU 1 지정
+            logger.info("🔧 RAG 임베딩 모델 GPU 1 직접 사용")
         else:
             device = "cpu"
     
@@ -69,8 +65,8 @@ async def generate_embeddings(request: EmbeddingRequest):
     try:
         # 모델이 초기화되지 않았으면 초기화
         if embedding_model is None:
-            # 요청된 디바이스가 없으면 GPU 1 사용 (격리 모드)
-            device = request.device if request.device else "cuda:0"  # 격리 모드에서 논리적 GPU 0
+            # 요청된 디바이스가 없으면 GPU 1 직접 사용
+            device = request.device if request.device else "cuda:1"
             initialize_embedding_model(request.model_name, device)
         
         # 디바이스 변경이 필요한 경우
