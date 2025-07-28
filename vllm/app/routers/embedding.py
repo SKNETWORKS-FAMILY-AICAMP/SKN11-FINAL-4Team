@@ -38,25 +38,25 @@ def initialize_embedding_model(model_name: str = "BAAI/bge-m3", device: str = No
         logger.info("✅ 임베딩 모델이 이미 초기화되어 있습니다.")
         return
     
-    # 디바이스 설정 - RAG 전용 GPU 1 사용
+    # 디바이스 설정 - GPU 1 무조건 사용
     if device is None:
-        if torch.cuda.is_available():
-            # RAG 전용 GPU ID (기본값: 1)
-            rag_gpu_id = int(os.getenv('RAG_GPU_ID', '1'))
-            device = f"cuda:{rag_gpu_id}"
-            logger.info(f"🔧 RAG 임베딩 모델 GPU {rag_gpu_id} 사용")
+        if torch.cuda.is_available() and torch.cuda.device_count() > 1:
+            # GPU 1 무조건 사용
+            device = "cuda:1"
+            logger.info("🔧 RAG 임베딩 모델 GPU 1 사용")
         else:
-            device = "cpu"
+            device = "cuda:0"  # GPU 1이 없으면 GPU 0 사용
+            logger.info("🔧 RAG 임베딩 모델 GPU 0 사용 (GPU 1 없음)")
     
     embedding_device = device
     logger.info(f"🔄 임베딩 모델 초기화 중... (모델: {model_name}, 디바이스: {device})")
     
     try:
         embedding_model = SentenceTransformer(model_name, device=device)
-        logger.info(f"✅ 임베딩 모델 초기화 완료: {model_name}")
+        logger.info(f"✅ 임베딩 모델 초기화 완료: {model_name} (디바이스: {device})")
     except Exception as e:
-        logger.error(f"❌ 임베딩 모델 초기화 실패: {e}")
-        raise HTTPException(status_code=500, detail=f"임베딩 모델 초기화 실패: {str(e)}")
+        logger.error(f"❌ 임베딩 모델 초기화 실패: {str(e)}")
+        raise Exception(f"임베딩 모델 초기화 실패: {str(e)}")
 
 @router.post("/embed", response_model=EmbeddingResponse)
 async def generate_embeddings(request: EmbeddingRequest):
@@ -165,12 +165,13 @@ async def batch_embedding(request: EmbeddingRequest):
             batch_texts = request.texts[i:i + batch_size]
             batch_embeddings = embedding_model.encode(
                 batch_texts,
+                batch_size=batch_size,
                 show_progress_bar=False,
                 convert_to_numpy=True
             )
             embeddings.extend(batch_embeddings.tolist())
             
-            logger.info(f"🔄 배치 처리 진행: {i//batch_size + 1}/{total_batches}")
+            logger.info(f"📊 배치 진행률: {min(i + batch_size, len(request.texts))}/{len(request.texts)}")
         
         logger.info(f"✅ 배치 임베딩 생성 완료: {len(embeddings)}개")
         
@@ -179,7 +180,7 @@ async def batch_embedding(request: EmbeddingRequest):
             dimension=embedding_model.get_sentence_embedding_dimension(),
             model_name=request.model_name,
             device=embedding_device,
-            batch_size=batch_size
+            batch_size=request.batch_size
         )
         
     except Exception as e:
