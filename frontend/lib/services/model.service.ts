@@ -17,6 +17,7 @@ export interface AIInfluencer {
   updated_at?: string
   style_preset?: StylePreset
   mbti?: ModelMBTI
+  system_prompt?: string
   // Instagram 연동 정보
   instagram_id?: string
   instagram_username?: string
@@ -82,11 +83,13 @@ export interface UpdateInfluencerRequest {
   style_preset_id?: string
   mbti_id?: number
   influencer_name?: string
+  influencer_description?: string
   image_url?: string
   influencer_data_url?: string
   learning_status?: number
   influencer_model_repo?: string
   chatbot_option?: boolean
+  system_prompt?: string
 }
 
 export interface MultiChatRequest {

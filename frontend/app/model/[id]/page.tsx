@@ -516,6 +516,7 @@ function ModelDetailContent() {
         name: data.influencer_name,
         description: data.influencer_description || "",
         image_url: processedImageUrl, // 그대로 사용
+        system_prompt: data.system_prompt || "",
         createdAt: data.created_at?.split("T")[0] || "",
         apiKey: sampleModel.apiKey, // API 키는 별도 조회
         trainingData: sampleModel.trainingData, // 훈련 데이터는 별도 조회
@@ -766,6 +767,7 @@ function ModelDetailContent() {
       const updateData: any = {
         influencer_name: model.name,
         influencer_description: model.description,
+        system_prompt: model.system_prompt,
       };
 
       if (imageUrl) {
