@@ -246,8 +246,8 @@ export default function GalleryPage() {
 
   // 초기 팀 설정
   useEffect(() => {
-    if (user?.teams?.length > 0 && !selectedTeam) {
-      setSelectedTeam(user.teams[0].toString())
+    if (user?.teams && user.teams.length > 0 && !selectedTeam) {
+      setSelectedTeam(user.teams[0].group_id.toString())
     }
   }, [user])
 
@@ -264,9 +264,9 @@ export default function GalleryPage() {
                 <SelectValue placeholder="팀 선택" />
               </SelectTrigger>
               <SelectContent>
-                {user.teams.map(teamId => (
-                  <SelectItem key={teamId} value={teamId.toString()}>
-                    팀 {teamId}
+                {user.teams.map(team => (
+                  <SelectItem key={team.group_id} value={team.group_id.toString()}>
+                    팀 {team.group_id}
                   </SelectItem>
                 ))}
               </SelectContent>

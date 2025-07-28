@@ -51,6 +51,14 @@ interface GeneratedImage {
   progress?: number
 }
 
+interface ImageSynthesisResult {
+  storage_id: string
+  prompt: string
+  width: number
+  height: number
+  s3_url: string
+}
+
 
 const PRESET_SIZES = [
   { id: 'square', name: '정사각형', width: 512, height: 512 },
@@ -2664,7 +2672,7 @@ ${testData.message}
                                 }
                                 
                                 // apiClient를 사용하여 백엔드에 요청
-                                const result = await apiClient.post('/api/v1/image-modification/synthesize', formData)
+                                const result = await apiClient.post('/api/v1/image-modification/synthesize', formData) as ImageSynthesisResult
                                 
                                 // 결과를 갤러리에 추가
                                 const newImage: GeneratedImage = {
