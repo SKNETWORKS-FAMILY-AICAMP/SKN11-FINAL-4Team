@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent } from "@/components/ui/card"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { tokenUtils } from "@/lib/auth"
 import { ModelService } from "@/lib/services/model.service"
 import MCPService, { MCPChatResponse } from '@/lib/services/mcp.service'
@@ -14,14 +14,15 @@ import { RAGService, RAGChatRequest } from '@/lib/services/rag.service'
 
 import {
   Send,
-  Bot,
-  User,
-  MessageSquare,
   Loader2,
-  ChevronDown,
+  AlertCircle,
+  CheckCircle,
+  XCircle,
   ChevronUp,
-  History,
-  Trash2,
+  ChevronDown,
+  MessageSquare,
+  User,
+  Bot,
 } from "lucide-react"
 
 interface Message {
@@ -32,15 +33,6 @@ interface Message {
   isStreaming?: boolean // 스트리밍 중인 메시지를 위한 속성
 }
 
-interface ChatHistory {
-  query: string
-  response: string
-  context: string
-  sources: any[]
-  model_info: any
-  timestamp: string
-}
-
 interface ChatModel {
   id: string
   name: string
@@ -49,6 +41,7 @@ interface ChatModel {
   chatbot_option: boolean
   influencer_model_repo: string // 백엔드에서 자동으로 설정됨
   group_id: string
+  image_url?: string // 인플루언서 이미지 URL
 }
 
 export default function ChatPage() {
@@ -61,36 +54,10 @@ export default function ChatPage() {
   const [isModelLoading, setIsModelLoading] = useState(true)
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('connecting')
   const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false)
-  const [chatHistory, setChatHistory] = useState<ChatHistory[]>([])
-  const [showHistory, setShowHistory] = useState(false)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const timeoutRef = useRef<NodeJS.Timeout | null>(null)
-
-  // 히스토리 관련 함수들
-  const getHistory = () => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({
-        type: "get_history"
-      }));
-    }
-  };
-
-  const clearHistory = () => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({
-        type: "clear_history"
-      }));
-    }
-  };
-
-  const toggleHistory = () => {
-    setShowHistory(!showHistory);
-    if (!showHistory) {
-      getHistory();
-    }
-  };
 
   // 모델 데이터 로드
   const loadModelData = async () => {
@@ -104,7 +71,8 @@ export default function ChatPage() {
         learning_status: data.learning_status,
         chatbot_option: data.chatbot_option,
         influencer_model_repo: data.influencer_model_repo || '',
-        group_id: String(data.group_id || '')
+        group_id: String(data.group_id || ''),
+        image_url: data.image_url || undefined, // 올바른 필드명 사용
       })
     } catch (error) {
       console.error("Error loading model data:", error)
@@ -203,12 +171,10 @@ export default function ChatPage() {
             timestamp: new Date(),
           }]);
         } else if (data.type === "history") {
-          // 히스토리 응답 처리
-          setChatHistory(data.data || []);
+          // 히스토리 응답 처리 - 백그라운드에서만 관리
           console.log("✅ 히스토리 로드 성공:", data.data);
         } else if (data.type === "history_cleared") {
-          // 히스토리 초기화 응답 처리
-          setChatHistory([]);
+          // 히스토리 초기화 응답 처리 - 백그라운드에서만 관리
           console.log("✅ 히스토리 초기화 성공");
         } else {
           // 기존 일반 응답 처리 (하위 호환성)
@@ -472,9 +438,20 @@ export default function ChatPage() {
               <div className="flex items-center justify-between min-w-0">
                 <div className="flex items-center space-x-3 min-w-0 flex-1">
                   <Avatar className="h-10 w-10 flex-shrink-0">
-                    <AvatarFallback className="bg-green-500 text-white">
-                      <Bot className="h-5 w-5" />
-                    </AvatarFallback>
+                    {model.image_url ? (
+                      <AvatarImage src={model.image_url} alt={model.name} />
+                    ) : (
+                      <AvatarFallback 
+                        className={`text-white font-semibold ${
+                          model.name.length % 4 === 0 ? 'bg-gradient-to-br from-purple-500 to-pink-500' :
+                          model.name.length % 4 === 1 ? 'bg-gradient-to-br from-blue-500 to-cyan-500' :
+                          model.name.length % 4 === 2 ? 'bg-gradient-to-br from-green-500 to-emerald-500' :
+                          'bg-gradient-to-br from-orange-500 to-red-500'
+                        }`}
+                      >
+                        {model.name.charAt(0).toUpperCase()}
+                      </AvatarFallback>
+                    )}
                   </Avatar>
                   <div className="min-w-0 flex-1">
                     <h3 className="font-semibold text-gray-900 truncate">{model.name}</h3>
@@ -502,35 +479,17 @@ export default function ChatPage() {
                   </div>
                 </div>
                 <div className="flex items-center space-x-2 flex-shrink-0 ml-4">
-                  {/* 히스토리 버튼들 */}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={toggleHistory}
-                    className="h-8 px-2"
-                  >
-                    <History className="h-4 w-4 mr-1" />
-                    히스토리
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={clearHistory}
-                    className="h-8 px-2 text-red-600 hover:text-red-700"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                  
                   {/* 연결 상태 표시 */}
-                  <div className="flex items-center space-x-1">
-                    <div className={`w-2 h-2 rounded-full flex-shrink-0 ${connectionStatus === 'connected' ? 'bg-green-500' :
+                  <div className="flex items-center space-x-2">
+                    <div className={`w-2 h-2 rounded-full ${
+                      connectionStatus === 'connected' ? 'bg-green-500' :
                       connectionStatus === 'connecting' ? 'bg-yellow-500' :
-                        connectionStatus === 'error' ? 'bg-red-500' : 'bg-gray-400'
-                      }`} />
-                    <span className="text-xs text-gray-600 whitespace-nowrap">
+                      connectionStatus === 'error' ? 'bg-red-500' : 'bg-gray-400'
+                    }`} />
+                    <span className="text-xs text-gray-500">
                       {connectionStatus === 'connected' ? '연결됨' :
-                        connectionStatus === 'connecting' ? '연결 중' :
-                          connectionStatus === 'error' ? '연결 오류' : '연결 끊김'}
+                       connectionStatus === 'connecting' ? '연결 중' :
+                       connectionStatus === 'error' ? '오류' : '연결 끊김'}
                     </span>
                   </div>
                 </div>
@@ -538,101 +497,44 @@ export default function ChatPage() {
             </div>
 
             {/* 메시지 영역 */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-4 min-h-0">
-              {messages.length === 0 ? (
-                <div className="text-center py-12">
-                  <MessageSquare className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-                  <p className="text-gray-500 text-lg">대화를 시작해보세요!</p>
-                  <p className="text-gray-400 mt-2">AI 인플루언서와 자유롭게 대화할 수 있습니다.</p>
-                </div>
-              ) : (
-                messages.map((message) => (
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {messages.map((message) => (
+                <div
+                  key={message.id}
+                  className={`flex ${
+                    message.sender === "user" ? "justify-end" : "justify-start"
+                  }`}
+                >
                   <div
-                    key={message.id}
-                    className={`flex ${message.sender === "user" ? "justify-end" : "justify-start"}`}
-                  >
-                    <div className={`flex items-start space-x-3 max-w-[70%] ${message.sender === "user" ? "flex-row-reverse space-x-reverse" : ""}`}>
-                      <Avatar className="h-8 w-8">
-                        <AvatarFallback className={message.sender === "user" ? "bg-blue-500 text-white" : "bg-green-500 text-white"}>
-                          {message.sender === "user" ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
-                        </AvatarFallback>
-                      </Avatar>
-
-                      <div className={`rounded-lg px-4 py-2 ${message.sender === "user"
+                    className={`max-w-[70%] rounded-lg px-4 py-2 ${
+                      message.sender === "user"
                         ? "bg-blue-500 text-white"
                         : "bg-gray-100 text-gray-900"
-
+                    }`}
+                  >
+                    <div className="flex items-start space-x-2">
+                      <Avatar className="h-6 w-6 flex-shrink-0">
+                        <AvatarFallback className={`text-xs ${
+                          message.sender === "user" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700"
                         }`}>
+                          {message.sender === "user" ? <User className="h-3 w-3" /> : <Bot className="h-3 w-3" />}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="flex-1">
                         <p className="text-sm whitespace-pre-wrap">{message.content}</p>
-                        <p className={`text-xs mt-1 ${message.sender === "user" ? "text-blue-100" : "text-gray-500"
-                          }`}>
-                          {message.timestamp.toLocaleTimeString('ko-KR', {
-                            hour: '2-digit',
-                            minute: '2-digit'
-                          })}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                ))
-              )}
-
-              {isLoading && (
-                <div className="flex justify-start">
-                  <div className="flex items-start space-x-3 max-w-[70%]">
-                    <Avatar className="h-8 w-8">
-                      <AvatarFallback className="bg-green-500 text-white">
-                        <Bot className="h-4 w-4" />
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="bg-gray-100 rounded-lg px-4 py-2">
-                      <div className="flex items-center space-x-2">
-                        <Loader2 className="h-4 w-4 animate-spin text-gray-500" />
-                        <span className="text-sm text-gray-500">답변을 생성하고 있습니다...</span>
+                        {message.isStreaming && (
+                          <div className="flex items-center mt-1">
+                            <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                            <span className="text-xs text-gray-500">생성 중...</span>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
                 </div>
-              )}
-
+              ))}
               <div ref={messagesEndRef} />
             </div>
-
-            {/* 히스토리 영역 */}
-            {showHistory && (
-              <div className="border-t border-gray-200 bg-gray-50 p-3 max-h-48 overflow-y-auto">
-                <div className="flex items-center justify-between mb-2">
-                  <h4 className="text-sm font-medium text-gray-900">채팅 히스토리</h4>
-                  <span className="text-xs text-gray-500">{chatHistory.length}개</span>
-                </div>
-                {chatHistory.length === 0 ? (
-                  <p className="text-sm text-gray-500 text-center py-3">히스토리가 없습니다.</p>
-                ) : (
-                  <div className="space-y-1">
-                    {chatHistory.map((history, index) => (
-                      <div key={index} className="bg-white rounded p-2 border text-xs">
-                        <div className="flex items-start justify-between">
-                          <div className="flex-1 min-w-0">
-                            <p className="font-medium text-gray-900 truncate">
-                              {history.query}
-                            </p>
-                            <p className="text-gray-600 mt-1 line-clamp-1">
-                              {history.response}
-                            </p>
-                          </div>
-                          <span className="text-gray-400 ml-2 flex-shrink-0 text-xs">
-                            {new Date(history.timestamp).toLocaleTimeString('ko-KR', {
-                              hour: '2-digit',
-                              minute: '2-digit'
-                            })}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
 
             {/* 입력 영역 */}
             <div className="border-t p-4 flex-shrink-0">

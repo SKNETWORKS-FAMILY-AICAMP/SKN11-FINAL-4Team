@@ -107,9 +107,7 @@ export class VectorDBService {
 
     // 문서 업로드 및 벡터DB 저장
     static async uploadAndStoreDocuments(
-        files: File[],
-        chunkSize: number = 1000,
-        chunkOverlap: number = 200
+        files: File[]
     ): Promise<VectorStoreResponse> {
         // 백엔드의 upload_document_gpu 엔드포인트에 맞게 FormData로 전송
         const formData = new FormData()

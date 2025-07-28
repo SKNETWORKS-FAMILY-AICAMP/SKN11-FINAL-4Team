@@ -212,7 +212,6 @@ async def search_documents(request: SearchRequest):
         )
         
         search_time = time.time() - search_start
-        logger.info(f"✅ 검색 완료: {len(search_results)}개 결과 (검색 시간: {search_time:.3f}초)")
 
         # 3. 결과 변환
         search_results = []
@@ -234,7 +233,7 @@ async def search_documents(request: SearchRequest):
                     )
                 )
 
-        logger.info(f"✅ 검색 완료: {len(search_results)}개 결과")
+        logger.info(f"✅ 검색 완료: {len(search_results)}개 결과 (검색 시간: {search_time:.3f}초)")
 
         return search_results
 
@@ -371,7 +370,6 @@ async def embed_and_search(query: str, top_k: int = 5, score_threshold: float = 
         )
         
         search_time = time.time() - search_start
-        logger.info(f"✅ 검색 완료: {len(search_results)}개 결과 (검색 시간: {search_time:.3f}초)")
 
         # 3. 결과 변환
         search_results = []
@@ -393,7 +391,7 @@ async def embed_and_search(query: str, top_k: int = 5, score_threshold: float = 
                     )
                 )
 
-        logger.info(f"✅ 검색 완료: {len(search_results)}개 결과")
+        logger.info(f"✅ 검색 완료: {len(search_results)}개 결과 (검색 시간: {search_time:.3f}초)")
 
         return search_results
 
