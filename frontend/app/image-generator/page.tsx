@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef, useMemo, useCallback } from "react"
+import { RunPodService, type RunPodCredits } from "@/lib/services/runpod.service"
 import { Navigation } from "@/components/navigation"
 import { useAuth } from "@/hooks/use-auth"
 import { tokenUtils } from "@/lib/auth"
@@ -11,7 +12,6 @@ import { Textarea } from "@/components/ui/textarea"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Input } from "@/components/ui/input"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
-
 import { Separator } from "@/components/ui/separator"
 
 import { Progress } from "@/components/ui/progress"
@@ -216,6 +216,9 @@ export default function ImageGeneratorPage() {
   const { token, isAuthenticated } = useAuth()
   const [accessToken, setAccessToken] = useState<string | null>(null)
   
+  // RunPod 크레딧 상태
+  const [credits, setCredits] = useState<RunPodCredits | null>(null)
+  
   // 토큰 초기화
   useEffect(() => {
     const storedToken = tokenUtils.getToken()
@@ -223,6 +226,26 @@ export default function ImageGeneratorPage() {
       setAccessToken(storedToken)
     }
   }, [token])
+
+  // RunPod 크레딧 조회
+  useEffect(() => {
+    const fetchCredits = async () => {
+      try {
+        const creditsData = await RunPodService.getCredits()
+        setCredits(creditsData)
+      } catch (err) {
+        console.error('RunPod 크레딧 조회 실패:', err)
+      }
+    }
+
+    if (accessToken) {
+      fetchCredits()
+      
+      // 5분마다 자동 새로고침
+      const interval = setInterval(fetchCredits, 5 * 60 * 1000)
+      return () => clearInterval(interval)
+    }
+  }, [accessToken])
 
   // WebSocket 연결 초기화
   useEffect(() => {
@@ -1398,12 +1421,23 @@ ${testData.message}
                 <h1 className="text-3xl font-bold text-gray-900">이미지 생성 & 수정</h1>
                 <p className="text-gray-600 mt-2">ComfyUI를 사용하여 AI 이미지를 생성하고 수정하세요</p>
               </div>
-              {/* WebSocket 연결 상태 표시 */}
-              <div className="flex items-center space-x-2">
-                <div className={`w-3 h-3 rounded-full ${wsConnected ? 'bg-green-500' : 'bg-red-500'}`} />
-                <span className="text-sm text-gray-600">
-                  {wsConnected ? 'WebSocket 연결됨' : 'WebSocket 연결 끊김'}
-                </span>
+              {/* 상단 우측 정보 영역 */}
+              <div className="flex flex-col space-y-2">
+                {/* WebSocket 연결 상태 표시 */}
+                <div className="flex items-center space-x-2">
+                  <div className={`w-3 h-3 rounded-full ${wsConnected ? 'bg-green-500' : 'bg-red-500'}`} />
+                  <span className="text-sm text-gray-600">
+                    {wsConnected ? 'WebSocket 연결됨' : 'WebSocket 연결 끊김'}
+                  </span>
+                </div>
+                
+                {/* RunPod 크레딧 표시 */}
+                <div className="flex items-center space-x-2">
+                  <span className="text-sm font-medium text-gray-600">남은 크레딧 : </span>
+                  <span className="text-sm font-medium text-gray-600">
+                    {credits ? `${credits.remaining_credits.toFixed(2)} $` : '로딩 중...'}
+                  </span>
+                </div>
               </div>
             </div>
           </div>
