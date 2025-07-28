@@ -243,6 +243,7 @@ function ModelDetailContent() {
     is_connected: false,
   });
   const [isConnecting, setIsConnecting] = useState(false);
+  const [carouselIndices, setCarouselIndices] = useState<{ [key: string]: number }>({});
   const [analyticsData, setAnalyticsData] = useState({
     totalApiCalls: 0,
     todayApiCalls: 0,
@@ -314,13 +315,17 @@ function ModelDetailContent() {
         `/api/v1/boards?influencer_id=${params.id}`,
       );
 
-      // 게시글 데이터 변환 (백엔드에서 제공하는 인플루언서 정보 사용)
+      // 인플루언서 정보 조회
+      const influencerResponse = await apiClient.get(`/api/v1/influencers/${params.id}`);
+      const influencerData = influencerResponse as any;
+
+      // 게시글 데이터 변환
       const transformedPosts: ContentPost[] = boardData.map((board: any) => {
-        // 백엔드에서 이미 제공하는 인플루언서 정보 사용
+        // 인플루언서 ID를 통해 인플루언서 정보 사용
         const influencerName =
-          board.influencer_name || model?.name || "AI 인플루언서";
+          board.influencer_name || influencerData?.influencer_name || "AI 인플루언서";
         const influencerDescription =
-          board.influencer_description || model?.description || "";
+          board.influencer_description || influencerData?.influencer_description || "";
 
         const basePost = {
           id: board.board_id,
@@ -337,10 +342,11 @@ function ModelDetailContent() {
               .map((tag: string) => (tag.startsWith("#") ? tag : `#${tag}`))
             : [],
           media: {
-            type: "image" as const,
-            urls: [board.image_url || "/placeholder.svg?height=400&width=400"],
-            thumbnailUrl:
-              board.image_url || "/placeholder.svg?height=400&width=400",
+            type: board.image_url && board.image_url.split(",").length > 1 ? "carousel" as const : "image" as const,
+            urls: board.image_url
+              ? board.image_url.split(",").map((url: string) => url.trim()).filter(Boolean)
+              : ["/placeholder.svg?height=400&width=400"],
+            thumbnailUrl: board.image_url ? board.image_url.split(",")[0]?.trim() || "/placeholder.svg?height=400&width=400" : "/placeholder.svg?height=400&width=400",
           },
           // 인플루언서 정보: 조회한 값 사용
           influencerId: board.influencer_id,
@@ -508,6 +514,7 @@ function ModelDetailContent() {
         name: data.influencer_name,
         description: data.influencer_description || "",
         image_url: processedImageUrl, // 그대로 사용
+        system_prompt: data.system_prompt || "",
         createdAt: data.created_at?.split("T")[0] || "",
         apiKey: sampleModel.apiKey, // API 키는 별도 조회
         trainingData: sampleModel.trainingData, // 훈련 데이터는 별도 조회
@@ -760,6 +767,7 @@ function ModelDetailContent() {
       const updateData: any = {
         influencer_name: model.name,
         influencer_description: model.description,
+        system_prompt: model.system_prompt,
       };
 
       if (imageUrl) {
@@ -1797,15 +1805,8 @@ function ModelDetailContent() {
 
   // 플랫폼별 성과 계산 함수 추가
   const calculatePlatformStats = () => {
-    // 모든 플랫폼을 기본으로 설정
-    const allPlatforms = [
-      "Instagram",
-      "Facebook",
-      "Twitter",
-      "TikTok",
-      "YouTube",
-      "Blog",
-    ];
+    // Instagram만 남기고 나머지는 제거
+    const allPlatforms = ["Instagram"];
     const platformStats: Record<
       string,
       {
@@ -1818,7 +1819,7 @@ function ModelDetailContent() {
       }
     > = {};
 
-    // 모든 플랫폼을 0으로 초기화
+    // Instagram만 0으로 초기화
     allPlatforms.forEach((platform) => {
       platformStats[platform] = {
         name: platform,
@@ -1831,18 +1832,7 @@ function ModelDetailContent() {
     });
 
     posts.forEach((post) => {
-      if (post.status === "published" && post.platform) {
-        if (!platformStats[post.platform]) {
-          platformStats[post.platform] = {
-            name: post.platform,
-            posts: 0,
-            totalLikes: 0,
-            totalComments: 0,
-            avgEngagement: 0,
-            color: "",
-          };
-        }
-
+      if (post.status === "published" && post.platform === "Instagram") {
         const stats = platformStats[post.platform];
         stats.posts += 1;
         stats.totalLikes += post.engagement?.likes || 0;
@@ -1857,16 +1847,8 @@ function ModelDetailContent() {
       stats.avgEngagement =
         stats.posts > 0 ? Math.round(totalEngagement / stats.posts) : 0;
 
-      // 플랫폼별 색상 설정
-      const colors: Record<string, string> = {
-        Instagram: "bg-pink-500",
-        Facebook: "bg-blue-600",
-        Twitter: "bg-sky-500",
-        TikTok: "bg-purple-600",
-        YouTube: "bg-red-600",
-        Blog: "bg-orange-500",
-      };
-      stats.color = colors[platform] || "bg-gray-500";
+      // Instagram 색상 설정
+      stats.color = "bg-pink-500";
     });
 
     return platformStats;
@@ -2574,6 +2556,7 @@ function ModelDetailContent() {
                         </span>
                       )}
                     </div>
+
                     <div className="flex items-center space-x-2 text-sm text-gray-500 mt-1">
                       <Calendar className="h-4 w-4" />
                       {selectedPost.status === "scheduled" &&
@@ -2700,7 +2683,7 @@ function ModelDetailContent() {
                         <span className="text-sm font-medium text-gray-700">
                           {selectedPost.media.type === "image" && "이미지"}
                           {selectedPost.media.type === "video" && "비디오"}
-                          {selectedPost.media.type === "carousel" && "캐러셀"}
+                          {selectedPost.media.type === "carousel" && "이미지"}
                         </span>
                         {selectedPost.media.type === "carousel" && (
                           <Badge variant="outline" className="text-xs">
@@ -2708,13 +2691,79 @@ function ModelDetailContent() {
                           </Badge>
                         )}
                       </div>
-                      {selectedPost.media.thumbnailUrl && (
+                      {selectedPost.media.urls && selectedPost.media.urls.length > 0 && (
                         <div className="mt-2">
-                          <img
-                            src={selectedPost.media.thumbnailUrl}
-                            alt="미디어 썸네일"
-                            className="w-32 h-32 object-cover rounded-lg border"
-                          />
+                          {selectedPost.media.urls.length === 1 ? (
+                            // 단일 이미지
+                            <img
+                              src={selectedPost.media.urls[0]}
+                              alt="미디어"
+                              className="w-32 h-32 object-cover rounded-lg border"
+                            />
+                          ) : (
+                            // 다중 이미지 캐러셀
+                            <div className="relative">
+                              <div className="flex items-center justify-between absolute inset-0 z-10">
+                                <button
+                                  onClick={() => {
+                                    const urls = selectedPost.media?.urls ?? [];
+                                    if (urls.length === 0) return;
+                                    const currentIndex = carouselIndices[selectedPost.id || ''] || 0;
+                                    const newIndex = currentIndex > 0 ? currentIndex - 1 : urls.length - 1;
+                                    setCarouselIndices(prev => ({
+                                      ...prev,
+                                      [selectedPost.id || '']: newIndex
+                                    }));
+                                  }}
+                                  className="bg-black bg-opacity-50 text-white p-1 rounded-full hover:bg-opacity-70 transition-all"
+                                >
+                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                                  </svg>
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    const urls = selectedPost.media?.urls ?? [];
+                                    if (urls.length === 0) return;
+                                    const currentIndex = carouselIndices[selectedPost.id || ''] || 0;
+                                    const newIndex = currentIndex < urls.length - 1 ? currentIndex + 1 : 0;
+                                    setCarouselIndices(prev => ({
+                                      ...prev,
+                                      [selectedPost.id || '']: newIndex
+                                    }));
+                                  }}
+                                  className="bg-black bg-opacity-50 text-white p-1 rounded-full hover:bg-opacity-70 transition-all"
+                                >
+                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                  </svg>
+                                </button>
+                              </div>
+                              <img
+                                src={selectedPost.media.urls[carouselIndices[selectedPost.id || ''] || 0]}
+                                alt={`미디어 ${(carouselIndices[selectedPost.id || ''] || 0) + 1}`}
+                                className="w-32 h-32 object-cover rounded-lg border"
+                              />
+                              {/* 인디케이터 */}
+                              <div className="flex justify-center mt-2 space-x-1">
+                                {selectedPost.media.urls.map((_, index) => (
+                                  <button
+                                    key={index}
+                                    onClick={() => {
+                                      setCarouselIndices(prev => ({
+                                        ...prev,
+                                        [selectedPost.id || '']: index
+                                      }));
+                                    }}
+                                    className={`w-2 h-2 rounded-full transition-all ${index === (carouselIndices[selectedPost.id || ''] || 0)
+                                      ? 'bg-blue-500'
+                                      : 'bg-gray-300'
+                                      }`}
+                                  />
+                                ))}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>

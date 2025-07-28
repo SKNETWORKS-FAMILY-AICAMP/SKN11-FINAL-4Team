@@ -25,6 +25,7 @@ from app.api.v1.endpoints import (
     prompt_test,  # 프롬프트 최적화 테스트 API
     gallery,  # 갤러리 API
     image_modification,  # 이미지 수정 API
+    runpod,  # RunPod 비용 조회 API
 )
 
 # 기존 복잡한 API들 임시 비활성화 (새로운 간소화된 API 사용)
@@ -90,6 +91,9 @@ api_router.include_router(
 
 # 관리자 페이지 API
 api_router.include_router(admin.router, prefix="/admin", tags=["Administrator"])
+
+# RunPod 비용 조회 API
+api_router.include_router(runpod.router, prefix="/runpod", tags=["RunPod"])
 
 # ComfyUI 이미지 생성 API
 api_router.include_router(comfyui.router, prefix="/comfyui", tags=["ComfyUI"])

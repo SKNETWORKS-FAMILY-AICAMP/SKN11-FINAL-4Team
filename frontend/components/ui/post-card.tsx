@@ -133,8 +133,9 @@ export function PostCard({
 
     const allHashtags = hashtags.length > 0 ? hashtags : boardHashtags
 
-    // content variant일 때는 최대 3개만 표시
-    const displayHashtags = variant === "content" ? allHashtags.slice(0, 3) : allHashtags
+    // variant에 따라 표시 개수 제한
+    const maxDisplayCount = variant === "content" ? 3 : 5
+    const displayHashtags = allHashtags.slice(0, maxDisplayCount)
 
     return (
       <div className="flex flex-wrap gap-1 mb-3">
@@ -143,9 +144,9 @@ export function PostCard({
             {tag}
           </span>
         ))}
-        {variant === "content" && allHashtags.length > 3 && (
+        {allHashtags.length > maxDisplayCount && (
           <span className="text-xs text-gray-500 px-2 py-1">
-            +{allHashtags.length - 3}개 더
+            +{allHashtags.length - maxDisplayCount}개 더
           </span>
         )}
       </div>
@@ -258,9 +259,8 @@ export function PostCard({
 
   return (
     <Card
-      className={`hover:shadow-md transition-shadow cursor-pointer ${variant === "content" ? "" : "group"
-        }`}
-      onClick={() => onView?.(post)}
+      className={`hover:shadow-md transition-shadow ${variant === "content" ? "cursor-default" : "cursor-pointer group"}`}
+      onClick={variant === "content" ? undefined : () => onView?.(post)}
     >
       <CardContent className="p-6 flex flex-col h-full">
         {/* 상태와 플랫폼 배지를 오른쪽 상단에 고정 */}
@@ -270,7 +270,7 @@ export function PostCard({
               {post.title || post.board_topic}
             </h4>
 
-            {renderInfluencerInfo()}
+
 
             <p className="text-gray-600 text-sm line-clamp-3 mb-3">
               {(post.content || post.board_description || '').length > 150
@@ -312,7 +312,7 @@ export function PostCard({
               <div className="flex items-center space-x-4 text-sm text-gray-500">
                 <div className="flex items-center space-x-1">
                   <User className="h-4 w-4" />
-                  <span>{post.influencerName || post.author || 'AI 인플루언서'}</span>
+                  <span>{post.influencerName || post.author || ''}</span>
                 </div>
               </div>
               <div className="flex items-center space-x-1 text-sm text-gray-500">

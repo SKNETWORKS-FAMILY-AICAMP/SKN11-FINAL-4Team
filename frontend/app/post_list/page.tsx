@@ -27,7 +27,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import { Plus, Search, Edit, Eye, Calendar, User, Filter, X, Copy, ExternalLink, Heart, MessageCircle, MoreHorizontal, UploadCloud, Instagram, Users, BarChart3, Bookmark, Play } from "lucide-react"
+import { Plus, Search, Edit, Eye, Calendar, User, Filter, X, Copy, ExternalLink, Heart, MessageCircle, MoreHorizontal, UploadCloud, Instagram, Users, BarChart3, Bookmark, Play, ImageIcon } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import apiClient from "@/lib/api"
 import { useToast } from "@/hooks/use-toast"
@@ -63,7 +63,10 @@ function PostListContent() {
   const [editHashtags, setEditHashtags] = useState("");
   const [editScheduledAt, setEditScheduledAt] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  // 캐러셀 현재 이미지 인덱스 관리
+  const [carouselIndices, setCarouselIndices] = useState<{ [key: string]: number }>({});
 
+  const isFetchingRef = useRef(false)
 
 
   const searchParams = useSearchParams()
@@ -72,7 +75,10 @@ function PostListContent() {
 
   // API에서 게시글 목록 가져오기
   const fetchPosts = async () => {
+    if (isFetchingRef.current) return
+
     try {
+      isFetchingRef.current = true
       setLoading(true)
 
       const boardData = await apiClient.get<any[]>('/api/v1/boards')
@@ -115,9 +121,9 @@ function PostListContent() {
             influencerName: influencerName,
             influencerDescription: influencerDescription,
             media: {
-              type: "image" as const,
-              urls: [board.image_url || "/placeholder.svg?height=400&width=400"],
-              thumbnailUrl: board.image_url || "/placeholder.svg?height=400&width=400"
+              type: board.image_url && board.image_url.split(",").length > 1 ? "carousel" as const : "image" as const,
+              urls: board.image_url ? board.image_url.split(",").map((url: string) => url.trim()).filter(Boolean) : ["/placeholder.svg?height=400&width=400"],
+              thumbnailUrl: board.image_url ? board.image_url.split(",")[0]?.trim() || "/placeholder.svg?height=400&width=400" : "/placeholder.svg?height=400&width=400"
             }
           }
 
@@ -161,6 +167,7 @@ function PostListContent() {
       })
     } finally {
       setLoading(false)
+      isFetchingRef.current = false
     }
   }
 
@@ -484,22 +491,76 @@ function PostListContent() {
             </div>
 
             {/* Instagram 이미지/캐러셀 */}
-            {post.media && (
+            {(post.media || post.image_url) && (
               <div className="relative">
-                {post.media.type === "carousel" ? (
-                  <div className="flex overflow-x-auto snap-x snap-mandatory">
-                    {post.media.urls.map((url, index) => (
-                      <img key={index} src={url || "/placeholder.svg"} alt={`Slide ${index + 1}`} className="w-full h-80 object-cover flex-shrink-0 snap-start" />
-                    ))}
-                  </div>
-                ) : (
-                  <img src={post.media.urls[0] || "/placeholder.svg"} alt="Post image" className="w-full h-80 object-cover" />
-                )}
-                {post.media.type === "carousel" && (
-                  <div className="absolute top-2 right-2 bg-black bg-opacity-50 text-white text-xs px-2 py-1 rounded">
-                    1/{post.media.urls.length}
-                  </div>
-                )}
+                {(() => {
+                  // image_url에서 다중 이미지 처리
+                  const imageUrls = post.image_url ? post.image_url.split(",") : (post.media?.urls || [])
+                  const isCarousel = imageUrls.length > 1
+
+                  if (isCarousel) {
+                    return (
+                      <div className="relative overflow-hidden">
+                        {/* 현재 이미지 */}
+                        <img
+                          src={imageUrls[carouselIndices[post.id || post.board_id || ''] || 0]?.trim() || "/placeholder.svg"}
+                          alt={`Slide ${(carouselIndices[post.id || post.board_id || ''] || 0) + 1}`}
+                          className="w-full h-80 object-cover"
+                        />
+
+                        {/* 이전/다음 버튼 */}
+                        {imageUrls.length > 1 && (
+                          <>
+                            {/* 이전 버튼 */}
+                            {(carouselIndices[post.id || post.board_id || ''] || 0) > 0 && (
+                              <button
+                                onClick={() => setCarouselIndices(prev => ({
+                                  ...prev,
+                                  [post.id || post.board_id || '']: (prev[post.id || post.board_id || ''] || 0) - 1
+                                }))}
+                                className="absolute left-2 top-1/2 transform -translate-y-1/2 bg-black bg-opacity-50 text-white p-2 rounded-full hover:bg-opacity-70 transition-all"
+                              >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                                </svg>
+                              </button>
+                            )}
+
+                            {/* 다음 버튼 */}
+                            {(carouselIndices[post.id || post.board_id || ''] || 0) < imageUrls.length - 1 && (
+                              <button
+                                onClick={() => setCarouselIndices(prev => ({
+                                  ...prev,
+                                  [post.id || post.board_id || '']: (prev[post.id || post.board_id || ''] || 0) + 1
+                                }))}
+                                className="absolute right-2 top-1/2 transform -translate-y-1/2 bg-black bg-opacity-50 text-white p-2 rounded-full hover:bg-opacity-70 transition-all"
+                              >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                </svg>
+                              </button>
+                            )}
+                          </>
+                        )}
+
+                        {/* 인디케이터 */}
+                        {imageUrls.length > 1 && (
+                          <div className="absolute top-2 right-2 bg-black bg-opacity-50 text-white text-xs px-2 py-1 rounded">
+                            {(carouselIndices[post.id || post.board_id || ''] || 0) + 1}/{imageUrls.length}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  } else {
+                    return (
+                      <img
+                        src={imageUrls[0]?.trim() || "/placeholder.svg"}
+                        alt="Post image"
+                        className="w-full h-80 object-cover"
+                      />
+                    )
+                  }
+                })()}
               </div>
             )}
 
@@ -558,9 +619,9 @@ function PostListContent() {
             </div>
 
             {/* Facebook 이미지 */}
-            {post.media && (
+            {(post.media || post.image_url) && (
               <div className="mb-3">
-                <img src={post.media.urls[0] || "/placeholder.svg"} alt="Post image" className="w-full rounded-lg" />
+                <img src={post.image_url ? post.image_url.split(",")[0]?.trim() : (post.media?.urls[0] || "/placeholder.svg")} alt="Post image" className="w-full rounded-lg" />
               </div>
             )}
 
@@ -911,7 +972,7 @@ function PostListContent() {
                 onInstagramUpload={handleInstagramUpload}
                 showActions={false}
                 showInfluencerInfo={false}
-                variant="content"
+                variant="list"
               />
             ))}
           </div>
@@ -1116,7 +1177,7 @@ function PostListContent() {
                         <span className="text-sm font-medium text-gray-700">
                           {selectedPost.media.type === "image" && "이미지"}
                           {selectedPost.media.type === "video" && "비디오"}
-                          {selectedPost.media.type === "carousel" && "캐러셀"}
+                          {selectedPost.media.type === "carousel" && "이미지"}
                         </span>
                         {selectedPost.media.type === "carousel" && (
                           <Badge variant="outline" className="text-xs">
@@ -1124,13 +1185,22 @@ function PostListContent() {
                           </Badge>
                         )}
                       </div>
-                      {selectedPost.media.thumbnailUrl && (
-                        <div className="mt-2">
-                          <img
-                            src={selectedPost.media.thumbnailUrl}
-                            alt="미디어 썸네일"
-                            className="w-32 h-32 object-cover rounded-lg border"
-                          />
+                      {selectedPost.media?.urls && selectedPost.media.urls.length > 0 && (
+                        <div className="mt-2 flex gap-2 overflow-x-auto">
+                          {selectedPost.media.urls.map((url, index) => (
+                            <div key={index} className="relative flex-shrink-0">
+                              <img
+                                src={url}
+                                alt={`미디어 ${index + 1}`}
+                                className="w-32 h-32 object-cover rounded-lg border"
+                              />
+                              {selectedPost.media?.urls && selectedPost.media.urls.length > 1 && (
+                                <div className="absolute top-2 right-2 bg-black bg-opacity-50 text-white text-xs px-2 py-1 rounded">
+                                  {index + 1}/{selectedPost.media.urls.length}
+                                </div>
+                              )}
+                            </div>
+                          ))}
                         </div>
                       )}
                     </div>
@@ -1175,6 +1245,44 @@ function PostListContent() {
                     {renderPlatformSpecificPost(selectedPost)}
                   </div>
                 </div>
+
+                {/* 임시저장일 때만 재발행/삭제 버튼 */}
+                {selectedPost && selectedPost.status === 'draft' && (
+                  <div className="flex gap-2 mt-8 justify-end">
+                    <Button
+                      variant="default"
+                      onClick={() => handlePublishPost(selectedPost.id || selectedPost.board_id)}
+                    >
+                      재발행
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      onClick={async () => {
+                        if (window.confirm('정말로 이 임시저장 게시글을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.')) {
+                          try {
+                            await apiClient.delete(`/api/v1/boards/${selectedPost.id || selectedPost.board_id}`)
+                            setIsViewModalOpen(false)
+                            setPosts(posts => posts.filter(p => (p.id || p.board_id) !== (selectedPost.id || selectedPost.board_id)))
+                            toast({
+                              title: '삭제 완료',
+                              description: '임시저장 게시글이 삭제되었습니다.',
+                              variant: 'default',
+                            })
+                          } catch (error) {
+                            toast({
+                              title: '삭제 실패',
+                              description: '게시글 삭제 중 오류가 발생했습니다.',
+                              variant: 'destructive',
+                            })
+                          }
+                        }
+                      }}
+                    >
+                      삭제
+                    </Button>
+                  </div>
+                )}
+
               </div>
             )}
           </DialogContent>

@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef, useMemo, useCallback } from "react"
+import { RunPodService, type RunPodCredits } from "@/lib/services/runpod.service"
 import { Navigation } from "@/components/navigation"
 import { useAuth } from "@/hooks/use-auth"
 import { useWebSocket } from "@/hooks/use-websocket"
@@ -14,7 +15,6 @@ import { Textarea } from "@/components/ui/textarea"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Input } from "@/components/ui/input"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
-
 import { Separator } from "@/components/ui/separator"
 import { useToast } from "@/hooks/use-toast"
 import { Progress } from "@/components/ui/progress"
@@ -365,6 +365,156 @@ export default function ImageGeneratorPage() {
       wsSend({ type: 'session_status' })
     }
   })
+  const [accessToken, setAccessToken] = useState<string | null>(null)
+  
+  // RunPod 크레딧 상태
+  const [credits, setCredits] = useState<RunPodCredits | null>(null)
+  
+  // 토큰 초기화
+  useEffect(() => {
+    const storedToken = tokenUtils.getToken()
+    if (storedToken) {
+      setAccessToken(storedToken)
+    }
+  }, [token])
+
+  // RunPod 크레딧 조회
+  useEffect(() => {
+    const fetchCredits = async () => {
+      try {
+        const creditsData = await RunPodService.getCredits()
+        setCredits(creditsData)
+      } catch (err) {
+        console.error('RunPod 크레딧 조회 실패:', err)
+      }
+    }
+
+    if (accessToken) {
+      fetchCredits()
+      
+      // 5분마다 자동 새로고침
+      const interval = setInterval(fetchCredits, 5 * 60 * 1000)
+      return () => clearInterval(interval)
+    }
+  }, [accessToken])
+
+  // WebSocket 연결 초기화
+  useEffect(() => {
+    if (!accessToken) return
+
+    // 이미 연결되어 있으면 재연결하지 않음
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      console.log('WebSocket already connected, skipping reconnection')
+      return
+    }
+
+    const connectWebSocket = () => {
+      try {
+        // 기존 연결이 있으면 정리
+        if (wsRef.current) {
+          wsRef.current.close()
+          wsRef.current = null
+        }
+
+        // WebSocket URL 구성 - 백엔드가 HTTP면 ws, HTTPS면 wss 사용
+        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
+        const wsProtocol = backendUrl.startsWith('https') ? 'wss:' : 'ws:'
+        const wsHost = backendUrl.replace(/^https?:\/\//, '')
+        const wsUrl = `${wsProtocol}//${wsHost}/api/v1/image-generation/ws?token=${accessToken}`
+        
+        console.log('Connecting to WebSocket:', wsUrl)
+        const ws = new WebSocket(wsUrl)
+        
+        ws.onopen = () => {
+          console.log('WebSocket connected')
+          setWsConnected(true)
+          
+          // 초기 세션 상태 요청
+          ws.send(JSON.stringify({ type: 'session_status' }))
+        }
+        
+        ws.onmessage = (event) => {
+          try {
+            const message = JSON.parse(event.data) as WSMessage
+            
+            switch (message.type) {
+              case 'session_status':
+                if (message.data) {
+                  const status = message.data as SessionStatus
+                  setSessionStatus(status)
+                  
+                  // 세션 시간 업데이트
+                  if (status.session_remaining_seconds !== undefined) {
+                    setClientSessionTime(status.session_remaining_seconds)
+                  }
+                  if (status.processing_remaining_seconds !== undefined) {
+                    setClientProcessingTime(status.processing_remaining_seconds)
+                  }
+                }
+                break
+                
+              case 'generation_progress':
+                if (message.data) {
+                  setGenerationProgress(message.data)
+                }
+                break
+                
+              case 'generation_complete':
+                if (message.data) {
+                  handleGenerationComplete(message.data)
+                }
+                break
+                
+              case 'error':
+                if (message.data?.message) {
+                  console.error('WebSocket error:', message.data.message)
+                  alert(message.data.message)
+                }
+                break
+                
+              case 'session_created':
+                // 세션 생성 응답은 createUserSession 함수에서 처리
+                break
+            }
+          } catch (error) {
+            console.error('WebSocket message parsing error:', error)
+          }
+        }
+        
+        ws.onerror = (error) => {
+          console.error('WebSocket error:', error)
+          setWsConnected(false)
+        }
+        
+        ws.onclose = () => {
+          console.log('WebSocket disconnected')
+          setWsConnected(false)
+          wsRef.current = null
+          
+          // 5초 후 재연결 시도 (연결이 없을 때만)
+          setTimeout(() => {
+            if (accessToken && (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN)) {
+              connectWebSocket()
+            }
+          }, 5000)
+        }
+        
+        wsRef.current = ws
+      } catch (error) {
+        console.error('WebSocket connection error:', error)
+        setWsConnected(false)
+      }
+    }
+    
+    connectWebSocket()
+    
+    // Cleanup
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close()
+      }
+    }
+  }, [accessToken])
   
   // 생성 파라미터
   const [prompt, setPrompt] = useState("")
@@ -1511,12 +1661,23 @@ ${testData.message}
                 <h1 className="text-3xl font-bold text-gray-900">이미지 생성 & 수정</h1>
                 <p className="text-gray-600 mt-2">ComfyUI를 사용하여 AI 이미지를 생성하고 수정하세요</p>
               </div>
-              {/* WebSocket 연결 상태 표시 */}
-              <div className="flex items-center space-x-2">
-                <div className={`w-3 h-3 rounded-full ${wsConnected ? 'bg-green-500' : 'bg-red-500'}`} />
-                <span className="text-sm text-gray-600">
-                  {wsConnected ? 'WebSocket 연결됨' : 'WebSocket 연결 끊김'}
-                </span>
+              {/* 상단 우측 정보 영역 */}
+              <div className="flex flex-col space-y-2">
+                {/* WebSocket 연결 상태 표시 */}
+                <div className="flex items-center space-x-2">
+                  <div className={`w-3 h-3 rounded-full ${wsConnected ? 'bg-green-500' : 'bg-red-500'}`} />
+                  <span className="text-sm text-gray-600">
+                    {wsConnected ? 'WebSocket 연결됨' : 'WebSocket 연결 끊김'}
+                  </span>
+                </div>
+                
+                {/* RunPod 크레딧 표시 */}
+                <div className="flex items-center space-x-2">
+                  <span className="text-sm font-medium text-gray-600">남은 크레딧 : </span>
+                  <span className="text-sm font-medium text-gray-600">
+                    {credits ? `${credits.remaining_credits.toFixed(2)} $` : '로딩 중...'}
+                  </span>
+                </div>
               </div>
             </div>
           </div>
