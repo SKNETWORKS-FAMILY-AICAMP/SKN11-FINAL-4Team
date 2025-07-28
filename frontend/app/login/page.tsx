@@ -79,9 +79,6 @@ export default function LoginPage() {
               <p className="text-xs text-blue-600 bg-blue-50 px-3 py-2 rounded-lg">
                 💡 처음 로그인하면 자동으로 계정이 생성됩니다
               </p>
-              <p className="text-xs text-orange-600 bg-orange-50 px-3 py-2 rounded-lg">
-                🏢 비즈니스 계정 권한으로 콘텐츠 관리 및 인사이트를 확인하세요
-              </p>
             </div>
           </div>
 
@@ -118,20 +115,6 @@ export default function LoginPage() {
               </>
             )}
           </Button>
-
-          <div className="mt-6 text-center">
-            <p className="text-xs text-gray-500">
-              계속 진행하시면{" "}
-              <a href="#" className="text-blue-600 hover:underline">
-                서비스 이용약관
-              </a>{" "}
-              및{" "}
-              <a href="#" className="text-blue-600 hover:underline">
-                개인정보처리방침
-              </a>
-              에 동의하는 것으로 간주됩니다.
-            </p>
-          </div>
         </CardContent>
       </Card>
     </div>
