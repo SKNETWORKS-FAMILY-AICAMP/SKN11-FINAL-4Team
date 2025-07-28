@@ -6,6 +6,7 @@ import { Navigation } from "@/components/navigation"
 import { useAuth } from "@/hooks/use-auth"
 import { useWebSocket } from "@/hooks/use-websocket"
 import { tokenUtils } from "@/lib/auth"
+import apiClient from "@/lib/api"
 import { galleryService } from "@/lib/services/gallery.service"
 import { imageModificationService } from "@/lib/services/image-modification.service"
 import { Button } from "@/components/ui/button"
@@ -386,6 +387,19 @@ export default function ImageGeneratorPage() {
         setCredits(creditsData)
       } catch (err) {
         console.error('RunPod 크레딧 조회 실패:', err)
+        // API 오류 시 크레딧을 null로 설정하여 UI에서 적절히 처리
+        setCredits(null)
+        
+        // 사용자에게 친화적인 에러 메시지 표시
+        if (err instanceof Error) {
+          if (err.message.includes('503') || err.message.includes('Service Unavailable')) {
+            console.warn('RunPod API 연결 실패 - API 키 설정을 확인하세요')
+          } else if (err.message.includes('401') || err.message.includes('Unauthorized')) {
+            console.warn('RunPod API 인증 실패 - 로그인이 필요합니다')
+          } else {
+            console.warn('RunPod 크레딧 조회 중 일시적인 오류가 발생했습니다')
+          }
+        }
       }
     }
 
@@ -398,123 +412,8 @@ export default function ImageGeneratorPage() {
     }
   }, [accessToken])
 
-  // WebSocket 연결 초기화
-  useEffect(() => {
-    if (!accessToken) return
-
-    // 이미 연결되어 있으면 재연결하지 않음
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      console.log('WebSocket already connected, skipping reconnection')
-      return
-    }
-
-    const connectWebSocket = () => {
-      try {
-        // 기존 연결이 있으면 정리
-        if (wsRef.current) {
-          wsRef.current.close()
-          wsRef.current = null
-        }
-
-        // WebSocket URL 구성 - 백엔드가 HTTP면 ws, HTTPS면 wss 사용
-        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
-        const wsProtocol = backendUrl.startsWith('https') ? 'wss:' : 'ws:'
-        const wsHost = backendUrl.replace(/^https?:\/\//, '')
-        const wsUrl = `${wsProtocol}//${wsHost}/api/v1/image-generation/ws?token=${accessToken}`
-        
-        console.log('Connecting to WebSocket:', wsUrl)
-        const ws = new WebSocket(wsUrl)
-        
-        ws.onopen = () => {
-          console.log('WebSocket connected')
-          setWsConnected(true)
-          
-          // 초기 세션 상태 요청
-          ws.send(JSON.stringify({ type: 'session_status' }))
-        }
-        
-        ws.onmessage = (event) => {
-          try {
-            const message = JSON.parse(event.data) as WSMessage
-            
-            switch (message.type) {
-              case 'session_status':
-                if (message.data) {
-                  const status = message.data as SessionStatus
-                  setSessionStatus(status)
-                  
-                  // 세션 시간 업데이트
-                  if (status.session_remaining_seconds !== undefined) {
-                    setClientSessionTime(status.session_remaining_seconds)
-                  }
-                  if (status.processing_remaining_seconds !== undefined) {
-                    setClientProcessingTime(status.processing_remaining_seconds)
-                  }
-                }
-                break
-                
-              case 'generation_progress':
-                if (message.data) {
-                  setGenerationProgress(message.data)
-                }
-                break
-                
-              case 'generation_complete':
-                if (message.data) {
-                  handleGenerationComplete(message.data)
-                }
-                break
-                
-              case 'error':
-                if (message.data?.message) {
-                  console.error('WebSocket error:', message.data.message)
-                  alert(message.data.message)
-                }
-                break
-                
-              case 'session_created':
-                // 세션 생성 응답은 createUserSession 함수에서 처리
-                break
-            }
-          } catch (error) {
-            console.error('WebSocket message parsing error:', error)
-          }
-        }
-        
-        ws.onerror = (error) => {
-          console.error('WebSocket error:', error)
-          setWsConnected(false)
-        }
-        
-        ws.onclose = () => {
-          console.log('WebSocket disconnected')
-          setWsConnected(false)
-          wsRef.current = null
-          
-          // 5초 후 재연결 시도 (연결이 없을 때만)
-          setTimeout(() => {
-            if (accessToken && (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN)) {
-              connectWebSocket()
-            }
-          }, 5000)
-        }
-        
-        wsRef.current = ws
-      } catch (error) {
-        console.error('WebSocket connection error:', error)
-        setWsConnected(false)
-      }
-    }
-    
-    connectWebSocket()
-    
-    // Cleanup
-    return () => {
-      if (wsRef.current) {
-        wsRef.current.close()
-      }
-    }
-  }, [accessToken])
+  // WebSocket 연결은 useWebSocket 훅에서 관리됨
+  // 수동 WebSocket 연결 코드 제거 (wsRef 미정의 오류 해결)
   
   // 생성 파라미터
   const [prompt, setPrompt] = useState("")
@@ -951,8 +850,14 @@ ${testData.message}
 
   const handleDownloadImage = async (imageUrl: string, filename: string) => {
     try {
-      const response = await fetch(imageUrl)
-      const blob = await response.blob()
+      // S3 URL에서 직접 다운로드하면 CORS 에러가 발생하므로
+      // 백엔드 프록시를 통해 다운로드
+      const encodedUrl = encodeURIComponent(imageUrl)
+      
+      // apiClient의 downloadImage 메서드를 사용하여 백엔드에 요청
+      const blob = await apiClient.downloadImage(`/api/v1/image-generation/proxy-download?url=${encodedUrl}`)
+      
+      // Blob을 사용하여 다운로드 처리
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
@@ -961,8 +866,20 @@ ${testData.message}
       a.click()
       window.URL.revokeObjectURL(url)
       document.body.removeChild(a)
+      
+      toast({
+        title: "다운로드 완료",
+        description: "이미지가 성공적으로 다운로드되었습니다.",
+        duration: 2000,
+      })
     } catch (error) {
-      // console.error('Failed to download image:', error)
+      console.error('Failed to download image:', error)
+      toast({
+        title: "다운로드 실패",
+        description: error instanceof Error ? error.message : "이미지 다운로드에 실패했습니다.",
+        variant: "destructive",
+        duration: 3000,
+      })
     }
   }
 
@@ -2609,126 +2526,10 @@ ${testData.message}
                     </div>
                   )}
 
-                  {/* 단계 4: 추가 도구 (방법이 선택된 경우에만 표시) */}
+                  {/* 이미지 생성 버튼 (방법이 선택된 경우에만 표시) */}
                   {getCurrentMethod() > 0 && (
-                    <div className="border-t pt-6 space-y-4 mt-6">
-                      <div className="flex items-center gap-2">
-                        <div className="w-6 h-6 rounded-full flex items-center justify-center text-sm font-medium bg-blue-500 text-white">
-                          4
-                        </div>
-                        <h3 className="text-lg font-medium">
-                          {getCurrentMethod() === 1 && "수정 실행"}
-                          {getCurrentMethod() === 2 && "합성 실행"}
-                        </h3>
-                      </div>
-                      
+                    <div className="border-t pt-6 mt-6">
                       <div className="space-y-4">
-                        {/* 마스킹 도구 (방법 2, 4에서만 표시) */}
-                        {(getCurrentMethod() === 2 || getCurrentMethod() === 4) && (
-                          <div className="space-y-3">
-                            <Label className="text-sm font-medium">수정할 영역 선택</Label>
-                            
-                            {/* 방법 4번일 때 이미지 선택 버튼 */}
-                            {getCurrentMethod() === 4 && selectedImages.length > 1 && (
-                              <div className="flex gap-2">
-                                <Button
-                                  variant={activeImageIndex === 0 ? "default" : "outline"}
-                                  size="sm"
-                                  onClick={() => setActiveImageIndex(0)}
-                                  className="flex-1"
-                                >
-                                  이미지 1 마스킹
-                                </Button>
-                                <Button
-                                  variant={activeImageIndex === 1 ? "default" : "outline"}
-                                  size="sm"
-                                  onClick={() => setActiveImageIndex(1)}
-                                  className="flex-1"
-                                >
-                                  이미지 2 마스킹
-                                </Button>
-                              </div>
-                            )}
-                            
-                            <div className="space-y-3">
-                              {/* 브러시 크기 조절 */}
-                              <div>
-                                <Label htmlFor="brush-size" className="text-xs text-gray-600">
-                                  브러시 크기: {brushSize}px
-                                </Label>
-                                <input
-                                  id="brush-size"
-                                  type="range"
-                                  min="5"
-                                  max="50"
-                                  value={brushSize}
-                                  onChange={(e) => setBrushSize(Number(e.target.value))}
-                                  className="w-full mt-1"
-                                />
-                              </div>
-
-                              {/* 마스킹 색상 선택 */}
-                              <div>
-                                <Label htmlFor="mask-color" className="text-xs text-gray-600">
-                                  마스킹 색상
-                                </Label>
-                                <div className="flex items-center gap-3 mt-1">
-                                  <input
-                                    id="mask-color"
-                                    type="color"
-                                    value={maskColor}
-                                    onChange={(e) => setMaskColor(e.target.value)}
-                                    className="w-12 h-8 rounded border cursor-pointer"
-                                  />
-                                  <div className="flex gap-1">
-                                    {['#FFFFFF', '#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF', '#00FFFF', '#FFA500', '#800080'].map((color) => (
-                                      <button
-                                        key={color}
-                                        onClick={() => setMaskColor(color)}
-                                        className={`w-6 h-6 rounded border-2 transition-all ${
-                                          maskColor === color ? 'border-gray-800 scale-110' : 'border-gray-300 hover:border-gray-500'
-                                        }`}
-                                        style={{ backgroundColor: color }}
-                                        title={color}
-                                      />
-                                    ))}
-                                  </div>
-                                </div>
-                              </div>
-
-                              {/* 마스킹 캔버스 */}
-                              <div className="relative border rounded-lg overflow-hidden bg-gray-50">
-                                <img
-                                  ref={imageRef}
-                                  src={selectedImages[activeImageIndex]?.url}
-                                  alt={`마스킹 대상 이미지 ${activeImageIndex + 1}`}
-                                  className="w-full h-auto max-h-64 object-contain"
-                                  style={{ display: maskMode ? 'block' : 'none' }}
-                                />
-                                <canvas
-                                  ref={canvasRef}
-                                  className="absolute top-0 left-0 w-full h-full cursor-crosshair"
-                                  style={{ display: maskMode ? 'block' : 'none' }}
-                                  onMouseDown={handleMouseDown}
-                                  onMouseMove={handleMouseMove}
-                                  onMouseUp={handleMouseUp}
-                                  onMouseLeave={handleMouseUp}
-                                />
-                              </div>
-
-                              <Button
-                                variant="outline"
-                                onClick={clearMask}
-                                size="sm"
-                                className="w-full"
-                              >
-                                <Eraser className="h-4 w-4 mr-2" />
-                                마스크 지우기
-                              </Button>
-                            </div>
-                          </div>
-                        )}
-
                         {/* 수정 실행 버튼 */}
                         <Button 
                           className="w-full bg-blue-600 hover:bg-blue-700 text-white"
@@ -2825,19 +2626,19 @@ ${testData.message}
                                 // 첫 번째 이미지
                                 if (selectedImages[0].type === 'upload' && selectedImages[0].file) {
                                   imageFile1 = selectedImages[0].file
-                                } else if (selectedImages[0].type === 'gallery' && selectedImages[0].url) {
-                                  const response = await fetch(selectedImages[0].url)
-                                  const blob = await response.blob()
-                                  imageFile1 = new File([blob], `image1_${Date.now()}.png`, { type: 'image/png' })
+                                } else if (selectedImages[0].type === 'gallery' && selectedImages[0].galleryImage) {
+                                  // 갤러리 이미지의 경우 storage_id를 사용하여 백엔드에서 처리
+                                  // 임시로 빈 파일 생성 (백엔드에서 storage_id로 처리)
+                                  imageFile1 = new File([], 'gallery_image_1', { type: 'image/png' })
                                 }
                                 
                                 // 두 번째 이미지
                                 if (selectedImages[1].type === 'upload' && selectedImages[1].file) {
                                   imageFile2 = selectedImages[1].file
-                                } else if (selectedImages[1].type === 'gallery' && selectedImages[1].url) {
-                                  const response = await fetch(selectedImages[1].url)
-                                  const blob = await response.blob()
-                                  imageFile2 = new File([blob], `image2_${Date.now()}.png`, { type: 'image/png' })
+                                } else if (selectedImages[1].type === 'gallery' && selectedImages[1].galleryImage) {
+                                  // 갤러리 이미지의 경우 storage_id를 사용하여 백엔드에서 처리
+                                  // 임시로 빈 파일 생성 (백엔드에서 storage_id로 처리)
+                                  imageFile2 = new File([], 'gallery_image_2', { type: 'image/png' })
                                 }
                                 
                                 if (!imageFile1 || !imageFile2) {
@@ -2854,27 +2655,16 @@ ${testData.message}
                                 formData.append('guidance', '2.5')
                                 formData.append('steps', '20')
                                 
-                                // 토큰 가져오기
-                                const token = tokenUtils.getToken()
-                                if (!token) {
-                                  throw new Error('로그인이 필요합니다')
+                                // 갤러리 이미지의 storage_id 추가
+                                if (selectedImages[0].type === 'gallery' && selectedImages[0].galleryImage) {
+                                  formData.append('image1_storage_id', selectedImages[0].galleryImage.id)
+                                }
+                                if (selectedImages[1].type === 'gallery' && selectedImages[1].galleryImage) {
+                                  formData.append('image2_storage_id', selectedImages[1].galleryImage.id)
                                 }
                                 
-                                // API 호출
-                                const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/image-modification/synthesize`, {
-                                  method: 'POST',
-                                  headers: {
-                                    Authorization: `Bearer ${token}`,
-                                  },
-                                  body: formData,
-                                })
-                                
-                                if (!response.ok) {
-                                  const error = await response.json()
-                                  throw new Error(error.detail || '이미지 합성에 실패했습니다')
-                                }
-                                
-                                const result = await response.json()
+                                // apiClient를 사용하여 백엔드에 요청
+                                const result = await apiClient.post('/api/v1/image-modification/synthesize', formData)
                                 
                                 // 결과를 갤러리에 추가
                                 const newImage: GeneratedImage = {

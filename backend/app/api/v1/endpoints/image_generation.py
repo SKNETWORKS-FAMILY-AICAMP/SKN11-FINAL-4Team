@@ -14,6 +14,7 @@ from typing import Optional, Dict, Any, List
 import logging
 import asyncio
 import json
+import io
 from datetime import datetime
 from app.database import get_async_db
 
@@ -1068,3 +1069,53 @@ async def _get_user_with_groups(user_id: str, db: AsyncSession) -> Optional[User
     except Exception as e:
         logger.error(f"Failed to get user with groups {user_id}: {e}")
         return None
+
+
+@router.get("/proxy-download")
+async def proxy_download_image(
+    url: str = Query(..., description="다운로드할 이미지 URL"),
+    current_user: Dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """
+    S3 이미지 다운로드 프록시 엔드포인트
+    CORS 문제를 해결하기 위해 백엔드를 통해 이미지를 다운로드
+    """
+    try:
+        import httpx
+        from fastapi.responses import StreamingResponse
+        
+        # URL 디코딩
+        decoded_url = url
+        
+        logger.info(f"🔗 프록시 다운로드 요청: {decoded_url[:100]}...")
+        
+        # S3 URL 확인
+        if not decoded_url.startswith(('https://', 'http://')):
+            raise HTTPException(status_code=400, detail="유효하지 않은 URL입니다")
+        
+        # 이미지 다운로드
+        async with httpx.AsyncClient() as client:
+            response = await client.get(decoded_url, follow_redirects=True)
+            
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail="이미지 다운로드 실패")
+            
+            # Content-Type 확인
+            content_type = response.headers.get('content-type', 'image/png')
+            
+            # StreamingResponse로 반환
+            return StreamingResponse(
+                io.BytesIO(response.content),
+                media_type=content_type,
+                headers={
+                    "Content-Disposition": f"attachment; filename=image.png",
+                    "Cache-Control": "public, max-age=3600"
+                }
+            )
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"프록시 다운로드 중 오류: {e}")
+        raise HTTPException(status_code=500, detail=f"이미지 다운로드 중 오류가 발생했습니다: {str(e)}")

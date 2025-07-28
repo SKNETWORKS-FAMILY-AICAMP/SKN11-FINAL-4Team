@@ -31,8 +31,6 @@ interface FormDataType {
   gender: string;
   age: string;
   imageMethod: string;
-  hairStyle: string;
-  mood: string;
   selectedPresetId: string;
   huggingFaceToken: string;
   systemPrompt: string;
@@ -51,9 +49,7 @@ export default function CreateModelPage() {
     mbti: "",
     gender: "",
     age: "",
-    imageMethod: "upload", // "upload" 또는 "prompt"
-    hairStyle: "",
-    mood: "",
+    imageMethod: "upload", // 항상 upload로 고정
     selectedPresetId: "manual", // 기본값을 "manual"로 설정하여 직접 입력 모드 시작
     huggingFaceToken: "",
     systemPrompt: "", // systemPrompt 필드 추가
@@ -91,6 +87,13 @@ export default function CreateModelPage() {
         setStylePresets(presets);
       } catch (error) {
         // 프리셋 데이터 로드 실패 처리
+        console.error('프리셋 데이터 로드 실패:', error);
+        toast({
+          title: "프리셋 로드 실패",
+          description: "스타일 프리셋을 불러오는 데 실패했습니다.",
+          variant: "destructive",
+          duration: 3000,
+        });
       } finally {
         setLoadingPresets(false);
       }
@@ -151,25 +154,7 @@ export default function CreateModelPage() {
 
   const handleInputChange = (field: string, value: string | string[]) => {
     setFormData((prev) => {
-      // 이미지 메서드가 변경되는 경우 관련 필드들 초기화
-      if (field === "imageMethod") {
-        if (value === "upload") {
-          // 이미지 업로드로 변경 시 이미지 생성 관련 필드들 초기화
-          return {
-            ...prev,
-            [field]: value,
-            modelType: "",
-            hairStyle: "",
-            mood: "",
-          }
-        } else if (value === "prompt") {
-          // 이미지 생성으로 변경 시 이미지 업로드 관련 필드들 초기화
-          return {
-            ...prev,
-            [field]: value,
-          }
-        }
-      }
+      // imageMethod 변경 관련 로직 제거 (항상 upload로 고정)
       
       // 일반적인 필드 변경
       return {
@@ -177,17 +162,6 @@ export default function CreateModelPage() {
         [field]: value,
       }
     })
-    
-    // 이미지 메서드가 변경되면 파일 상태도 초기화
-    if (field === "imageMethod") {
-      if (value === "prompt") {
-        // 이미지 생성으로 변경 시 업로드된 파일들 초기화
-        setFiles(prev => ({ ...prev, imageSamples: null }))
-        setImagePreviewUrls([])
-        // 기존 미리보기 URL들 해제
-        imagePreviewUrls.forEach(url => URL.revokeObjectURL(url))
-      }
-    }
   }
 
   const handleFileUpload = async (type: keyof typeof files, uploadedFiles: FileList | null) => {
@@ -247,9 +221,7 @@ export default function CreateModelPage() {
           mbti: preset.mbti_id ? String(preset.mbti_id) : "none",
           gender: String(preset.influencer_gender),
           age: preset.influencer_age_group ? String(preset.influencer_age_group * 10) : "",
-          hairStyle: preset.influencer_hairstyle || "",
-          mood: preset.influencer_style || "",
-          imageMethod: "prompt",
+          imageMethod: "upload", // 항상 upload로 고정
           systemPrompt: preset.system_prompt || "",
         }));
         setGeneratedTones([{
@@ -317,16 +289,13 @@ export default function CreateModelPage() {
         return;
       }
 
-      // 이미지 검증
+      // 이미지 검증 (업로드만 허용)
       const hasImageUpload = files.imageSamples && files.imageSamples.length > 0;
-      const hasImagePrompt = formData.imageMethod === "prompt" &&
-        formData.hairStyle.trim() !== "" &&
-        formData.mood.trim() !== "";
 
-      if (!hasImageUpload && !hasImagePrompt) {
+      if (!hasImageUpload) {
         toast({
           title: "입력 필요",
-          description: "이미지를 업로드하거나 이미지 생성 프롬프트를 입력해주세요.",
+          description: "이미지를 업로드해주세요.",
           variant: "destructive",
           duration: 3000,
         });
@@ -374,6 +343,7 @@ export default function CreateModelPage() {
           createInfluencerData.system_prompt = formData.systemPrompt || selectedPreset.system_prompt; // 프리셋의 시스템 프롬프트 추가
           createInfluencerData.model_type = selectedPreset.influencer_type === 1 ? "character" : selectedPreset.influencer_type === 2 ? "human" : "objects";
           createInfluencerData.mbti = selectedPreset.mbti_name;
+          createInfluencerData.mbti_id = selectedPreset.mbti_id;
           createInfluencerData.gender = selectedPreset.influencer_gender === 0 ? "male" : selectedPreset.influencer_gender === 1 ? "female" : "other";
           createInfluencerData.age = selectedPreset.influencer_age_group ? String(selectedPreset.influencer_age_group * 10) : undefined;
           createInfluencerData.hair_style = selectedPreset.influencer_hairstyle;
@@ -386,15 +356,16 @@ export default function CreateModelPage() {
         createInfluencerData.tone = formData.tone || formData.customTones[0] || "";
         createInfluencerData.system_prompt = formData.systemPrompt; // Use the stored systemPrompt
         createInfluencerData.model_type = formData.modelType;
-        createInfluencerData.mbti = formData.mbti !== "none" ? formData.mbti : undefined;
+        // mbti_id를 MBTI 타입 문자열로 변환
+        if (formData.mbti !== "none" && formData.mbti) {
+          const selectedMbti = mbtiList.find(m => String(m.mbti_id) === formData.mbti);
+          createInfluencerData.mbti = selectedMbti?.mbti_name;
+          createInfluencerData.mbti_id = parseInt(formData.mbti);
+        }
         createInfluencerData.gender = formData.gender !== "none" ? (formData.gender === "0" ? "male" : formData.gender === "1" ? "female" : formData.gender === "2" ? "other" : formData.gender) : undefined;
         createInfluencerData.age = formData.age;
 
-        // 이미지 생성 방법에 따른 데이터 추가
-        if (formData.imageMethod === "prompt") {
-          createInfluencerData.hair_style = formData.hairStyle;
-          createInfluencerData.mood = formData.mood;
-        }
+        // 이미지 생성 관련 코드 제거
       }
 
       // 이미지가 있는 경우 FormData로 전송
@@ -428,11 +399,7 @@ export default function CreateModelPage() {
         successMessage += `• 말투: ${formData.tone || formData.customTones[0] || "사용자 정의"}\n`
         successMessage += `• 모델 유형: ${formData.modelType === "character" ? "캐릭터형" : formData.modelType === "human" ? "사람형" : "사물형"}\n`
 
-        if (formData.imageMethod === "prompt") {
-          successMessage += `• 이미지: 프롬프트 생성 (${formData.hairStyle}, ${formData.mood})\n`
-        } else {
-          successMessage += `• 이미지: 파일 업로드\n`
-        }
+        successMessage += `• 이미지: 파일 업로드\n`
       }
 
       successMessage += `\n다음 작업이 백그라운드에서 자동으로 진행됩니다:\n• 2,000개 QA 쌍 생성\n• S3에 데이터 업로드\n• QLoRA 4비트 양자화 파인튜닝\n• Hugging Face에 모델 업로드\n\n완료 시 이메일과 웹 알림을 받으실 수 있습니다.`
@@ -1038,21 +1005,13 @@ export default function CreateModelPage() {
             <CardHeader>
               <CardTitle>이미지 설정</CardTitle>
               <CardDescription>
-                AI 인플루언서의 이미지를 설정하세요.<br />
-                이미지 업로드 또는 이미지 생성 중 하나는 필수입니다.
+                AI 인플루언서의 이미지를 업로드하세요.<br />
+                이미지 업로드는 필수입니다.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-              {/* 이미지 생성 방법 탭 */}
+              {/* 이미지 업로드 섹션 */}
               <div>
-                                      <Label className="text-base font-medium mb-3 block">이미지 생성 방법*</Label>
-                <Tabs value={formData.imageMethod} onValueChange={(value) => handleInputChange("imageMethod", value)} className="w-full">
-                  <TabsList className="grid w-full grid-cols-2">
-                    <TabsTrigger value="upload">이미지 업로드</TabsTrigger>
-                    <TabsTrigger value="prompt">이미지 생성</TabsTrigger>
-                  </TabsList>
-
-                  <TabsContent value="upload" className="mt-4">
                     <div>
                       <Label className="text-base font-medium mb-3 block">이미지 파일 업로드</Label>
                       
@@ -1184,47 +1143,6 @@ export default function CreateModelPage() {
                         </div>
                       )}
                     </div>
-                  </TabsContent>
-
-                  <TabsContent value="prompt" className="mt-4">
-                    <div className="space-y-4">
-                      <Label className="text-base font-medium block">이미지 생성 프롬프트</Label>
-                      <div>
-                        <Label htmlFor="modelType">AI 인플루언서 유형</Label>
-                        <Select value={formData.modelType} onValueChange={(value) => handleInputChange("modelType", value)}>
-                          <SelectTrigger>
-                            <SelectValue placeholder="AI 인플루언서 유형을 선택하세요" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="character">캐릭터형 (애니메이션, 만화 스타일)</SelectItem>
-                            <SelectItem value="human">사람형 (실제 사람과 유사한 형태)</SelectItem>
-                            <SelectItem value="objects">사물형 (사물과 유사한 형태)</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div>
-                        <Label htmlFor="hairStyle">헤어스타일 *</Label>
-                        <Input
-                          id="hairStyle"
-                          placeholder="예: 긴 생머리, 숏컷, 웨이브 머리, 포니테일"
-                          value={formData.hairStyle}
-                          onChange={(e) => handleInputChange("hairStyle", e.target.value)}
-                        />
-                        <p className="text-xs text-gray-500 mt-1">💡 원하는 헤어스타일을 자세히 설명해주세요</p>
-                      </div>
-                      <div>
-                        <Label htmlFor="mood">분위기/스타일 *</Label>
-                        <Input
-                          id="mood"
-                          placeholder="예: 밝고 친근한, 세련되고 우아한, 캐주얼하고 편안한"
-                          value={formData.mood}
-                          onChange={(e) => handleInputChange("mood", e.target.value)}
-                        />
-                        <p className="text-xs text-gray-500 mt-1">💡 원하는 분위기나 스타일을 설명해주세요</p>
-                      </div>
-                    </div>
-                  </TabsContent>
-                </Tabs>
               </div>
             </CardContent>
           </Card>
@@ -1248,9 +1166,8 @@ export default function CreateModelPage() {
                 formData.huggingFaceToken === "none" || !formData.huggingFaceToken || // 허깅페이스 토큰*
                 !formData.personality.trim() || // 성격*
                 (!formData.tone.trim() && formData.customTones.length === 0) || // 말투*
-                // 이미지: 업로드 또는 생성 중 하나는 필수
-                (formData.imageMethod === "upload" && (!files.imageSamples || files.imageSamples.length === 0)) ||
-                (formData.imageMethod === "prompt" && (!formData.hairStyle.trim() || !formData.mood.trim()))
+                // 이미지 업로드 필수
+                (!files.imageSamples || files.imageSamples.length === 0)
               } 
               className="bg-blue-600 hover:bg-blue-700 text-white"
             >

@@ -7,15 +7,16 @@ import uuid
 import logging
 import json
 from typing import Optional, Dict, Any
-from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException, status, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException, status, WebSocket, WebSocketDisconnect, Request
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 import httpx
 import io
 from PIL import Image
 from pathlib import Path
 import base64
 
-from app.database import get_async_db
+from app.database import get_async_db, get_db
 from app.core.security import get_current_user
 from app.services.s3_service import get_s3_service
 from app.services.image_storage_service import get_image_storage_service
@@ -877,7 +878,6 @@ async def handle_websocket_image_modification(
 
 @router.post("/synthesize")
 async def synthesize_images(
-    request: Request,
     image1: UploadFile = File(..., description="첫 번째 이미지"),
     image2: UploadFile = File(..., description="두 번째 이미지"),
     prompt: str = Form(..., description="합성 프롬프트"),
@@ -885,7 +885,10 @@ async def synthesize_images(
     height: int = Form(720, description="출력 이미지 높이"),
     guidance: float = Form(2.5, description="가이던스 스케일"),
     steps: int = Form(20, description="생성 스텝 수"),
-    db: Session = Depends(get_db)
+    image1_storage_id: Optional[str] = Form(None, description="첫 번째 갤러리 이미지 ID"),
+    image2_storage_id: Optional[str] = Form(None, description="두 번째 갤러리 이미지 ID"),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
     """
     두 개의 이미지를 합성하여 새로운 이미지 생성
@@ -900,38 +903,120 @@ async def synthesize_images(
     """
     try:
         # 1. 사용자 인증
-        from app.api.dependencies.auth import get_user_session
-        user_session = await get_user_session(request, db)
-        user_id = user_session.get("user_id")
-        team_id = user_session.get("team_id")
-        
-        if not user_id or not team_id:
+        user_id = current_user.get("sub")
+        if not user_id:
             raise HTTPException(status_code=401, detail="인증되지 않은 사용자")
+        
+        # 팀 정보 가져오기
+        from app.models.user import User
+        from sqlalchemy.orm import selectinload
+        from sqlalchemy import select
+        user_result = db.execute(
+            select(User).options(selectinload(User.teams)).where(User.user_id == user_id)
+        )
+        user = user_result.scalar_one_or_none()
+        if not user or not user.teams:
+            raise HTTPException(status_code=403, detail="소속된 팀이 없습니다")
+        team_id = user.teams[0].group_id
         
         logger.info(f"🎨 이미지 합성 요청 - User: {user_id}, Prompt: {prompt[:50]}...")
         
-        # 2. 이미지 파일 검증
-        valid_types = ["image/jpeg", "image/jpg", "image/png", "image/webp"]
-        if image1.content_type not in valid_types or image2.content_type not in valid_types:
-            raise HTTPException(
-                status_code=400, 
-                detail=f"지원되지 않는 파일 형식. 지원 형식: {', '.join(valid_types)}"
-            )
+        # 2. 이미지 데이터 읽기
+        s3_service = get_s3_service()
+        image_storage_service = get_image_storage_service()
         
-        # 3. 이미지 데이터 읽기
-        image1_data = await image1.read()
-        image2_data = await image2.read()
+        # 첫 번째 이미지 처리
+        if image1_storage_id:
+            # 갤러리 이미지인 경우 S3에서 가져오기
+            logger.info(f"📸 갤러리 이미지 1 가져오기: {image1_storage_id}")
+            # DB에서 이미지 정보 조회
+            from app.models.image_storage import ImageStorage
+            image1_record = db.query(ImageStorage).filter(
+                ImageStorage.storage_id == image1_storage_id
+            ).first()
+            
+            if not image1_record:
+                raise HTTPException(status_code=404, detail="첫 번째 갤러리 이미지를 찾을 수 없습니다")
+            
+            # 원본 S3 URL 사용 (DB에는 raw URL이 저장되어 있어야 함)
+            logger.info(f"DB에서 가져온 S3 URL: {image1_record.s3_url}")
+            
+            # S3에서 이미지 다운로드
+            image1_data = await s3_service.download_image_data(image1_record.s3_url)
+            if not image1_data:
+                raise HTTPException(status_code=404, detail="첫 번째 이미지 다운로드 실패")
+        else:
+            # 업로드된 파일인 경우
+            valid_types = ["image/jpeg", "image/jpg", "image/png", "image/webp"]
+            if image1.content_type not in valid_types:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"지원되지 않는 파일 형식. 지원 형식: {', '.join(valid_types)}"
+                )
+            image1_data = await image1.read()
+        
+        # 두 번째 이미지 처리
+        if image2_storage_id:
+            # 갤러리 이미지인 경우 S3에서 가져오기
+            logger.info(f"📸 갤러리 이미지 2 가져오기: {image2_storage_id}")
+            # DB에서 이미지 정보 조회
+            from app.models.image_storage import ImageStorage
+            image2_record = db.query(ImageStorage).filter(
+                ImageStorage.storage_id == image2_storage_id
+            ).first()
+            
+            if not image2_record:
+                raise HTTPException(status_code=404, detail="두 번째 갤러리 이미지를 찾을 수 없습니다")
+            
+            # 원본 S3 URL 사용 (DB에는 raw URL이 저장되어 있어야 함)
+            logger.info(f"DB에서 가져온 S3 URL: {image2_record.s3_url}")
+            
+            # S3에서 이미지 다운로드
+            image2_data = await s3_service.download_image_data(image2_record.s3_url)
+            if not image2_data:
+                raise HTTPException(status_code=404, detail="두 번째 이미지 다운로드 실패")
+        else:
+            # 업로드된 파일인 경우
+            valid_types = ["image/jpeg", "image/jpg", "image/png", "image/webp"]
+            if image2.content_type not in valid_types:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"지원되지 않는 파일 형식. 지원 형식: {', '.join(valid_types)}"
+                )
+            image2_data = await image2.read()
         
         # 4. RunPod 세션 정보 확인
-        from app.services.runpod_session_service import get_runpod_session_service
-        runpod_session_service = get_runpod_session_service()
-        runpod_endpoint = await runpod_session_service.get_active_session_endpoint(user_id, db)
+        from app.services.user_session_service import get_user_session_service
+        from app.services.runpod_service import get_runpod_service
         
-        if not runpod_endpoint:
+        user_session_service = get_user_session_service()
+        session_status = await user_session_service.get_session_status(user_id, db)
+        
+        if not session_status:
             raise HTTPException(
                 status_code=400,
-                detail="활성 RunPod 세션이 없습니다. 먼저 새 세션을 시작하세요."
+                detail="활성 세션이 없습니다. 먼저 이미지 생성 세션을 시작해주세요."
             )
+        
+        pod_id = session_status.get("pod_id")
+        if not pod_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Pod ID를 찾을 수 없습니다. 세션을 다시 시작해주세요."
+            )
+        
+        # RunPod에서 ComfyUI 엔드포인트 가져오기
+        runpod_service = get_runpod_service()
+        pod_info = await runpod_service.get_pod_status(pod_id)
+        
+        if not pod_info or not pod_info.endpoint_url:
+            raise HTTPException(
+                status_code=503,
+                detail="ComfyUI 엔드포인트를 찾을 수 없습니다"
+            )
+        
+        runpod_endpoint = pod_info.endpoint_url
+        logger.info(f"🚀 이미지 합성 ComfyUI 엔드포인트: {runpod_endpoint}")
         
         # 5. 프롬프트 최적화 (OpenAI 사용)
         prompt_service = get_prompt_optimization_service()
