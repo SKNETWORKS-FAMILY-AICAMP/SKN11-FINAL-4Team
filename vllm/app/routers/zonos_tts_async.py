@@ -19,18 +19,19 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field, validator
 import aiofiles
 
-from zonos.model import Zonos
-from zonos.conditioning import make_cond_dict
+# Zonos imports는 워커 프로세스에서만 수행
+# from zonos.model import Zonos
+# from zonos.conditioning import make_cond_dict
 from app.utils.async_s3_utils import get_async_s3_manager, initialize_async_s3_manager
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Zonos 모델 전역 변수
-zonos_model = None
-device = None
-zonos_initialization_attempted = False  # 초기화 시도 추적
+# Zonos 모델 전역 변수는 제거 (멀티프로세싱 워커에서만 사용)
+# zonos_model = None
+# device = None
+# zonos_initialization_attempted = False
 
 # 멀티프로세싱 관련 전역 변수
 zonos_process = None
@@ -368,11 +369,11 @@ def initialize_zonos_multiprocessing():
         logger.error(f"❌ Zonos 멀티프로세싱 초기화 실패: {e}")
         return False
 
-@router.on_event("startup")
-async def startup_event():
-    """라우터 시작 시 멀티프로세싱 환경 초기화"""
-    loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, initialize_zonos_multiprocessing)
+# startup 이벤트 제거 - main.py에서 명시적으로 초기화
+# @router.on_event("startup")
+# async def startup_event():
+#     """라우터 시작 시 멀티프로세싱 환경 초기화"""
+#     pass
 
 async def generate_tts_multiprocess(
     task_id: str,

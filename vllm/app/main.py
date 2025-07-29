@@ -76,6 +76,11 @@ async def on_startup():
         from app.routers.finetuning_async import initialize_finetuning_multiprocessing
         initialize_finetuning_multiprocessing()
         logger.info("✅ 파인튜닝 멀티프로세싱 초기화 완료")
+        
+        # Zonos TTS 멀티프로세싱 초기화
+        from app.routers.zonos_tts_async import initialize_zonos_multiprocessing
+        initialize_zonos_multiprocessing()
+        logger.info("✅ Zonos TTS 멀티프로세싱 초기화 완료")
 
         logger.info("✅ FastAPI 서버 초기화 완료")
     except Exception as e:
@@ -94,6 +99,13 @@ async def on_shutdown():
         cleanup_finetuning_multiprocessing()
     except Exception as e:
         logger.error(f"파인튜닝 멀티프로세싱 정리 실패: {e}")
+    
+    # Zonos TTS 멀티프로세싱 정리
+    try:
+        from app.routers.zonos_tts_async import cleanup_multiprocessing
+        cleanup_multiprocessing()
+    except Exception as e:
+        logger.error(f"Zonos TTS 멀티프로세싱 정리 실패: {e}")
 
 
 @app.get("/")
