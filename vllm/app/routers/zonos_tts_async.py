@@ -200,11 +200,11 @@ def zonos_worker_process(request_queue: Queue, response_queue: Queue):
     logger.info(f"🖥️ CUDA_VISIBLE_DEVICES={os.environ['CUDA_VISIBLE_DEVICES']} (물리적 GPU {tts_gpu_id})")
     logger.info(f"📍 TTS는 GPU {tts_gpu_id}번에서 실행됩니다")
     
-    # 이 프로세스 내에서 torch와 Zonos 임포트
+
     import torch
     import torchaudio
     from zonos.model import Zonos
-    from zonos.conditioning import make_cond_dict
+    
     
     # 모델 초기화
     try:
@@ -312,11 +312,11 @@ def generate_tts_in_process(zonos_model, device, text, speaker, language, speaki
     """프로세스 내에서 TTS 생성"""
     from zonos.conditioning import make_cond_dict
     
-    # 조건 딕셔너리 생성
+    # 조건 딕셔너리 생성 - language를 항상 'ko'로 고정
     cond_dict = make_cond_dict(
         text=text,
         speaker=speaker,
-        language=language,
+        language='ko',  # 항상 한국어로 고정
         speaking_rate=speaking_rate,
         emotion=emotion,
         pitch_std=pitch_std
@@ -498,7 +498,7 @@ async def process_tts_task(
             task_id,
             request.text,
             speaker,
-            request.language,
+            'ko',  # 항상 한국어로 고정
             request.speaking_rate,
             request.pitch_std,
             request.cfg_scale,
@@ -826,7 +826,7 @@ async def process_tts_with_voice_task(task_id: str, request: ZonosTTSWithVoiceRe
             task_id,
             str(temp_voice_path),
             request.text,
-            request.language,
+            'ko',  # 항상 한국어로 고정
             request.speaking_rate,
             request.pitch_std,
             request.cfg_scale,

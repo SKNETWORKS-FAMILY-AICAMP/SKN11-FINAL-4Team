@@ -23,6 +23,7 @@ from app.routers import (
     zonos_tts_async,
     embedding,
     vector_db,
+    tone_analysis,
 )
 
 # 로깅 설정
@@ -164,3 +165,4 @@ app.include_router(backend_utils.router, prefix="/api/v1", tags=["Backend Utils"
 app.include_router(zonos_tts_async.router, prefix="/zonos", tags=["Zonos TTS"])
 app.include_router(embedding.router, prefix="/embedding", tags=["Embedding"])
 app.include_router(vector_db.router, tags=["Vector Database"])
+app.include_router(tone_analysis.router, prefix="/tone", tags=["Tone Analysis"])
