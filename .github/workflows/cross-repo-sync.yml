@@ -8,9 +8,21 @@ on:
       - 'frontend/**'
       - 'backend/**'
       - 'vllm/**'
+  pull_request:
+    types: [closed]
+    branches:
+      - develop
+    paths:
+      - 'frontend/**'
+      - 'backend/**'
+      - 'vllm/**'
 jobs:
   detect-changes:
     runs-on: ubuntu-latest
+    # PR 이벤트일 경우 머지되었을 때만 실행
+    if: |
+      github.event_name == 'push' || 
+      (github.event_name == 'pull_request' && github.event.pull_request.merged == true)
     outputs:
       frontend-changed: ${{ steps.changes.outputs.frontend }}
       backend-changed: ${{ steps.changes.outputs.backend }}
@@ -19,12 +31,18 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0  # PR 머지 시 전체 히스토리가 필요함
 
       - name: Detect changes
         id: changes
         run: |
-          CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD)
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            # PR 머지의 경우 베이스 브랜치와 비교
+            CHANGED_FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }})
+          else
+            # 일반 push의 경우 이전 커밋과 비교
+            CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD)
+          fi
           echo "Changed files:"
           echo "$CHANGED_FILES"
           

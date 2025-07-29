@@ -28,6 +28,23 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# 디버깅용 미들웨어
+@router.middleware("http")
+async def log_requests(request, call_next):
+    import time
+    start_time = time.time()
+    
+    # 요청 정보 로깅
+    logger.info(f"🔹 요청 수신: {request.method} {request.url.path}")
+    
+    response = await call_next(request)
+    
+    # 응답 시간 로깅
+    process_time = time.time() - start_time
+    logger.info(f"🔹 응답 완료: {request.url.path} - {response.status_code} ({process_time:.2f}초)")
+    
+    return response
+
 # Zonos 모델 전역 변수는 제거 (멀티프로세싱 워커에서만 사용)
 # zonos_model = None
 # device = None
@@ -275,6 +292,17 @@ def zonos_worker_process(request_queue: Queue, response_queue: Queue):
         logger.error(f"❌ Zonos 워커 모델 초기화 실패: {e}")
         return
     
+    # 시작 시 큐 비우기
+    queue_empty_count = 0
+    while not request_queue.empty():
+        try:
+            old_request = request_queue.get_nowait()
+            queue_empty_count += 1
+        except:
+            break
+    if queue_empty_count > 0:
+        logger.warning(f"⚠️ 워커 시작 시 {queue_empty_count}개의 이전 요청을 제거했습니다.")
+    
     # 요청 처리 루프
     while True:
         try:
@@ -288,7 +316,14 @@ def zonos_worker_process(request_queue: Queue, response_queue: Queue):
             task_id = request.get('task_id', 'unknown')
             
             logger.info(f"🔄 워커가 작업을 처리합니다 - Type: {task_type}, Task ID: {task_id}")
-            logger.debug(f"요청 내용: {list(request.keys())}")
+            logger.info(f"📋 요청 키 목록: {list(request.keys())}")
+            
+            # 상세 디버깅 정보
+            if task_type == 'generate_tts_with_voice':
+                logger.warning(f"⚠️ generate_tts_with_voice 요청 감지!")
+                logger.warning(f"   - 전체 요청 내용: {request}")
+                logger.warning(f"   - 'text' 키 존재 여부: {'text' in request}")
+                logger.warning(f"   - 'texts' 키 존재 여부: {'texts' in request}")
             
             try:
                 if task_type == 'generate_tts':
@@ -329,6 +364,13 @@ def zonos_worker_process(request_queue: Queue, response_queue: Queue):
                     # 필수 필드 검증
                     required_fields = ['voice_path', 'text', 'language', 'speaking_rate', 'pitch_std', 'cfg_scale', 'emotion', 'output_path']
                     missing_fields = [field for field in required_fields if field not in request]
+                    if missing_fields:
+                        # texts가 있고 text가 없는 경우 처리
+                        if 'texts' in request and 'text' not in request and len(request['texts']) > 0:
+                            logger.warning(f"⚠️ 'texts' 필드를 'text'로 변환합니다 (첫 번째 문장만 사용)")
+                            request['text'] = request['texts'][0]
+                            missing_fields.remove('text') if 'text' in missing_fields else None
+                        
                     if missing_fields:
                         raise ValueError(f"필수 필드가 누락되었습니다: {missing_fields}")
                     
@@ -948,6 +990,10 @@ async def generate_tts_with_voice_async(
     request: ZonosTTSWithVoiceRequest
 ):
     """음성 클로닝을 사용한 비동기 TTS 생성 (Base64 인코딩된 음성 데이터 사용)"""
+    
+    logger.info("📍 /generate_tts_with_voice 엔드포인트 호출됨")
+    logger.info(f"   - text: {request.text[:50] if hasattr(request, 'text') else 'None'}")
+    logger.info(f"   - async_mode: {request.async_mode}")
     # 멀티프로세싱이 초기화되지 않았으면 초기화
     if zonos_process is None or not zonos_process.is_alive():
         logger.warning("⚠️ Zonos 멀티프로세싱이 초기화되지 않았습니다. 초기화 시도 중...")
@@ -970,6 +1016,8 @@ async def generate_tts_with_voice_async(
     
     if request.async_mode:
         # 백그라운드 작업으로 처리
+        logger.warning(f"⚠️ 백그라운드 작업 추가: generate_tts_with_voice_async - task_id: {task_id}")
+        logger.warning(f"   - 호출자 정보를 확인하세요!")
         background_tasks.add_task(
             process_tts_with_voice_task,
             task_id,
@@ -1024,6 +1072,10 @@ async def process_tts_with_voice_task(task_id: str, request: ZonosTTSWithVoiceRe
         output_path = str(temp_dir / output_filename)
         
         # 멀티프로세스로 TTS 생성
+        logger.info(f"🔄 process_tts_with_voice_task 실행 중 - task_id: {task_id}")
+        logger.info(f"   - request type: {type(request)}")
+        logger.info(f"   - request.text: {request.text if hasattr(request, 'text') else 'text 속성 없음'}")
+        
         await generate_tts_with_voice_multiprocess(
             task_id,
             str(temp_voice_path),
@@ -1432,6 +1484,10 @@ async def stream_tts(request: StreamingTTSRequest):
 async def stream_tts_with_voice(request: StreamingTTSWithVoiceRequest):
     """SSE를 사용한 음성 클로닝 TTS 스트리밍"""
     
+    logger.info("📍 /stream_tts_with_voice 엔드포인트 호출됨")
+    logger.info(f"   - texts 개수: {len(request.texts) if hasattr(request, 'texts') else 0}")
+    logger.info(f"   - 첫 번째 text: {request.texts[0][:50] if hasattr(request, 'texts') and request.texts else 'None'}")
+    
     # 멀티프로세싱 확인
     if zonos_process is None or not zonos_process.is_alive():
         logger.warning("⚠️ Zonos 멀티프로세싱이 초기화되지 않았습니다. 초기화 시도 중...")
@@ -1461,7 +1517,7 @@ async def stream_tts_with_voice(request: StreamingTTSWithVoiceRequest):
                 await f.write(voice_data)
             
             # 워커에 요청 전송
-            request_queue.put({
+            streaming_request = {
                 'type': 'generate_streaming_tts_with_voice',
                 'task_id': task_id,
                 'texts': request.texts,
@@ -1473,7 +1529,11 @@ async def stream_tts_with_voice(request: StreamingTTSWithVoiceRequest):
                 'emotion': request.emotion,
                 'chunk_schedule': request.chunk_schedule,
                 'chunk_overlap': request.chunk_overlap
-            })
+            }
+            logger.info(f"📤 스트리밍 요청 전송 - task_id: {task_id}")
+            logger.info(f"   - 요청 타입: {streaming_request['type']}")
+            logger.info(f"   - texts 개수: {len(streaming_request['texts'])}")
+            request_queue.put(streaming_request)
             
             # 응답 대기
             timeout = 120  # 2분 타임아웃
