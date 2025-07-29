@@ -39,24 +39,10 @@ export class TTSService {
     const abortController = new AbortController()
     
     try {
-      const token = localStorage.getItem('accessToken')
-      if (!token) {
-        throw new Error('인증 토큰이 없습니다')
-      }
-
-      const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'}/api/v1/tts/stream_voice`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify(request),
+      // apiClient의 stream 메서드 사용
+      const response = await apiClient.stream('/api/v1/tts/stream_voice', request, {
         signal: abortController.signal
       })
-
-      if (!response.ok) {
-        throw new Error(`TTS 요청 실패: ${response.status}`)
-      }
 
       const reader = response.body?.getReader()
       const decoder = new TextDecoder()

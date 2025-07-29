@@ -26,9 +26,7 @@ class Settings(BaseSettings):
     DATABASE_POOL_TIMEOUT: int = 30
 
     # 보안 설정
-    SECRET_KEY: str = os.getenv(
-        "JWT_SECRET_KEY", os.getenv("JWT_SECRET_KEY", secrets.token_urlsafe(32))
-    )
+    SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", secrets.token_urlsafe(32))
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 10080  # 7 days
 

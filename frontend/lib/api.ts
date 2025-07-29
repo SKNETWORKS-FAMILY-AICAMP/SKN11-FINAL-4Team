@@ -16,6 +16,7 @@ export class APIError extends Error {
 interface RequestOptions extends RequestInit {
   requireAuth?: boolean
   timeout?: number
+  signal?: AbortSignal
 }
 
 class APIClient {
@@ -221,6 +222,81 @@ class APIClient {
         throw new APIError('Request timeout', 408)
       }
 
+      throw new APIError(
+        error instanceof Error ? error.message : 'Network error',
+        0
+      )
+    }
+  }
+
+  // SSE 스트리밍용 메서드
+  async stream(
+    endpoint: string,
+    data?: any,
+    options?: Omit<RequestOptions, 'headers'>
+  ): Promise<Response> {
+    const { requireAuth = true, timeout = 300000, signal, ...fetchOptions } = options || {}
+    
+    const url = `${this.baseURL}${endpoint}`
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json'
+    }
+    
+    if (requireAuth) {
+      const token = tokenUtils.getToken()
+      if (!token) {
+        throw new APIError('No authentication token found', 401)
+      }
+      headers.Authorization = `Bearer ${token}`
+    }
+    
+    // 외부에서 제공된 signal이 있으면 사용, 없으면 timeout용 controller 생성
+    let abortSignal: AbortSignal
+    let timeoutId: NodeJS.Timeout | undefined
+    
+    if (signal) {
+      abortSignal = signal
+    } else {
+      const controller = new AbortController()
+      abortSignal = controller.signal
+      timeoutId = setTimeout(() => controller.abort(), timeout)
+    }
+    
+    try {
+      const response = await fetch(url, {
+        ...fetchOptions,
+        method: 'POST',
+        headers,
+        body: data ? JSON.stringify(data) : undefined,
+        signal: abortSignal
+      })
+      
+      if (timeoutId) {
+        clearTimeout(timeoutId)
+      }
+      
+      if (!response.ok) {
+        const errorData = await response.text()
+        throw new APIError(
+          errorData || `HTTP ${response.status}`,
+          response.status
+        )
+      }
+      
+      return response
+    } catch (error) {
+      if (timeoutId) {
+        clearTimeout(timeoutId)
+      }
+      
+      if (error instanceof APIError) {
+        throw error
+      }
+      
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        throw new APIError('Request timeout', 408)
+      }
+      
       throw new APIError(
         error instanceof Error ? error.message : 'Network error',
         0

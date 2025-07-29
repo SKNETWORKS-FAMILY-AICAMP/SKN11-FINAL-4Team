@@ -269,10 +269,10 @@ async def stream_voice(
     
     async def generate_stream() -> AsyncGenerator[str, None]:
         """SSE 스트림 생성"""
+        vllm_url = os.getenv('VLLM_BASE_URL', 'http://localhost:8001')
+        stream_endpoint = f"{vllm_url}/zonos/stream_tts_with_voice"
+        
         try:
-            # VLLM 서버 URL 구성
-            vllm_url = os.getenv('VLLM_URL', 'http://localhost:8001')
-            stream_endpoint = f"{vllm_url}/api/v1/zonos_tts/stream_tts_with_voice"
             
             # S3 presigned URL 생성
             if base_voice.s3_key:
@@ -293,7 +293,7 @@ async def stream_voice(
                     presigned_url = base_voice.s3_url
             
             # 베이스 음성 다운로드 및 Base64 인코딩
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(verify=False) as client:
                 voice_response = await client.get(presigned_url)
                 if voice_response.status_code != 200:
                     raise HTTPException(status_code=500, detail="베이스 음성을 가져올 수 없습니다")
@@ -303,8 +303,8 @@ async def stream_voice(
             # 초기 이벤트 전송
             yield f"data: {json.dumps({'event': 'start', 'message': '스트리밍 시작', 'influencer_id': request.influencer_id})}\n\n"
             
-            # VLLM 서버로 스트리밍 요청
-            async with httpx.AsyncClient(timeout=120.0) as client:
+            # VLLM 서버로 스트리밍 요청 (RunPod는 자체 서명 인증서를 사용할 수 있음)
+            async with httpx.AsyncClient(timeout=120.0, verify=False) as client:
                 # 스트리밍 요청 데이터
                 stream_data = {
                     "texts": request.texts,
@@ -358,11 +358,16 @@ async def stream_voice(
                                 logger.error(f"JSON 파싱 오류: {e}, line: {line}")
                                 continue
                     
+        except httpx.ConnectError as e:
+            logger.error(f"VLLM 서버 연결 실패: {str(e)}")
+            logger.error(f"VLLM URL: {vllm_url}")
+            yield f"data: {json.dumps({'event': 'error', 'error': f'VLLM 서버 연결 실패: {vllm_url}'})}\n\n"
         except httpx.TimeoutException:
             logger.error("VLLM 서버 타임아웃")
             yield f"data: {json.dumps({'event': 'error', 'error': '서버 타임아웃'})}\n\n"
         except Exception as e:
             logger.error(f"스트리밍 중 오류: {str(e)}")
+            logger.error(f"오류 타입: {type(e).__name__}")
             yield f"data: {json.dumps({'event': 'error', 'error': str(e)})}\n\n"
     
     return StreamingResponse(
