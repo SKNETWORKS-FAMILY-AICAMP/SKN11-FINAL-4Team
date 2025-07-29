@@ -197,16 +197,10 @@ def initialize_embedding_model(model_name: str = "BAAI/bge-m3", device: str = No
     # 멀티프로세싱 초기화
     initialize_embedding_multiprocessing()
     
-    # GPU 1 사용 (격리 모드)
-    if device is None:
-        if torch.cuda.is_available():
-            device = "cuda:0"  # 격리된 환경에서 논리적 GPU 0 = 물리적 GPU 1
-            logger.info("🔧 RAG 임베딩 모델 GPU 1 사용 (멀티프로세싱 격리)")
-        else:
-            device = "cpu"
-    
-    embedding_device = device
-    logger.info(f"🔄 임베딩 모델 초기화 완료 (멀티프로세싱 방식): {model_name} (디바이스: {device})")
+    # 메인 프로세스에서는 CUDA를 초기화하지 않음
+    # 실제 GPU 설정은 워커 프로세스에서 처리됨
+    embedding_device = "cuda:0"  # 워커 프로세스 내부에서의 논리적 디바이스
+    logger.info(f"🔄 임베딩 모델 초기화 완료 (멀티프로세싱 방식): {model_name}")
 
 @router.post("/embed", response_model=EmbeddingResponse)
 async def generate_embeddings(request: EmbeddingRequest):
