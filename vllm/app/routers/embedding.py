@@ -85,6 +85,11 @@ def embedding_worker_process(request_queue: Queue, response_queue: Queue):
     
     # GPU 1 전용 환경 설정
     rag_gpu_id = int(os.getenv('RAG_GPU_ID', '1'))
+    
+    # 부모 프로세스의 CUDA_VISIBLE_DEVICES를 무시하고 새로 설정
+    if 'CUDA_VISIBLE_DEVICES' in os.environ:
+        logger.info(f"⚠️ 부모 프로세스의 CUDA_VISIBLE_DEVICES={os.environ['CUDA_VISIBLE_DEVICES']} 무시")
+    
     os.environ['CUDA_VISIBLE_DEVICES'] = str(rag_gpu_id)
     
     logger.info(f"🔍 임베딩 워커 시작")
@@ -94,6 +99,14 @@ def embedding_worker_process(request_queue: Queue, response_queue: Queue):
     # 이 프로세스 내에서 torch와 SentenceTransformer 임포트
     import torch
     from sentence_transformers import SentenceTransformer
+    
+    # GPU 설정 확인
+    if torch.cuda.is_available():
+        logger.info(f"✅ CUDA 사용 가능 - GPU 개수: {torch.cuda.device_count()}")
+        logger.info(f"🖥️ 현재 GPU 디바이스: cuda:{torch.cuda.current_device()}")
+        logger.info(f"📊 GPU 이름: {torch.cuda.get_device_name(0)}")
+    else:
+        logger.error("❌ CUDA를 사용할 수 없습니다!")
     
     # 모델 초기화
     try:

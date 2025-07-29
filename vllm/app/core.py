@@ -348,17 +348,9 @@ async def initialize_vllm_engine():
             # GPU 설정 및 격리 확인
             vllm_gpu_id = int(os.getenv('VLLM_GPU_ID', '0'))
             
-            # CUDA_VISIBLE_DEVICES로 격리된 경우
-            if 'CUDA_VISIBLE_DEVICES' in os.environ:
-                logger.info(f"🔒 GPU 격리 모드 (CUDA_VISIBLE_DEVICES={os.environ['CUDA_VISIBLE_DEVICES']})")
-                # 격리된 환경에서는 항상 device 0 사용
-                visible_devices = os.environ['CUDA_VISIBLE_DEVICES'].split(',')
-                if len(visible_devices) == 1:
-                    logger.info(f"✅ 단일 GPU 격리 환경 - Physical GPU {visible_devices[0]} → Logical GPU 0")
-                else:
-                    logger.info(f"✅ 다중 GPU 격리 환경 - Physical GPUs {visible_devices} → Logical GPUs 0-{len(visible_devices)-1}")
-            else:
-                logger.info(f"🔧 vLLM GPU {vllm_gpu_id} 사용 (격리되지 않은 환경)")
+            # vLLM 전용 GPU 설정 (격리하지 않고 tensor_parallel_size로 제어)
+            logger.info(f"🔧 vLLM이 GPU {vllm_gpu_id}를 사용하도록 설정")
+            logger.info(f"📍 다른 서비스는 멀티프로세싱으로 개별 GPU 할당됨")
         
             # GPU 메모리 fraction 설정
             gpu_memory_fraction = float(os.getenv('VLLM_GPU_MEMORY_UTILIZATION', '0.5'))

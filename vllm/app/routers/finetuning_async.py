@@ -34,6 +34,11 @@ def finetuning_worker_process(request_queue: Queue, response_queue: Queue, statu
     
     # GPU 설정
     finetuning_gpu_id = int(os.getenv('FINETUNING_GPU_ID', '0'))
+    
+    # 부모 프로세스의 CUDA_VISIBLE_DEVICES를 무시하고 새로 설정
+    if 'CUDA_VISIBLE_DEVICES' in os.environ:
+        logger.info(f"⚠️ 부모 프로세스의 CUDA_VISIBLE_DEVICES={os.environ['CUDA_VISIBLE_DEVICES']} 무시")
+    
     os.environ['CUDA_VISIBLE_DEVICES'] = str(finetuning_gpu_id)
     
     logger.info(f"🔧 파인튜닝 워커 시작")
