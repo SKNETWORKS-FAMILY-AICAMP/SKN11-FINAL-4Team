@@ -46,6 +46,32 @@ export default function IntegrationsTab({
   handleInstagramDisconnect,
   PostImage
 }: IntegrationsTabProps) {
+  // 전체 Instagram 상태 로그 출력
+  console.log('=== Instagram 상태 디버깅 ===');
+  console.log('전체 Instagram Status:', instagramStatus);
+  console.log('연동 상태:', instagramStatus.is_connected);
+  console.log('토큰 만료:', instagramStatus.token_expired);
+  console.log('Instagram Info:', instagramStatus.instagram_info);
+  
+  if (instagramStatus.instagram_info) {
+    console.log('Instagram 통계:', {
+      팔로워: instagramStatus.instagram_info.followers_count || 0,
+      팔로잉: instagramStatus.instagram_info.follows_count || 0,
+      게시물: instagramStatus.instagram_info.media_count || 0
+    });
+    console.log('Instagram Info 상세:', {
+      username: instagramStatus.instagram_info.username,
+      account_type: instagramStatus.instagram_info.account_type,
+      name: instagramStatus.instagram_info.name,
+      biography: instagramStatus.instagram_info.biography,
+      profile_picture_url: instagramStatus.instagram_info.profile_picture_url,
+      website: instagramStatus.instagram_info.website
+    });
+  } else {
+    console.log('Instagram Info가 없습니다.');
+  }
+  console.log('========================');
+
   return (
     <div className="space-y-6">
       {/* Instagram 계정 연동 */}
@@ -140,88 +166,87 @@ export default function IntegrationsTab({
               </div>
 
               {/* Instagram 상세 정보 */}
-              {instagramStatus.instagram_info &&
-                !instagramStatus.token_expired && (
-                  <div className="space-y-4">
-                    {/* 통계 정보 */}
-                    <div className="grid grid-cols-3 gap-4 p-4 bg-white rounded-lg border border-gray-200">
-                      <div className="text-center">
-                        <p className="text-lg font-semibold text-gray-900">
-                          {(
-                            instagramStatus.instagram_info
-                              .followers_count || 0
-                          ).toLocaleString()}
-                        </p>
-                        <p className="text-xs text-gray-500">팔로워</p>
-                      </div>
-                      <div className="text-center">
-                        <p className="text-lg font-semibold text-gray-900">
-                          {(
-                            instagramStatus.instagram_info
-                              .follows_count || 0
-                          ).toLocaleString()}
-                        </p>
-                        <p className="text-xs text-gray-500">팔로잉</p>
-                      </div>
-                      <div className="text-center">
-                        <p className="text-lg font-semibold text-gray-900">
-                          {(
-                            instagramStatus.instagram_info
-                              .media_count || 0
-                          ).toLocaleString()}
-                        </p>
-                        <p className="text-xs text-gray-500">게시물</p>
-                      </div>
-                    </div>
+              <div className="space-y-4">
+                {/* 통계 정보 */}
+                <div className="grid grid-cols-3 gap-4 p-4 bg-white rounded-lg border border-gray-200">
+                  <div className="text-center">
+                    <p className="text-lg font-semibold text-gray-900">
+                      {(
+                        instagramStatus.instagram_info
+                          ?.followers_count || 0
+                      ).toLocaleString()}
+                    </p>
+                    <p className="text-xs text-gray-500">팔로워</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-lg font-semibold text-gray-900">
+                      {(
+                        instagramStatus.instagram_info
+                          ?.follows_count || 0
+                      ).toLocaleString()}
+                    </p>
+                    <p className="text-xs text-gray-500">팔로잉</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-lg font-semibold text-gray-900">
+                      {(
+                        instagramStatus.instagram_info
+                          ?.media_count || 0
+                      ).toLocaleString()}
+                    </p>
+                    <p className="text-xs text-gray-500">게시물</p>
+                  </div>
+                </div>
 
-                    {/* 프로필 정보 */}
-                    {(instagramStatus.instagram_info.name ||
-                      instagramStatus.instagram_info.biography ||
-                      instagramStatus.instagram_info.website) && (
-                        <div className="p-4 bg-white rounded-lg border border-gray-200 space-y-3">
-                          {instagramStatus.instagram_info.name && (
-                            <div>
-                              <p className="text-xs text-gray-500 mb-1">
-                                이름
-                              </p>
-                              <p className="text-sm font-medium text-gray-900">
-                                {instagramStatus.instagram_info.name}
-                              </p>
-                            </div>
-                          )}
+                {/* 프로필 정보 */}
+                {instagramStatus.instagram_info && (
+                  instagramStatus.instagram_info.name ||
+                  instagramStatus.instagram_info.biography ||
+                  instagramStatus.instagram_info.website
+                ) && (
+                  <div className="p-4 bg-white rounded-lg border border-gray-200 space-y-3">
+                    {instagramStatus.instagram_info.name && (
+                      <div>
+                        <p className="text-xs text-gray-500 mb-1">
+                          이름
+                        </p>
+                        <p className="text-sm font-medium text-gray-900">
+                          {instagramStatus.instagram_info.name}
+                        </p>
+                      </div>
+                    )}
 
-                          {instagramStatus.instagram_info.biography && (
-                            <div>
-                              <p className="text-xs text-gray-500 mb-1">
-                                소개
-                              </p>
-                              <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
-                                {instagramStatus.instagram_info.biography}
-                              </p>
-                            </div>
-                          )}
+                    {instagramStatus.instagram_info.biography && (
+                      <div>
+                        <p className="text-xs text-gray-500 mb-1">
+                          소개
+                        </p>
+                        <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
+                          {instagramStatus.instagram_info.biography}
+                        </p>
+                      </div>
+                    )}
 
-                          {instagramStatus.instagram_info.website && (
-                            <div>
-                              <p className="text-xs text-gray-500 mb-1">
-                                웹사이트
-                              </p>
-                              <a
-                                href={
-                                  instagramStatus.instagram_info.website
-                                }
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-sm text-blue-600 hover:text-blue-800 underline"
-                              >
-                                {instagramStatus.instagram_info.website}
-                              </a>
-                            </div>
-                          )}
-                        </div>
-                      )}
+                    {instagramStatus.instagram_info.website && (
+                      <div>
+                        <p className="text-xs text-gray-500 mb-1">
+                          웹사이트
+                        </p>
+                        <a
+                          href={
+                            instagramStatus.instagram_info.website
+                          }
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-sm text-blue-600 hover:text-blue-800 underline"
+                        >
+                          {instagramStatus.instagram_info.website}
+                        </a>
+                      </div>
+                    )}
                   </div>
                 )}
+              </div>
 
               {/* 재연동/연동 해제 버튼 */}
               <div className="pt-2 space-y-3">
