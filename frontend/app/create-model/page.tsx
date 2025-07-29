@@ -8,14 +8,12 @@ import { Navigation } from "@/components/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { ModelService, StylePreset, ToneGenerationRequest, ConversationExample, ModelMBTI } from "@/lib/services/model.service"
+import { ModelService, ToneGenerationRequest, ConversationExample, ModelMBTI } from "@/lib/services/model.service"
 import { useAuth } from "@/hooks/use-auth"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Checkbox } from "@/components/ui/checkbox"
-import { Upload, ArrowLeft, Lightbulb, MessageCircle, Palette, Trash2 } from "lucide-react"
+import { Upload, ArrowLeft, Lightbulb, MessageCircle, Trash2 } from "lucide-react"
 import Link from "next/link"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { useToast } from "@/hooks/use-toast"
@@ -72,6 +70,7 @@ export default function CreateModelPage() {
   const [loadingTokens, setLoadingTokens] = useState(false)
   const [mbtiList, setMbtiList] = useState<ModelMBTI[]>([])
   const [loadingMbti, setLoadingMbti] = useState(false)
+  const [toneType, setToneType] = useState<"tone" | "dialogue">("tone") // 말투 타입 추가
 
   useEffect(() => {
     // 중복 API 호출 방지
@@ -144,6 +143,15 @@ export default function CreateModelPage() {
   useEffect(() => {
     setShowToneExamples(false);
   }, [formData.personality]);
+  
+  // 탭 변경 시 tone type 설정
+  useEffect(() => {
+    if (toneTab === "custom") {
+      setToneType("dialogue");
+    } else {
+      setToneType("tone");
+    }
+  }, [toneTab]);
 
   // customTone이 있으면 customTones로 마이그레이션
   useEffect(() => {
@@ -279,10 +287,21 @@ export default function CreateModelPage() {
         });
         return;
       }
-      if (!formData.tone.trim() && formData.customTones.length === 0) {
+      // 말투 검증: 추천 말투 탭에서는 tone 확인, 대사 입력 탭에서는 7개 이상 확인
+      if (toneTab === "recommend" && !formData.tone.trim()) {
         toast({
           title: "선택 필요",
-          description: "말투를 선택하거나 직접 입력해주세요.",
+          description: "추천 말투를 선택해주세요.",
+          variant: "destructive",
+          duration: 3000,
+        });
+        return;
+      }
+      
+      if (toneTab === "custom" && formData.customTones.length < 7) {
+        toast({
+          title: "대사 부족",
+          description: `최소 7개의 대사를 입력해주세요. (현재 ${formData.customTones.length}개)`,
           variant: "destructive",
           duration: 3000,
         });
@@ -353,7 +372,18 @@ export default function CreateModelPage() {
         // 직접 입력 모드: style_preset_id는 undefined로 보내고, 사용자가 입력한 데이터 사용
         createInfluencerData.style_preset_id = undefined; // 백엔드에서 자동 생성 로직을 타도록 undefined로 보냄
         createInfluencerData.personality = formData.personality;
-        createInfluencerData.tone = formData.tone || formData.customTones[0] || "";
+        
+        // 탭에 따라 데이터 전송 방식 변경
+        if (toneTab === "custom" && formData.customTones.length >= 7) {
+          // 대사 입력 탭: tone_data로 전송
+          createInfluencerData.tone_type = "dialogue";
+          createInfluencerData.tone_data = formData.customTones.join("\n");
+          createInfluencerData.tone = ""; // tone은 빈 값으로
+        } else {
+          // 추천 말투 탭: 기존 방식대로 tone 필드 사용
+          createInfluencerData.tone = formData.tone || "";
+        }
+        
         createInfluencerData.system_prompt = formData.systemPrompt; // Use the stored systemPrompt
         createInfluencerData.model_type = formData.modelType;
         // mbti_id를 MBTI 타입 문자열로 변환
@@ -870,7 +900,7 @@ export default function CreateModelPage() {
                 <Tabs value={toneTab} onValueChange={setToneTab} className="w-full mb-4">
                   <TabsList className="grid w-full grid-cols-2">
                     <TabsTrigger value="recommend">추천 말투 선택</TabsTrigger>
-                    <TabsTrigger value="custom">직접 입력</TabsTrigger>
+                    <TabsTrigger value="custom">캐릭터 대사 입력 (7개 이상)</TabsTrigger>
                   </TabsList>
                   <TabsContent value="recommend">
                     <div className="flex gap-2 mb-4">
@@ -946,15 +976,25 @@ export default function CreateModelPage() {
                       <div className="flex items-center gap-2 mb-1">
                         <Lightbulb className="h-4 w-4 text-yellow-600" />
                         <span className="text-sm text-yellow-800">
-                          예시 말투가 많을수록 인플루언서가 학습을 잘합니다.
+                          캐릭터의 실제 대사를 7개 이상 입력해주세요. ({formData.customTones.length}/7개)
                         </span>
                       </div>
+                      {formData.customTones.length < 7 && (
+                        <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg mb-2">
+                          <p className="text-sm text-blue-700">
+                            💡 캐릭터가 실제로 할 법한 대사를 입력하세요. 예:
+                            <br />• "안녕! 오늘도 좋은 하루 보내고 있어?"
+                            <br />• "우와, 이거 정말 대박이다!"
+                            <br />• "음... 그건 좀 어려운 문제네요."
+                          </p>
+                        </div>
+                      )}
                       <div className="flex gap-2">
                         <Input
                           value={customToneInput}
                           onChange={e => setCustomToneInput(e.target.value)}
-                          placeholder="말투 예시를 입력하세요"
-                          onKeyDown={e => { if (e.key === 'Enter') handleAddCustomTone(); }}
+                          placeholder="캐릭터의 대사를 입력하세요"
+                          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddCustomTone(); } }}
                         />
                         <Button type="button" onClick={handleAddCustomTone} disabled={!customToneInput.trim()}>
                           추가
@@ -1165,7 +1205,8 @@ export default function CreateModelPage() {
                 formData.gender === "none" || !formData.gender || // 성별*
                 formData.huggingFaceToken === "none" || !formData.huggingFaceToken || // 허깅페이스 토큰*
                 !formData.personality.trim() || // 성격*
-                (!formData.tone.trim() && formData.customTones.length === 0) || // 말투*
+                // 말투 검증: 추천 말투 탭에서는 tone 필수, 대사 입력 탭에서는 7개 이상 필수
+                (toneTab === "recommend" ? !formData.tone.trim() : formData.customTones.length < 7) ||
                 // 이미지 업로드 필수
                 (!files.imageSamples || files.imageSamples.length === 0)
               } 
