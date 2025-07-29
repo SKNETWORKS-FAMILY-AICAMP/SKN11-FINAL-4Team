@@ -93,7 +93,6 @@ def create_influencer(db: Session, user_id: str, influencer_data: AIInfluencerCr
     style_preset_id = influencer_data.style_preset_id
     if not style_preset_id:
         if influencer_data.personality and influencer_data.tone:
-
             age_group = DataMapper.map_age_to_group(influencer_data.age)
 
             preset_data = StylePresetCreate(
@@ -110,7 +109,7 @@ def create_influencer(db: Session, user_id: str, influencer_data: AIInfluencerCr
                 influencer_description=influencer_data.influencer_description or f"{influencer_data.influencer_name}의 AI 인플루언서",
                 system_prompt=influencer_data.system_prompt,  # 시스템 프롬프트 추가
             )
-
+            print(preset_data)
             style_preset = create_style_preset(db, preset_data)
             style_preset_id = style_preset.style_preset_id
         else:
@@ -194,7 +193,7 @@ def create_influencer(db: Session, user_id: str, influencer_data: AIInfluencerCr
     if influencer_data.tone_type and influencer_data.tone_data:
         logger.info(f"📝 말투 정보 처리: type={influencer_data.tone_type}")
         final_system_prompt = influencer_data.tone_data
-
+    print(f"final_system_prompt: {final_system_prompt}")
     # 인플루언서 생성 데이터 준비
     influencer_create_data = {
         "influencer_id": str(uuid.uuid4()),
@@ -224,6 +223,7 @@ def create_influencer(db: Session, user_id: str, influencer_data: AIInfluencerCr
     try:
         # 인플루언서 생성
         influencer = AIInfluencer(**influencer_create_data)
+        print(f"influencer: {influencer}")
         db.add(influencer)
         db.flush()  # ID 생성을 위해 flush
 
