@@ -46,31 +46,6 @@ export default function IntegrationsTab({
   handleInstagramDisconnect,
   PostImage
 }: IntegrationsTabProps) {
-  // 전체 Instagram 상태 로그 출력
-  console.log('=== Instagram 상태 디버깅 ===');
-  console.log('전체 Instagram Status:', instagramStatus);
-  console.log('연동 상태:', instagramStatus.is_connected);
-  console.log('토큰 만료:', instagramStatus.token_expired);
-  console.log('Instagram Info:', instagramStatus.instagram_info);
-  
-  if (instagramStatus.instagram_info) {
-    console.log('Instagram 통계:', {
-      팔로워: instagramStatus.instagram_info.followers_count || 0,
-      팔로잉: instagramStatus.instagram_info.follows_count || 0,
-      게시물: instagramStatus.instagram_info.media_count || 0
-    });
-    console.log('Instagram Info 상세:', {
-      username: instagramStatus.instagram_info.username,
-      account_type: instagramStatus.instagram_info.account_type,
-      name: instagramStatus.instagram_info.name,
-      biography: instagramStatus.instagram_info.biography,
-      profile_picture_url: instagramStatus.instagram_info.profile_picture_url,
-      website: instagramStatus.instagram_info.website
-    });
-  } else {
-    console.log('Instagram Info가 없습니다.');
-  }
-  console.log('========================');
 
   return (
     <div className="space-y-6">
