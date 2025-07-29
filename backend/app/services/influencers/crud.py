@@ -208,8 +208,11 @@ async def create_influencer(db: Session, user_id: str, influencer_data: AIInflue
                 # 캐릭터 정보 구성
                 character_info = {
                     "name": influencer_data.influencer_name,
+                    "description": influencer_data.influencer_description or "",
                     "age": influencer_data.age,
-                    "personality": influencer_data.personality
+                    "personality": influencer_data.personality,
+                    "mbti": influencer_data.mbti or "MBTI 정보 없음",
+                    "gender": influencer_data.gender or "성별 정보 없음"
                 }
                 
                 # tone_data 분석

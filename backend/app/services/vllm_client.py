@@ -306,71 +306,23 @@ class VLLMClient:
             Dict[str, Any]: 분석 결과 (system_prompt, tone_analysis 포함)
         """
         try:
-            # OpenAI 호환 엔드포인트 사용
-            analysis_prompt = f"""다음 대사들을 분석하여 이 캐릭터의 말투 특징을 파악하고, 적절한 시스템 프롬프트를 생성해주세요.
-
-대사:
-{tone_data}
-
-"""
-            if character_info:
-                analysis_prompt += f"""
-캐릭터 정보:
-- 이름: {character_info.get('name', '알 수 없음')}
-- 나이: {character_info.get('age', '알 수 없음')}
-- 성격: {character_info.get('personality', '알 수 없음')}
-"""
-
-            analysis_prompt += """
-다음 형식으로 응답해주세요:
-
-1. 말투 분석:
-- 어체 특징: (존댓말/반말, 격식/비격식 등)
-- 어미 사용: (특징적인 어미나 종결어)
-- 특수 표현: (자주 사용하는 감탄사, 별명, 특정 단어 등)
-- 감정 표현: (감정 표현 방식의 특징)
-
-2. 시스템 프롬프트:
-당신은 [캐릭터 설명]. [말투 특징 설명]. [대화 스타일 설명].
-
-3. 대표 예시:
-위 대사 중 가장 특징적인 2-3개를 선별해주세요.
-"""
-
-            # vLLM 서버의 직접 생성 엔드포인트 사용
-            system_message = "당신은 캐릭터의 대사를 분석하여 말투 특징을 파악하고 시스템 프롬프트를 생성하는 전문가입니다."
-            
+            # 새로운 대사 분석 엔드포인트 사용
             payload = {
-                "user_message": analysis_prompt,
-                "system_message": system_message,
-                "influencer_name": "분석 도우미",
-                "max_new_tokens": 1000,
-                "temperature": 0.7,
-                "do_sample": True,
-                "use_chat_template": True
+                "tone_data": tone_data,
+                "character_info": character_info
             }
 
-            logger.info("🔍 대사 분석 요청 시작")
-            response = await self.client.post("/generate", json=payload)
+            logger.info("🔍 대사 분석 요청 시작 (OpenAI 기반)")
+            response = await self.client.post("/tone/analyze_tone", json=payload)
             response.raise_for_status()
             
             result = response.json()
-            analysis_text = result.get("generated_text", "")
-            
-            # 분석 결과에서 시스템 프롬프트 추출
-            system_prompt = ""
-            if "2. 시스템 프롬프트:" in analysis_text:
-                prompt_start = analysis_text.find("2. 시스템 프롬프트:") + len("2. 시스템 프롬프트:")
-                prompt_end = analysis_text.find("\n3.", prompt_start)
-                if prompt_end == -1:
-                    prompt_end = len(analysis_text)
-                system_prompt = analysis_text[prompt_start:prompt_end].strip()
             
             logger.info("✅ 대사 분석 완료")
             return {
-                "system_prompt": system_prompt,
-                "tone_analysis": analysis_text,
-                "original_tone_data": tone_data
+                "system_prompt": result.get("system_prompt", ""),
+                "tone_analysis": result.get("tone_analysis", ""),
+                "original_tone_data": result.get("original_tone_data", tone_data)
             }
             
         except Exception as e:
