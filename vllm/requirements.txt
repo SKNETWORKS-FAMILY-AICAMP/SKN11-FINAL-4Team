@@ -98,6 +98,7 @@ langchain-text-splitters==0.3.8
 langsmith==0.4.8
 language-tags==1.2.0
 lark==1.2.2
+sentence-transformers>=2.7.0
 launchpadlib==1.10.16
 lazr.restfulclient==0.14.4
 lazr.uri==1.0.6
@@ -258,3 +259,4 @@ yarl==1.20.1
 zipp==1.0.0
 zstandard==0.23.0
 sentence-transformers
+pymilvus

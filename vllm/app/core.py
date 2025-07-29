@@ -41,6 +41,7 @@ from fastapi import HTTPException
 # 전역 변수
 engine: AsyncLLMEngine = None
 tokenizer = None  # 토크나이저 전역 변수 추가
+embedding_model = None  # 임베딩 모델 전역 변수 추가
 loaded_adapters: Dict[str, Dict[str, Any]] = {}
 finetuning_tasks: Dict[str, Dict[str, Any]] = {}  # 파인튜닝 작업 저장
 finetuning_queue: asyncio.Queue = None # 파인튜닝 작업을 위한 큐
@@ -387,9 +388,62 @@ async def initialize_vllm_engine():
         logger.error(f"❌ 초기화 실패: {e}")
         raise e
 
+
+async def initialize_embedding_model():
+    """임베딩 모델 초기화"""
+    global embedding_model
+    
+    try:
+        logger.info("🔄 임베딩 모델 초기화 시작...")
+        
+        # GPU 디바이스 확인
+        import torch
+        device = get_device()
+        logger.info(f"🖥️ 사용할 디바이스: {device}")
+        
+        # SentenceTransformer 모델 로드
+        from sentence_transformers import SentenceTransformer
+        model_name = os.getenv("EMBEDDING_MODEL_NAME", "BAAI/bge-m3")
+        
+        logger.info(f"📋 임베딩 모델 로드 중: {model_name}")
+        embedding_model = SentenceTransformer(model_name, device=device)
+        
+        # 모델을 GPU로 이동
+        embedding_model = embedding_model.to(device)
+        logger.info(f"✅ 임베딩 모델 GPU 로드 완료: {device}")
+        
+        # 테스트 임베딩 생성
+        test_texts = ["테스트 문장입니다."]
+        test_embeddings = embedding_model.encode(test_texts, convert_to_tensor=True)
+        logger.info(f"✅ 임베딩 모델 테스트 완료: {test_embeddings.shape}")
+        
+        logger.info("✅ 임베딩 모델 초기화 완료")
+        
+    except Exception as e:
+        logger.error(f"❌ 임베딩 모델 초기화 실패: {e}")
+        raise
+
+
+def get_device():
+    """GPU 디바이스 반환"""
+    import torch
+    if torch.cuda.is_available():
+        return "cuda:0"
+    else:
+        return "cpu"
+
+
+def get_embedding_model():
+    """전역 임베딩 모델 반환"""
+    global embedding_model
+    if embedding_model is None:
+        raise RuntimeError("임베딩 모델이 초기화되지 않았습니다.")
+    return embedding_model
+
+
 async def startup_event():
     """서버 시작 시 비동기 엔진 초기화 및 파인튜닝 워커 시작"""
-    global finetuning_queue
+    global finetuning_queue, embedding_model
     
     try:
         await initialize_vllm_engine()
@@ -397,6 +451,14 @@ async def startup_event():
     except Exception as e:
         logger.error(f"❌ vLLM 엔진 초기화 실패: {e}")
         logger.warning("⚠️ vLLM 엔진 없이 파인튜닝 큐만 초기화합니다")
+
+    # 임베딩 모델 초기화
+    try:
+        await initialize_embedding_model()
+        logger.info("✅ 임베딩 모델 초기화 완료")
+    except Exception as e:
+        logger.error(f"❌ 임베딩 모델 초기화 실패: {e}")
+        logger.warning("⚠️ 임베딩 모델 없이 계속 진행합니다")
 
     # vLLM 엔진 초기화 실패와 관계없이 파인튜닝 큐는 초기화
     logger.info("🔄 파인튜닝 큐 초기화 중...")

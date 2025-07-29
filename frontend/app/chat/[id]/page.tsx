@@ -6,19 +6,23 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent } from "@/components/ui/card"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { tokenUtils } from "@/lib/auth"
 import { ModelService } from "@/lib/services/model.service"
 import MCPService, { MCPChatResponse } from '@/lib/services/mcp.service'
+import { RAGService, RAGChatRequest } from '@/lib/services/rag.service'
 
 import {
   Send,
-  Bot,
-  User,
-  MessageSquare,
   Loader2,
-  ChevronDown,
+  AlertCircle,
+  CheckCircle,
+  XCircle,
   ChevronUp,
+  ChevronDown,
+  MessageSquare,
+  User,
+  Bot,
 } from "lucide-react"
 
 interface Message {
@@ -37,6 +41,7 @@ interface ChatModel {
   chatbot_option: boolean
   influencer_model_repo: string // 백엔드에서 자동으로 설정됨
   group_id: string
+  image_url?: string // 인플루언서 이미지 URL
 }
 
 export default function ChatPage() {
@@ -66,7 +71,8 @@ export default function ChatPage() {
         learning_status: data.learning_status,
         chatbot_option: data.chatbot_option,
         influencer_model_repo: data.influencer_model_repo || '',
-        group_id: String(data.group_id || '')
+        group_id: String(data.group_id || ''),
+        image_url: data.image_url || undefined, // 올바른 필드명 사용
       })
     } catch (error) {
       // console.error("Error loading model data:", error)
@@ -164,6 +170,12 @@ export default function ChatPage() {
             sender: "bot",
             timestamp: new Date(),
           }]);
+        } else if (data.type === "history") {
+          // 히스토리 응답 처리 - 백그라운드에서만 관리
+          console.log("✅ 히스토리 로드 성공:", data.data);
+        } else if (data.type === "history_cleared") {
+          // 히스토리 초기화 응답 처리 - 백그라운드에서만 관리
+          console.log("✅ 히스토리 초기화 성공");
         } else {
           // 기존 일반 응답 처리 (하위 호환성)
           setIsLoading(false);
@@ -224,80 +236,138 @@ export default function ChatPage() {
     setInputMessage("");
     setIsLoading(true);
 
-    // 1. MCP REST 우선 시도
-    let mcpResult: string | null = null;
     try {
-      const mcpResponse: MCPChatResponse = await MCPService.processMessage({ message: currentMessage, influencer_id: model?.id || '' });
-      if (mcpResponse && mcpResponse.response && mcpResponse.response.trim()) {
-        mcpResult = mcpResponse.response.trim();
-      }
-    } catch (error: any) {
-      // MCP 오류는 fallback으로 처리
-    }
-
-    // 2. MCP 결과가 있으면, 그 결과를 LLM(WebSocket) 프롬프트로 넣어 답변 생성
-    if (mcpResult && connectionStatus === 'connected' && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      // 1단계: RAG 분기처리 (문서 검색)
+      let ragResult: string | null = null;
       try {
-        // MCP 결과를 LLM에 프롬프트로 넣어 자연스러운 답변 생성 요청
-        const prompt = `사용자 질문: ${currentMessage}\n도구 결과: ${mcpResult}\n위 정보를 바탕으로, 친근하고 자연스럽게 답변해 주세요.`;
-        wsRef.current.send(prompt);
-        // 타임아웃 설정 (30초)
-        timeoutRef.current = setTimeout(() => {
+        const ragRequest: RAGChatRequest = {
+          message: currentMessage,  // query를 message로 변경
+          include_sources: true
+        };
+        
+        const ragResponse = await RAGService.chat(ragRequest);
+        if (ragResponse && ragResponse.response && ragResponse.response.trim()) {
+          ragResult = ragResponse.response.trim();
+          console.log("✅ RAG 처리 성공:", ragResult.substring(0, 100) + "...");
+        } else {
+          console.log("❌ RAG 처리 실패 또는 문서 없음, MCP로 전환");
+        }
+      } catch (error: any) {
+        console.log("❌ RAG 처리 중 오류:", error.message);
+        // RAG 오류는 MCP로 fallback
+      }
+
+      // 2단계: RAG 결과가 있으면 SLLM으로 자연스러운 답변 생성
+      if (ragResult && connectionStatus === 'connected' && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        try {
+          const prompt = `사용자 질문: ${currentMessage}\n참고 문서 내용: ${ragResult}\n위 문서 내용을 바탕으로 답변해 주세요.`;
+          wsRef.current.send(prompt);
+          
+          // 타임아웃 설정 (30초)
+          timeoutRef.current = setTimeout(() => {
+            setIsLoading(false);
+            setMessages(prev => [...prev, {
+              id: (Date.now() + 1).toString(),
+              content: "응답 시간이 초과되었습니다. 다시 시도해주세요.",
+              sender: "bot",
+              timestamp: new Date(),
+            }]);
+          }, 30000);
+          return;
+        } catch (error) {
+          console.error("RAG 결과 처리 중 오류:", error);
+          // RAG 결과 처리 실패 시 MCP로 fallback
+        }
+      }
+
+      // 3단계: MCP 분기처리 (도구 사용)
+      let mcpResult: string | null = null;
+      try {
+        const mcpResponse: MCPChatResponse = await MCPService.processMessage({ 
+          message: currentMessage, 
+          influencer_id: model?.id || '' 
+        });
+        if (mcpResponse && mcpResponse.response && mcpResponse.response.trim()) {
+          mcpResult = mcpResponse.response.trim();
+          console.log("✅ MCP 처리 성공:", mcpResult.substring(0, 100) + "...");
+        } else {
+          console.log("❌ MCP 처리 실패 또는 도구 불필요, SLLM으로 전환");
+        }
+      } catch (error: any) {
+        console.log("❌ MCP 처리 중 오류:", error.message);
+        // MCP 오류는 SLLM으로 fallback
+      }
+
+      // 4단계: MCP 결과가 있으면 SLLM으로 자연스러운 답변 생성
+      if (mcpResult && connectionStatus === 'connected' && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        try {
+          const prompt = `사용자 질문: ${currentMessage}\n도구 결과: ${mcpResult}\n위 정보를 바탕으로 답변해 주세요.`;
+          wsRef.current.send(prompt);
+          
+          // 타임아웃 설정 (30초)
+          timeoutRef.current = setTimeout(() => {
+            setIsLoading(false);
+            setMessages(prev => [...prev, {
+              id: (Date.now() + 1).toString(),
+              content: "응답 시간이 초과되었습니다. 다시 시도해주세요.",
+              sender: "bot",
+              timestamp: new Date(),
+            }]);
+          }, 30000);
+          return;
+        } catch (error) {
+          console.error("MCP 결과 처리 중 오류:", error);
+          // MCP 결과 처리 실패 시 SLLM으로 fallback
+        }
+      }
+
+      // 5단계: SLLM fallback (일반 대화)
+      if (connectionStatus === 'connected' && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        try {
+          wsRef.current.send(currentMessage);
+          
+          // 타임아웃 설정 (30초)
+          timeoutRef.current = setTimeout(() => {
+            setIsLoading(false);
+            setMessages(prev => [...prev, {
+              id: (Date.now() + 1).toString(),
+              content: "응답 시간이 초과되었습니다. 다시 시도해주세요.",
+              sender: "bot",
+              timestamp: new Date(),
+            }]);
+          }, 30000);
+        } catch (error) {
+          console.error("SLLM 처리 중 오류:", error);
           setIsLoading(false);
           setMessages(prev => [...prev, {
             id: (Date.now() + 1).toString(),
-            content: "응답 시간이 초과되었습니다. 다시 시도해주세요.",
+            content: "메시지 전송에 실패했습니다. 다시 시도해주세요.",
             sender: "bot",
             timestamp: new Date(),
           }]);
-        }, 30000);
-        return;
-      } catch (error) {
-        setIsLoading(false);
-        setMessages(prev => [...prev, {
-          id: (Date.now() + 1).toString(),
-          content: "메시지 전송에 실패했습니다. 다시 시도해주세요.",
-          sender: "bot",
-          timestamp: new Date(),
-        }]);
+        }
         return;
       }
-    }
 
-    // 3. MCP 결과가 없으면 WebSocket LLM fallback (기존 질문 그대로)
-    if (connectionStatus === 'connected' && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      try {
-        wsRef.current.send(currentMessage);
-        // 타임아웃 설정 (30초)
-        timeoutRef.current = setTimeout(() => {
-          setIsLoading(false);
-          setMessages(prev => [...prev, {
-            id: (Date.now() + 1).toString(),
-            content: "응답 시간이 초과되었습니다. 다시 시도해주세요.",
-            sender: "bot",
-            timestamp: new Date(),
-          }]);
-        }, 30000);
-      } catch (error) {
-        setIsLoading(false);
-        setMessages(prev => [...prev, {
-          id: (Date.now() + 1).toString(),
-          content: "메시지 전송에 실패했습니다. 다시 시도해주세요.",
-          sender: "bot",
-          timestamp: new Date(),
-        }]);
-      }
-      return;
-    }
+      // 6단계: WebSocket 연결 불가
+      setIsLoading(false);
+      setMessages(prev => [...prev, {
+        id: (Date.now() + 1).toString(),
+        content: "서버와의 연결이 끊어졌습니다. 재연결 버튼을 눌러주세요.",
+        sender: "bot",
+        timestamp: new Date(),
+      }]);
 
-    // 4. WebSocket도 불가하면 연결 오류 메시지
-    setIsLoading(false);
-    setMessages(prev => [...prev, {
-      id: (Date.now() + 1).toString(),
-      content: "서버와의 연결이 끊어졌습니다. 재연결 버튼을 눌러주세요.",
-      sender: "bot",
-      timestamp: new Date(),
-    }]);
+    } catch (error) {
+      console.error("메시지 처리 중 오류:", error);
+      setIsLoading(false);
+      setMessages(prev => [...prev, {
+        id: (Date.now() + 1).toString(),
+        content: "메시지 처리 중 오류가 발생했습니다. 다시 시도해주세요.",
+        sender: "bot",
+        timestamp: new Date(),
+      }]);
+    }
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -368,9 +438,20 @@ export default function ChatPage() {
               <div className="flex items-center justify-between min-w-0">
                 <div className="flex items-center space-x-3 min-w-0 flex-1">
                   <Avatar className="h-10 w-10 flex-shrink-0">
-                    <AvatarFallback className="bg-green-500 text-white">
-                      <Bot className="h-5 w-5" />
-                    </AvatarFallback>
+                    {model.image_url ? (
+                      <AvatarImage src={model.image_url} alt={model.name} />
+                    ) : (
+                      <AvatarFallback 
+                        className={`text-white font-semibold ${
+                          model.name.length % 4 === 0 ? 'bg-gradient-to-br from-purple-500 to-pink-500' :
+                          model.name.length % 4 === 1 ? 'bg-gradient-to-br from-blue-500 to-cyan-500' :
+                          model.name.length % 4 === 2 ? 'bg-gradient-to-br from-green-500 to-emerald-500' :
+                          'bg-gradient-to-br from-orange-500 to-red-500'
+                        }`}
+                      >
+                        {model.name.charAt(0).toUpperCase()}
+                      </AvatarFallback>
+                    )}
                   </Avatar>
                   <div className="min-w-0 flex-1">
                     <h3 className="font-semibold text-gray-900 truncate">{model.name}</h3>
@@ -399,15 +480,16 @@ export default function ChatPage() {
                 </div>
                 <div className="flex items-center space-x-2 flex-shrink-0 ml-4">
                   {/* 연결 상태 표시 */}
-                  <div className="flex items-center space-x-1">
-                    <div className={`w-2 h-2 rounded-full flex-shrink-0 ${connectionStatus === 'connected' ? 'bg-green-500' :
+                  <div className="flex items-center space-x-2">
+                    <div className={`w-2 h-2 rounded-full ${
+                      connectionStatus === 'connected' ? 'bg-green-500' :
                       connectionStatus === 'connecting' ? 'bg-yellow-500' :
-                        connectionStatus === 'error' ? 'bg-red-500' : 'bg-gray-400'
-                      }`} />
-                    <span className="text-xs text-gray-600 whitespace-nowrap">
+                      connectionStatus === 'error' ? 'bg-red-500' : 'bg-gray-400'
+                    }`} />
+                    <span className="text-xs text-gray-500">
                       {connectionStatus === 'connected' ? '연결됨' :
-                        connectionStatus === 'connecting' ? '연결 중' :
-                          connectionStatus === 'error' ? '연결 오류' : '연결 끊김'}
+                       connectionStatus === 'connecting' ? '연결 중' :
+                       connectionStatus === 'error' ? '오류' : '연결 끊김'}
                     </span>
                   </div>
                 </div>
@@ -415,63 +497,42 @@ export default function ChatPage() {
             </div>
 
             {/* 메시지 영역 */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-4 min-h-0">
-              {messages.length === 0 ? (
-                <div className="text-center py-12">
-                  <MessageSquare className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-                  <p className="text-gray-500 text-lg">대화를 시작해보세요!</p>
-                  <p className="text-gray-400 mt-2">AI 인플루언서와 자유롭게 대화할 수 있습니다.</p>
-                </div>
-              ) : (
-                messages.map((message) => (
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {messages.map((message) => (
+                <div
+                  key={message.id}
+                  className={`flex ${
+                    message.sender === "user" ? "justify-end" : "justify-start"
+                  }`}
+                >
                   <div
-                    key={message.id}
-                    className={`flex ${message.sender === "user" ? "justify-end" : "justify-start"}`}
-                  >
-                    <div className={`flex items-start space-x-3 max-w-[70%] ${message.sender === "user" ? "flex-row-reverse space-x-reverse" : ""}`}>
-                      <Avatar className="h-8 w-8">
-                        <AvatarFallback className={message.sender === "user" ? "bg-blue-500 text-white" : "bg-green-500 text-white"}>
-                          {message.sender === "user" ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
-                        </AvatarFallback>
-                      </Avatar>
-
-                      <div className={`rounded-lg px-4 py-2 ${message.sender === "user"
+                    className={`max-w-[70%] rounded-lg px-4 py-2 ${
+                      message.sender === "user"
                         ? "bg-blue-500 text-white"
                         : "bg-gray-100 text-gray-900"
-
+                    }`}
+                  >
+                    <div className="flex items-start space-x-2">
+                      <Avatar className="h-6 w-6 flex-shrink-0">
+                        <AvatarFallback className={`text-xs ${
+                          message.sender === "user" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700"
                         }`}>
+                          {message.sender === "user" ? <User className="h-3 w-3" /> : <Bot className="h-3 w-3" />}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="flex-1">
                         <p className="text-sm whitespace-pre-wrap">{message.content}</p>
-                        <p className={`text-xs mt-1 ${message.sender === "user" ? "text-blue-100" : "text-gray-500"
-                          }`}>
-                          {message.timestamp.toLocaleTimeString('ko-KR', {
-                            hour: '2-digit',
-                            minute: '2-digit'
-                          })}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                ))
-              )}
-
-              {isLoading && (
-                <div className="flex justify-start">
-                  <div className="flex items-start space-x-3 max-w-[70%]">
-                    <Avatar className="h-8 w-8">
-                      <AvatarFallback className="bg-green-500 text-white">
-                        <Bot className="h-4 w-4" />
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="bg-gray-100 rounded-lg px-4 py-2">
-                      <div className="flex items-center space-x-2">
-                        <Loader2 className="h-4 w-4 animate-spin text-gray-500" />
-                        <span className="text-sm text-gray-500">답변을 생성하고 있습니다...</span>
+                        {message.isStreaming && (
+                          <div className="flex items-center mt-1">
+                            <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                            <span className="text-xs text-gray-500">생성 중...</span>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
                 </div>
-              )}
-
+              ))}
               <div ref={messagesEndRef} />
             </div>
 
