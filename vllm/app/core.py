@@ -3,9 +3,8 @@ import os
 os.environ["VLLM_USE_V1"] = "0" # vLLM v1 어텐션 백엔드 비활성화
 os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"  # 멀티프로세스 방식 변경
 
-# GPU 설정은 환경 변수로 제어 (CUDA_VISIBLE_DEVICES가 없을 때만 기본값 설정)
-if "CUDA_VISIBLE_DEVICES" not in os.environ:
-    os.environ["CUDA_VISIBLE_DEVICES"] = os.getenv("VLLM_GPU_ID", "0")
+# GPU 설정은 각 프로세스에서 개별적으로 처리
+# 메인 프로세스에서는 CUDA_VISIBLE_DEVICES를 설정하지 않음
 import asyncio
 import logging
 import time
@@ -298,10 +297,8 @@ async def restart_engine():
     global engine, tokenizer
     logger.info("🔄 엔진 재시작 시작...")
     
-    # GPU 설정 유지 (이미 설정된 경우 유지, 아니면 기본값 사용)
-    if 'CUDA_VISIBLE_DEVICES' not in os.environ:
-        os.environ['CUDA_VISIBLE_DEVICES'] = os.getenv('VLLM_GPU_ID', '0')
-    logger.info(f"🖥️ CUDA_VISIBLE_DEVICES={os.environ['CUDA_VISIBLE_DEVICES']} 설정 완료")
+    # GPU 설정은 vLLM 엔진 초기화 시 처리
+    logger.info("🖥️ vLLM은 엔진 초기화 시 GPU를 자동 선택합니다")
     
     # 기존 엔진 종료
     if engine is not None:
@@ -391,7 +388,7 @@ async def initialize_vllm_engine():
                 max_num_batched_tokens=8192,
                 disable_log_requests=True,
                 enforce_eager=True,  # CUDA 그래프 비활성화로 디바이스 문제 방지
-                device="cuda:0",  # 명시적으로 cuda:0 디바이스 지정
+                device=f"cuda:{vllm_gpu_id}",  # 환경변수에 따라 GPU 지정
                 disable_custom_all_reduce=True,  # 다중 GPU 통신 비활성화
             )
             
