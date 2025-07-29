@@ -432,7 +432,7 @@ export default function CreateModelPage() {
         successMessage += `• 이미지: 파일 업로드\n`
       }
 
-      successMessage += `\n다음 작업이 백그라운드에서 자동으로 진행됩니다:\n• 2,000개 QA 쌍 생성\n• S3에 데이터 업로드\n• QLoRA 4비트 양자화 파인튜닝\n• Hugging Face에 모델 업로드\n\n완료 시 이메일과 웹 알림을 받으실 수 있습니다.`
+      successMessage += `\n인플루언서 생성 완료 시 이메일과 웹 알림을 받으실 수 있습니다.`
 
       toast({
         title: "생성 성공",
