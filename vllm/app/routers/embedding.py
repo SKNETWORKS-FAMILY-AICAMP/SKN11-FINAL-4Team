@@ -336,12 +336,13 @@ async def embedding_health_check():
     except Exception as e:
         return {"status": "error", "message": f"임베딩 모델 상태 확인 실패: {str(e)}"}
 
-@router.on_event("startup")
-async def startup_event():
-    """서버 시작 시 임베딩 모델 초기화"""
-    logger.info("🔄 임베딩 모델 멀티프로세싱 초기화 시작...")
-    initialize_embedding_model()
-    logger.info("✅ 임베딩 모델 멀티프로세싱 초기화 완료")
+# startup 이벤트 제거 - main.py에서 명시적으로 초기화
+# @router.on_event("startup")
+# async def startup_event():
+#     """서버 시작 시 임베딩 모델 초기화"""
+#     logger.info("🔄 임베딩 모델 멀티프로세싱 초기화 시작...")
+#     initialize_embedding_model()
+#     logger.info("✅ 임베딩 모델 멀티프로세싱 초기화 완료")
 
 @router.on_event("shutdown")
 async def shutdown_event():
