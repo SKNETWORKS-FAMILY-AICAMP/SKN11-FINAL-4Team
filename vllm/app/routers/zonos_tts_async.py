@@ -284,12 +284,21 @@ def zonos_worker_process(request_queue: Queue, response_queue: Queue):
             if request is None:  # 종료 신호
                 break
             
-            task_type = request['type']
-            task_id = request['task_id']
+            task_type = request.get('type', 'unknown')
+            task_id = request.get('task_id', 'unknown')
+            
+            logger.info(f"🔄 워커가 작업을 처리합니다 - Type: {task_type}, Task ID: {task_id}")
+            logger.debug(f"요청 내용: {list(request.keys())}")
             
             try:
                 if task_type == 'generate_tts':
                     # TTS 생성
+                    # 필수 필드 검증
+                    required_fields = ['text', 'language', 'speaking_rate', 'pitch_std', 'cfg_scale', 'emotion', 'output_path']
+                    missing_fields = [field for field in required_fields if field not in request]
+                    if missing_fields:
+                        raise ValueError(f"필수 필드가 누락되었습니다: {missing_fields}")
+                    
                     result = generate_tts_in_process(
                         zonos_model, device,
                         request['text'],
@@ -317,6 +326,12 @@ def zonos_worker_process(request_queue: Queue, response_queue: Queue):
                     
                 elif task_type == 'generate_tts_with_voice':
                     # 음성 클로닝 TTS
+                    # 필수 필드 검증
+                    required_fields = ['voice_path', 'text', 'language', 'speaking_rate', 'pitch_std', 'cfg_scale', 'emotion', 'output_path']
+                    missing_fields = [field for field in required_fields if field not in request]
+                    if missing_fields:
+                        raise ValueError(f"필수 필드가 누락되었습니다: {missing_fields}")
+                    
                     voice_path = request['voice_path']
                     
                     # 스피커 임베딩 생성
@@ -352,6 +367,12 @@ def zonos_worker_process(request_queue: Queue, response_queue: Queue):
                     
                 elif task_type == 'generate_streaming_tts':
                     # 스트리밍 TTS 생성
+                    # 필수 필드 검증
+                    required_fields = ['texts', 'language', 'speaking_rate', 'pitch_std', 'cfg_scale', 'emotion']
+                    missing_fields = [field for field in required_fields if field not in request]
+                    if missing_fields:
+                        raise ValueError(f"필수 필드가 누락되었습니다: {missing_fields}")
+                    
                     chunks = generate_streaming_tts_in_process(
                         zonos_model, device,
                         request['texts'],
@@ -374,6 +395,12 @@ def zonos_worker_process(request_queue: Queue, response_queue: Queue):
                     
                 elif task_type == 'generate_streaming_tts_with_voice':
                     # 음성 클로닝 스트리밍 TTS
+                    # 필수 필드 검증
+                    required_fields = ['voice_path', 'texts', 'language', 'speaking_rate', 'pitch_std', 'cfg_scale', 'emotion']
+                    missing_fields = [field for field in required_fields if field not in request]
+                    if missing_fields:
+                        raise ValueError(f"필수 필드가 누락되었습니다: {missing_fields}")
+                    
                     voice_path = request['voice_path']
                     
                     # 스피커 임베딩 생성
@@ -401,6 +428,9 @@ def zonos_worker_process(request_queue: Queue, response_queue: Queue):
                         'chunks': chunks,
                         'sample_rate': zonos_model.autoencoder.sampling_rate
                     })
+                
+                else:
+                    raise ValueError(f"알 수 없는 작업 유형: {task_type}")
                     
             except Exception as e:
                 logger.error(f"작업 처리 실패 (task_id: {task_id}): {e}")
@@ -501,11 +531,26 @@ def initialize_zonos_multiprocessing():
     
     if zonos_process is not None and zonos_process.is_alive():
         logger.info("Zonos 멀티프로세싱이 이미 실행 중입니다.")
+        # 기존 큐 비우기
+        while not request_queue.empty():
+            try:
+                request_queue.get_nowait()
+            except:
+                break
+        while not response_queue.empty():
+            try:
+                response_queue.get_nowait()
+            except:
+                break
         return True
     
     try:
         # 멀티프로세싱 방식을 spawn으로 설정 (CUDA 컨텍스트 격리)
-        mp.set_start_method('spawn', force=True)
+        try:
+            mp.set_start_method('spawn', force=True)
+        except RuntimeError:
+            # 이미 설정된 경우 무시
+            pass
         
         # 큐 생성
         request_queue = mp.Queue(maxsize=100)
