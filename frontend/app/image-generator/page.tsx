@@ -593,7 +593,7 @@ export default function ImageGeneratorPage() {
 
       const data = await galleryService.getImages({
         page: page,
-        page_size: 10,
+        page_size: 12,
         team_id: teamId
       })
 

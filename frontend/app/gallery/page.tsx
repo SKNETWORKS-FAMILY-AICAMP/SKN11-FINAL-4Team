@@ -34,7 +34,7 @@ export default function GalleryPage() {
   const [currentPage, setCurrentPage] = useState(1)
   const [pagination, setPagination] = useState<PaginationInfo>({
     page: 1,
-    page_size: 10,
+    page_size: 12,
     total_count: 0,
     total_pages: 0
   })
@@ -69,7 +69,7 @@ export default function GalleryPage() {
 
       const params = new URLSearchParams({
         page: page.toString(),
-        page_size: '10',
+        page_size: '12',
         team_id: teamId.toString()
       })
 
@@ -84,7 +84,7 @@ export default function GalleryPage() {
         setImages(data.images || [])
         setPagination(data.pagination || {
           page: 1,
-          page_size: 10,
+          page_size: 12,
           total_count: 0,
           total_pages: 0
         })
