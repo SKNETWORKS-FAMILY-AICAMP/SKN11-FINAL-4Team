@@ -76,7 +76,7 @@ function InstagramCallbackContent() {
         }, 1000)
         
       } catch (error) {
-        console.error('Instagram 콜백 처리 오류:', error)
+        // console.error('Instagram 콜백 처리 오류:', error)
         setStatus('error')
         setMessage('처리 중 오류가 발생했습니다.')
         

@@ -56,6 +56,7 @@ class APIClient {
         throw new APIError('No authentication token found', 401)
       }
       headers.Authorization = `Bearer ${token}`
+      console.log('🔑 인증 토큰 추가됨:', token.substring(0, 20) + '...')
     }
 
     // 타임아웃 설정
@@ -167,6 +168,64 @@ class APIClient {
 
   async delete<T>(endpoint: string, options?: RequestOptions): Promise<T> {
     return this.request<T>(endpoint, { ...options, method: 'DELETE' })
+  }
+
+  // 이미지 다운로드용 메서드 (Blob 반환)
+  async downloadImage(endpoint: string, options?: RequestOptions): Promise<Blob> {
+    const {
+      requireAuth = true,
+      timeout = 30000,
+      headers: customHeaders = {},
+      ...fetchOptions
+    } = options || {}
+
+    const url = `${this.baseURL}${endpoint}`
+    
+    const headers: Record<string, string> = {
+      ...(customHeaders as Record<string, string>)
+    }
+
+    if (requireAuth) {
+      const token = tokenUtils.getToken()
+      if (!token) {
+        throw new APIError('No authentication token found', 401)
+      }
+      headers.Authorization = `Bearer ${token}`
+    }
+
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), timeout)
+
+    try {
+      const response = await fetch(url, {
+        ...fetchOptions,
+        headers,
+        signal: controller.signal
+      })
+
+      clearTimeout(timeoutId)
+
+      if (!response.ok) {
+        throw new APIError(`HTTP ${response.status}`, response.status)
+      }
+
+      return await response.blob()
+    } catch (error) {
+      clearTimeout(timeoutId)
+
+      if (error instanceof APIError) {
+        throw error
+      }
+
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        throw new APIError('Request timeout', 408)
+      }
+
+      throw new APIError(
+        error instanceof Error ? error.message : 'Network error',
+        0
+      )
+    }
   }
 
   // 파일 업로드용 메서드 (개선된 버전)

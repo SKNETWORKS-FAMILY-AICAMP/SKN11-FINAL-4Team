@@ -40,3 +40,10 @@ export type {
   Team,
   TeamListResponse
 } from './permission.service'
+
+// RunPod Service
+export { RunPodService } from './runpod.service'
+export type {
+  RunPodCredits,
+  RunPodApiResponse
+} from './runpod.service'

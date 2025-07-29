@@ -99,14 +99,12 @@ class PromptOptimizationService:
             logger.info(f"🔄 Flux 프롬프트 최적화 시작: '{user_prompt[:50]}...'")
             logger.info(f"📝 선택된 스타일: {selected_styles}")
             
-            # 스타일 키워드 수집
-            style_keywords = self._collect_flux_style_keywords(selected_styles or {})
             
             # OpenAI를 통한 프롬프트 최적화
-            optimized_prompt = await self._optimize_flux_with_openai(user_prompt, style_keywords)
+            optimized_prompt = await self._optimize_flux_with_openai(user_prompt, selected_styles)
             
             # 최종 프롬프트 구성
-            final_prompt = self._build_flux_final_prompt(optimized_prompt, style_keywords)
+            final_prompt = self._build_flux_final_prompt(optimized_prompt, selected_styles)
             
             logger.info(f"✅ Flux 프롬프트 최적화 완료: '{final_prompt[:50]}...'")
             return final_prompt
@@ -280,6 +278,71 @@ class PromptOptimizationService:
             "photograph": "low quality, blurry, distorted, deformed, ugly, bad anatomy, worst quality, low resolution, cartoon, anime, painting, artistic",
         }
     
+    async def optimize_image_modification_prompt(self, edit_instruction: str) -> str:
+        """이미지 수정용 프롬프트 최적화"""
+        try:
+            logger.info(f"🔄 이미지 수정 프롬프트 최적화 시작: '{edit_instruction[:50]}...'")
+            
+            # 한글이 포함되어 있으면 번역 + 최적화
+            is_korean = self._is_korean(edit_instruction)
+            
+            system_prompt = """당신은 ComfyUI를 위한 전문 프롬프트 엔지니어입니다.
+사용자의 입력을 받아 고품질 이미지 수정을 위한 최적화된 영문 프롬프트를 생성하세요.
+
+요구사항:
+1. 입력이 한글이면 영어로 번역
+2. 구체적이고 시각적인 묘사 포함
+3. 명확한 동작 단어 사용 (make, change, transform, modify, add, remove)
+4. 관련 스타일과 품질 설명 포함
+5. 프롬프트는 간결하지만 상세하게 작성
+
+응답 형식:
+{
+  "optimized_instruction": "Clear, detailed English instruction for image modification"
+}
+
+예시:
+Input: "머리를 파란색으로 바꿔줘"
+Output: {"optimized_instruction": "Change the hair color to bright blue, maintaining natural hair texture and shine"}
+
+Input: "배경을 해변으로 변경"
+Output: {"optimized_instruction": "Replace the background with a tropical beach scene, golden sand and blue ocean"}"""
+
+            user_message = f"Optimize this image editing instruction: {edit_instruction}"
+            
+            response = openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_message},
+                ],
+                temperature=0.3,
+                max_tokens=200,
+            )
+            
+            result_text = response.choices[0].message.content.strip()
+            
+            # JSON 파싱 시도
+            try:
+                result_json = json.loads(result_text)
+                optimized_instruction = result_json.get("optimized_instruction", edit_instruction)
+                logger.info(f"✅ 이미지 수정 프롬프트 최적화 성공")
+                logger.info(f"   원본: {edit_instruction}")
+                logger.info(f"   최적화: {optimized_instruction}")
+                return optimized_instruction
+            except json.JSONDecodeError:
+                logger.warning("JSON 파싱 실패, 원본 텍스트 반환")
+                # JSON 파싱 실패 시 원본 텍스트에서 유용한 부분 추출
+                if ":" in result_text:
+                    optimized = result_text.split(":", 1)[1].strip().strip('"')
+                    return optimized
+                return result_text
+                
+        except Exception as e:
+            logger.error(f"이미지 수정 프롬프트 최적화 실패: {e}")
+            # 실패 시 원본 반환
+            return edit_instruction
+    
     def _collect_flux_style_keywords(self, selected_styles: Dict[str, str]) -> Dict[str, str]:
         """Flux용 스타일 키워드 수집"""
         
@@ -310,6 +373,12 @@ class PromptOptimizationService:
                 "차가운": "cool color temperature, crisp lighting, blue tones",
                 "신비로운": "mysterious atmosphere, soft lighting, ethereal mood",
                 "역동적": "dynamic composition, energetic movement, action scene"
+            },
+            "인종스타일": {
+                "동양인": "asian features, korean beauty, east asian aesthetic",
+                "서양인": "western features, european aesthetic, caucasian appearance",
+                "혼합": "mixed features, diverse appearance, global aesthetic",
+                "기본": ""
             }
         }
         
@@ -396,7 +465,7 @@ Return ONLY the optimized English prompt for Flux.1-dev, no explanations or quot
             logger.error(f"❌ OpenAI API 호출 실패: {e}")
             raise
     
-    def _build_flux_final_prompt(self, optimized_prompt: str, style_keywords: Dict[str, str]) -> str:
+    def _build_flux_final_prompt(self, optimized_prompt: str, selected_styles: Dict[str, str]) -> str:
         """Flux용 최종 프롬프트 구성"""
         
         # 기본 프롬프트
@@ -405,7 +474,7 @@ Return ONLY the optimized English prompt for Flux.1-dev, no explanations or quot
         # 스타일 키워드 추가 (중복 제거)
         existing_keywords = optimized_prompt.lower()
         
-        for category, keywords in style_keywords.items():
+        for category, keywords in selected_styles.items():
             # 이미 포함된 키워드는 제외
             unique_keywords = []
             for keyword in keywords.split(", "):

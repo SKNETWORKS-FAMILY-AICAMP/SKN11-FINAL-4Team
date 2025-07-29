@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { CheckCircle, AlertCircle, Info, ExternalLink } from "lucide-react"
+import { useToast } from "@/hooks/use-toast"
 
 interface DebugInfo {
   hasAppId: boolean
@@ -17,6 +18,7 @@ interface DebugInfo {
 }
 
 export function InstagramDebugHelper() {
+  const { toast } = useToast()
   const [debugInfo, setDebugInfo] = useState<DebugInfo | null>(null)
   const [isChecking, setIsChecking] = useState(false)
 
@@ -45,9 +47,18 @@ export function InstagramDebugHelper() {
     const testPopup = window.open('about:blank', 'test-popup', 'width=400,height=300')
     if (testPopup) {
       setTimeout(() => testPopup.close(), 2000)
-      alert('팝업 테스트 성공! 팝업이 정상적으로 열렸습니다.')
+      toast({
+        title: "팝업 테스트 성공",
+        description: '팝업이 정상적으로 열렸습니다.',
+        duration: 3000,
+      })
     } else {
-      alert('팝업 테스트 실패! 브라우저가 팝업을 차단했습니다.')
+      toast({
+        title: "팝업 테스트 실패",
+        description: '브라우저가 팝업을 차단했습니다.',
+        variant: "destructive",
+        duration: 3000,
+      })
     }
   }
 

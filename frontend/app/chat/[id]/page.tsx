@@ -75,7 +75,7 @@ export default function ChatPage() {
         image_url: data.image_url || undefined, // 올바른 필드명 사용
       })
     } catch (error) {
-      console.error("Error loading model data:", error)
+      // console.error("Error loading model data:", error)
     } finally {
       setIsModelLoading(false)
     }
@@ -98,7 +98,7 @@ export default function ChatPage() {
     wsRef.current = ws;
 
     ws.onopen = () => {
-      console.log("WebSocket 연결 성공");
+      // console.log("WebSocket 연결 성공");
       setConnectionStatus('connected');
     };
 
@@ -199,7 +199,7 @@ export default function ChatPage() {
     };
 
     ws.onerror = (e) => {
-      console.error("WebSocket 에러:", e);
+      // console.error("WebSocket 에러:", e);
       setConnectionStatus('error');
       setMessages(prev => [...prev, {
         id: Date.now().toString(),
@@ -210,7 +210,7 @@ export default function ChatPage() {
     };
 
     ws.onclose = () => {
-      console.log("WebSocket 연결 종료");
+      // console.log("WebSocket 연결 종료");
       setConnectionStatus('disconnected');
     };
 

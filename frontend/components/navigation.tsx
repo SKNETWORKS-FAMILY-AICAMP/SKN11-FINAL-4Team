@@ -15,8 +15,6 @@ export function Navigation() {
   const { user, logout, isAuthenticated } = useAuth()
   const { hasPermission, isAdmin, hasGroup } = usePermission()
 
-  console.log(user)
-
   if (pathname === "/login" || !isAuthenticated) {
     return null
   }

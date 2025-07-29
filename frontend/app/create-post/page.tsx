@@ -119,7 +119,7 @@ export default function CreatePostPage() {
           }))
         }
       } catch (err) {
-        console.error('Failed to fetch influencers:', err)
+        // console.error('Failed to fetch influencers:', err)
         setError('인플루언서 정보를 불러오는데 실패했습니다.')
       } finally {
         setLoading(false)
@@ -142,7 +142,7 @@ export default function CreatePostPage() {
       try {
         await processImageFile(formData.uploaded_images[0])
       } catch (error) {
-        console.error('Image reprocessing error:', error)
+        // console.error('Image reprocessing error:', error)
       }
     }
   }
@@ -335,7 +335,7 @@ export default function CreatePostPage() {
       }
     } catch (error) {
       setError('이미지 처리 중 오류가 발생했습니다.')
-      console.error('Image processing error:', error)
+      // console.error('Image processing error:', error)
     }
   }
 
@@ -495,20 +495,20 @@ export default function CreatePostPage() {
         hashtags: res.generated_hashtags || [],
       };
       setGenerated(generatedContent);
-
-      // 자동 말투 변환 제거 - 사용자가 별도 버튼으로 실행하도록 변경
-      // if (generatedContent.content && selectedInfluencer) {
-      //   try {
-      //     const response = await apiClient.post('/api/v1/boards/influencer-style/convert', {
-      //       influencer_id: selectedInfluencer.influencer_id,
-      //       text: generatedContent.content,
-      //     });
-      //     setConverted((response as any).converted_text || "");
-      //   } catch (convertErr) {
-      //     console.error("말투 변환 실패:", convertErr);
-      //     // 말투 변환 실패해도 본문 생성은 성공으로 처리
-      //   }
-      // }
+      
+      // 생성된 본문으로 바로 말투 변환 실행
+      if (generatedContent.content && selectedInfluencer) {
+        try {
+          const response = await apiClient.post('/api/v1/boards/influencer-style/convert', {
+            influencer_id: selectedInfluencer.influencer_id,
+            text: generatedContent.content,
+          });
+          setConverted((response as any).converted_text || "");
+        } catch (convertErr) {
+          // console.error("말투 변환 실패:", convertErr);
+          // 말투 변환 실패해도 본문 생성은 성공으로 처리
+        }
+      }
     } catch (err) {
       console.error('AI 생성 실패:', err);
       if (err instanceof Error) {

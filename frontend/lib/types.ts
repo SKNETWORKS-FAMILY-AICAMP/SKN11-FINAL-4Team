@@ -14,6 +14,7 @@ export interface AIModel {
   }
   allowedGroups?: string[]
   ownerId?: string
+  system_prompt?: string
   // Instagram 연동 정보
   instagram_id?: string
   instagram_username?: string

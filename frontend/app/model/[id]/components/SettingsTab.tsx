@@ -9,6 +9,7 @@ interface Model {
   name: string;
   description: string;
   image_url?: string;
+  system_prompt?: string;
 }
 
 interface SettingsTabProps {
@@ -58,7 +59,7 @@ export default function SettingsTab({
           {/* 프로필 이미지와 기본 정보를 가로로 배치 */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             {/* 프로필 이미지 섹션 */}
-            <div className="flex flex-col items-center space-y-4 pt-12">
+            <div className="flex flex-col items-center justify-center space-y-4 h-full min-h-[300px]">
               {/* 대형 프로필 이미지 - 클릭 가능 */}
               <div
                 className="relative cursor-pointer"
@@ -66,7 +67,7 @@ export default function SettingsTab({
               >
                 {uploadedImage && imagePreview ? (
                   // 업로드된 이미지 미리보기
-                  <div className="w-36 h-36 rounded-full overflow-hidden shadow-lg hover:opacity-80 transition-opacity">
+                  <div className="w-52 h-52 rounded-full overflow-hidden shadow-lg hover:opacity-80 transition-opacity">
                     <img
                       src={imagePreview}
                       alt="Uploaded"
@@ -75,7 +76,7 @@ export default function SettingsTab({
                   </div>
                 ) : model?.image_url ? (
                   // 기존 인플루언서 이미지
-                  <div className="w-36 h-36 rounded-full overflow-hidden shadow-lg hover:opacity-80 transition-opacity">
+                  <div className="w-52 h-52 rounded-full overflow-hidden shadow-lg hover:opacity-80 transition-opacity">
                     <img
                       src={model.image_url}
                       alt="Profile"
@@ -87,9 +88,9 @@ export default function SettingsTab({
                         const parent = target.parentElement;
                         if (parent) {
                           parent.innerHTML = `
-                            <div class="w-36 h-36 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg">
-                              <div class="w-20 h-20 bg-orange-500 rounded-lg flex items-center justify-center">
-                                <svg class="h-10 w-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <div class="w-52 h-52 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg">
+                              <div class="w-32 h-32 bg-orange-500 rounded-lg flex items-center justify-center">
+                                <svg class="h-16 w-16 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
                                 </svg>
                               </div>
@@ -101,9 +102,9 @@ export default function SettingsTab({
                   </div>
                 ) : (
                   // 기본 아이콘
-                  <div className="w-36 h-36 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg hover:opacity-80 transition-opacity">
-                    <div className="w-20 h-20 bg-orange-500 rounded-lg flex items-center justify-center">
-                      <Bot className="h-10 w-10 text-white" />
+                  <div className="w-52 h-52 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg hover:opacity-80 transition-opacity">
+                    <div className="w-32 h-32 bg-orange-500 rounded-lg flex items-center justify-center">
+                      <Bot className="h-16 w-16 text-white" />
                     </div>
                   </div>
                 )}
@@ -175,13 +176,40 @@ export default function SettingsTab({
                     disabled={isModelLoading}
                   />
                 </div>
+                <div>
+                  <Label
+                    htmlFor="model-system-prompt"
+                    className="text-sm font-medium text-gray-700 mb-2 block"
+                  >
+                    시스템 프롬프트
+                  </Label>
+                  <Textarea
+                    id="model-system-prompt"
+                    value={
+                      isModelLoading ? "로딩 중..." : model.system_prompt || ""
+                    }
+                    onChange={(e) =>
+                      setModel((prev: any) => ({
+                        ...prev,
+                        system_prompt: e.target.value,
+                      }))
+                    }
+                    rows={6}
+                    placeholder="AI 인플루언서의 성격과 행동을 정의하는 시스템 프롬프트를 입력하세요"
+                    className="border-gray-300 focus:border-blue-500 focus:ring-blue-500 resize-none"
+                    disabled={isModelLoading}
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    시스템 프롬프트는 AI 인플루언서의 기본 성격과 대화 스타일을 결정합니다.
+                  </p>
+                </div>
               </div>
               <Button
                 onClick={handleUpdateModel}
                 disabled={
                   isUpdating || isModelLoading || isUploadingImage
                 }
-                className="w-full bg-gray-800 hover:bg-gray-900 text-white font-medium py-2.5"
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5"
               >
                 {isUploadingImage
                   ? "이미지 업로드 중..."

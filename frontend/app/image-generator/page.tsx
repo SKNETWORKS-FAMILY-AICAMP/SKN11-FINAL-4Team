@@ -1,9 +1,14 @@
 "use client"
 
 import { useState, useEffect, useRef, useMemo, useCallback } from "react"
+import { RunPodService, type RunPodCredits } from "@/lib/services/runpod.service"
 import { Navigation } from "@/components/navigation"
 import { useAuth } from "@/hooks/use-auth"
+import { useWebSocket } from "@/hooks/use-websocket"
 import { tokenUtils } from "@/lib/auth"
+import apiClient from "@/lib/api"
+import { galleryService } from "@/lib/services/gallery.service"
+import { imageModificationService } from "@/lib/services/image-modification.service"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
@@ -11,9 +16,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Input } from "@/components/ui/input"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
-
 import { Separator } from "@/components/ui/separator"
-
+import { useToast } from "@/hooks/use-toast"
 import { Progress } from "@/components/ui/progress"
 import { 
   ImageIcon, 
@@ -31,7 +35,9 @@ import {
   X,
   Maximize2,
   Eraser,
-  Filter
+  Filter,
+  ChevronLeft,
+  ChevronRight
 } from "lucide-react"
 
 interface GeneratedImage {
@@ -43,6 +49,14 @@ interface GeneratedImage {
   created_at: string
   status: 'generating' | 'completed' | 'failed'
   progress?: number
+}
+
+interface ImageSynthesisResult {
+  storage_id: string
+  prompt: string
+  width: number
+  height: number
+  s3_url: string
 }
 
 
@@ -177,6 +191,8 @@ const STYLE_CATEGORIES = [
 ]
 
 export default function ImageGeneratorPage() {
+  const { toast } = useToast()
+  const { user } = useAuth()
   const [images, setImages] = useState<GeneratedImage[]>([])
   const [loading, setLoading] = useState(false)
 
@@ -186,6 +202,11 @@ export default function ImageGeneratorPage() {
   const [selectedStyle, setSelectedStyle] = useState<string>("realistic")
   const [selectedSize, setSelectedSize] = useState<string>("square")
 
+  // 갤러리 페이지네이션 상태
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalPages, setTotalPages] = useState(0)
+  const [totalImages, setTotalImages] = useState(0)
+  const [galleryLoading, setGalleryLoading] = useState(false)
   
   // 세션 상태 관리 추가
   const [sessionStatus, setSessionStatus] = useState<SessionStatus | null>(null)
@@ -198,9 +219,7 @@ export default function ImageGeneratorPage() {
   // 세션 자동 재시도 상태
   const [sessionRetryCount, setSessionRetryCount] = useState(0)
   
-  // WebSocket 관련 상태
-  const wsRef = useRef<WebSocket | null>(null)
-  const [wsConnected, setWsConnected] = useState(false)
+  // 진행 상태
   const [generationProgress, setGenerationProgress] = useState<{
     status: string
     progress: number
@@ -214,7 +233,151 @@ export default function ImageGeneratorPage() {
   
   // 인증 상태 추가
   const { token, isAuthenticated } = useAuth()
+
+  // 웹소켓 훅 사용
+  const { isConnected: wsConnected, send: wsSend } = useWebSocket({
+    onSessionStatus: (status: SessionStatus) => {
+      setSessionStatus(status)
+      if (status.session_remaining_seconds !== undefined) {
+        setClientSessionTime(status.session_remaining_seconds)
+      }
+      if (status.processing_remaining_seconds !== undefined) {
+        setClientProcessingTime(status.processing_remaining_seconds)
+      }
+    },
+    onGenerationProgress: (progress: any) => {
+      setGenerationProgress(progress)
+    },
+    onGenerationComplete: (data: any) => {
+      handleGenerationComplete(data)
+    },
+    onMessage: (message: any) => {
+      switch (message.type) {
+        case 'pod_ready':
+          if (message.data) {
+            setSessionStatus(prev => ({
+              ...prev,
+              pod_status: 'ready',
+              pod_id: message.data.pod_id || prev?.pod_id
+            }))
+            toast({
+              title: "Pod 준비 완료",
+              description: message.data.message || 'Pod가 준비되었습니다. 이미지 생성이 가능합니다.',
+              duration: 3000,
+            })
+          }
+          break
+          
+        case 'pod_failed':
+          if (message.data) {
+            setSessionStatus(prev => ({
+              ...prev,
+              pod_status: 'failed'
+            }))
+            toast({
+              title: "Pod 준비 실패",
+              description: message.data.message || 'Pod 준비에 실패했습니다. 다시 시도해주세요.',
+              variant: "destructive",
+              duration: 3000,
+            })
+          }
+          break
+          
+        case 'modification_progress':
+          if (message.data) {
+            toast({
+              title: "이미지 수정 중",
+              description: `${message.data.message} (${message.data.progress}%)`,
+              duration: 1000,
+            })
+          }
+          break
+          
+        case 'modification_complete':
+          if (message.data && message.data.success) {
+            if (message.data.lora_settings) {
+              console.log('이미지 수정에 사용된 LoRA 설정:', message.data.lora_settings)
+            }
+            
+            const newImage: GeneratedImage = {
+              id: message.data.storage_id,
+              prompt: `[Modified] ${message.data.edit_instruction}`,
+              width: message.data.width,
+              height: message.data.height,
+              image_url: message.data.s3_url,
+              created_at: new Date().toISOString(),
+              status: 'completed'
+            }
+            
+            setImages(prev => [newImage, ...prev])
+            setPreviewImage(newImage)
+            
+            if (activeTab === "modify") {
+              setShowGalleryImageModal(true)
+            } else {
+              setShowImageModal(true)
+            }
+            
+            toast({
+              title: "수정 완료",
+              description: '이미지가 성공적으로 수정되었습니다.',
+              duration: 3000,
+            })
+            
+            const textArea = document.getElementById('edit-prompt') as HTMLTextAreaElement
+            if (textArea) textArea.value = ''
+            setSelectedImages([])
+            setSelectedMethod(0)
+            setIsGenerating(false)
+          }
+          break
+          
+        case 'session_created':
+          if (message.data) {
+            const data = message.data
+            if (data.success) {
+              setSessionStatus(data.session_status)
+              setClientSessionTime(data.session_status?.session_remaining_seconds || null)
+              setClientProcessingTime(data.session_status?.processing_remaining_seconds || null)
+              setSessionRetryCount(0)
+              setIsAutoRetrying(false)
+              toast({
+                title: "세션 생성 성공",
+                description: '이미지 생성이 가능합니다.',
+                duration: 3000,
+              })
+            } else {
+              // 세션 생성 실패 처리
+              toast({
+                title: "세션 생성 실패",
+                description: data.message || '세션 생성에 실패했습니다.',
+                variant: "destructive",
+                duration: 3000,
+              })
+            }
+          }
+          break
+      }
+    },
+    onError: (error: any) => {
+      if (error?.message) {
+        toast({
+          title: "오류",
+          description: error.message,
+          variant: "destructive",
+          duration: 3000,
+        })
+      }
+    },
+    onConnect: () => {
+      // 연결되면 세션 상태 요청
+      wsSend({ type: 'session_status' })
+    }
+  })
   const [accessToken, setAccessToken] = useState<string | null>(null)
+  
+  // RunPod 크레딧 상태
+  const [credits, setCredits] = useState<RunPodCredits | null>(null)
   
   // 토큰 초기화
   useEffect(() => {
@@ -224,123 +387,41 @@ export default function ImageGeneratorPage() {
     }
   }, [token])
 
-  // WebSocket 연결 초기화
+  // RunPod 크레딧 조회
   useEffect(() => {
-    if (!accessToken) return
-
-    // 이미 연결되어 있으면 재연결하지 않음
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      console.log('WebSocket already connected, skipping reconnection')
-      return
-    }
-
-    const connectWebSocket = () => {
+    const fetchCredits = async () => {
       try {
-        // 기존 연결이 있으면 정리
-        if (wsRef.current) {
-          wsRef.current.close()
-          wsRef.current = null
-        }
-
-        // WebSocket URL 구성 - 백엔드가 HTTP면 ws, HTTPS면 wss 사용
-        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
-        const wsProtocol = backendUrl.startsWith('https') ? 'wss:' : 'ws:'
-        const wsHost = backendUrl.replace(/^https?:\/\//, '')
-        const wsUrl = `${wsProtocol}//${wsHost}/api/v1/image-generation/ws?token=${accessToken}`
+        const creditsData = await RunPodService.getCredits()
+        setCredits(creditsData)
+      } catch (err) {
+        console.error('RunPod 크레딧 조회 실패:', err)
+        // API 오류 시 크레딧을 null로 설정하여 UI에서 적절히 처리
+        setCredits(null)
         
-        console.log('Connecting to WebSocket:', wsUrl)
-        const ws = new WebSocket(wsUrl)
-        
-        ws.onopen = () => {
-          console.log('WebSocket connected')
-          setWsConnected(true)
-          
-          // 초기 세션 상태 요청
-          ws.send(JSON.stringify({ type: 'session_status' }))
-        }
-        
-        ws.onmessage = (event) => {
-          try {
-            const message = JSON.parse(event.data) as WSMessage
-            
-            switch (message.type) {
-              case 'session_status':
-                if (message.data) {
-                  const status = message.data as SessionStatus
-                  setSessionStatus(status)
-                  
-                  // 세션 시간 업데이트
-                  if (status.session_remaining_seconds !== undefined) {
-                    setClientSessionTime(status.session_remaining_seconds)
-                  }
-                  if (status.processing_remaining_seconds !== undefined) {
-                    setClientProcessingTime(status.processing_remaining_seconds)
-                  }
-                }
-                break
-                
-              case 'generation_progress':
-                if (message.data) {
-                  setGenerationProgress(message.data)
-                }
-                break
-                
-              case 'generation_complete':
-                if (message.data) {
-                  handleGenerationComplete(message.data)
-                }
-                break
-                
-              case 'error':
-                if (message.data?.message) {
-                  console.error('WebSocket error:', message.data.message)
-                  alert(message.data.message)
-                }
-                break
-                
-              case 'session_created':
-                // 세션 생성 응답은 createUserSession 함수에서 처리
-                break
-            }
-          } catch (error) {
-            console.error('WebSocket message parsing error:', error)
+        // 사용자에게 친화적인 에러 메시지 표시
+        if (err instanceof Error) {
+          if (err.message.includes('503') || err.message.includes('Service Unavailable')) {
+            console.warn('RunPod API 연결 실패 - API 키 설정을 확인하세요')
+          } else if (err.message.includes('401') || err.message.includes('Unauthorized')) {
+            console.warn('RunPod API 인증 실패 - 로그인이 필요합니다')
+          } else {
+            console.warn('RunPod 크레딧 조회 중 일시적인 오류가 발생했습니다')
           }
         }
-        
-        ws.onerror = (error) => {
-          console.error('WebSocket error:', error)
-          setWsConnected(false)
-        }
-        
-        ws.onclose = () => {
-          console.log('WebSocket disconnected')
-          setWsConnected(false)
-          wsRef.current = null
-          
-          // 5초 후 재연결 시도 (연결이 없을 때만)
-          setTimeout(() => {
-            if (accessToken && (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN)) {
-              connectWebSocket()
-            }
-          }, 5000)
-        }
-        
-        wsRef.current = ws
-      } catch (error) {
-        console.error('WebSocket connection error:', error)
-        setWsConnected(false)
       }
     }
-    
-    connectWebSocket()
-    
-    // Cleanup
-    return () => {
-      if (wsRef.current) {
-        wsRef.current.close()
-      }
+
+    if (accessToken) {
+      fetchCredits()
+      
+      // 5분마다 자동 새로고침
+      const interval = setInterval(fetchCredits, 5 * 60 * 1000)
+      return () => clearInterval(interval)
     }
   }, [accessToken])
+
+  // WebSocket 연결은 useWebSocket 훅에서 관리됨
+  // 수동 WebSocket 연결 코드 제거 (wsRef 미정의 오류 해결)
   
   // 생성 파라미터
   const [prompt, setPrompt] = useState("")
@@ -406,78 +487,32 @@ export default function ImageGeneratorPage() {
       }
       
       // WebSocket 연결 확인
-      if (!wsConnected || !wsRef.current) {
-        console.error('WebSocket 연결이 없습니다.')
-        alert('WebSocket 연결이 끊어졌습니다. 페이지를 새로고침해주세요.')
+      if (!wsConnected) {
+        // WebSocket 연결이 없습니다
+        toast({
+          title: "연결 오류",
+          description: 'WebSocket 연결이 끊어졌습니다. 페이지를 새로고침해주세요.',
+          variant: "destructive",
+          duration: 3000,
+        })
         return false
       }
       
       // WebSocket으로 세션 생성 요청
-      return new Promise((resolve) => {
-        // 임시 이벤트 리스너 설정
-        const handleSessionCreated = (event: MessageEvent) => {
-          try {
-            const message = JSON.parse(event.data)
-            if (message.type === 'session_created') {
-              // 리스너 제거
-              wsRef.current?.removeEventListener('message', handleSessionCreated)
-              
-              const data = message.data
-              if (data.success) {
-                setSessionStatus(data.session_status)
-                
-                // 클라이언트 사이드 타이머 업데이트
-                setClientSessionTime(data.session_status?.session_remaining_seconds || null)
-                setClientProcessingTime(data.session_status?.processing_remaining_seconds || null)
-                
-                // 성공 시 재시도 카운트 리셋
-                setSessionRetryCount(0)
-                setIsAutoRetrying(false)
-                
-                console.log('세션 생성 성공:', data.session_status)
-                resolve(true)
-              } else {
-                console.error(`세션 생성 실패 (시도 ${retryAttempt + 1}/${maxRetries + 1}):`, data.message)
-                
-                // 재시도 로직
-                if (retryAttempt < maxRetries) {
-                  const nextAttempt = retryAttempt + 1
-                  setSessionRetryCount(nextAttempt)
-                  
-                  console.log(`${retryDelay/1000}초 후 세션 생성 재시도 (${nextAttempt}/${maxRetries})...`)
-                  
-                  setTimeout(async () => {
-                    await createUserSession(true, nextAttempt)
-                  }, retryDelay)
-                  
-                  resolve(false)
-                } else {
-                  console.error('세션 생성 최대 재시도 횟수 초과')
-                  setIsAutoRetrying(false)
-                  resolve(false)
-                }
-              }
-            }
-          } catch (error) {
-            console.error('Session created message parsing error:', error)
-          }
-        }
-        
-        // 이벤트 리스너 등록
-        wsRef.current?.addEventListener('message', handleSessionCreated)
-        
-        // 세션 생성 요청 전송
-        wsRef.current?.send(JSON.stringify({ type: 'create_session' }))
-      })
+      wsSend({ type: 'create_session' })
+      
+      // 세션 생성 요청 후 상태를 기다리지 않고 바로 리턴
+      // onMessage 핸들러에서 session_created 이벤트를 처리함
+      return true
     } catch (error) {
-      console.error(`세션 생성 오류 (시도 ${retryAttempt + 1}/${maxRetries + 1}):`, error)
+      // 세션 생성 오류
       
       // 재시도 로직
       if (retryAttempt < maxRetries) {
         const nextAttempt = retryAttempt + 1
         setSessionRetryCount(nextAttempt)
         
-        console.log(`${retryDelay/1000}초 후 세션 생성 재시도 (${nextAttempt}/${maxRetries})...`)
+        // console.log(`${retryDelay/1000}초 후 세션 생성 재시도 (${nextAttempt}/${maxRetries})...`)
         
         setTimeout(async () => {
           await createUserSession(true, nextAttempt)
@@ -485,7 +520,7 @@ export default function ImageGeneratorPage() {
         
         return false
       } else {
-        console.error('세션 생성 최대 재시도 횟수 초과')
+        // console.error('세션 생성 최대 재시도 횟수 초과')
         setIsAutoRetrying(false)
         return false
       }
@@ -539,19 +574,93 @@ export default function ImageGeneratorPage() {
   const lastPointRef = useRef<{x: number, y: number} | null>(null)
 
 
-  // my-images 요청 제거 - 갤러리 페이지에서만 이미지 목록 조회
+  // 갤러리 이미지 가져오기 함수
+  const fetchGalleryImages = async (page: number = 1) => {
+    try {
+      setGalleryLoading(true)
+
+      // 팀 ID 가져오기
+      const teamId = user?.teams?.[0]?.group_id
+      if (!teamId) {
+        toast({
+          title: "팀 정보 없음",
+          description: '소속된 팀이 없습니다.',
+          variant: "destructive",
+          duration: 3000,
+        })
+        return
+      }
+
+      const data = await galleryService.getImages({
+        page: page,
+        page_size: 10,
+        team_id: teamId
+      })
+
+      // GeneratedImage 형식으로 변환
+      const convertedImages = data.images.map((img) => ({
+        id: img.storage_id,
+        prompt: img.prompt || '',
+        width: img.width,
+        height: img.height,
+        image_url: img.s3_url,
+        created_at: img.created_at,
+        status: 'completed' as const
+      }))
+      
+      setImages(convertedImages)
+      setTotalPages(data.pagination.total_pages)
+      setTotalImages(data.pagination.total_count)
+      setCurrentPage(data.pagination.page)
+    } catch (error) {
+      // Failed to fetch gallery images
+      toast({
+        title: "오류 발생",
+        description: '이미지 목록을 불러오는데 실패했습니다.',
+        variant: "destructive",
+        duration: 3000,
+      })
+    } finally {
+      setGalleryLoading(false)
+    }
+  }
+
+  // 페이지 변경 핸들러
+  const handlePageChange = (newPage: number) => {
+    if (newPage >= 1 && newPage <= totalPages) {
+      setCurrentPage(newPage)
+      fetchGalleryImages(newPage)
+    }
+  }
+
+  // 갤러리 탭 활성화 시 이미지 가져오기
+  useEffect(() => {
+    if (activeTab === 'gallery' && user?.teams?.[0]?.group_id) {
+      fetchGalleryImages(currentPage)
+    }
+  }, [activeTab, user])
 
   // 프롬프트 최적화 테스트 함수
   const handleTestPrompt = async () => {
     if (!prompt.trim() && !getCombinedPromptKeywords()) {
-      alert('테스트할 프롬프트를 입력하거나 스타일을 선택해주세요.')
+      toast({
+        title: "입력 필요",
+        description: '테스트할 프롬프트를 입력하거나 스타일을 선택해주세요.',
+        variant: "destructive",
+        duration: 3000,
+      })
       return
     }
 
     try {
       const token = localStorage.getItem('access_token')
       if (!token) {
-        alert('로그인이 필요합니다.')
+        toast({
+          title: "인증 필요",
+          description: '로그인이 필요합니다.',
+          variant: "destructive",
+          duration: 3000,
+        })
         return
       }
 
@@ -589,16 +698,30 @@ ${testData.optimized_prompt}
 ${testData.message}
         `
         
-        alert(resultMessage)
+        toast({
+          title: "프롬프트 최적화 테스트 완료",
+          description: resultMessage,
+          duration: 3000,
+        })
         
         // 콘솔에도 상세 정보 출력
-        console.log('🤖 프롬프트 최적화 테스트 결과:', testData)
+        // 프롬프트 최적화 테스트 완료
       } else {
-        alert('프롬프트 테스트 실패: ' + (testData.detail || '알 수 없는 오류'))
+        toast({
+          title: "프롬프트 테스트 실패",
+          description: testData.detail || '알 수 없는 오류',
+          variant: "destructive",
+          duration: 3000,
+        })
       }
     } catch (error) {
-      console.error('Prompt test failed:', error)
-      alert('프롬프트 테스트 중 오류가 발생했습니다.')
+      // Prompt test failed
+      toast({
+        title: "오류 발생",
+        description: '프롬프트 테스트 중 오류가 발생했습니다.',
+        variant: "destructive",
+        duration: 3000,
+      })
     }
   }
 
@@ -629,19 +752,34 @@ ${testData.message}
       
       // 세션 상태는 WebSocket을 통해 자동으로 업데이트됨
     } else {
-      alert(data.message || '이미지 생성 실패')
+      toast({
+        title: "이미지 생성 실패",
+        description: data.message || '이미지 생성 실패',
+        variant: "destructive",
+        duration: 3000,
+      })
     }
   }
 
   const handleGenerateImage = async () => {
     if (!prompt.trim() && !getCombinedPromptKeywords()) {
-      alert('프롬프트를 입력하거나 스타일을 선택해주세요.')
+      toast({
+        title: "입력 필요",
+        description: '프롬프트를 입력하거나 스타일을 선택해주세요.',
+        variant: "destructive",
+        duration: 3000,
+      })
       return
     }
 
     // WebSocket 연결 확인
-    if (!wsConnected || !wsRef.current) {
-      alert('WebSocket 연결이 끊어졌습니다. 페이지를 새로고침해주세요.')
+    if (!wsConnected) {
+      toast({
+        title: "연결 오류",
+        description: 'WebSocket 연결이 끊어졌습니다. 페이지를 새로고침해주세요.',
+        variant: "destructive",
+        duration: 3000,
+      })
       return
     }
 
@@ -656,16 +794,16 @@ ${testData.message}
     const selectedSizeData = PRESET_SIZES.find(size => size.id === selectedSize)
 
     // 프론트엔드 로그: 요청 파라미터
-    console.log('[이미지 생성 요청] 파라미터:', {
-      prompt,
-      selected_styles: getSelectedStylesForAPI(),
-      width: selectedSizeData?.width || 1024,
-      height: selectedSizeData?.height || 1024,
-    })
+    // console.log('[이미지 생성 요청] 파라미터:', {
+    //   prompt,
+    //   selected_styles: getSelectedStylesForAPI(),
+    //   width: selectedSizeData?.width || 1024,
+    //   height: selectedSizeData?.height || 1024,
+    // })
 
     try {
       // WebSocket으로 이미지 생성 요청
-      wsRef.current.send(JSON.stringify({
+      wsSend({
         type: 'generate_image',
         data: {
           prompt: prompt.trim() || getCombinedPromptKeywords(),
@@ -676,39 +814,58 @@ ${testData.message}
           guidance: 3.5,
           seed: null
         }
-      }))
+      })
     } catch (error) {
-      console.error('Failed to send image generation request:', error)
+      // console.error('Failed to send image generation request:', error)
       setIsGenerating(false)
       setGenerationProgress(null)
-      alert('이미지 생성 요청 중 오류가 발생했습니다.')
+      toast({
+        title: "오류 발생",
+        description: '이미지 생성 요청 중 오류가 발생했습니다.',
+        variant: "destructive",
+        duration: 3000,
+      })
     }
   }
 
   const handleDeleteImage = async (storage_id: string) => {
-    try {
-      const token = localStorage.getItem('access_token')
-      if (!token) {
-        console.error('No access token found')
-        return
-      }
+    if (!confirm('이 이미지를 삭제하시겠습니까?')) return
 
-      await fetch(`/api/image-generation/images/${storage_id}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      })
+    try {
+      await galleryService.deleteImage(storage_id)
+      
       setImages(prev => prev.filter(img => img.id !== storage_id))
+      toast({
+        title: "삭제 완료",
+        description: '이미지가 삭제되었습니다.',
+        duration: 3000,
+      })
+      
+      // 현재 페이지 새로고침
+      if (activeTab === 'gallery') {
+        fetchGalleryImages(currentPage)
+      }
     } catch (error) {
-      console.error('Failed to delete image:', error)
+      // console.error('Failed to delete image:', error)
+      toast({
+        title: "삭제 실패",
+        description: '이미지 삭제에 실패했습니다.',
+        variant: "destructive",
+        duration: 3000,
+      })
     }
   }
 
   const handleDownloadImage = async (imageUrl: string, filename: string) => {
     try {
-      const response = await fetch(imageUrl)
-      const blob = await response.blob()
+      // S3 URL에서 직접 다운로드하면 CORS 에러가 발생하므로
+      // 백엔드 프록시를 통해 다운로드
+      const encodedUrl = encodeURIComponent(imageUrl)
+      
+      // apiClient의 downloadImage 메서드를 사용하여 백엔드에 요청
+      const blob = await apiClient.downloadImage(`/api/v1/image-generation/proxy-download?url=${encodedUrl}`)
+      
+      // Blob을 사용하여 다운로드 처리
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
@@ -717,8 +874,20 @@ ${testData.message}
       a.click()
       window.URL.revokeObjectURL(url)
       document.body.removeChild(a)
+      
+      toast({
+        title: "다운로드 완료",
+        description: "이미지가 성공적으로 다운로드되었습니다.",
+        duration: 2000,
+      })
     } catch (error) {
       console.error('Failed to download image:', error)
+      toast({
+        title: "다운로드 실패",
+        description: error instanceof Error ? error.message : "이미지 다운로드에 실패했습니다.",
+        variant: "destructive",
+        duration: 3000,
+      })
     }
   }
 
@@ -768,7 +937,12 @@ ${testData.message}
       const currentCount = selectedImages.length + gallerySelectedImages.length
       const maxAllowed = getRequiredImageCount()
       if (currentCount >= maxAllowed) {
-        alert(`최대 ${maxAllowed}개까지 이미지를 선택할 수 있습니다.`)
+        toast({
+          title: "선택 제한",
+          description: `최대 ${maxAllowed}개까지 이미지를 선택할 수 있습니다.`,
+          variant: "destructive",
+          duration: 3000,
+        })
         return
       }
       setGallerySelectedImages(prev => [...prev, image])
@@ -794,7 +968,12 @@ ${testData.message}
     if (file && file.type.startsWith('image/')) {
       const maxAllowed = getRequiredImageCount()
       if (selectedImages.length >= maxAllowed) {
-        alert(`최대 ${maxAllowed}개까지 이미지를 선택할 수 있습니다.`)
+        toast({
+          title: "선택 제한",
+          description: `최대 ${maxAllowed}개까지 이미지를 선택할 수 있습니다.`,
+          variant: "destructive",
+          duration: 3000,
+        })
         return
       }
       
@@ -968,13 +1147,23 @@ ${testData.message}
   const handleInpainting = async () => {
     const maskData = getMaskData()
     if (!maskData) {
-      alert('먼저 마스크를 그려주세요.')
+      toast({
+        title: "마스크 필요",
+        description: '먼저 마스크를 그려주세요.',
+        variant: "destructive",
+        duration: 3000,
+      })
       return
     }
 
     const inpaintPrompt = (document.getElementById('inpaint-prompt') as HTMLTextAreaElement)?.value
     if (!inpaintPrompt.trim()) {
-      alert('수정 프롬프트를 입력해주세요.')
+      toast({
+        title: "입력 필요",
+        description: '수정 프롬프트를 입력해주세요.',
+        variant: "destructive",
+        duration: 3000,
+      })
       return
     }
 
@@ -997,14 +1186,28 @@ ${testData.message}
       const data = await response.json()
       
       if (data.success) {
-        alert('인페인팅이 시작되었습니다!')
+        toast({
+          title: "인페인팅 시작",
+          description: '인페인팅이 시작되었습니다!',
+          duration: 3000,
+        })
         // 진행 상황 모니터링 로직...
       } else {
-        alert('인페인팅 시작에 실패했습니다.')
+        toast({
+          title: "인페인팅 실패",
+          description: '인페인팅 시작에 실패했습니다.',
+          variant: "destructive",
+          duration: 3000,
+        })
       }
     } catch (error) {
-      console.error('Inpainting error:', error)
-      alert('인페인팅 중 오류가 발생했습니다.')
+      // console.error('Inpainting error:', error)
+      toast({
+        title: "오류 발생",
+        description: '인페인팅 중 오류가 발생했습니다.',
+        variant: "destructive",
+        duration: 3000,
+      })
     } finally {
       setIsGenerating(false)
     }
@@ -1015,8 +1218,13 @@ ${testData.message}
     if (!previewImage) return
     
     // WebSocket 연결 확인
-    if (!wsConnected || !wsRef.current) {
-      alert('WebSocket 연결이 끊어졌습니다. 페이지를 새로고침해주세요.')
+    if (!wsConnected) {
+      toast({
+        title: "연결 오류",
+        description: 'WebSocket 연결이 끊어졌습니다. 페이지를 새로고침해주세요.',
+        variant: "destructive",
+        duration: 3000,
+      })
       return
     }
     
@@ -1038,7 +1246,7 @@ ${testData.message}
       const selectedSizeData = PRESET_SIZES.find(size => size.id === selectedSize)
       
       // WebSocket으로 이미지 재생성 요청
-      wsRef.current.send(JSON.stringify({
+      wsSend({
         type: 'generate_image',
         data: {
           prompt: previousPrompt,
@@ -1049,21 +1257,26 @@ ${testData.message}
           guidance: 3.5,
           seed: null  // 새로운 시드로 재생성
         }
-      }))
-      
-      console.log('[이미지 재생성 요청] 파라미터:', {
-        prompt: previousPrompt,
-        selected_styles: getSelectedStylesForAPI(),
-        width: selectedSizeData?.width || 1024,
-        height: selectedSizeData?.height || 1024,
-        previousImage: previousImage
       })
+      
+      // console.log('[이미지 재생성 요청] 파라미터:', {
+      //   prompt: previousPrompt,
+      //   selected_styles: getSelectedStylesForAPI(),
+      //   width: selectedSizeData?.width || 1024,
+      //   height: selectedSizeData?.height || 1024,
+      //   previousImage: previousImage
+      // })
     } catch (error) {
-      console.error('Failed to send regeneration request:', error)
+      // console.error('Failed to send regeneration request:', error)
       setIsGenerating(false)
       setGenerationProgress(null)
       setPreviewImage(previousImage) // 실패 시 이전 이미지 복원
-      alert('이미지 재생성 요청 중 오류가 발생했습니다.')
+      toast({
+        title: "오류 발생",
+        description: '이미지 재생성 요청 중 오류가 발생했습니다.',
+        variant: "destructive",
+        duration: 3000,
+      })
     }
   }
 
@@ -1132,7 +1345,12 @@ ${testData.message}
       const files = Array.from(e.dataTransfer.files).filter(file => file.type.startsWith('image/'))
       
       if (files.length === 0) {
-        alert('이미지 파일만 업로드할 수 있습니다.')
+        toast({
+          title: "파일 형식 오류",
+          description: '이미지 파일만 업로드할 수 있습니다.',
+          variant: "destructive",
+          duration: 3000,
+        })
         return
       }
       
@@ -1140,7 +1358,12 @@ ${testData.message}
       const filesToUpload = files.slice(0, remainingSlots)
       
       if (files.length > remainingSlots) {
-        alert(`최대 2개까지 선택 가능합니다. ${remainingSlots}개 파일만 업로드됩니다.`)
+        toast({
+          title: "선택 제한",
+          description: `최대 2개까지 선택 가능합니다. ${remainingSlots}개 파일만 업로드됩니다.`,
+          variant: "destructive",
+          duration: 3000,
+        })
       }
       
       filesToUpload.forEach(file => {
@@ -1156,7 +1379,12 @@ ${testData.message}
       const imageFiles = Array.from(files).filter(file => file.type.startsWith('image/'))
       
       if (imageFiles.length === 0) {
-        alert('이미지 파일만 선택할 수 있습니다.')
+        toast({
+          title: "파일 형식 오류",
+          description: '이미지 파일만 선택할 수 있습니다.',
+          variant: "destructive",
+          duration: 3000,
+        })
         return
       }
       
@@ -1164,7 +1392,12 @@ ${testData.message}
       const filesToUpload = imageFiles.slice(0, remainingSlots)
       
       if (imageFiles.length > remainingSlots) {
-        alert(`최대 2개까지 선택 가능합니다. ${remainingSlots}개 파일만 업로드됩니다.`)
+        toast({
+          title: "선택 제한",
+          description: `최대 2개까지 선택 가능합니다. ${remainingSlots}개 파일만 업로드됩니다.`,
+          variant: "destructive",
+          duration: 3000,
+        })
       }
       
       filesToUpload.forEach(file => {
@@ -1191,32 +1424,9 @@ ${testData.message}
   }
 
   const selectMethod2 = () => {
-    setMaskMode(true)
-    setSelectedMethod(2)
-    // 방법 2: 마스킹 수정 모드로 전환 (이미지 1개 필요)
-    if (selectedImages.length > 1) {
-      // 첫 번째 이미지만 유지하고 나머지는 제거
-      const firstImage = selectedImages[0]
-      selectedImages.slice(1).forEach(image => {
-        if (image.type === 'upload' && image.url) {
-          URL.revokeObjectURL(image.url)
-        }
-      })
-      setSelectedImages([firstImage])
-    }
-  }
-
-  const selectMethod3 = () => {
     setMaskMode(false)
-    setSelectedMethod(3)
-    // 방법 3: 이미지 합성 모드로 전환 (이미지 2개 필요)
-    // 이미지가 2개 미만이면 추가 선택 안내
-  }
-
-  const selectMethod4 = () => {
-    setMaskMode(true)
-    setSelectedMethod(4)
-    // 방법 4: 복합 마스킹 모드로 전환 (이미지 2개 필요)
+    setSelectedMethod(2)
+    // 방법 2: 이미지 합성 모드로 전환 (이미지 2개 필요)
     // 이미지가 2개 미만이면 추가 선택 안내
   }
 
@@ -1227,9 +1437,9 @@ ${testData.message}
 
   // 선택된 방법에 따른 필요한 이미지 개수
   const getRequiredImageCount = () => {
-    if (selectedMethod === 1 || selectedMethod === 2) {
+    if (selectedMethod === 1) {
       return 1
-    } else if (selectedMethod === 3 || selectedMethod === 4) {
+    } else if (selectedMethod === 2) {
       return 2
     }
     return 0
@@ -1240,6 +1450,8 @@ ${testData.message}
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
   const [selectedSubcategory, setSelectedSubcategory] = useState<string | null>(null)
   const [selectedDetailStyle, setSelectedDetailStyle] = useState<string | null>(null)
+  // 인종 스타일 선택 상태
+  const [selectedEthnicityStyle, setSelectedEthnicityStyle] = useState<string>("기본")
   // 풍경 선택 상태
   const [selectedLandscape, setSelectedLandscape] = useState<string | null>(null)
 
@@ -1248,22 +1460,15 @@ ${testData.message}
     setSelectedMainCategory(mainId)
     setSelectedCategory(null)
     setSelectedSubcategory(null)
-    setSelectedDetailStyle(null)
     setSelectedLandscape(null)  // 풍경 선택도 초기화
   }
   const handleCategorySelect = (categoryId: string | null) => {
     setSelectedCategory(categoryId)
     setSelectedSubcategory(null)
-    setSelectedDetailStyle(null)
     setSelectedLandscape(null)  // 풍경 선택도 초기화
   }
   const handleSubcategorySelect = (subcategoryId: string | null) => {
     setSelectedSubcategory(subcategoryId)
-    setSelectedDetailStyle(null)
-    setSelectedLandscape(null)  // 풍경 선택도 초기화
-  }
-  const handleDetailStyleSelect = (styleId: string | null) => {
-    setSelectedDetailStyle(styleId)
     setSelectedLandscape(null)  // 풍경 선택도 초기화
   }
   const handleLandscapeSelect = (landscapeId: string) => {
@@ -1272,14 +1477,12 @@ ${testData.message}
     setSelectedMainCategory(null)
     setSelectedCategory(null)
     setSelectedSubcategory(null)
-    setSelectedDetailStyle(null)
   }
   const handleLandscapeOptionSelect = (optionId: string) => {
     if (selectedLandscape === 'landscape') {
       setSelectedCategory(optionId)
       setSelectedMainCategory(null)
       setSelectedSubcategory(null)
-      setSelectedDetailStyle(null)
     }
   }
 
@@ -1294,7 +1497,7 @@ ${testData.message}
 
     // 사람인 경우
     if (selectedMainCategory === 'person') {
-      if (selectedCategory && selectedSubcategory && selectedDetailStyle) {
+      if (selectedCategory && selectedSubcategory) {
         // 스타일 키워드 추가
         const styleId = selectedCategory // real, movie, anime, webtoon, digital
         if (PROMPT_KEYWORDS.styles[styleId as keyof typeof PROMPT_KEYWORDS.styles]) {
@@ -1305,12 +1508,6 @@ ${testData.message}
         const genderId = selectedSubcategory // man, woman
         if (PROMPT_KEYWORDS.gender[genderId as keyof typeof PROMPT_KEYWORDS.gender]) {
           keywords.push(PROMPT_KEYWORDS.gender[genderId as keyof typeof PROMPT_KEYWORDS.gender])
-        }
-
-        // 지역 키워드 추가
-        const regionId = selectedDetailStyle.includes('east') ? 'east' : 'west'
-        if (PROMPT_KEYWORDS.region[regionId]) {
-          keywords.push(PROMPT_KEYWORDS.region[regionId])
         }
       }
     }
@@ -1365,25 +1562,16 @@ ${testData.message}
       selectedStyles['대분류'] = categoryMapping[selectedMainCategory] || '선택안함'
     }
     
-    // 세부스타일 매핑 (예시로 기본적인 매핑만 구현)
-    if (selectedDetailStyle) {
-      const styleMapping: Record<string, string> = {
-        'realistic': '사실적',
-        'anime': '애니메이션',
-        'cartoon': '만화',
-        'painting': '유화',
-        'watercolor': '수채화',
-        'digital': '디지털아트',
-        'minimal': '미니멀',
-        'fantasy': '판타지'
-      }
-      selectedStyles['세부스타일'] = styleMapping[selectedDetailStyle] || '사실적'
-    }
     
     // 분위기 매핑 (기본값으로 밝은 사용)
     selectedStyles['분위기'] = '밝은'  // 디폴트
     
-    console.log('🎨 선택된 스타일 정보:', selectedStyles)
+    // 인종 스타일 추가
+    if (selectedEthnicityStyle) {
+      selectedStyles['인종스타일'] = selectedEthnicityStyle
+    }
+    
+    // console.log('🎨 선택된 스타일 정보:', selectedStyles)
     return selectedStyles
   }
 
@@ -1398,12 +1586,23 @@ ${testData.message}
                 <h1 className="text-3xl font-bold text-gray-900">이미지 생성 & 수정</h1>
                 <p className="text-gray-600 mt-2">ComfyUI를 사용하여 AI 이미지를 생성하고 수정하세요</p>
               </div>
-              {/* WebSocket 연결 상태 표시 */}
-              <div className="flex items-center space-x-2">
-                <div className={`w-3 h-3 rounded-full ${wsConnected ? 'bg-green-500' : 'bg-red-500'}`} />
-                <span className="text-sm text-gray-600">
-                  {wsConnected ? 'WebSocket 연결됨' : 'WebSocket 연결 끊김'}
-                </span>
+              {/* 상단 우측 정보 영역 */}
+              <div className="flex flex-col space-y-2">
+                {/* WebSocket 연결 상태 표시 */}
+                <div className="flex items-center space-x-2">
+                  <div className={`w-3 h-3 rounded-full ${wsConnected ? 'bg-green-500' : 'bg-red-500'}`} />
+                  <span className="text-sm text-gray-600">
+                    {wsConnected ? 'WebSocket 연결됨' : 'WebSocket 연결 끊김'}
+                  </span>
+                </div>
+                
+                {/* RunPod 크레딧 표시 */}
+                <div className="flex items-center space-x-2">
+                  <span className="text-sm font-medium text-gray-600">남은 크레딧 : </span>
+                  <span className="text-sm font-medium text-gray-600">
+                    {credits ? `${credits.remaining_credits.toFixed(2)} $` : '로딩 중...'}
+                  </span>
+                </div>
               </div>
             </div>
           </div>
@@ -1493,8 +1692,9 @@ ${testData.message}
                           </p>
                         )}
                         
-                        {/* 세션 시간이 만료되거나 실패한 경우 재시작 버튼 표시 */}
-                        {(sessionStatus.pod_status === 'failed' || (clientSessionTime !== null && clientSessionTime <= 0)) && (
+                        {/* 세션 시간이 만료되거나 실패한 경우 재시작 버튼 표시 (생성 중이 아닐 때만) */}
+                        {(sessionStatus.pod_status === 'failed' || (clientSessionTime !== null && clientSessionTime <= 0)) && 
+                         sessionStatus.pod_status !== 'starting' && (
                           <Button 
                             onClick={handleCreateSession} 
                             className="mt-2" 
@@ -1507,8 +1707,16 @@ ${testData.message}
                           </Button>
                         )}
                         
+                        {/* Pod 생성 중 메시지 표시 */}
+                        {sessionStatus.pod_status === 'starting' && (
+                          <div className="flex items-center text-xs text-blue-600 mt-2">
+                            <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                            Pod 생성 중... 잠시만 기다려주세요.
+                          </div>
+                        )}
+                        
                         {/* 세션 시간이 만료된 경우 안내 메시지 표시 */}
-                        {clientSessionTime !== null && clientSessionTime <= 0 && sessionStatus.pod_status !== 'failed' && (
+                        {clientSessionTime !== null && clientSessionTime <= 0 && sessionStatus.pod_status !== 'failed' && sessionStatus.pod_status !== 'starting' && (
                           <p className="text-xs text-orange-600 mt-2">
                             ⏰ 세션 시간이 만료되었습니다. 새로운 세션을 시작해주세요.
                           </p>
@@ -1598,7 +1806,6 @@ ${testData.message}
                                           setSelectedMainCategory("")
                                           setSelectedCategory("")
                                           setSelectedSubcategory("")
-                                          setSelectedDetailStyle("")
                                           setSelectedLandscape("")
                                         }}
                                         className={
@@ -1637,7 +1844,6 @@ ${testData.message}
                                           onClick={() => {
                                             setSelectedCategory("")
                                             setSelectedSubcategory("")
-                                            setSelectedDetailStyle("")
                                           }}
                                           className={
                                             "p-3 rounded-xl border text-center transition-colors min-w-[120px] min-h-[40px] text-base font-semibold " +
@@ -1679,7 +1885,6 @@ ${testData.message}
                                         <button
                                           onClick={() => {
                                             setSelectedSubcategory("")
-                                            setSelectedDetailStyle("")
                                           }}
                                           className={
                                             "p-3 rounded-xl border text-center transition-colors min-w-[120px] min-h-[40px] text-base font-semibold " +
@@ -1715,57 +1920,55 @@ ${testData.message}
                                       </div>
                                     </div>
                                   ) : <div />}
-                                  {/* 4단계: 세부 스타일(동양/서양 등) */}
-                                  {selectedMainCategory === "person" && selectedCategory && selectedSubcategory ? (
-                                    <div>
-                                      <Label className="block mb-2">세부 스타일</Label>
-                                      <div className="flex flex-col gap-2 min-w-[120px]">
-                                        <button
-                                          onClick={() => setSelectedDetailStyle("")}
-                                          className={
-                                            "p-3 rounded-xl border text-center transition-colors min-w-[120px] min-h-[40px] text-base font-semibold " +
-                                            (selectedDetailStyle === ""
-                                              ? "bg-blue-100 border-blue-300 text-blue-700 ring-2 ring-blue-300 scale-105 shadow"
-                                              : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50 hover:scale-105")
-                                          }
-                                        >
-                                          선택안함
-                                        </button>
-                                        {(() => {
-                                          const main = STYLE_CATEGORIES.find((m: any) => m.id === selectedMainCategory)
-                                          const cat = main?.subcategories?.find((c: any) => c.id === selectedCategory)
-                                          const sub = (cat as any)?.subcategories?.find((s: any) => s.id === selectedSubcategory)
-                                          if (sub && Array.isArray(sub.styles)) {
-                                            return sub.styles.map((style: { id: string; name: string }) => (
-                                              <button
-                                                key={style.id}
-                                                onClick={() => handleDetailStyleSelect(style.id)}
-                                                className={
-                                                  "p-3 rounded-xl border text-center transition-colors min-w-[120px] min-h-[40px] text-base font-semibold " +
-                                                  (selectedDetailStyle === style.id
-                                                    ? "bg-blue-100 border-blue-300 text-blue-700 ring-2 ring-blue-300 scale-105 shadow"
-                                                    : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50 hover:scale-105")
-                                                }
-                                              >
-                                                <div>{style.name}</div>
-                                              </button>
-                                            ))
-                                          }
-                                          return null
-                                        })()}
-                                      </div>
-                                    </div>
-                                  ) : <div />}
                                 </div>
                               </CardContent>
                             </Card>
+
+                            {/* 인종 스타일 선택 - 사람 카테고리가 선택된 경우에만 표시 */}
+                            {selectedMainCategory === "person" && (
+                              <Card className="border-0 shadow-none bg-gray-50 mt-4">
+                                <CardHeader className="pb-3">
+                                  <CardTitle className="flex items-center gap-2 text-base">
+                                    <Palette className="h-4 w-4" />
+                                    인종 스타일 선택
+                                  </CardTitle>
+                                  <CardDescription className="text-xs text-gray-500 mt-1">
+                                    생성할 인물의 인종 특성을 선택하세요.
+                                  </CardDescription>
+                                </CardHeader>
+                                <CardContent className="space-y-4">
+                                  <div className="flex gap-3 flex-wrap">
+                                    {[
+                                      { id: '기본', name: '기본', description: '지정하지 않음' },
+                                      { id: '동양인', name: '동양인', description: '한국, 일본, 중국 등' },
+                                      { id: '서양인', name: '서양인', description: '유럽, 북미 등' },
+                                      { id: '혼합', name: '혼합', description: '다양한 특성 혼합' }
+                                    ].map(style => (
+                                      <button
+                                        key={style.id}
+                                        onClick={() => setSelectedEthnicityStyle(style.id)}
+                                        className={
+                                          "p-4 rounded-xl border text-center transition-colors min-w-[140px] " +
+                                          (selectedEthnicityStyle === style.id
+                                            ? "bg-blue-100 border-blue-300 text-blue-700 ring-2 ring-blue-300 scale-105 shadow"
+                                            : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50 hover:scale-105")
+                                        }
+                                      >
+                                        <div className="font-semibold text-base">{style.name}</div>
+                                        <div className="text-xs text-gray-400 mt-1">{style.description}</div>
+                                      </button>
+                                    ))}
+                                  </div>
+                                </CardContent>
+                              </Card>
+                            )}
 
                             {/* 스타일 선택이 모두 끝난 경우에만 풍경 선택 카드 표시 */}
                             {(
                               // 대분류가 '선택안함'이면 바로 풍경 선택 카드 표시
                               selectedMainCategory === "" ||
-                              // 사람
-                              (selectedMainCategory === "person" && selectedCategory !== null && selectedSubcategory !== null && selectedDetailStyle !== null) ||
+                              // 사람 (3단계: 카테고리와 서브카테고리까지만 선택하면 됨)
+                              (selectedMainCategory === "person" && selectedCategory !== null && selectedSubcategory !== null) ||
                               // 동물/사물 (2단계만 있으므로 분류까지만 선택하면 됨)
                               ((selectedMainCategory === "animal" || selectedMainCategory === "object") && selectedCategory !== null)
                             ) && (
@@ -2004,7 +2207,7 @@ ${testData.message}
                       <h3 className="text-lg font-medium">수정 방법 선택</h3>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 gap-3">
                       {/* 방법 1: 단순 프롬프트 수정 */}
                       <button
                         onClick={selectMethod1}
@@ -2026,39 +2229,18 @@ ${testData.message}
                         <p className="text-xs text-gray-500">기존 이미지를 설명으로 전체 수정</p>
                       </button>
 
-                      {/* 방법 2: 마스킹 수정 */}
+                      {/* 방법 2: 이미지 합성 */}
                       <button
                         onClick={selectMethod2}
                         className={`p-4 rounded-lg border-2 transition-all text-left ${
                           selectedMethod === 2
-                            ? 'border-green-500 bg-green-50' 
-                            : 'border-gray-200 hover:border-gray-300'
-                        }`}
-                      >
-                        <div className="flex items-center gap-3 mb-2">
-                          <div className="w-6 h-6 bg-green-100 rounded-full flex items-center justify-center">
-                            <span className="text-green-600 font-medium text-xs">2</span>
-                          </div>
-                          <div>
-                            <h4 className="font-medium text-sm">마스킹 수정</h4>
-                            <p className="text-xs text-gray-600">이미지 1개 + 마스킹 + 프롬프트</p>
-                          </div>
-                        </div>
-                        <p className="text-xs text-gray-500">특정 영역만 선택하여 수정</p>
-                      </button>
-
-                      {/* 방법 3: 이미지 합성 */}
-                      <button
-                        onClick={selectMethod3}
-                        className={`p-4 rounded-lg border-2 transition-all text-left ${
-                          selectedMethod === 3
                             ? 'border-purple-500 bg-purple-50' 
                             : 'border-gray-200 hover:border-gray-300'
                         }`}
                       >
                         <div className="flex items-center gap-3 mb-2">
                           <div className="w-6 h-6 bg-purple-100 rounded-full flex items-center justify-center">
-                            <span className="text-purple-600 font-medium text-xs">3</span>
+                            <span className="text-purple-600 font-medium text-xs">2</span>
                           </div>
                           <div>
                             <h4 className="font-medium text-sm">이미지 합성</h4>
@@ -2066,27 +2248,6 @@ ${testData.message}
                           </div>
                         </div>
                         <p className="text-xs text-gray-500">두 이미지를 설명과 함께 합성</p>
-                      </button>
-
-                      {/* 방법 4: 복합 마스킹 */}
-                      <button
-                        onClick={selectMethod4}
-                        className={`p-4 rounded-lg border-2 transition-all text-left ${
-                          selectedMethod === 4
-                            ? 'border-orange-500 bg-orange-50' 
-                            : 'border-gray-200 hover:border-gray-300'
-                        }`}
-                      >
-                        <div className="flex items-center gap-3 mb-2">
-                          <div className="w-6 h-6 bg-orange-100 rounded-full flex items-center justify-center">
-                            <span className="text-orange-600 font-medium text-xs">4</span>
-                          </div>
-                          <div>
-                            <h4 className="font-medium text-sm">복합 마스킹</h4>
-                            <p className="text-xs text-gray-600">이미지 2개 + 마스킹 + 프롬프트</p>
-                          </div>
-                        </div>
-                        <p className="text-xs text-gray-500">두 이미지의 특정 영역 합성</p>
                       </button>
                     </div>
                   </div>
@@ -2373,153 +2534,209 @@ ${testData.message}
                     </div>
                   )}
 
-                  {/* 단계 4: 추가 도구 (방법이 선택된 경우에만 표시) */}
+                  {/* 이미지 생성 버튼 (방법이 선택된 경우에만 표시) */}
                   {getCurrentMethod() > 0 && (
-                    <div className="border-t pt-6 space-y-4 mt-6">
-                      <div className="flex items-center gap-2">
-                        <div className="w-6 h-6 rounded-full flex items-center justify-center text-sm font-medium bg-blue-500 text-white">
-                          4
-                        </div>
-                        <h3 className="text-lg font-medium">
-                          {getCurrentMethod() === 1 && "수정 실행"}
-                          {getCurrentMethod() === 2 && "마스킹 도구"}
-                          {getCurrentMethod() === 3 && "합성 실행"}
-                          {getCurrentMethod() === 4 && "마스킹 도구"}
-                        </h3>
-                      </div>
-                      
+                    <div className="border-t pt-6 mt-6">
                       <div className="space-y-4">
-                        {/* 마스킹 도구 (방법 2, 4에서만 표시) */}
-                        {(getCurrentMethod() === 2 || getCurrentMethod() === 4) && (
-                          <div className="space-y-3">
-                            <Label className="text-sm font-medium">수정할 영역 선택</Label>
-                            
-                            {/* 방법 4번일 때 이미지 선택 버튼 */}
-                            {getCurrentMethod() === 4 && selectedImages.length > 1 && (
-                              <div className="flex gap-2">
-                                <Button
-                                  variant={activeImageIndex === 0 ? "default" : "outline"}
-                                  size="sm"
-                                  onClick={() => setActiveImageIndex(0)}
-                                  className="flex-1"
-                                >
-                                  이미지 1 마스킹
-                                </Button>
-                                <Button
-                                  variant={activeImageIndex === 1 ? "default" : "outline"}
-                                  size="sm"
-                                  onClick={() => setActiveImageIndex(1)}
-                                  className="flex-1"
-                                >
-                                  이미지 2 마스킹
-                                </Button>
-                              </div>
-                            )}
-                            
-                            <div className="space-y-3">
-                              {/* 브러시 크기 조절 */}
-                              <div>
-                                <Label htmlFor="brush-size" className="text-xs text-gray-600">
-                                  브러시 크기: {brushSize}px
-                                </Label>
-                                <input
-                                  id="brush-size"
-                                  type="range"
-                                  min="5"
-                                  max="50"
-                                  value={brushSize}
-                                  onChange={(e) => setBrushSize(Number(e.target.value))}
-                                  className="w-full mt-1"
-                                />
-                              </div>
-
-                              {/* 마스킹 색상 선택 */}
-                              <div>
-                                <Label htmlFor="mask-color" className="text-xs text-gray-600">
-                                  마스킹 색상
-                                </Label>
-                                <div className="flex items-center gap-3 mt-1">
-                                  <input
-                                    id="mask-color"
-                                    type="color"
-                                    value={maskColor}
-                                    onChange={(e) => setMaskColor(e.target.value)}
-                                    className="w-12 h-8 rounded border cursor-pointer"
-                                  />
-                                  <div className="flex gap-1">
-                                    {['#FFFFFF', '#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF', '#00FFFF', '#FFA500', '#800080'].map((color) => (
-                                      <button
-                                        key={color}
-                                        onClick={() => setMaskColor(color)}
-                                        className={`w-6 h-6 rounded border-2 transition-all ${
-                                          maskColor === color ? 'border-gray-800 scale-110' : 'border-gray-300 hover:border-gray-500'
-                                        }`}
-                                        style={{ backgroundColor: color }}
-                                        title={color}
-                                      />
-                                    ))}
-                                  </div>
-                                </div>
-                              </div>
-
-                              {/* 마스킹 캔버스 */}
-                              <div className="relative border rounded-lg overflow-hidden bg-gray-50">
-                                <img
-                                  ref={imageRef}
-                                  src={selectedImages[activeImageIndex]?.url}
-                                  alt={`마스킹 대상 이미지 ${activeImageIndex + 1}`}
-                                  className="w-full h-auto max-h-64 object-contain"
-                                  style={{ display: maskMode ? 'block' : 'none' }}
-                                />
-                                <canvas
-                                  ref={canvasRef}
-                                  className="absolute top-0 left-0 w-full h-full cursor-crosshair"
-                                  style={{ display: maskMode ? 'block' : 'none' }}
-                                  onMouseDown={handleMouseDown}
-                                  onMouseMove={handleMouseMove}
-                                  onMouseUp={handleMouseUp}
-                                  onMouseLeave={handleMouseUp}
-                                />
-                              </div>
-
-                              <Button
-                                variant="outline"
-                                onClick={clearMask}
-                                size="sm"
-                                className="w-full"
-                              >
-                                <Eraser className="h-4 w-4 mr-2" />
-                                마스크 지우기
-                              </Button>
-                            </div>
-                          </div>
-                        )}
-
                         {/* 수정 실행 버튼 */}
                         <Button 
                           className="w-full bg-blue-600 hover:bg-blue-700 text-white"
                           size="lg"
-                          onClick={() => {
+                          onClick={async () => {
                             const editPrompt = (document.getElementById('edit-prompt') as HTMLTextAreaElement)?.value
                             if (!editPrompt?.trim()) {
-                              alert('수정 내용을을 입력해주세요.')
+                              toast({
+                                title: "입력 필요",
+                                description: '수정 내용을 입력해주세요.',
+                                variant: "destructive",
+                                duration: 3000,
+                              })
                               return
                             }
                             
-                            // TODO: 각 방법에 따른 수정 API 호출
-                            console.log('수정 실행:', {
-                              method: getCurrentMethod(),
-                              prompt: editPrompt,
-                              images: selectedImages,
-                              maskMode: maskMode
-                            })
+                            // 단순 이미지 수정 (방법 1)
+                            if (getCurrentMethod() === 1 && selectedImages.length > 0) {
+                              try {
+                                setIsGenerating(true)
+                                
+                                // 선택된 이미지 파일 가져오기
+                                let imageFile: File | null = null
+                                
+                                if (selectedImages[0].type === 'upload' && selectedImages[0].file) {
+                                  imageFile = selectedImages[0].file
+                                } else if (selectedImages[0].type === 'gallery' && selectedImages[0].url) {
+                                  // 갤러리 이미지의 경우 URL에서 blob으로 변환
+                                  const imageUrl = selectedImages[0].url
+                                  console.log('Gallery image URL:', imageUrl, typeof imageUrl)
+                                  
+                                  // URL이 문자열인지 확인
+                                  if (typeof imageUrl !== 'string') {
+                                    throw new Error(`이미지 URL이 올바르지 않습니다: ${typeof imageUrl}`)
+                                  }
+                                  
+                                  const response = await fetch(imageUrl)
+                                  const blob = await response.blob()
+                                  imageFile = new File([blob], `image_${Date.now()}.png`, { type: 'image/png' })
+                                }
+                                
+                                if (!imageFile) {
+                                  throw new Error('이미지 파일을 찾을 수 없습니다')
+                                }
+                                
+                                // 기존 WebSocket 연결 사용
+                                if (wsConnected) {
+                                  // 이미지를 Base64로 변환
+                                  const reader = new FileReader()
+                                  reader.onload = () => {
+                                    const base64Data = reader.result?.toString().split(',')[1]
+                                    
+                                    // WebSocket으로 이미지 수정 요청 전송
+                                    wsSend({
+                                      type: 'modify_image',
+                                      data: {
+                                        image: base64Data,
+                                        edit_instruction: editPrompt
+                                      }
+                                    })
+                                    
+                                    toast({
+                                      title: "이미지 수정 중",
+                                      description: '이미지를 수정하고 있습니다. 잠시만 기다려주세요...',
+                                      duration: 5000,
+                                    })
+                                  }
+                                  reader.readAsDataURL(imageFile)
+                                } else {
+                                  throw new Error('WebSocket 연결이 없습니다. 페이지를 새로고침해주세요.')
+                                }
+                              } catch (error) {
+                                // console.error('이미지 수정 실패:', error)
+                                toast({
+                                  title: "수정 실패",
+                                  description: error instanceof Error ? error.message : '이미지 수정에 실패했습니다.',
+                                  variant: "destructive",
+                                  duration: 5000,
+                                })
+                              } finally {
+                                setIsGenerating(false)
+                              }
+                            } 
+                            
+                            // 이미지 합성 (방법 2)
+                            else if (getCurrentMethod() === 2 && selectedImages.length >= 2) {
+                              try {
+                                setIsGenerating(true)
+                                
+                                // 두 개의 이미지 파일 가져오기
+                                let imageFile1: File | null = null
+                                let imageFile2: File | null = null
+                                
+                                // 첫 번째 이미지
+                                if (selectedImages[0].type === 'upload' && selectedImages[0].file) {
+                                  imageFile1 = selectedImages[0].file
+                                } else if (selectedImages[0].type === 'gallery' && selectedImages[0].galleryImage) {
+                                  // 갤러리 이미지의 경우 storage_id를 사용하여 백엔드에서 처리
+                                  // 임시로 빈 파일 생성 (백엔드에서 storage_id로 처리)
+                                  imageFile1 = new File([], 'gallery_image_1', { type: 'image/png' })
+                                }
+                                
+                                // 두 번째 이미지
+                                if (selectedImages[1].type === 'upload' && selectedImages[1].file) {
+                                  imageFile2 = selectedImages[1].file
+                                } else if (selectedImages[1].type === 'gallery' && selectedImages[1].galleryImage) {
+                                  // 갤러리 이미지의 경우 storage_id를 사용하여 백엔드에서 처리
+                                  // 임시로 빈 파일 생성 (백엔드에서 storage_id로 처리)
+                                  imageFile2 = new File([], 'gallery_image_2', { type: 'image/png' })
+                                }
+                                
+                                if (!imageFile1 || !imageFile2) {
+                                  throw new Error('이미지 파일을 찾을 수 없습니다')
+                                }
+                                
+                                // FormData 생성
+                                const formData = new FormData()
+                                formData.append('image1', imageFile1)
+                                formData.append('image2', imageFile2)
+                                formData.append('prompt', editPrompt)
+                                formData.append('width', '1024')
+                                formData.append('height', '720')
+                                formData.append('guidance', '2.5')
+                                formData.append('steps', '20')
+                                
+                                // 갤러리 이미지의 storage_id 추가
+                                if (selectedImages[0].type === 'gallery' && selectedImages[0].galleryImage) {
+                                  formData.append('image1_storage_id', selectedImages[0].galleryImage.id)
+                                }
+                                if (selectedImages[1].type === 'gallery' && selectedImages[1].galleryImage) {
+                                  formData.append('image2_storage_id', selectedImages[1].galleryImage.id)
+                                }
+                                
+                                // apiClient를 사용하여 백엔드에 요청
+                                const result = await apiClient.post('/api/v1/image-modification/synthesize', formData) as ImageSynthesisResult
+                                
+                                // 결과를 갤러리에 추가
+                                const newImage: GeneratedImage = {
+                                  id: result.storage_id,
+                                  prompt: result.prompt,
+                                  width: result.width,
+                                  height: result.height,
+                                  image_url: result.s3_url,
+                                  created_at: new Date().toISOString(),
+                                  status: 'completed'
+                                }
+                                
+                                setImages(prev => [newImage, ...prev])
+                                setPreviewImage(newImage)
+                                setShowGalleryImageModal(true)
+                                
+                                // 성공 메시지
+                                toast({
+                                  title: "합성 완료",
+                                  description: '이미지 합성이 완료되었습니다!',
+                                  duration: 3000,
+                                })
+                                
+                                // 입력 초기화
+                                const textArea = document.getElementById('edit-prompt') as HTMLTextAreaElement
+                                if (textArea) textArea.value = ''
+                                setSelectedImages([])
+                                setSelectedMethod(0)
+                                
+                              } catch (error) {
+                                console.error('이미지 합성 실패:', error)
+                                toast({
+                                  title: "합성 실패",
+                                  description: error instanceof Error ? error.message : '이미지 합성에 실패했습니다.',
+                                  variant: "destructive",
+                                  duration: 5000,
+                                })
+                              } finally {
+                                setIsGenerating(false)
+                              }
+                            } else {
+                              // 기타 경우
+                              toast({
+                                title: "준비 중",
+                                description: '해당 수정 방법은 아직 준비 중입니다.',
+                                variant: "default",
+                                duration: 3000,
+                              })
+                            }
                           }}
+                          disabled={isGenerating}
                         >
-                          <Wand2 className="h-4 w-4 mr-2" />
-                          {getCurrentMethod() === 1 && "이미지 수정"}
-                          {getCurrentMethod() === 2 && "마스킹 수정"}
-                          {getCurrentMethod() === 3 && "이미지 합성"}
-                          {getCurrentMethod() === 4 && "복합 마스킹"}
+                          {isGenerating ? (
+                            <>
+                              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                              처리 중...
+                            </>
+                          ) : (
+                            <>
+                              <Wand2 className="h-4 w-4 mr-2" />
+                              {getCurrentMethod() === 1 && "이미지 수정"}
+                              {getCurrentMethod() === 2 && "이미지 합성"}
+                            </>
+                          )}
                         </Button>
                       </div>
                     </div>
@@ -2533,73 +2750,129 @@ ${testData.message}
                 {activeTab === "gallery" && (
                   <div className="space-y-6">
                     <div className="flex justify-between items-center">
-                <h2 className="text-xl font-semibold">생성된 이미지</h2>
-                <Button variant="outline" onClick={() => window.location.reload()}>
-                  <RefreshCw className="h-4 w-4 mr-2" />
-                  새로고침
-                </Button>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                {images.map((image) => (
-                  <Card key={image.id} className="overflow-hidden cursor-pointer hover:shadow-lg transition-shadow" onClick={() => {
-                    setPreviewImage(image)
-                    setShowGalleryImageModal(true)
-                  }}>
-                    <div className="aspect-square relative">
-                      <img
-                        src={image.image_url}
-                        alt={image.prompt}
-                        className="w-full h-full object-cover"
-                      />
-                      <div className="absolute top-2 right-2 flex gap-1">
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            handleDownloadImage(image.image_url, `generated_image_${image.id}.png`)
-                          }}
-                          title="다운로드"
-                        >
-                          <Download className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            setPreviewImage(image)
-                            setShowGalleryImageModal(true)
-                          }}
-                          title="확대 보기"
-                        >
-                          <Maximize2 className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="destructive"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            handleDeleteImage(image.id)
-                          }}
-                          title="삭제"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                      <div>
+                        <h2 className="text-xl font-semibold">생성된 이미지</h2>
+                        {totalImages > 0 && (
+                          <p className="text-sm text-gray-600 mt-1">
+                            총 {totalImages}개의 이미지
+                          </p>
+                        )}
                       </div>
+                      <Button variant="outline" onClick={() => fetchGalleryImages(currentPage)}>
+                        <RefreshCw className="h-4 w-4 mr-2" />
+                        새로고침
+                      </Button>
                     </div>
-                  </Card>
-                ))}
-              </div>
 
-              {images.length === 0 && (
-                <div className="text-center py-12">
-                  <ImageIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                  <p className="text-lg font-medium text-gray-900 mb-2">생성된 이미지가 없습니다</p>
-                  <p className="text-gray-600">첫 번째 이미지를 생성해보세요</p>
-                </div>
-              )}
+                    {/* 로딩 상태 */}
+                    {galleryLoading && (
+                      <div className="text-center py-12">
+                        <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+                        <p className="mt-2 text-gray-600">이미지를 불러오는 중...</p>
+                      </div>
+                    )}
+
+                    {/* 이미지 그리드 */}
+                    {!galleryLoading && images.length > 0 && (
+                      <>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                          {images.map((image) => (
+                            <Card key={image.id} className="overflow-hidden cursor-pointer hover:shadow-lg transition-shadow" onClick={() => {
+                              setPreviewImage(image)
+                              setShowGalleryImageModal(true)
+                            }}>
+                              <div className="aspect-square relative">
+                                <img
+                                  src={image.image_url}
+                                  alt={image.prompt}
+                                  className="w-full h-full object-cover"
+                                />
+                                <div className="absolute top-2 right-2 flex gap-1">
+                                  <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      handleDownloadImage(image.image_url, `generated_image_${image.id}.png`)
+                                    }}
+                                    title="다운로드"
+                                  >
+                                    <Download className="h-4 w-4" />
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      setPreviewImage(image)
+                                      setShowGalleryImageModal(true)
+                                    }}
+                                    title="확대 보기"
+                                  >
+                                    <Maximize2 className="h-4 w-4" />
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="destructive"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      handleDeleteImage(image.id)
+                                    }}
+                                    title="삭제"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              </div>
+                              <CardContent className="p-3">
+                                <p className="text-sm text-gray-600 truncate">
+                                  {image.prompt || '프롬프트 없음'}
+                                </p>
+                                <p className="text-xs text-gray-400 mt-1">
+                                  {new Date(image.created_at).toLocaleDateString()}
+                                </p>
+                              </CardContent>
+                            </Card>
+                          ))}
+                        </div>
+
+                        {/* 페이지네이션 */}
+                        {totalPages > 1 && (
+                          <div className="mt-8 flex justify-center items-center gap-4">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handlePageChange(currentPage - 1)}
+                              disabled={currentPage === 1}
+                            >
+                              <ChevronLeft className="h-4 w-4" />
+                              이전
+                            </Button>
+                            <span className="text-sm">
+                              {currentPage} / {totalPages} 페이지
+                            </span>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handlePageChange(currentPage + 1)}
+                              disabled={currentPage === totalPages}
+                            >
+                              다음
+                              <ChevronRight className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        )}
+                      </>
+                    )}
+
+                    {/* 이미지가 없을 때 */}
+                    {!galleryLoading && images.length === 0 && (
+                      <div className="text-center py-12">
+                        <ImageIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                        <p className="text-lg font-medium text-gray-900 mb-2">생성된 이미지가 없습니다</p>
+                        <p className="text-gray-600">첫 번째 이미지를 생성해보세요</p>
+                      </div>
+                    )}
                   </div>
                 )}
               </CardContent>
@@ -2809,8 +3082,13 @@ ${testData.message}
                             e.stopPropagation()
                             
                             // WebSocket 연결 확인
-                            if (!wsConnected || !wsRef.current) {
-                              alert('WebSocket 연결이 끊어졌습니다. 페이지를 새로고침해주세요.')
+                            if (!wsConnected) {
+                              toast({
+          title: "연결 오류",
+          description: 'WebSocket 연결이 끊어졌습니다. 페이지를 새로고침해주세요.',
+          variant: "destructive",
+          duration: 3000,
+        })
                               return
                             }
                             
@@ -2831,7 +3109,7 @@ ${testData.message}
                             setTimeout(() => {
                               const selectedSizeData = PRESET_SIZES.find(size => size.id === selectedSize)
                               
-                              wsRef.current?.send(JSON.stringify({
+                              wsSend({
                                 type: 'generate_image',
                                 data: {
                                   prompt: originalPrompt,
@@ -2842,7 +3120,7 @@ ${testData.message}
                                   guidance: 3.5,
                                   seed: null
                                 }
-                              }))
+                              })
                             }, 100)
                           }}
                           className="flex-1 text-xs"
@@ -2908,7 +3186,7 @@ ${testData.message}
           <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>
-                갤러리 이미지
+                {previewImage?.prompt?.includes('[Modified]') ? '수정된 이미지' : '갤러리 이미지'}
               </DialogTitle>
             </DialogHeader>
             {previewImage ? (
@@ -2973,10 +3251,10 @@ ${testData.message}
                       
                       // WebSocket으로 재생성 요청
                       setTimeout(() => {
-                        if (wsConnected && wsRef.current) {
+                        if (wsConnected) {
                           const selectedSizeData = PRESET_SIZES.find(size => size.id === selectedSize)
                           
-                          wsRef.current.send(JSON.stringify({
+                          wsSend({
                             type: 'generate_image',
                             data: {
                               prompt: originalPrompt,
@@ -2987,9 +3265,14 @@ ${testData.message}
                               guidance: 3.5,
                               seed: null
                             }
-                          }))
+                          })
                         } else {
-                          alert('WebSocket 연결이 끊어졌습니다. 페이지를 새로고침해주세요.')
+                          toast({
+          title: "연결 오류",
+          description: 'WebSocket 연결이 끊어졌습니다. 페이지를 새로고침해주세요.',
+          variant: "destructive",
+          duration: 3000,
+        })
                           setIsGenerating(false)
                           setGenerationProgress(null)
                           setShowImageModal(false)
