@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { User, Save, ShieldCheck, ShieldX, Plus, Trash2, Users, Eye, EyeOff, Key, Loader2, FileText, Upload, Download, Settings, ChevronDown, ChevronUp } from "lucide-react"
+import { User, ShieldCheck, ShieldX, Plus, Trash2, Users, Eye, Key, Loader2, FileText, Upload, ChevronDown, Download } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { AlertDialog, AlertDialogTrigger, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogCancel, AlertDialogAction } from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
@@ -17,6 +17,7 @@ import { Badge } from "@/components/ui/badge"
 import { useToast } from "@/hooks/use-toast"
 import { AdminService, type AdminTeam, type AdminUser, type AdminHFToken, type AdminCreateHFTokenRequest } from "@/lib/services/admin.service"
 import { VectorDBService } from "@/lib/services/vector-db.service"
+import { apiClient } from "@/lib/api"
 
 export default function AdministratorPage() {
   const { toast } = useToast()
@@ -63,11 +64,34 @@ export default function AdministratorPage() {
   const [uploadingDocument, setUploadingDocument] = useState(false)
   const [selectedFiles, setSelectedFiles] = useState<File[]>([])
 
-  // RAG 고급 설정 관련 상태들
-  const [showAdvancedSettings, setShowAdvancedSettings] = useState(false)
-  const [chunkSize, setChunkSize] = useState(150)
-  const [chunkOverlap, setChunkOverlap] = useState(20)
-  const [topK, setTopK] = useState(5)
+  // 문서 목록 로드 함수
+  const loadVectorizedDocuments = async () => {
+    try {
+      setLoadingDocuments(true)
+      const data = await apiClient.get<any>('/api/v1/documents/vectorized')
+      console.log('API Data:', data)
+
+      setDocuments(data.documents.map((doc: any) => ({
+        id: doc.documents_id,
+        name: doc.documents_name,
+        size: `${(doc.file_size / 1024 / 1024).toFixed(2)} MB`,
+        uploaded_at: new Date(doc.created_at).toLocaleDateString('ko-KR'),
+        status: doc.is_vectorized === 1 ? 'processed' : 'processing',
+        s3_url: doc.s3_url
+      })))
+    } catch (error) {
+      console.error('문서 목록 조회 실패:', error)
+      toast({
+        title: "문서 목록 조회 실패",
+        description: "벡터화된 문서 목록을 불러오는데 실패했습니다.",
+        variant: "destructive",
+      })
+    } finally {
+      setLoadingDocuments(false)
+    }
+  }
+
+
 
   const isFetchingDataRef = useRef(false)
   const isFetchingTokensRef = useRef(false)
@@ -105,6 +129,13 @@ export default function AdministratorPage() {
   useEffect(() => {
     fetchHFTokens()
   }, [])
+
+  // 문서 탭이 활성화될 때 문서 목록 로드
+  useEffect(() => {
+    if (activeTab === "documents") {
+      loadVectorizedDocuments()
+    }
+  }, [activeTab])
 
   // HF 토큰 데이터 로드
   const fetchHFTokens = async () => {
@@ -1164,9 +1195,11 @@ export default function AdministratorPage() {
                                 e.preventDefault()
                                 e.stopPropagation()
                                 const files = Array.from(e.dataTransfer.files)
-                                // PDF 파일만 필터링
+                                // PDF 파일만 필터링하고 첫 번째 파일만 선택
                                 const pdfFiles = files.filter(file => file.type === 'application/pdf')
-                                setSelectedFiles(prev => [...prev, ...pdfFiles])
+                                if (pdfFiles.length > 0) {
+                                  setSelectedFiles([pdfFiles[0]])
+                                }
                               }}
                             >
                               <div
@@ -1228,10 +1261,10 @@ export default function AdministratorPage() {
                                       text-sm transition-colors duration-300 max-w-md mx-auto
                                       ${selectedFiles.length > 0 ? "text-blue-600" : "text-gray-600 group-hover:text-blue-600"}
                                     `}>
-                                      RAG 챗봇 학습용 문서들을 드래그하여 놓거나 클릭하여 선택하세요
+                                      RAG 챗봇 학습용 문서를 드래그하여 놓거나 클릭하여 선택하세요
                                     </p>
                                     <p className="text-xs text-gray-500">
-                                      지원 형식: PDF (여러 파일 선택 가능)
+                                      지원 형식: PDF (단일 파일만 업로드 가능)
                                     </p>
                                   </div>
 
@@ -1243,9 +1276,11 @@ export default function AdministratorPage() {
                                       multiple
                                       onChange={(e) => {
                                         const files = Array.from(e.target.files || [])
-                                        // PDF 파일만 필터링
+                                        // PDF 파일만 필터링하고 첫 번째 파일만 선택
                                         const pdfFiles = files.filter(file => file.type === 'application/pdf')
-                                        setSelectedFiles(prev => [...prev, ...pdfFiles])
+                                        if (pdfFiles.length > 0) {
+                                          setSelectedFiles([pdfFiles[0]])
+                                        }
                                       }}
                                       className="hidden"
                                       id="document-upload"
@@ -1272,10 +1307,10 @@ export default function AdministratorPage() {
                               </div>
                             </div>
 
-                            {/* 선택된 파일 목록 */}
+                            {/* 선택된 파일 */}
                             {selectedFiles.length > 0 && (
                               <div className="mt-4">
-                                <h5 className="font-medium text-gray-900 mb-2">선택된 파일 ({selectedFiles.length}개)</h5>
+                                <h5 className="font-medium text-gray-900 mb-2">선택된 파일</h5>
                                 <div className="space-y-2">
                                   {selectedFiles.map((file, index) => (
                                     <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
@@ -1292,7 +1327,7 @@ export default function AdministratorPage() {
                                         variant="ghost"
                                         size="sm"
                                         onClick={() => {
-                                          setSelectedFiles(prev => prev.filter((_, i) => i !== index))
+                                          setSelectedFiles([])
                                         }}
                                       >
                                         <Trash2 className="h-4 w-4" />
@@ -1301,102 +1336,7 @@ export default function AdministratorPage() {
                                   ))}
                                 </div>
 
-                                {/* RAG 고급 설정 토글 */}
-                                <div className="mt-6 border-t pt-4">
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    onClick={() => setShowAdvancedSettings(!showAdvancedSettings)}
-                                    className="w-full flex items-center justify-between"
-                                  >
-                                    <div className="flex items-center gap-2">
-                                      <Settings className="h-4 w-4" />
-                                      <span className="font-medium">RAG 임베딩 고급 설정</span>
-                                    </div>
-                                    {showAdvancedSettings ? (
-                                      <ChevronUp className="h-4 w-4" />
-                                    ) : (
-                                      <ChevronDown className="h-4 w-4" />
-                                    )}
-                                  </Button>
 
-                                  {/* 고급 설정 패널 */}
-                                  {showAdvancedSettings && (
-                                    <div className="mt-4 p-4 bg-gray-50 rounded-lg border">
-                                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                        {/* 청크 크기 설정 */}
-                                        <div>
-                                          <Label htmlFor="chunk-size" className="text-sm font-medium">
-                                            청크 크기
-                                          </Label>
-                                          <Input
-                                            id="chunk-size"
-                                            type="number"
-                                            value={chunkSize}
-                                            onChange={(e) => setChunkSize(Number(e.target.value))}
-                                            min="100"
-                                            max="4000"
-                                            step="100"
-                                            className="mt-1"
-                                          />
-                                          <p className="text-xs text-gray-500 mt-1">
-                                            문서를 나눌 청크의 크기 (100-4000)
-                                          </p>
-                                        </div>
-
-                                        {/* 청크 오버랩 설정 */}
-                                        <div>
-                                          <Label htmlFor="chunk-overlap" className="text-sm font-medium">
-                                            청크 오버랩
-                                          </Label>
-                                          <Input
-                                            id="chunk-overlap"
-                                            type="number"
-                                            value={chunkOverlap}
-                                            onChange={(e) => setChunkOverlap(Number(e.target.value))}
-                                            min="0"
-                                            max={chunkSize}
-                                            step="50"
-                                            className="mt-1"
-                                          />
-                                          <p className="text-xs text-gray-500 mt-1">
-                                            연속된 청크 간의 겹치는 부분 (0-{chunkSize})
-                                          </p>
-                                        </div>
-
-                                        {/* Top-K 설정 */}
-                                        <div>
-                                          <Label htmlFor="top-k" className="text-sm font-medium">
-                                            Top-K
-                                          </Label>
-                                          <Input
-                                            id="top-k"
-                                            type="number"
-                                            value={topK}
-                                            onChange={(e) => setTopK(Number(e.target.value))}
-                                            min="1"
-                                            max="20"
-                                            step="1"
-                                            className="mt-1"
-                                          />
-                                          <p className="text-xs text-gray-500 mt-1">
-                                            검색할 관련 문서 수 (1-20)
-                                          </p>
-                                        </div>
-                                      </div>
-
-                                      {/* 설정 요약 */}
-                                      <div className="mt-4 p-3 bg-blue-50 rounded border border-blue-200">
-                                        <h6 className="text-sm font-medium text-blue-900 mb-2">현재 설정 요약</h6>
-                                        <div className="text-xs text-blue-800 space-y-1">
-                                          <p>• 청크 크기: {chunkSize} 토큰</p>
-                                          <p>• 청크 오버랩: {chunkOverlap} 토큰</p>
-                                          <p>• Top-K: {topK}</p>
-                                        </div>
-                                      </div>
-                                    </div>
-                                  )}
-                                </div>
 
                                 <div className="flex gap-2 mt-4">
                                   <Button
@@ -1404,7 +1344,7 @@ export default function AdministratorPage() {
                                     variant="outline"
                                     size="sm"
                                   >
-                                    모든 파일 제거
+                                    파일 제거
                                   </Button>
                                   <Button
                                     onClick={async () => {
@@ -1413,9 +1353,7 @@ export default function AdministratorPage() {
 
                                         // 벡터DB에 문서 업로드
                                         const result = await VectorDBService.uploadAndStoreDocuments(
-                                          selectedFiles,
-                                          chunkSize,
-                                          chunkOverlap
+                                          selectedFiles
                                         )
 
                                         if (result.success) {
@@ -1425,6 +1363,8 @@ export default function AdministratorPage() {
                                             variant: "default",
                                           })
                                           setSelectedFiles([])
+                                          // 문서 목록 새로고침
+                                          loadVectorizedDocuments()
                                         } else {
                                           throw new Error('업로드 실패')
                                         }
@@ -1450,7 +1390,7 @@ export default function AdministratorPage() {
                                     ) : (
                                       <>
                                         <Upload className="h-4 w-4 mr-2" />
-                                        업로드 ({selectedFiles.length}개)
+                                        업로드
                                       </>
                                     )}
                                   </Button>
@@ -1459,58 +1399,16 @@ export default function AdministratorPage() {
                             )}
                           </div>
 
-                          {/* 벡터DB 관리 섹션 */}
-                          <div className="mb-6 pb-6 border-b">
-                            <h4 className="font-medium text-gray-900 mb-4">벡터DB 관리</h4>
-                            <div className="flex gap-2">
-                              <Button
-                                onClick={async () => {
-                                  try {
-                                    const result = await VectorDBService.clearVectorDB()
-                                    if (result.success) {
-                                      toast({
-                                        title: "벡터DB 초기화 완료",
-                                        description: "벡터DB가 성공적으로 초기화되었습니다.",
-                                        variant: "default",
-                                      })
-                                    }
-                                  } catch (error) {
-                                    console.error('벡터DB 초기화 실패:', error)
-                                    toast({
-                                      title: "벡터DB 초기화 실패",
-                                      description: "벡터DB 초기화 중 오류가 발생했습니다.",
-                                      variant: "destructive",
-                                    })
-                                  }
-                                }}
-                                variant="outline"
-                                size="sm"
-                              >
-                                벡터DB 초기화
-                              </Button>
-                            </div>
-                          </div>
 
-                          {/* 문서 목록 섹션 */}
+
+                          {/* 벡터화된 문서 목록 섹션 */}
                           <div>
                             <div className="flex items-center justify-between mb-4">
-                              <h4 className="font-medium text-gray-900">업로드된 문서</h4>
+                              <h4 className="font-medium text-gray-900">벡터화된 문서</h4>
                               <Button
                                 variant="outline"
                                 size="sm"
-                                onClick={() => {
-                                  // TODO: 문서 목록 새로고침
-                                  setLoadingDocuments(true)
-                                  setTimeout(() => {
-                                    setLoadingDocuments(false)
-                                    // 임시 데이터
-                                    setDocuments([
-                                      { id: 1, name: '회사_정책서.pdf', size: '2.5 MB', uploaded_at: '2024-01-15', status: 'processed' },
-                                      { id: 2, name: '제품_매뉴얼.docx', size: '1.8 MB', uploaded_at: '2024-01-14', status: 'processing' },
-                                      { id: 3, name: 'FAQ.txt', size: '0.3 MB', uploaded_at: '2024-01-13', status: 'processed' },
-                                    ])
-                                  }, 1000)
-                                }}
+                                onClick={loadVectorizedDocuments}
                                 disabled={loadingDocuments}
                               >
                                 {loadingDocuments ? (
@@ -1545,39 +1443,38 @@ export default function AdministratorPage() {
                                         variant={doc.status === 'processed' ? 'default' : 'secondary'}
                                         className="text-xs"
                                       >
-                                        {doc.status === 'processed' ? '처리 완료' : '처리 중'}
+                                        {doc.status === 'processed' ? '벡터화 완료' : '벡터화 중'}
                                       </Badge>
-                                      <AlertDialog>
-                                        <AlertDialogTrigger asChild>
-                                          <Button variant="ghost" size="sm">
-                                            <Trash2 className="h-4 w-4" />
-                                          </Button>
-                                        </AlertDialogTrigger>
-                                        <AlertDialogContent>
-                                          <AlertDialogHeader>
-                                            <AlertDialogTitle>문서 삭제</AlertDialogTitle>
-                                            <AlertDialogDescription>
-                                              정말 이 문서를 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.
-                                            </AlertDialogDescription>
-                                          </AlertDialogHeader>
-                                          <AlertDialogFooter>
-                                            <AlertDialogCancel>취소</AlertDialogCancel>
-                                            <AlertDialogAction
-                                              onClick={() => {
-                                                setDocuments(prev => prev.filter(d => d.id !== doc.id))
-                                                toast({
-                                                  title: "문서 삭제 완료",
-                                                  description: `${doc.name}이(가) 삭제되었습니다.`,
-                                                  variant: "default",
-                                                })
-                                              }}
-                                              className="bg-red-600 hover:bg-red-700"
-                                            >
-                                              삭제
-                                            </AlertDialogAction>
-                                          </AlertDialogFooter>
-                                        </AlertDialogContent>
-                                      </AlertDialog>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={async () => {
+                                          try {
+                                            const data = await apiClient.get<any>(`/api/v1/documents/${doc.id}/download`)
+                                            if (data.success && data.download_url) {
+                                              // 새 창에서 다운로드 링크 열기
+                                              window.open(data.download_url, '_blank')
+                                              toast({
+                                                title: "다운로드 시작",
+                                                description: `${doc.name} 다운로드가 시작되었습니다.`,
+                                                variant: "default",
+                                              })
+                                            } else {
+                                              throw new Error('다운로드 URL 생성 실패')
+                                            }
+                                          } catch (error) {
+                                            console.error('문서 다운로드 실패:', error)
+                                            toast({
+                                              title: "다운로드 실패",
+                                              description: "문서 다운로드 중 오류가 발생했습니다.",
+                                              variant: "destructive",
+                                            })
+                                          }
+                                        }}
+                                      >
+                                        <Download className="h-4 w-4" />
+                                      </Button>
+
                                     </div>
                                   </div>
                                 ))}

@@ -37,7 +37,9 @@ class ChatRequest(BaseModel):
     """채팅 요청 스키마"""
 
     message: str = Field(..., description="사용자 메시지")
-    similarity_threshold: float = Field(0.7, description="유사도 임계값")  # 0.5에서 0.7로 높임
+    similarity_threshold: float = Field(
+        0.7, description="유사도 임계값"
+    )  # 0.5에서 0.7로 높임
     max_tokens: int = Field(1024, description="최대 토큰 수")
     include_sources: Optional[bool] = Field(True, description="소스 포함 여부")
 
@@ -208,6 +210,72 @@ async def upload_document_gpu(
                         status_code=500, detail="vLLM 서버 벡터DB 저장에 실패했습니다."
                     )
 
+                    # S3에 PDF 파일 업로드 및 데이터베이스에 저장
+            documents_id = None
+            try:
+                from app.services.s3_service import get_s3_service
+                from app.services.rag_document_service import get_rag_document_service
+
+                s3_service = get_s3_service()
+                rag_document_service = get_rag_document_service()
+
+                if s3_service.is_available():
+                    # S3 키 생성 (documents/YYYY-MM-DD/HH-MM-SS_filename.pdf)
+                    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                    s3_key = f"documents/{timestamp}/{file.filename}"
+
+                    # S3에 업로드
+                    s3_url = s3_service.upload_file(
+                        temp_file_path, s3_key, content_type="application/pdf"
+                    )
+
+                    if s3_url:
+                        logger.info(f"✅ S3 업로드 성공: {s3_url}")
+
+                        # 데이터베이스에 문서 정보 저장
+                        documents_id = rag_document_service.save_document_info(
+                            documents_name=file.filename,
+                            file_size=file.size,
+                            s3_url=s3_url,
+                            db=db,
+                        )
+
+                        if documents_id:
+                            logger.info(f"✅ 문서 정보 저장 완료: {documents_id}")
+
+                            # 기존 벡터화된 문서들의 상태를 0으로 변경
+                            rag_document_service.reset_all_vectorization_status(db=db)
+                            logger.info("✅ 기존 벡터화 상태 초기화 완료")
+
+                            # 새 문서의 벡터화 상태를 1로 설정
+                            rag_document_service.update_vectorization_status(
+                                documents_id=documents_id, db=db, is_vectorized=1
+                            )
+                            logger.info(
+                                f"✅ 새 문서 벡터화 상태 설정 완료: {documents_id}"
+                            )
+                        else:
+                            logger.error("❌ 문서 정보 저장 실패")
+                            raise HTTPException(
+                                status_code=500,
+                                detail="데이터베이스 저장에 실패했습니다.",
+                            )
+                    else:
+                        logger.warning("⚠️ S3 업로드 실패")
+                        raise HTTPException(
+                            status_code=500, detail="S3 업로드에 실패했습니다."
+                        )
+                else:
+                    logger.warning("⚠️ S3 서비스를 사용할 수 없습니다")
+                    raise HTTPException(
+                        status_code=500, detail="S3 서비스를 사용할 수 없습니다."
+                    )
+            except Exception as storage_error:
+                logger.error(f"❌ 저장소 처리 중 오류: {storage_error}")
+                raise HTTPException(
+                    status_code=500, detail=f"저장소 처리 실패: {str(storage_error)}"
+                )
+
             return DocumentUploadResponse(
                 status="success",
                 message=f"벡터DB가 초기화되고 문서가 vLLM 서버의 Milvus 벡터DB에 성공적으로 업로드되었습니다.",
@@ -304,7 +372,9 @@ async def chat_gpu(chat_request: ChatRequest):
 async def embed_and_search(
     query: str = Form(..., description="검색 쿼리"),
     top_k: int = Form(5, description="검색할 상위 k개"),
-    score_threshold: float = Form(0.7, description="유사도 임계값"),  # 0.5에서 0.7로 높임
+    score_threshold: float = Form(
+        0.7, description="유사도 임계값"
+    ),  # 0.5에서 0.7로 높임
 ):
     """임베딩 생성 및 벡터 검색"""
     try:
