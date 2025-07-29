@@ -160,6 +160,59 @@ class SimpleTTSRequest(BaseModel):
             return PREDEFINED_EMOTIONS[emotion_name]
         return v
 
+class StreamingTTSRequest(BaseModel):
+    texts: list[str]  # 문장 단위로 분할된 텍스트 리스트
+    language: str = "ko"
+    speaking_rate: float = 22.0
+    pitch_std: float = 40.0
+    cfg_scale: float = 4.0
+    emotion: list[float] = Field(default=[0.3077, 0.0256, 0.0256, 0.0256, 0.0256, 0.0256, 0.2564, 0.3077], description="8차원 감정 벡터")
+    emotion_name: Optional[str] = Field(default=None, description="미리 정의된 감정 이름")
+    chunk_schedule: Optional[list[int]] = Field(default=None, description="청크 스케줄 (없으면 기본값 사용)")
+    chunk_overlap: int = Field(default=1, description="청크 간 오버랩 토큰 수")
+    
+    @validator('emotion')
+    def validate_emotion(cls, v):
+        if len(v) != 8:
+            raise ValueError("emotion은 8개의 float 값으로 구성되어야 합니다.")
+        if not all(0 <= x <= 1 for x in v):
+            raise ValueError("emotion 값은 0과 1 사이여야 합니다.")
+        return v
+    
+    @validator('emotion', pre=False, always=True)
+    def set_emotion_from_name(cls, v, values):
+        emotion_name = values.get('emotion_name')
+        if emotion_name and emotion_name in PREDEFINED_EMOTIONS:
+            return PREDEFINED_EMOTIONS[emotion_name]
+        return v
+
+class StreamingTTSWithVoiceRequest(BaseModel):
+    texts: list[str]  # 문장 단위로 분할된 텍스트 리스트
+    voice_data_base64: str  # Base64 인코딩된 음성 데이터
+    language: str = "ko"
+    speaking_rate: float = 22.0
+    pitch_std: float = 40.0
+    cfg_scale: float = 4.0
+    emotion: list[float] = Field(default=[0.3077, 0.0256, 0.0256, 0.0256, 0.0256, 0.0256, 0.2564, 0.3077], description="8차원 감정 벡터")
+    emotion_name: Optional[str] = Field(default=None, description="미리 정의된 감정 이름")
+    chunk_schedule: Optional[list[int]] = Field(default=None, description="청크 스케줄 (없으면 기본값 사용)")
+    chunk_overlap: int = Field(default=1, description="청크 간 오버랩 토큰 수")
+    
+    @validator('emotion')
+    def validate_emotion(cls, v):
+        if len(v) != 8:
+            raise ValueError("emotion은 8개의 float 값으로 구성되어야 합니다.")
+        if not all(0 <= x <= 1 for x in v):
+            raise ValueError("emotion 값은 0과 1 사이여야 합니다.")
+        return v
+    
+    @validator('emotion', pre=False, always=True)
+    def set_emotion_from_name(cls, v, values):
+        emotion_name = values.get('emotion_name')
+        if emotion_name and emotion_name in PREDEFINED_EMOTIONS:
+            return PREDEFINED_EMOTIONS[emotion_name]
+        return v
+
 class ZonosTTSResponse(BaseModel):
     task_id: str
     status: str
@@ -297,6 +350,58 @@ def zonos_worker_process(request_queue: Queue, response_queue: Queue):
                         'output_path': output_path
                     })
                     
+                elif task_type == 'generate_streaming_tts':
+                    # 스트리밍 TTS 생성
+                    chunks = generate_streaming_tts_in_process(
+                        zonos_model, device,
+                        request['texts'],
+                        request.get('speaker'),
+                        request['language'],
+                        request['speaking_rate'],
+                        request['pitch_std'],
+                        request['cfg_scale'],
+                        request['emotion'],
+                        request.get('chunk_schedule'),
+                        request.get('chunk_overlap', 1)
+                    )
+                    
+                    response_queue.put({
+                        'task_id': task_id,
+                        'status': 'success',
+                        'chunks': chunks,
+                        'sample_rate': zonos_model.autoencoder.sampling_rate
+                    })
+                    
+                elif task_type == 'generate_streaming_tts_with_voice':
+                    # 음성 클로닝 스트리밍 TTS
+                    voice_path = request['voice_path']
+                    
+                    # 스피커 임베딩 생성
+                    wav, sampling_rate = torchaudio.load(voice_path)
+                    wav = wav.to(device)
+                    speaker = zonos_model.make_speaker_embedding(wav, sampling_rate)
+                    
+                    # 스트리밍 TTS 생성
+                    chunks = generate_streaming_tts_in_process(
+                        zonos_model, device,
+                        request['texts'],
+                        speaker,
+                        request['language'],
+                        request['speaking_rate'],
+                        request['pitch_std'],
+                        request['cfg_scale'],
+                        request['emotion'],
+                        request.get('chunk_schedule'),
+                        request.get('chunk_overlap', 1)
+                    )
+                    
+                    response_queue.put({
+                        'task_id': task_id,
+                        'status': 'success',
+                        'chunks': chunks,
+                        'sample_rate': zonos_model.autoencoder.sampling_rate
+                    })
+                    
             except Exception as e:
                 logger.error(f"작업 처리 실패 (task_id: {task_id}): {e}")
                 response_queue.put({
@@ -337,6 +442,58 @@ def generate_tts_in_process(zonos_model, device, text, speaker, language, speaki
     wavs = zonos_model.autoencoder.decode(codes)
     
     return wavs[0]
+
+def generate_streaming_tts_in_process(zonos_model, device, texts, speaker, language, speaking_rate, pitch_std, cfg_scale, emotion, chunk_schedule=None, chunk_overlap=1):
+    """프로세스 내에서 스트리밍 TTS 생성"""
+    from zonos.conditioning import make_cond_dict
+    import base64
+    
+    # 기본 청크 스케줄 (RTX 3090 최적화)
+    if chunk_schedule is None:
+        chunk_schedule = [22, 13, *range(12, 100)]
+    
+    # 텍스트를 generator로 변환
+    def text_generator():
+        for text in texts:
+            cond_dict = make_cond_dict(
+                text=text,
+                speaker=speaker,
+                language='ko',  # 항상 한국어로 고정
+                speaking_rate=speaking_rate,
+                emotion=emotion,
+                pitch_std=pitch_std
+            )
+            yield cond_dict
+    
+    # 스트리밍 생성
+    stream_generator = zonos_model.stream(
+        cond_dicts_generator=text_generator(),
+        chunk_schedule=chunk_schedule,
+        chunk_overlap=chunk_overlap,
+        mark_boundaries=True,
+    )
+    
+    # 각 청크를 base64로 인코딩하여 전송
+    chunks = []
+    for i, audio_chunk in enumerate(stream_generator):
+        if isinstance(audio_chunk, str):
+            # 경계 마커
+            chunks.append({
+                'type': 'boundary',
+                'data': audio_chunk,
+                'index': i
+            })
+        else:
+            # 오디오 청크를 바이트로 변환
+            audio_bytes = audio_chunk.cpu().numpy().astype('float32').tobytes()
+            chunks.append({
+                'type': 'audio',
+                'data': base64.b64encode(audio_bytes).decode('utf-8'),
+                'shape': list(audio_chunk.shape),
+                'index': i
+            })
+    
+    return chunks
 
 def initialize_zonos_multiprocessing():
     """멀티프로세싱 환경 초기화"""
@@ -1131,3 +1288,217 @@ async def shutdown_event():
     
     # ThreadPoolExecutor 종료
     await shutdown_executor()
+
+# 스트리밍 엔드포인트
+from fastapi.responses import StreamingResponse
+import json
+import time
+
+@router.post("/stream_tts")
+async def stream_tts(request: StreamingTTSRequest):
+    """SSE를 사용한 TTS 스트리밍 (기본 음성)"""
+    
+    # 멀티프로세싱 확인
+    if zonos_process is None or not zonos_process.is_alive():
+        logger.warning("⚠️ Zonos 멀티프로세싱이 초기화되지 않았습니다. 초기화 시도 중...")
+        success = await asyncio.get_event_loop().run_in_executor(None, initialize_zonos_multiprocessing)
+        if not success:
+            raise HTTPException(status_code=500, detail="Zonos 멀티프로세싱 초기화에 실패했습니다.")
+    
+    task_id = str(uuid.uuid4())
+    
+    async def generate():
+        """SSE 스트림 생성"""
+        try:
+            # 초기 상태 전송
+            yield f"data: {json.dumps({'event': 'start', 'task_id': task_id, 'message': '스트리밍 시작'})}\n\n"
+            
+            # 워커에 요청 전송
+            request_queue.put({
+                'type': 'generate_streaming_tts',
+                'task_id': task_id,
+                'texts': request.texts,
+                'speaker': None,  # 기본 음성
+                'language': 'ko',
+                'speaking_rate': request.speaking_rate,
+                'pitch_std': request.pitch_std,
+                'cfg_scale': request.cfg_scale,
+                'emotion': request.emotion,
+                'chunk_schedule': request.chunk_schedule,
+                'chunk_overlap': request.chunk_overlap
+            })
+            
+            # 응답 대기
+            timeout = 120  # 2분 타임아웃
+            start_time = time.time()
+            
+            while True:
+                if not response_queue.empty():
+                    response = response_queue.get_nowait()
+                    if response['task_id'] == task_id:
+                        if response['status'] == 'success':
+                            chunks = response['chunks']
+                            sample_rate = response['sample_rate']
+                            
+                            # 각 청크 전송
+                            for chunk in chunks:
+                                chunk_data = {
+                                    'event': 'chunk',
+                                    'chunk': chunk,
+                                    'sample_rate': sample_rate
+                                }
+                                yield f"data: {json.dumps(chunk_data)}\n\n"
+                                await asyncio.sleep(0.01)  # 백프레셔 방지
+                            
+                            # 완료 이벤트
+                            yield f"data: {json.dumps({'event': 'complete', 'message': '스트리밍 완료'})}\n\n"
+                            break
+                        else:
+                            # 에러 이벤트
+                            error_data = {
+                                'event': 'error',
+                                'error': response.get('error', 'Unknown error')
+                            }
+                            yield f"data: {json.dumps(error_data)}\n\n"
+                            break
+                
+                # 타임아웃 체크
+                if time.time() - start_time > timeout:
+                    yield f"data: {json.dumps({'event': 'error', 'error': '타임아웃'})}\n\n"
+                    break
+                
+                await asyncio.sleep(0.1)
+                
+        except Exception as e:
+            logger.error(f"스트리밍 중 오류: {e}")
+            yield f"data: {json.dumps({'event': 'error', 'error': str(e)})}\n\n"
+    
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"  # nginx 버퍼링 비활성화
+        }
+    )
+
+@router.post("/stream_tts_with_voice")
+async def stream_tts_with_voice(request: StreamingTTSWithVoiceRequest):
+    """SSE를 사용한 음성 클로닝 TTS 스트리밍"""
+    
+    # 멀티프로세싱 확인
+    if zonos_process is None or not zonos_process.is_alive():
+        logger.warning("⚠️ Zonos 멀티프로세싱이 초기화되지 않았습니다. 초기화 시도 중...")
+        success = await asyncio.get_event_loop().run_in_executor(None, initialize_zonos_multiprocessing)
+        if not success:
+            raise HTTPException(status_code=500, detail="Zonos 멀티프로세싱 초기화에 실패했습니다.")
+    
+    task_id = str(uuid.uuid4())
+    
+    async def generate():
+        """SSE 스트림 생성"""
+        try:
+            import base64
+            
+            # 초기 상태 전송
+            yield f"data: {json.dumps({'event': 'start', 'task_id': task_id, 'message': '음성 클로닝 스트리밍 시작'})}\n\n"
+            
+            # 임시 디렉토리 생성
+            temp_dir = Path("/tmp/zonos_tts")
+            temp_dir.mkdir(exist_ok=True)
+            
+            # Base64 디코딩하여 음성 파일 생성
+            voice_data = base64.b64decode(request.voice_data_base64)
+            temp_voice_path = temp_dir / f"temp_voice_{uuid.uuid4()}.wav"
+            
+            async with aiofiles.open(temp_voice_path, "wb") as f:
+                await f.write(voice_data)
+            
+            # 워커에 요청 전송
+            request_queue.put({
+                'type': 'generate_streaming_tts_with_voice',
+                'task_id': task_id,
+                'texts': request.texts,
+                'voice_path': str(temp_voice_path),
+                'language': 'ko',
+                'speaking_rate': request.speaking_rate,
+                'pitch_std': request.pitch_std,
+                'cfg_scale': request.cfg_scale,
+                'emotion': request.emotion,
+                'chunk_schedule': request.chunk_schedule,
+                'chunk_overlap': request.chunk_overlap
+            })
+            
+            # 응답 대기
+            timeout = 120  # 2분 타임아웃
+            start_time = time.time()
+            
+            while True:
+                if not response_queue.empty():
+                    response = response_queue.get_nowait()
+                    if response['task_id'] == task_id:
+                        if response['status'] == 'success':
+                            chunks = response['chunks']
+                            sample_rate = response['sample_rate']
+                            
+                            # 각 청크 전송
+                            for chunk in chunks:
+                                chunk_data = {
+                                    'event': 'chunk',
+                                    'chunk': chunk,
+                                    'sample_rate': sample_rate
+                                }
+                                yield f"data: {json.dumps(chunk_data)}\n\n"
+                                await asyncio.sleep(0.01)  # 백프레셔 방지
+                            
+                            # 완료 이벤트
+                            yield f"data: {json.dumps({'event': 'complete', 'message': '음성 클로닝 스트리밍 완료'})}\n\n"
+                            
+                            # 임시 파일 삭제
+                            try:
+                                temp_voice_path.unlink()
+                            except:
+                                pass
+                            break
+                        else:
+                            # 에러 이벤트
+                            error_data = {
+                                'event': 'error',
+                                'error': response.get('error', 'Unknown error')
+                            }
+                            yield f"data: {json.dumps(error_data)}\n\n"
+                            
+                            # 임시 파일 삭제
+                            try:
+                                temp_voice_path.unlink()
+                            except:
+                                pass
+                            break
+                
+                # 타임아웃 체크
+                if time.time() - start_time > timeout:
+                    yield f"data: {json.dumps({'event': 'error', 'error': '타임아웃'})}\n\n"
+                    
+                    # 임시 파일 삭제
+                    try:
+                        temp_voice_path.unlink()
+                    except:
+                        pass
+                    break
+                
+                await asyncio.sleep(0.1)
+                
+        except Exception as e:
+            logger.error(f"음성 클로닝 스트리밍 중 오류: {e}")
+            yield f"data: {json.dumps({'event': 'error', 'error': str(e)})}\n\n"
+    
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"  # nginx 버퍼링 비활성화
+        }
+    )

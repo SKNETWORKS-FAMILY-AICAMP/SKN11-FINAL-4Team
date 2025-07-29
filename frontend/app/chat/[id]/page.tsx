@@ -11,6 +11,7 @@ import { tokenUtils } from "@/lib/auth"
 import { ModelService } from "@/lib/services/model.service"
 import MCPService, { MCPChatResponse } from '@/lib/services/mcp.service'
 import { RAGService, RAGChatRequest } from '@/lib/services/rag.service'
+import { TTSService, StreamEvent } from '@/lib/services/tts.service'
 
 import {
   Send,
@@ -23,6 +24,8 @@ import {
   MessageSquare,
   User,
   Bot,
+  Volume2,
+  VolumeX,
 } from "lucide-react"
 
 interface Message {
@@ -31,6 +34,8 @@ interface Message {
   sender: "user" | "bot"
   timestamp: Date
   isStreaming?: boolean // 스트리밍 중인 메시지를 위한 속성
+  ttsTaskId?: string // TTS 작업 ID
+  audioUrl?: string // 생성된 오디오 URL
 }
 
 interface ChatModel {
@@ -54,10 +59,15 @@ export default function ChatPage() {
   const [isModelLoading, setIsModelLoading] = useState(true)
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('connecting')
   const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false)
+  const [playingAudioId, setPlayingAudioId] = useState<string | null>(null)
+  const [loadingTTSId, setLoadingTTSId] = useState<string | null>(null)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const timeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const audioContextRef = useRef<AudioContext | null>(null)
+  const abortControllerRef = useRef<AbortController | null>(null)
 
   // 모델 데이터 로드
   const loadModelData = async () => {
@@ -381,6 +391,129 @@ export default function ChatPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
+  // TTS 스트리밍 처리
+  const handleTTS = async (message: Message) => {
+    if (!model) return;
+    
+    try {
+      setLoadingTTSId(message.id);
+      
+      const sentences = TTSService.splitIntoSentences(message.content);
+      
+      // 오디오 컨텍스트 초기화
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      }
+
+      let audioChunks: Float32Array[] = [];
+      let sampleRate = 44100;
+      let isFirstChunk = true;
+
+      // TTS 스트리밍 시작
+      const abortController = await TTSService.streamVoice(
+        {
+          texts: sentences,
+          influencer_id: model.id
+        },
+        (event: StreamEvent) => {
+          if (event.event === 'chunk' && event.chunk) {
+            const chunk = event.chunk;
+            sampleRate = event.sample_rate || 44100;
+
+            if (chunk.type === 'audio') {
+              // Base64 디코딩 및 Float32Array 변환
+              const binaryString = atob(chunk.data);
+              const bytes = new Uint8Array(binaryString.length);
+              for (let i = 0; i < binaryString.length; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+              }
+              
+              const floatArray = new Float32Array(bytes.buffer);
+              audioChunks.push(floatArray);
+              
+              // 첫 청크가 도착하면 재생 시작
+              if (isFirstChunk) {
+                isFirstChunk = false;
+                setPlayingAudioId(message.id);
+                playAudioChunks(audioChunks, sampleRate);
+              }
+            }
+          } else if (event.event === 'complete') {
+            console.log('TTS 스트리밍 완료');
+            // 모든 청크 재생
+            if (audioChunks.length > 0 && audioContextRef.current) {
+              playAudioChunks(audioChunks, sampleRate);
+            }
+          } else if (event.event === 'error') {
+            console.error('TTS 에러:', event.error);
+            setLoadingTTSId(null);
+            setPlayingAudioId(null);
+          }
+        },
+        (error) => {
+          console.error('TTS 스트리밍 오류:', error);
+          setLoadingTTSId(null);
+          setPlayingAudioId(null);
+        }
+      );
+
+      // 컨트롤러 저장 (중지할 때 사용)
+      abortControllerRef.current = abortController;
+      
+    } catch (error) {
+      console.error('TTS 처리 오류:', error);
+      setLoadingTTSId(null);
+      setPlayingAudioId(null);
+    }
+  };
+
+  // 오디오 청크 재생
+  const playAudioChunks = async (chunks: Float32Array[], sampleRate: number) => {
+    if (!audioContextRef.current) return;
+
+    // 전체 길이 계산
+    const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+    const combinedAudio = new Float32Array(totalLength);
+    
+    // 청크 결합
+    let offset = 0;
+    for (const chunk of chunks) {
+      combinedAudio.set(chunk, offset);
+      offset += chunk.length;
+    }
+
+    // 오디오 버퍼 생성
+    const audioBuffer = audioContextRef.current.createBuffer(1, combinedAudio.length, sampleRate);
+    audioBuffer.copyToChannel(combinedAudio, 0);
+
+    // 소스 노드 생성 및 재생
+    const source = audioContextRef.current.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(audioContextRef.current.destination);
+    source.start();
+
+    source.onended = () => {
+      setPlayingAudioId(null);
+    };
+  };
+
+  // 오디오 재생 중지
+  const stopAudio = () => {
+    // 스트리밍 중지
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    
+    // 오디오 컨텍스트 중지
+    if (audioContextRef.current && audioContextRef.current.state === 'running') {
+      audioContextRef.current.suspend();
+    }
+    
+    setPlayingAudioId(null);
+    setLoadingTTSId(null);
+  };
+
   useEffect(() => {
     scrollToBottom()
   }, [messages])
@@ -526,6 +659,38 @@ export default function ChatPage() {
                           <div className="flex items-center mt-1">
                             <Loader2 className="h-3 w-3 animate-spin mr-1" />
                             <span className="text-xs text-gray-500">생성 중...</span>
+                          </div>
+                        )}
+                        {/* TTS 버튼 - 봇 메시지에만 표시 */}
+                        {message.sender === "bot" && !message.isStreaming && (
+                          <div className="flex items-center mt-2">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                if (playingAudioId === message.id) {
+                                  stopAudio();
+                                } else {
+                                  handleTTS(message);
+                                }
+                              }}
+                              disabled={loadingTTSId === message.id}
+                              className="h-6 px-2 py-1"
+                            >
+                              {loadingTTSId === message.id ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : playingAudioId === message.id ? (
+                                <>
+                                  <VolumeX className="h-3 w-3 mr-1" />
+                                  <span className="text-xs">중지</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Volume2 className="h-3 w-3 mr-1" />
+                                  <span className="text-xs">듣기</span>
+                                </>
+                              )}
+                            </Button>
                           </div>
                         )}
                       </div>

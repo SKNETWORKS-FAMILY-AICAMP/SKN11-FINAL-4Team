@@ -1,11 +1,15 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, AsyncGenerator
 from pydantic import BaseModel
 import json
 import logging
 import os
+import httpx
+import asyncio
+import base64
 from app.database import get_db
 from app.models.influencer import AIInfluencer
 from app.models.voice import VoiceBase, GeneratedVoice
@@ -32,6 +36,13 @@ class VoiceGenerationRequest(BaseModel):
     text: str
     influencer_id: str
     base_voice_url: Optional[str] = None
+
+
+class StreamingVoiceRequest(BaseModel):
+    texts: List[str]  # 문장 단위로 분할된 텍스트 리스트
+    influencer_id: str
+    chunk_schedule: Optional[List[int]] = None
+    chunk_overlap: int = 1
 
 
 @router.post("/generate_voice")
@@ -221,3 +232,145 @@ async def handle_tts_webhook(
         logger.error(f"웹훅 처리 중 오류: {str(e)}")
         db.rollback()
         raise HTTPException(status_code=500, detail="웹훅 처리 중 오류가 발생했습니다")
+
+
+@router.post("/stream_voice")
+async def stream_voice(
+    request: StreamingVoiceRequest,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+    s3_service = Depends(get_s3_service),
+):
+    """텍스트를 스트리밍 음성으로 변환"""
+    user_id = current_user.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User ID not found")
+    
+    # 인플루언서 확인
+    influencer = db.query(AIInfluencer).filter(
+        AIInfluencer.influencer_id == request.influencer_id
+    ).first()
+    
+    if not influencer:
+        raise HTTPException(status_code=404, detail="인플루언서를 찾을 수 없습니다")
+    
+    # 베이스 음성 확인
+    base_voice = db.query(VoiceBase).filter(
+        VoiceBase.influencer_id == influencer.influencer_id
+    ).first()
+    
+    if not base_voice:
+        raise HTTPException(status_code=400, detail="베이스 음성이 설정되지 않았습니다")
+    
+    # 텍스트 총 길이 검증
+    total_length = sum(len(text) for text in request.texts)
+    if total_length > 2000:
+        raise HTTPException(status_code=400, detail="텍스트 총 길이는 2000자 이하여야 합니다")
+    
+    async def generate_stream() -> AsyncGenerator[str, None]:
+        """SSE 스트림 생성"""
+        try:
+            # VLLM 서버 URL 구성
+            vllm_url = os.getenv('VLLM_URL', 'http://localhost:8001')
+            stream_endpoint = f"{vllm_url}/api/v1/zonos_tts/stream_tts_with_voice"
+            
+            # S3 presigned URL 생성
+            if base_voice.s3_key:
+                presigned_url = s3_service.generate_presigned_url(
+                    s3_key=base_voice.s3_key,
+                    expiration=3600
+                )
+            else:
+                import re
+                match = re.search(r'amazonaws\.com/(.+)$', base_voice.s3_url)
+                if match:
+                    object_key = match.group(1)
+                    presigned_url = s3_service.generate_presigned_url(
+                        s3_key=object_key,
+                        expiration=3600
+                    )
+                else:
+                    presigned_url = base_voice.s3_url
+            
+            # 베이스 음성 다운로드 및 Base64 인코딩
+            async with httpx.AsyncClient() as client:
+                voice_response = await client.get(presigned_url)
+                if voice_response.status_code != 200:
+                    raise HTTPException(status_code=500, detail="베이스 음성을 가져올 수 없습니다")
+                
+                voice_data_base64 = base64.b64encode(voice_response.content).decode()
+            
+            # 초기 이벤트 전송
+            yield f"data: {json.dumps({'event': 'start', 'message': '스트리밍 시작', 'influencer_id': request.influencer_id})}\n\n"
+            
+            # VLLM 서버로 스트리밍 요청
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                # 스트리밍 요청 데이터
+                stream_data = {
+                    "texts": request.texts,
+                    "voice_data_base64": voice_data_base64,
+                    "emotion": [0.3077, 0.0256, 0.0256, 0.0256, 0.0256, 0.0256, 0.2564, 0.3077],  # 중립 감정
+                    "chunk_schedule": request.chunk_schedule,
+                    "chunk_overlap": request.chunk_overlap
+                }
+                
+                # SSE 스트림 수신
+                async with client.stream(
+                    'POST',
+                    stream_endpoint,
+                    json=stream_data,
+                    headers={"Accept": "text/event-stream"}
+                ) as response:
+                    if response.status_code != 200:
+                        error_data = await response.aread()
+                        logger.error(f"VLLM 스트리밍 오류: {error_data}")
+                        yield f"data: {json.dumps({'event': 'error', 'error': 'VLLM 서버 오류'})}\n\n"
+                        return
+                    
+                    # VLLM 서버의 SSE 스트림을 클라이언트로 전달
+                    async for line in response.aiter_lines():
+                        if line.startswith('data: '):
+                            try:
+                                # VLLM 데이터 파싱
+                                vllm_data = json.loads(line[6:])
+                                
+                                # 클라이언트에게 전달
+                                client_data = {
+                                    'event': vllm_data.get('event'),
+                                    'influencer_id': request.influencer_id
+                                }
+                                
+                                if vllm_data.get('event') == 'chunk':
+                                    client_data['chunk'] = vllm_data.get('chunk')
+                                    client_data['sample_rate'] = vllm_data.get('sample_rate')
+                                elif vllm_data.get('event') == 'complete':
+                                    client_data['message'] = '스트리밍 완료'
+                                elif vllm_data.get('event') == 'error':
+                                    client_data['error'] = vllm_data.get('error')
+                                
+                                yield f"data: {json.dumps(client_data)}\n\n"
+                                
+                                # complete 이벤트면 종료
+                                if vllm_data.get('event') == 'complete':
+                                    break
+                                    
+                            except json.JSONDecodeError as e:
+                                logger.error(f"JSON 파싱 오류: {e}, line: {line}")
+                                continue
+                    
+        except httpx.TimeoutException:
+            logger.error("VLLM 서버 타임아웃")
+            yield f"data: {json.dumps({'event': 'error', 'error': '서버 타임아웃'})}\n\n"
+        except Exception as e:
+            logger.error(f"스트리밍 중 오류: {str(e)}")
+            yield f"data: {json.dumps({'event': 'error', 'error': str(e)})}\n\n"
+    
+    return StreamingResponse(
+        generate_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
