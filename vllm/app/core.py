@@ -103,22 +103,47 @@ async def run_finetuning_pipeline(qa_data: List[Dict], system_message: str,
     try:
         logger.info(f"🔄 파인튜닝 파이프라인 실행: {hf_repo_id}")
         logger.info(f"🔍 파이프라인 QA 데이터: 개수={len(qa_data)}")
-        logger.info(f"🎯 device_map='auto'로 자동 GPU 할당")
         
-        # fine_custom 모듈을 동적으로 import
-        from pipeline import fine_custom
+        # 멀티프로세싱 사용 여부 확인 (기본값: true)
+        use_multiprocessing = os.getenv('USE_FINETUNING_MULTIPROCESSING', 'true').lower() == 'true'
         
-        # 직접 fine_custom.main 함수 호출
-        hf_model_url = fine_custom.main(
-            qa_data=qa_data,
-            system_message=system_message,
-            hf_token=hf_token,
-            hf_repo_id=hf_repo_id,
-            training_epochs=training_epochs
-        )
+        if use_multiprocessing:
+            # 멀티프로세싱 방식 (완전 격리)
+            logger.info("🔄 파인튜닝을 멀티프로세싱으로 실행 (완전 격리)")
+            from app.routers.finetuning_async import submit_finetuning_task
+            
+            task_data = {
+                'task_id': f"ft_{hf_repo_id}_{int(time.time())}",
+                'qa_data': qa_data,
+                'system_message': system_message,
+                'hf_token': hf_token,
+                'hf_repo_id': hf_repo_id,
+                'training_epochs': training_epochs
+            }
+            
+            response = await submit_finetuning_task(task_data)
+            
+            if response['status'] == 'success':
+                return response['hf_model_url']
+            else:
+                raise Exception(response.get('error', '파인튜닝 실패'))
+        else:
+            # 스레드 방식 (가벼운 격리)
+            logger.info("🧵 파인튜닝을 별도 스레드에서 실행 (비블로킹)")
+            from pipeline import fine_custom
+            
+            hf_model_url = await asyncio.to_thread(
+                fine_custom.main,
+                qa_data=qa_data,
+                system_message=system_message,
+                hf_token=hf_token,
+                hf_repo_id=hf_repo_id,
+                training_epochs=training_epochs
+            )
+            
+            return hf_model_url
         
         logger.info(f"✅ 파인튜닝 파이프라인 실행 완료: {hf_repo_id}")
-        return hf_model_url
             
     except Exception as e:
         logger.error(f"❌ 파인튜닝 파이프라인 실행 실패: {e}")

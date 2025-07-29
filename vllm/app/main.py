@@ -71,6 +71,11 @@ async def on_startup():
 
         # RAG 전용 GPU 1 사용 (멀티프로세싱으로 격리됨)
         initialize_embedding_model()
+        
+        # 파인튜닝 멀티프로세싱 초기화
+        from app.routers.finetuning_async import initialize_finetuning_multiprocessing
+        initialize_finetuning_multiprocessing()
+        logger.info("✅ 파인튜닝 멀티프로세싱 초기화 완료")
 
         logger.info("✅ FastAPI 서버 초기화 완료")
     except Exception as e:
@@ -82,6 +87,13 @@ async def on_startup():
 async def on_shutdown():
     """서버 종료 시 정리 작업"""
     logger.info("🛑 FastAPI 서버 종료 중...")
+    
+    # 파인튜닝 멀티프로세싱 정리
+    try:
+        from app.routers.finetuning_async import cleanup_finetuning_multiprocessing
+        cleanup_finetuning_multiprocessing()
+    except Exception as e:
+        logger.error(f"파인튜닝 멀티프로세싱 정리 실패: {e}")
 
 
 @app.get("/")
