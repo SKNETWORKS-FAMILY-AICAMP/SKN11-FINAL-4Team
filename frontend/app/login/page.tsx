@@ -67,7 +67,7 @@ export default function LoginPage() {
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
           <div className="flex justify-center mb-4">
-            <Bot className="h-12 w-12 text-blue-600" />
+            <img src="/favicon.ico" alt="AI Influencer Platform" className="h-12 w-12" />
           </div>
           <CardTitle className="text-2xl font-bold">AI Influencer Platform</CardTitle>
           <CardDescription>기업용 AI 인플루언서 생성 및 관리 플랫폼</CardDescription>

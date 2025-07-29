@@ -25,7 +25,7 @@ export function Navigation() {
         <div className="flex justify-between h-16">
           <div className="flex items-center">
             <Link href="/dashboard" className="flex items-center space-x-2">
-              <Bot className="h-8 w-8 text-blue-600" />
+              <img src="/favicon.ico" alt="AIMEX" className="h-8 w-8" />
               <span className="text-xl font-bold text-gray-900">AIMEX</span>
             </Link>
           </div>
