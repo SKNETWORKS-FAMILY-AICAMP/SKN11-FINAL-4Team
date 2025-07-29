@@ -157,7 +157,7 @@ export default function TestModelPage() {
             <Card className="h-full flex flex-col overflow-hidden">
               <CardHeader className="flex-shrink-0">
                 <CardTitle className="flex items-center space-x-2">
-                  <Bot className="h-5 w-5" />
+                  <img src="/favicon.ico" alt="AI Influencer" className="h-5 w-5" />
                   <span>AI 인플루언서 선택</span>
                 </CardTitle>
                 <CardDescription>테스트할 AI 인플루언서들을 선택하세요 (3개까지 선택 가능)</CardDescription>

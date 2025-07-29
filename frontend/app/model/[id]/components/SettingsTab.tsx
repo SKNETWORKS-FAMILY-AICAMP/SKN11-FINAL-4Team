@@ -41,9 +41,7 @@ export default function SettingsTab({
       <Card className="bg-white shadow-sm border border-gray-200">
         <CardHeader className="pb-4">
           <div className="flex items-center space-x-3">
-            <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
-              <Bot className="h-6 w-6 text-blue-600" />
-            </div>
+            <img src="/favicon.ico" alt="AI Influencer" className="h-10 w-10" />
             <div>
               <CardTitle className="text-lg font-medium text-gray-900">
                 기본 정보
@@ -102,10 +100,8 @@ export default function SettingsTab({
                   </div>
                 ) : (
                   // 기본 아이콘
-                  <div className="w-52 h-52 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg hover:opacity-80 transition-opacity">
-                    <div className="w-32 h-32 bg-orange-500 rounded-lg flex items-center justify-center">
-                      <Bot className="h-16 w-16 text-white" />
-                    </div>
+                  <div className="w-52 h-52 rounded-full bg-gradient-to-br from-blue-200 to-blue-50 flex items-center justify-center shadow-lg hover:opacity-80 transition-opacity">
+                    <img src="/favicon.ico" alt="AI Influencer" className="h-28 w-28" />
                   </div>
                 )}
                 {/* 클릭 안내 오버레이 */}

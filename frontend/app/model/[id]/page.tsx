@@ -2821,7 +2821,7 @@ function ModelDetailContent() {
           <DialogContent className="max-w-2xl">
             <DialogHeader>
               <DialogTitle className="flex items-center space-x-2">
-                <Bot className="h-5 w-5" />
+                <img src="/favicon.ico" alt="AI Influencer" className="h-5 w-5" />
                 <span>프로필 이미지</span>
               </DialogTitle>
             </DialogHeader>
@@ -2848,10 +2848,8 @@ function ModelDetailContent() {
                     />
                   </div>
                 ) : (
-                  <div className="w-80 h-80 rounded-lg bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg">
-                    <div className="w-40 h-40 bg-orange-500 rounded-lg flex items-center justify-center">
-                      <Bot className="h-20 w-20 text-white" />
-                    </div>
+                  <div className="w-80 h-80 rounded-lg bg-gradient-to-br from-blue-200 to-blue-50 flex items-center justify-center shadow-lg">
+                    <img src="/favicon.ico" alt="AI Influencer" className="h-20 w-20" />
                   </div>
                 )}
               </div>
