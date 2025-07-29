@@ -275,10 +275,26 @@ export class ModelService {
    * Instagram 연결 상태 확인
    */
   static async getInstagramStatus(influencerId: string): Promise<{
-    connected: boolean
-    instagram_username?: string
-    instagram_account_type?: string
-    last_sync?: string
+    is_connected: boolean;
+    instagram_id?: string;
+    instagram_page_id?: string;
+    instagram_username?: string;
+    instagram_account_type?: string;
+    connected_at?: string;
+    token_expires_at?: string;
+    token_expired?: boolean;
+    instagram_info?: {
+      id: string;
+      username: string;
+      account_type: string;
+      name?: string;
+      biography?: string;
+      followers_count?: number;
+      follows_count?: number;
+      media_count?: number;
+      profile_picture_url?: string;
+      website?: string;
+    };
   }> {
     return await apiClient.get(`/api/v1/influencers/${influencerId}/instagram/status`)
   }

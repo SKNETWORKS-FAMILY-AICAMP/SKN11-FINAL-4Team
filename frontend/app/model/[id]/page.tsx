@@ -224,6 +224,10 @@ function ModelDetailContent() {
   const [voiceToDelete, setVoiceToDelete] = useState<string | null>(null);
   const [instagramStatus, setInstagramStatus] = useState<{
     is_connected: boolean;
+    instagram_id?: string;
+    instagram_page_id?: string;
+    instagram_username?: string;
+    instagram_account_type?: string;
     connected_at?: string;
     token_expires_at?: string;
     token_expired?: boolean;
@@ -1117,36 +1121,38 @@ function ModelDetailContent() {
       checkBaseVoice();
       const checkInstagramStatus = async () => {
         try {
-          // 모델 데이터에서 Instagram 정보 확인
+          // Instagram이 연동되어 있으면 API로 실시간 정보 조회
           if (model.instagram_is_active) {
-            setInstagramStatus({
-              is_connected: true,
-              connected_at: model.instagram_connected_at,
-              instagram_info: {
-                id: model.instagram_id || "",
-                username: model.instagram_username || "",
-                account_type: model.instagram_account_type || "",
-              },
-            });
-          } else {
-            // API로 추가 확인 (기존 방식 유지)
             try {
               const data = await ModelService.getInstagramStatus(
                 params.id as string,
               );
               setInstagramStatus({
-                is_connected: data.connected,
-                instagram_info: data.instagram_username
-                  ? {
-                    id: "",
-                    username: data.instagram_username,
-                    account_type: data.instagram_account_type || "",
-                  }
-                  : undefined,
+                is_connected: data.is_connected,
+                instagram_id: data.instagram_id,
+                instagram_page_id: data.instagram_page_id,
+                instagram_username: data.instagram_username,
+                instagram_account_type: data.instagram_account_type,
+                connected_at: data.connected_at,
+                token_expires_at: data.token_expires_at,
+                token_expired: data.token_expired,
+                instagram_info: data.instagram_info,
               });
             } catch (error) {
-              setInstagramStatus({ is_connected: false });
+              // API 호출 실패 시 기본 정보 사용
+              setInstagramStatus({
+                is_connected: true,
+                connected_at: model.instagram_connected_at,
+                instagram_info: {
+                  id: model.instagram_id || "",
+                  username: model.instagram_username || "",
+                  account_type: model.instagram_account_type || "",
+                },
+              });
             }
+          } else {
+            // Instagram이 연동되지 않은 경우
+            setInstagramStatus({ is_connected: false });
           }
         } catch (error) {
           setInstagramStatus({ is_connected: false });
