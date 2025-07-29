@@ -337,29 +337,25 @@ class VLLMClient:
 위 대사 중 가장 특징적인 2-3개를 선별해주세요.
 """
 
-            # OpenAI 호환 API 호출
+            # vLLM 서버의 직접 생성 엔드포인트 사용
+            system_message = "당신은 캐릭터의 대사를 분석하여 말투 특징을 파악하고 시스템 프롬프트를 생성하는 전문가입니다."
+            
             payload = {
-                "model": "LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct",
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": "당신은 캐릭터의 대사를 분석하여 말투 특징을 파악하고 시스템 프롬프트를 생성하는 전문가입니다."
-                    },
-                    {
-                        "role": "user",
-                        "content": analysis_prompt
-                    }
-                ],
+                "user_message": analysis_prompt,
+                "system_message": system_message,
+                "influencer_name": "분석 도우미",
+                "max_new_tokens": 1000,
                 "temperature": 0.7,
-                "max_tokens": 1000
+                "do_sample": True,
+                "use_chat_template": True
             }
 
             logger.info("🔍 대사 분석 요청 시작")
-            response = await self.client.post("/v1/chat/completions", json=payload)
+            response = await self.client.post("/generate", json=payload)
             response.raise_for_status()
             
             result = response.json()
-            analysis_text = result["choices"][0]["message"]["content"]
+            analysis_text = result.get("generated_text", "")
             
             # 분석 결과에서 시스템 프롬프트 추출
             system_prompt = ""
