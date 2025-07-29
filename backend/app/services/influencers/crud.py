@@ -316,7 +316,7 @@ async def update_influencer(
     influencer = await get_influencer_by_id(db, user_id, influencer_id)
 
     # 업데이트할 필드들
-    update_data = influencer_update.dict(exclude_unset=True)
+    update_data = influencer_update.model_dump(exclude_unset=True)
     
     # chatbot_option이 활성화되는지 확인
     if 'chatbot_option' in update_data and update_data['chatbot_option'] == True:

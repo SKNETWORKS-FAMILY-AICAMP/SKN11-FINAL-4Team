@@ -70,12 +70,12 @@ async def analyze_tone_data(request: ToneAnalysisRequest):
         char_gender = "성별 정보 없음"
         
         if request.character_info:
-            char_name = request.character_info.get('name', '알 수 없음')
-            char_description = request.character_info.get('description', '설명 없음')
-            char_personality = request.character_info.get('personality', '성격 정보 없음')
-            char_mbti = request.character_info.get('mbti', 'MBTI 정보 없음')
-            char_age = request.character_info.get('age', '연령대 정보 없음')
-            char_gender = request.character_info.get('gender', '성별 정보 없음')
+            char_name = str(request.character_info.get('name', '알 수 없음'))
+            char_description = str(request.character_info.get('description', '설명 없음'))
+            char_personality = str(request.character_info.get('personality', '성격 정보 없음'))
+            char_mbti = str(request.character_info.get('mbti', 'MBTI 정보 없음'))
+            char_age = str(request.character_info.get('age', '연령대 정보 없음'))
+            char_gender = str(request.character_info.get('gender', '성별 정보 없음'))
             
             analysis_prompt += f"""
 캐릭터 정보:
