@@ -190,6 +190,10 @@ def zonos_worker_process(request_queue: Queue, response_queue: Queue):
     tts_gpu_id = int(os.getenv('TTS_GPU_ID', '1'))
     os.environ['CUDA_VISIBLE_DEVICES'] = str(tts_gpu_id)
     
+    logger.info(f"🔊 TTS 워커 시작")
+    logger.info(f"🖥️ CUDA_VISIBLE_DEVICES={os.environ['CUDA_VISIBLE_DEVICES']} (물리적 GPU {tts_gpu_id})")
+    logger.info(f"📍 TTS는 GPU {tts_gpu_id}번에서 실행됩니다")
+    
     # 이 프로세스 내에서 torch와 Zonos 임포트
     import torch
     import torchaudio

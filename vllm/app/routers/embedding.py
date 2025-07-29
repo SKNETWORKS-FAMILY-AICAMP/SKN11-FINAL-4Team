@@ -87,6 +87,10 @@ def embedding_worker_process(request_queue: Queue, response_queue: Queue):
     rag_gpu_id = int(os.getenv('RAG_GPU_ID', '1'))
     os.environ['CUDA_VISIBLE_DEVICES'] = str(rag_gpu_id)
     
+    logger.info(f"🔍 임베딩 워커 시작")
+    logger.info(f"🖥️ CUDA_VISIBLE_DEVICES={os.environ['CUDA_VISIBLE_DEVICES']} (물리적 GPU {rag_gpu_id})")
+    logger.info(f"📍 RAG 임베딩은 GPU {rag_gpu_id}번에서 실행됩니다")
+    
     # 이 프로세스 내에서 torch와 SentenceTransformer 임포트
     import torch
     from sentence_transformers import SentenceTransformer

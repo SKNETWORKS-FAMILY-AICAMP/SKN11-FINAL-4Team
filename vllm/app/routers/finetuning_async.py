@@ -36,7 +36,9 @@ def finetuning_worker_process(request_queue: Queue, response_queue: Queue, statu
     finetuning_gpu_id = int(os.getenv('FINETUNING_GPU_ID', '0'))
     os.environ['CUDA_VISIBLE_DEVICES'] = str(finetuning_gpu_id)
     
-    logger.info(f"🔧 파인튜닝 워커 시작 (GPU {finetuning_gpu_id})")
+    logger.info(f"🔧 파인튜닝 워커 시작")
+    logger.info(f"🖥️ CUDA_VISIBLE_DEVICES={os.environ['CUDA_VISIBLE_DEVICES']} (물리적 GPU {finetuning_gpu_id})")
+    logger.info(f"📍 파인튜닝은 GPU {finetuning_gpu_id}번에서 실행됩니다")
     
     while True:
         try:
