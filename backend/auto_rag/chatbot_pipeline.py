@@ -23,39 +23,43 @@ from chat_generator import (
     ChatGenerator, 
     VLLMGenerationConfig, 
     PromptTemplate, 
-    truncate_history_hybrid,
+    truncate_history_by_char,
     TextNormalizer,
     ModelIdValidator
 )
 from embed_store import EmbeddingStore
 from document_loader import PDFToQAProcessor
-from app.services.vllm_client import VLLMConfig
 
 # 환경변수에도 설정 (전체 시스템 동기화)
 from dotenv import load_dotenv
 load_dotenv()
 
+# VLLM 설정 - 환경 변수 우선, 없으면 기본값 사용
+DYNAMIC_VLLM_URL = os.getenv("VLLM_BASE_URL", "http://localhost:8000")
+
 try:
-    from app.core.config import settings
-    DYNAMIC_VLLM_URL = settings.VLLM_BASE_URL  # .env의 VLLM_BASE_URL 사용
-    print(f"✅ Backend 설정에서 VLLM URL 로드: {DYNAMIC_VLLM_URL}")
+    from app.services.vllm_client import VLLMConfig
+    print(f"✅ Backend VLLM 클라이언트 로드 성공")
 except ImportError as e:
-    print(f"❌ Backend 설정 import 실패: {e}")
-    print("💡 backend/.env 파일에 VLLM_BASE_URL을 설정해주세요")
-    DYNAMIC_VLLM_URL = "http://localhost:8000"  # 기본값
-except AttributeError as e:
-    print(f"⚠️ VLLM_BASE_URL이 설정되지 않음: {e}")
-    print("💡 backend/.env 파일에 VLLM_BASE_URL=your_url을 추가해주세요")
-    DYNAMIC_VLLM_URL = "http://localhost:8000"  # 기본값
+    print(f"⚠️ Backend VLLM 클라이언트 로드 실패: {e}")
+    print("💡 기본 VLLM 설정을 사용합니다")
+    # 기본 VLLM 설정 클래스 정의
+    @dataclass
+    class VLLMConfig:
+        base_url: str = DYNAMIC_VLLM_URL
+
+try:
+    from app.services.vllm_client import vllm_health_check
+    print(f"✅ Backend VLLM 헬스체크 함수 로드 성공")
+except ImportError as e:
+    print(f"⚠️ Backend VLLM 헬스체크 함수 로드 실패: {e}")
+    print("💡 기본 헬스체크 함수를 사용합니다")
+    # 기본 헬스체크 함수 정의
+    async def vllm_health_check():
+        return True
 
 # 환경변수에도 설정 (전체 시스템 동기화)
 os.environ["VLLM_BASE_URL"] = DYNAMIC_VLLM_URL
-
-# 수정: backend의 VLLM 클라이언트 import
-from app.services.vllm_client import (
-    VLLMServerConfig as VLLMConfig,
-    vllm_health_check
-)
 
 # 우리가 만든 모듈들 임포트
 from document_loader import load_pdf_and_generate_qa, PDFToQAProcessor

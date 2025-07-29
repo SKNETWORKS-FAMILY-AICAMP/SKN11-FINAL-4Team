@@ -19,12 +19,42 @@ from pathlib import Path
 backend_path = Path(__file__).parent.parent
 sys.path.append(str(backend_path))
 
-from app.services.vllm_client import (
-    VLLMClient, 
-    VLLMServerConfig as VLLMConfig,
-    get_vllm_client,
-    vllm_health_check
-)
+# VLLM 설정 - 환경 변수 우선, 없으면 기본값 사용
+DYNAMIC_VLLM_URL = os.getenv("VLLM_BASE_URL", "http://localhost:8000")
+
+try:
+    from app.services.vllm_client import (
+        VLLMClient, 
+        VLLMServerConfig as VLLMConfig,
+        get_vllm_client,
+        vllm_health_check
+    )
+    print(f"✅ Backend VLLM 클라이언트 로드 성공")
+except ImportError as e:
+    print(f"⚠️ Backend VLLM 클라이언트 로드 실패: {e}")
+    print("💡 기본 VLLM 설정을 사용합니다")
+    # 기본 VLLM 설정 클래스 정의
+    @dataclass
+    class VLLMConfig:
+        base_url: str = DYNAMIC_VLLM_URL
+    
+    # 기본 VLLM 클라이언트 클래스 정의
+    class VLLMClient:
+        def __init__(self, config):
+            self.config = config
+        
+        async def generate_response(self, **kwargs):
+            return {"response": "VLLM 서버가 연결되지 않았습니다."}
+        
+        async def load_adapter(self, **kwargs):
+            return True
+    
+    async def get_vllm_client():
+        return VLLMClient(VLLMConfig())
+    
+    async def vllm_health_check():
+        return False
+
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)

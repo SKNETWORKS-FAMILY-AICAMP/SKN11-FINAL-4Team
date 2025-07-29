@@ -1,9 +1,59 @@
-import fitz  # PyMuPDF
+import os
 import json
 from pathlib import Path
 from typing import List, Dict, Optional
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
+from docling.document_converter import DocumentConverter
+import fitz  # PyMuPDF
+
+
+@dataclass
+class QAPair:
+    question: str
+    answer: str
+    context: str
+    source_page: int
+
+
+class PDFToQAProcessor:
+    def __init__(self):
+        self.converter = DocumentConverter()
+
+    def process(self, file_path: str) -> List[QAPair]:
+        if not Path(file_path).exists():
+            raise FileNotFoundError(f"❌ PDF 파일을 찾을 수 없습니다: {file_path}")
+
+        print("📄 Docling으로 PDF 변환 시작...")
+        structured_doc = self.converter.convert(file_path)
+
+        if not structured_doc or "sections" not in structured_doc:
+            raise ValueError("⚠️ Docling 변환 결과가 비어있거나 sections가 없습니다.")
+
+        qa_pairs = []
+        for section in structured_doc["sections"]:
+            title = section.get("title", "")
+            paragraphs = section.get("paragraphs", [])
+            for para in paragraphs:
+                context = para.get("text", "")
+                if not context.strip():
+                    continue
+
+                # 간단한 QA 템플릿 생성
+                question = f"{title.strip()}에 대해 설명해줘" if title else "이 내용에 대해 설명해줘"
+                answer = context.strip()
+
+                qa_pairs.append(
+                    QAPair(
+                        question=question,
+                        answer=answer,
+                        context=context,
+                        source_page=para.get("page", -1)
+                    )
+                )
+
+        print(f"✅ Docling 기반 QA 쌍 {len(qa_pairs)}개 생성 완료")
+        return qa_pairs
 
 
 @dataclass
@@ -13,16 +63,6 @@ class TextBlock:
     block_type: str
     page_number: int
     confidence: float = 1.0
-
-
-@dataclass
-class QAPair:
-    """QA 쌍 데이터 클래스"""
-    question: str
-    answer: str
-    context: str
-    source_page: int
-
 
 class TextExtractor(ABC):
     """텍스트 추출 인터페이스"""
@@ -88,34 +128,56 @@ class TextStructurer:
         return structured_blocks
 
 
-class QAGenerator:
-    """QA 쌍 생성기"""
+class DoclingQAGenerator:
+    """docling을 사용한 QA 쌍 생성기"""
     
-    def __init__(self):
-        self.question_templates = [
-            "이 문단은 어떤 내용을 설명하나요?",
-            "이 부분에서 다루는 주요 주제는 무엇인가요?",
-            "이 문단의 핵심 내용을 요약하면?",
-            "여기서 설명하고 있는 것은 무엇인가요?"
-        ]
+    def __init__(self, model_name: str = "microsoft/DialoGPT-medium"):
+        """
+        docling QA 생성기 초기화
+        
+        Args:
+            model_name: 사용할 모델명 (기본값: microsoft/DialoGPT-medium)
+        """
+        if not DOCLING_AVAILABLE:
+            raise ImportError("docling 라이브러리가 필요합니다. 올바른 사용법을 확인해주세요.")
+        
+        try:
+            self.docling = Docling(model_name=model_name)
+            print(f"✅ docling 초기화 완료: {model_name}")
+        except Exception as e:
+            print(f"❌ docling 초기화 실패: {e}")
+            raise RuntimeError(f"docling 초기화 중 오류 발생: {e}")
     
     def generate_qa_from_blocks(self, blocks: List[TextBlock]) -> List[QAPair]:
-        """구조화된 블록에서 QA 쌍 생성"""
+        """구조화된 블록에서 docling을 사용하여 QA 쌍 생성"""
+        if not DOCLING_AVAILABLE:
+            raise ImportError("docling 라이브러리가 필요합니다.")
+        
         qa_pairs = []
         
         for i, block in enumerate(blocks):
             if block.block_type == "paragraph":
-                # 템플릿 순환 사용
-                question_template = self.question_templates[i % len(self.question_templates)]
-                
-                qa_pair = QAPair(
-                    question=question_template,
-                    answer=block.content,
-                    context=block.content,
-                    source_page=block.page_number
-                )
-                
-                qa_pairs.append(qa_pair)
+                try:
+                    # docling을 사용하여 QA 쌍 생성
+                    qa_result = self.docling.generate_qa(block.content)
+                    
+                    # docling 결과를 QAPair로 변환
+                    qa_pair = QAPair(
+                        question=qa_result["question"],
+                        answer=qa_result["answer"],
+                        context=block.content,
+                        source_page=block.page_number
+                    )
+                    
+                    qa_pairs.append(qa_pair)
+                    
+                    # 진행상황 출력
+                    if (i + 1) % 10 == 0:
+                        print(f"📝 {i + 1}/{len(blocks)}개 문단 처리 완료")
+                        
+                except Exception as e:
+                    print(f"❌ 문단 {i+1} 처리 중 오류: {e}")
+                    raise RuntimeError(f"QA 쌍 생성 중 오류 발생: {e}")
         
         return qa_pairs
 
@@ -126,14 +188,14 @@ class PDFToQAProcessor:
     def __init__(self, 
                  extractor: Optional[TextExtractor] = None,
                  structurer: Optional[TextStructurer] = None,
-                 qa_generator: Optional[QAGenerator] = None):
+                 qa_generator: Optional[DoclingQAGenerator] = None):
         self.extractor = extractor or PDFTextExtractor()
         self.structurer = structurer or TextStructurer()
-        self.qa_generator = qa_generator or QAGenerator()
+        self.qa_generator = qa_generator or DoclingQAGenerator()
     
     def process(self, pdf_path: str) -> List[QAPair]:
         """
-        PDF → 텍스트 추출 → 구조화 → QA 생성 전체 파이프라인
+        PDF → 텍스트 추출 → 구조화 → docling QA 생성 전체 파이프라인
         """
         try:
             # 1. 텍스트 추출
@@ -144,9 +206,9 @@ class PDFToQAProcessor:
             structured_blocks = self.structurer.structure_text(raw_blocks)
             print(f"✅ {len(structured_blocks)}개 문단으로 구조화 완료")
             
-            # 3. QA 쌍 생성
+            # 3. docling을 사용한 QA 쌍 생성
             qa_pairs = self.qa_generator.generate_qa_from_blocks(structured_blocks)
-            print(f"✅ {len(qa_pairs)}개 QA 쌍 생성 완료")
+            print(f"✅ {len(qa_pairs)}개 QA 쌍 생성 완료 (docling 사용)")
             
             return qa_pairs
             
