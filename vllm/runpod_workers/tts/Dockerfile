@@ -45,23 +45,6 @@ RUN pip install --no-cache-dir \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# espeak 설치 확인
-RUN which espeak && espeak --version || echo "espeak not found"
-RUN which espeak-ng && espeak-ng --version || echo "espeak-ng not found"
-
-# espeak 심볼릭 링크 생성 (필요시)
-RUN ln -sf /usr/bin/espeak-ng /usr/bin/espeak || true
-
-# espeak 라이브러리 경로 찾기 및 설정
-RUN find /usr -name "libespeak-ng.so*" -type f 2>/dev/null || echo "libespeak-ng.so not found"
-
-# 환경 변수 설정 제거 (자동 탐지 사용)
-ENV PHONEMIZER_ESPEAK_LIBRARY=""
-
-# phonemizer 설치 확인 및 테스트
-RUN python3 -c "import phonemizer; print(f'Phonemizer version: {phonemizer.__version__}')"
-RUN python3 -c "from phonemizer.backend import EspeakBackend; print('EspeakBackend import successful')"
-
 # zonos 모듈 복사 (존재 여부 확인)
 COPY zonos/ /app/zonos/
 
