@@ -2937,60 +2937,6 @@ function ModelDetailContent() {
           </DialogContent>
         </Dialog>
 
-        {/* 갤러리 모달 */}
-        <Dialog open={isGalleryModalOpen} onOpenChange={setIsGalleryModalOpen}>
-          <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle className="flex items-center space-x-2">
-                <ImageIcon className="h-5 w-5" />
-                <span>갤러리에서 이미지 선택</span>
-              </DialogTitle>
-            </DialogHeader>
-
-            <div className="space-y-6">
-              {isLoadingGallery ? (
-                <div className="flex items-center justify-center py-12">
-                  <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
-                  <span className="ml-2 text-gray-600">
-                    이미지 목록을 불러오는 중...
-                  </span>
-                </div>
-              ) : galleryImages.length > 0 ? (
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                  {galleryImages.map((imageUrl, index) => (
-                    <div
-                      key={index}
-                      className="relative group cursor-pointer"
-                      onClick={() => selectGalleryImage(imageUrl)}
-                    >
-                      <img
-                        src={imageUrl}
-                        alt={`Gallery image ${index + 1}`}
-                        className="w-full h-32 object-cover rounded-lg border hover:border-blue-500 transition-colors"
-                      />
-                      <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all duration-200 rounded-lg flex items-center justify-center">
-                        <span className="text-white opacity-0 group-hover:opacity-100 text-sm font-medium">
-                          선택
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center py-12">
-                  <ImageIcon className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-                  <p className="text-gray-500 text-lg">
-                    갤러리에 이미지가 없습니다
-                  </p>
-                  <p className="text-gray-400 mt-2">
-                    먼저 이미지를 업로드해주세요
-                  </p>
-                </div>
-              )}
-            </div>
-          </DialogContent>
-        </Dialog>
-
         <Dialog
           open={!!voiceToDelete}
           onOpenChange={(open) => !open && setVoiceToDelete(null)}
