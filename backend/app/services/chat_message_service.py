@@ -20,19 +20,7 @@ class ChatMessageService:
             # UUID만 사용 (완전한 고유성 보장)
             session_id = str(uuid.uuid4())
             
-            # 빈 메시지로 세션 시작
-            chat_message = ChatMessage(
-                chat_message_id=str(uuid.uuid4()),
-                session_id=session_id,
-                influencer_id=influencer_id,
-                message_content="",  # 빈 내용으로 세션 시작
-                created_at=datetime.now(),
-                end_at=None  # 세션 종료 시 설정
-            )
-            self.db.add(chat_message)
-            self.db.commit()
-            self.db.refresh(chat_message)
-            
+            # 세션만 생성 (빈 메시지 없이)
             logger.info(f"✅ 채팅 세션 생성 완료: session_id={session_id}, influencer_id={influencer_id}")
             return session_id
         except Exception as e:
@@ -40,7 +28,7 @@ class ChatMessageService:
             self.db.rollback()
             raise
     
-    def add_message_to_session(self, session_id: str, influencer_id: str, message_content: str) -> bool:
+    def add_message_to_session(self, session_id: str, influencer_id: str, message_content: str, message_type: str = "user") -> bool:
         """세션에 새 메시지 추가"""
         try:
             # 새 메시지 생성 (UUID 사용)
@@ -49,6 +37,7 @@ class ChatMessageService:
                 session_id=session_id,
                 influencer_id=influencer_id,
                 message_content=message_content,
+                message_type=message_type,  # user 또는 ai
                 created_at=datetime.now(),
                 end_at=None
             )
@@ -56,7 +45,7 @@ class ChatMessageService:
             self.db.commit()
             self.db.refresh(new_message)
             
-            logger.info(f"✅ 세션에 메시지 추가 완료: session_id={session_id}, chat_message_id={new_message.chat_message_id}")
+            logger.info(f"✅ 세션에 메시지 추가 완료: session_id={session_id}, type={message_type}, chat_message_id={new_message.chat_message_id}")
             return True
         except Exception as e:
             logger.error(f"❌ 세션 메시지 추가 실패: {e}")
@@ -64,26 +53,14 @@ class ChatMessageService:
             return False
     
     def end_session(self, session_id: str) -> bool:
-        """세션 종료 (해당 세션의 모든 메시지에 end_at 설정)"""
+        """세션 종료 (세션 종료 시간 기록)"""
         try:
-            messages = (
-                self.db.query(ChatMessage)
-                .filter(ChatMessage.session_id == session_id)
-                .all()
-            )
-            
-            if messages:
-                for message in messages:
-                    message.end_at = datetime.now()
-                self.db.commit()
-                logger.info(f"✅ 세션 종료 완료: session_id={session_id}, 메시지 수={len(messages)}")
-                return True
-            else:
-                logger.warning(f"⚠️ 세션을 찾을 수 없음: session_id={session_id}")
-                return False
+            # 세션 종료 시간을 기록하는 별도 테이블이나 방법이 없으므로
+            # 현재는 로그만 남기고 실제 종료 처리는 하지 않음
+            logger.info(f"✅ 세션 종료: session_id={session_id}")
+            return True
         except Exception as e:
             logger.error(f"❌ 세션 종료 실패: {e}")
-            self.db.rollback()
             return False
     
 
@@ -121,7 +98,7 @@ class ChatMessageService:
             logger.error(f"❌ 인플루언서 메시지 조회 실패: {e}")
             return []
     
-    def get_messages_by_session(self, session_id: int) -> Optional[ChatMessage]:
+    def get_messages_by_session(self, session_id: str) -> Optional[ChatMessage]:
         """세션별 메시지 조회"""
         try:
             message = (
@@ -136,7 +113,7 @@ class ChatMessageService:
             logger.error(f"❌ 세션 메시지 조회 실패: {e}")
             return None
     
-    def update_message_end_time(self, session_id: int) -> bool:
+    def update_message_end_time(self, session_id: str) -> bool:
         """메시지 종료 시간 업데이트"""
         try:
             message = (

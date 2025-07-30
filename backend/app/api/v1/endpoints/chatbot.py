@@ -154,17 +154,26 @@ async def chatbot(
                         if current_session_id:
                             session_messages = chat_message_service.get_session_messages(current_session_id)
                             
-                            # 세션 메시지를 히스토리 형식으로 변환
+                            # 사용자/AI 메시지를 쌍으로 구성하여 히스토리 생성 (message_type 기반)
                             history_data = []
+                            current_user_msg = None
+                            current_timestamp = None
+                            
                             for msg in session_messages:
-                                if msg.message_content:  # 빈 메시지 제외
+                                if msg.message_type == "user":
+                                    current_user_msg = msg.message_content
+                                    current_timestamp = msg.created_at.isoformat() if msg.created_at else None
+                                elif msg.message_type == "ai" and current_user_msg:
+                                    ai_response = msg.message_content
                                     history_data.append({
-                                        "query": "이전 대화",
-                                        "response": msg.message_content,
-                                        "timestamp": msg.created_at.isoformat() if msg.created_at else None,
+                                        "query": current_user_msg,
+                                        "response": ai_response,
+                                        "timestamp": current_timestamp,
                                         "source": "session",
                                         "session_id": msg.session_id
                                     })
+                                    current_user_msg = None
+                                    current_timestamp = None
                             
                             await websocket.send_text(
                                 json.dumps({
@@ -209,41 +218,48 @@ async def chatbot(
                     current_session_id = chat_message_service.create_session(influencer_id or "default")
                     logger.info(f"[WS] 새 세션 생성: session_id={current_session_id}")
                 
-                # 히스토리 컨텍스트 추가 (현재 세션 기반)
-                history_summary = ""  # 변수 초기화
+                # 의도 기반 히스토리 컨텍스트 추가
+                enhanced_message = user_message
                 
                 # 현재 세션의 이전 메시지들 조회
                 session_messages = chat_message_service.get_session_messages(current_session_id)
                 
-                if session_messages and len(session_messages) > 1:  # 첫 번째 메시지(빈 세션) 제외
-                    # OpenAI로 히스토리 요약
-                    try:
-                        # 세션 메시지를 히스토리 형식으로 변환
-                        all_history = []
-                        for msg in session_messages[1:]:  # 첫 번째 빈 메시지 제외
-                            all_history.append({
-                                "query": msg.message_content[:100] + "...",  # 간단한 요약
-                                "response": msg.message_content
-                            })
-                        
-                        if all_history:
-                            history_summary = await summarize_chat_history(all_history, max_tokens=100)
-                            if history_summary and len(history_summary) > 10:
-                                enhanced_message = f"이전 대화 요약: {history_summary}\n\n현재 질문: {user_message}"
-                                logger.info(f"[WS] OpenAI 히스토리 요약 사용 (세션: {current_session_id}, 메시지: {len(all_history)}개, 요약: {len(history_summary)}자)")
-                            else:
-                                # 요약 실패 시 간단한 대체 방법 사용
-                                recent_chat = all_history[-1]
-                                simple_summary = f"마지막 질문: {recent_chat['query'][:50]}..."
-                                enhanced_message = f"이전: {simple_summary}\n\n현재 질문: {user_message}"
-                                logger.info(f"[WS] 간단한 히스토리 사용 (세션: {current_session_id}, 메시지: {len(all_history)}개)")
-                        else:
+                if session_messages:
+                    # 빈 메시지 제외하고 유효한 메시지만 필터링
+                    valid_messages = [msg for msg in session_messages if msg.message_content.strip()]
+                    
+                    if len(valid_messages) >= 2:  # 최소 1턴(사용자+AI) 이상
+                        try:
+                            # 사용자/AI 메시지를 쌍으로 구성 (message_type 기반)
+                            conversation_pairs = []
+                            current_user_msg = None
+                            
+                            for msg in valid_messages:
+                                if msg.message_type == "user":
+                                    current_user_msg = msg.message_content
+                                elif msg.message_type == "ai" and current_user_msg:
+                                    ai_response = msg.message_content
+                                    conversation_pairs.append({
+                                        "query": current_user_msg,
+                                        "response": ai_response
+                                    })
+                                    current_user_msg = None  # 다음 쌍을 위해 초기화
+                            
+                            if conversation_pairs:
+                                # 의도 분석을 통한 히스토리 프롬프트 생성
+                                intent_based_context = await analyze_user_intent(user_message, conversation_pairs)
+                                
+                                if intent_based_context and len(intent_based_context) > 10:
+                                    enhanced_message = f"{intent_based_context}\n\n현재 질문: {user_message}"
+                                    logger.info(f"[WS] 의도 기반 히스토리 사용 (세션: {current_session_id}, 대화쌍: {len(conversation_pairs)}개)")
+                                else:
+                                    # 의도 분석 실패 시 최근 대화만 사용
+                                    latest_pair = conversation_pairs[-1]
+                                    enhanced_message = f"이전 질문: {latest_pair['query'][:50]}...\n\n현재 질문: {user_message}"
+                                    logger.info(f"[WS] 최근 대화 사용 (세션: {current_session_id})")
+                        except Exception as e:
+                            logger.warning(f"[WS] 히스토리 처리 실패, 요약 없이 진행: {e}")
                             enhanced_message = user_message
-                    except Exception as e:
-                        logger.warning(f"[WS] 히스토리 요약 실패, 요약 없이 진행: {e}")
-                        enhanced_message = user_message
-                else:
-                    enhanced_message = user_message
 
                 # VLLM 서버에서 스트리밍 응답 생성
                 try:
@@ -287,15 +303,23 @@ async def chatbot(
                         json.dumps({"type": "complete", "content": ""})
                     )
 
-                    # 세션에 대화 저장 (완료 후에만)
+                    # 세션에 대화 저장 (메시지 타입 구분)
                     if full_response.strip():
                         try:
-                            # 전체 대화 내용을 하나의 메시지로 저장
-                            full_conversation = f"사용자: {user_message}\n\nAI: {full_response}"
+                            # 사용자 메시지 저장
                             chat_message_service.add_message_to_session(
                                 session_id=current_session_id,
                                 influencer_id=influencer_id or "default",
-                                message_content=full_conversation
+                                message_content=user_message,
+                                message_type="user"
+                            )
+                            
+                            # AI 응답 저장
+                            chat_message_service.add_message_to_session(
+                                session_id=current_session_id,
+                                influencer_id=influencer_id or "default",
+                                message_content=full_response,
+                                message_type="ai"
                             )
                             logger.info(f"[WS] 세션에 대화 저장 완료: session_id={current_session_id}")
                         except Exception as e:
@@ -374,6 +398,69 @@ async def get_openai_client():
         },
         timeout=30.0
     )
+
+async def analyze_user_intent(user_message: str, history: List[Dict]) -> str:
+    """사용자 질문의 의도를 분석하여 히스토리 프롬프트 생성"""
+    if not history:
+        return ""
+    
+    try:
+        # 최근 3개 대화만 사용
+        recent_history = history[-3:] if len(history) > 3 else history
+        
+        # 히스토리 텍스트 구성
+        history_text = ""
+        for i, chat in enumerate(recent_history, 1):
+            history_text += f"이전 질문{i}: {chat['query']}\n이전 답변{i}: {chat['response']}\n\n"
+        
+        # OpenAI API 호출 (의도 분석용 시스템 프롬프트)
+        client = await get_openai_client()
+        
+        system_prompt = """당신은 사용자의 질문 의도를 분석하는 전문가입니다.
+
+주어진 이전 대화 히스토리와 현재 질문을 바탕으로, 현재 질문과 관련된 이전 대화만을 선별하여 컨텍스트를 제공하세요.
+
+규칙:
+1. 현재 질문과 직접적으로 관련된 이전 대화만 포함
+2. 관련 없는 대화는 제외
+3. 간결하고 명확하게 요약
+4. 현재 질문에 도움이 되는 정보만 포함
+
+형식: "이전에 [관련 내용]에 대해 이야기했는데, [현재 질문과의 연관성]"
+예시: "이전에 날씨 API 사용법에 대해 이야기했는데, 이번에는 다른 API 사용법을 문의하시는군요."
+
+현재 질문: {user_message}
+
+이전 대화:
+{history_text}
+
+분석 결과:"""
+
+        response = await client.post(
+            "/chat/completions",
+            json={
+                "model": "gpt-3.5-turbo",
+                "messages": [
+                    {"role": "system", "content": system_prompt.format(user_message=user_message, history_text=history_text)},
+                    {"role": "user", "content": f"현재 질문: {user_message}\n\n이전 대화:\n{history_text}"}
+                ],
+                "max_tokens": 150,
+                "temperature": 0.3
+            }
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            content = result["choices"][0]["message"]["content"].strip()
+            logger.info(f"✅ 의도 분석 완료: {len(content)}자")
+            return content
+        else:
+            logger.warning(f"⚠️ 의도 분석 실패: {response.status_code}")
+            return ""
+            
+    except Exception as e:
+        logger.error(f"❌ 의도 분석 중 오류: {e}")
+        return ""
 
 async def summarize_chat_history(history: List[Dict], max_tokens: int = 80) -> str:
     """OpenAI를 사용해서 채팅 히스토리를 요약 (완전한 요약 보장)"""
