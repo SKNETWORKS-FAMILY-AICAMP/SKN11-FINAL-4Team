@@ -16,19 +16,19 @@ class RunPodFineTuningClient:
     
     def __init__(self):
         self.api_key = os.getenv("RUNPOD_API_KEY")
-        self.endpoint_id = os.getenv("RUNPOD_FINETUNING_ENDPOINT_ID")
+        self.endpoint_id = None  # 항상 동적으로 찾기
         self.base_url = "https://api.runpod.ai/v2"
         
         if not self.api_key:
             raise ValueError("RUNPOD_API_KEY 환경 변수가 설정되지 않았습니다")
         
-        if not self.endpoint_id:
-            logger.warning("RUNPOD_FINETUNING_ENDPOINT_ID가 설정되지 않았습니다. 동적으로 찾습니다.")
+        logger.info("파인튜닝 엔드포인트를 동적으로 찾습니다.")
     
     async def find_or_create_endpoint(self) -> str:
         """파인튜닝 엔드포인트를 찾거나 생성"""
-        if self.endpoint_id:
-            return self.endpoint_id
+        # 캐시된 endpoint_id가 있어도 항상 새로 찾기 (선택사항)
+        # if self.endpoint_id:
+        #     return self.endpoint_id
         
         # GraphQL로 기존 엔드포인트 찾기
         graphql_url = "https://api.runpod.io/graphql"
@@ -81,9 +81,9 @@ class RunPodFineTuningClient:
         except Exception as e:
             logger.error(f"엔드포인트 조회 실패: {e}")
         
-        # 엔드포인트를 찾지 못한 경우 환경 변수 확인
+        # 엔드포인트를 찾지 못한 경우 에러
         if not self.endpoint_id:
-            raise ValueError("파인튜닝 엔드포인트를 찾을 수 없습니다. RUNPOD_FINETUNING_ENDPOINT_ID를 설정하세요.")
+            raise ValueError("파인튜닝 엔드포인트를 찾을 수 없습니다. RunPod에 파인튜닝 엔드포인트가 있는지 확인하세요.")
         
         return self.endpoint_id
     

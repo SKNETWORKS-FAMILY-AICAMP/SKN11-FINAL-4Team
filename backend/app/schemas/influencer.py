@@ -227,6 +227,7 @@ class ToneGenerationRequest(BaseModel):
     gender: Optional[str] = None
     age: Optional[str] = None
     tone_type: Optional[str] = None
+    num_tones: Optional[int] = 3  # 생성할 어투 개수 (기본 3개)
 
 
 # 생성된 어투 스키마
