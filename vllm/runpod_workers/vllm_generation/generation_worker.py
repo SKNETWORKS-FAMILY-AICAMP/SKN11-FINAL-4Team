@@ -424,8 +424,7 @@ def initialize_engine(model_name: str = DEFAULT_MODEL):
             enforce_eager=False,  # CUDA 그래프 사용
             # 추가 최적화
             block_size=16,  # 메모리 블록 크기
-            swap_space=4,  # 스왑 공간 (GB)
-            use_v2_block_manager=True  # 새로운 블록 매니저 사용
+            swap_space=4  # 스왑 공간 (GB)
         )
         
         logger.info("✅ vLLM 엔진 초기화 완료")
