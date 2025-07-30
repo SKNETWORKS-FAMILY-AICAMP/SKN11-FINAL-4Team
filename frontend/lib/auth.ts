@@ -16,9 +16,18 @@ export const tokenUtils = {
     if (typeof window !== 'undefined') {
       const isLoggedOut = localStorage.getItem(LOGGED_OUT_KEY)
       if (isLoggedOut) {
+        console.log('[Auth] 사용자가 로그아웃 상태입니다.')
         return null
       }
-      return localStorage.getItem(TOKEN_KEY)
+      const token = localStorage.getItem(TOKEN_KEY)
+      if (token) {
+        console.log(`[Auth] 토큰 발견: ${token.substring(0, 20)}...`)
+        console.log(`[Auth] 토큰 길이: ${token.length}`)
+        console.log(`[Auth] 토큰 만료 여부: ${tokenUtils.isTokenExpired(token) ? '만료됨' : '유효함'}`)
+      } else {
+        console.log('[Auth] 저장된 토큰이 없습니다.')
+      }
+      return token
     }
     return null
   },

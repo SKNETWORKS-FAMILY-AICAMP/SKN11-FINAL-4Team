@@ -249,6 +249,7 @@ export default function ImageGeneratorPage() {
       setGenerationProgress(progress)
     },
     onGenerationComplete: (data: any) => {
+      console.log('🎉 Generation complete received:', data)
       handleGenerationComplete(data)
     },
     onMessage: (message: any) => {
@@ -1423,12 +1424,6 @@ ${testData.message}
     }
   }
 
-  const selectMethod2 = () => {
-    setMaskMode(false)
-    setSelectedMethod(2)
-    // 방법 2: 이미지 합성 모드로 전환 (이미지 2개 필요)
-    // 이미지가 2개 미만이면 추가 선택 안내
-  }
 
   // 현재 선택된 방법 확인
   const getCurrentMethod = () => {
@@ -1439,8 +1434,6 @@ ${testData.message}
   const getRequiredImageCount = () => {
     if (selectedMethod === 1) {
       return 1
-    } else if (selectedMethod === 2) {
-      return 2
     }
     return 0
   }
@@ -2229,26 +2222,6 @@ ${testData.message}
                         <p className="text-xs text-gray-500">기존 이미지를 설명으로 전체 수정</p>
                       </button>
 
-                      {/* 방법 2: 이미지 합성 */}
-                      <button
-                        onClick={selectMethod2}
-                        className={`p-4 rounded-lg border-2 transition-all text-left ${
-                          selectedMethod === 2
-                            ? 'border-purple-500 bg-purple-50' 
-                            : 'border-gray-200 hover:border-gray-300'
-                        }`}
-                      >
-                        <div className="flex items-center gap-3 mb-2">
-                          <div className="w-6 h-6 bg-purple-100 rounded-full flex items-center justify-center">
-                            <span className="text-purple-600 font-medium text-xs">2</span>
-                          </div>
-                          <div>
-                            <h4 className="font-medium text-sm">이미지 합성</h4>
-                            <p className="text-xs text-gray-600">이미지 2개 + 프롬프트</p>
-                          </div>
-                        </div>
-                        <p className="text-xs text-gray-500">두 이미지를 설명과 함께 합성</p>
-                      </button>
                     </div>
                   </div>
 
@@ -2332,10 +2305,7 @@ ${testData.message}
                                     text-sm transition-colors duration-300 max-w-md mx-auto
                                     ${dragActive ? "text-blue-600" : "text-gray-600 group-hover:text-blue-600"}
                                   `}>
-                                    {getRequiredImageCount() === 1 
-                                      ? "수정할 이미지를 드래그하여 놓거나 클릭하여 선택하세요"
-                                      : "합성할 이미지들을 드래그하여 놓거나 클릭하여 선택하세요"
-                                    }
+                                    수정할 이미지를 드래그하여 놓거나 클릭하여 선택하세요
                                   </p>
                                   <p className="text-xs text-gray-500">
                                     지원 형식: JPG, PNG, GIF, WebP
@@ -2527,8 +2497,6 @@ ${testData.message}
                         <p className="text-xs text-gray-500 mt-1">
                           {selectedImages.length === 1 && !maskMode && "이미지를 어떻게 수정할지 설명하세요"}
                           {selectedImages.length === 1 && maskMode && "마스킹된 영역을 어떻게 수정할지 설명하세요"}
-                          {selectedImages.length === 2 && !maskMode && "두 이미지를 어떻게 합성할지 설명하세요"}
-                          {selectedImages.length === 2 && maskMode && "마스킹된 영역을 어떻게 합성할지 설명하세요"}
                         </p>
                       </div>
                     </div>
@@ -2620,99 +2588,6 @@ ${testData.message}
                               } finally {
                                 setIsGenerating(false)
                               }
-                            } 
-                            
-                            // 이미지 합성 (방법 2)
-                            else if (getCurrentMethod() === 2 && selectedImages.length >= 2) {
-                              try {
-                                setIsGenerating(true)
-                                
-                                // 두 개의 이미지 파일 가져오기
-                                let imageFile1: File | null = null
-                                let imageFile2: File | null = null
-                                
-                                // 첫 번째 이미지
-                                if (selectedImages[0].type === 'upload' && selectedImages[0].file) {
-                                  imageFile1 = selectedImages[0].file
-                                } else if (selectedImages[0].type === 'gallery' && selectedImages[0].galleryImage) {
-                                  // 갤러리 이미지의 경우 storage_id를 사용하여 백엔드에서 처리
-                                  // 임시로 빈 파일 생성 (백엔드에서 storage_id로 처리)
-                                  imageFile1 = new File([], 'gallery_image_1', { type: 'image/png' })
-                                }
-                                
-                                // 두 번째 이미지
-                                if (selectedImages[1].type === 'upload' && selectedImages[1].file) {
-                                  imageFile2 = selectedImages[1].file
-                                } else if (selectedImages[1].type === 'gallery' && selectedImages[1].galleryImage) {
-                                  // 갤러리 이미지의 경우 storage_id를 사용하여 백엔드에서 처리
-                                  // 임시로 빈 파일 생성 (백엔드에서 storage_id로 처리)
-                                  imageFile2 = new File([], 'gallery_image_2', { type: 'image/png' })
-                                }
-                                
-                                if (!imageFile1 || !imageFile2) {
-                                  throw new Error('이미지 파일을 찾을 수 없습니다')
-                                }
-                                
-                                // FormData 생성
-                                const formData = new FormData()
-                                formData.append('image1', imageFile1)
-                                formData.append('image2', imageFile2)
-                                formData.append('prompt', editPrompt)
-                                formData.append('width', '1024')
-                                formData.append('height', '720')
-                                formData.append('guidance', '2.5')
-                                formData.append('steps', '20')
-                                
-                                // 갤러리 이미지의 storage_id 추가
-                                if (selectedImages[0].type === 'gallery' && selectedImages[0].galleryImage) {
-                                  formData.append('image1_storage_id', selectedImages[0].galleryImage.id)
-                                }
-                                if (selectedImages[1].type === 'gallery' && selectedImages[1].galleryImage) {
-                                  formData.append('image2_storage_id', selectedImages[1].galleryImage.id)
-                                }
-                                
-                                // apiClient를 사용하여 백엔드에 요청
-                                const result = await apiClient.post('/api/v1/image-modification/synthesize', formData) as ImageSynthesisResult
-                                
-                                // 결과를 갤러리에 추가
-                                const newImage: GeneratedImage = {
-                                  id: result.storage_id,
-                                  prompt: result.prompt,
-                                  width: result.width,
-                                  height: result.height,
-                                  image_url: result.s3_url,
-                                  created_at: new Date().toISOString(),
-                                  status: 'completed'
-                                }
-                                
-                                setImages(prev => [newImage, ...prev])
-                                setPreviewImage(newImage)
-                                setShowGalleryImageModal(true)
-                                
-                                // 성공 메시지
-                                toast({
-                                  title: "합성 완료",
-                                  description: '이미지 합성이 완료되었습니다!',
-                                  duration: 3000,
-                                })
-                                
-                                // 입력 초기화
-                                const textArea = document.getElementById('edit-prompt') as HTMLTextAreaElement
-                                if (textArea) textArea.value = ''
-                                setSelectedImages([])
-                                setSelectedMethod(0)
-                                
-                              } catch (error) {
-                                console.error('이미지 합성 실패:', error)
-                                toast({
-                                  title: "합성 실패",
-                                  description: error instanceof Error ? error.message : '이미지 합성에 실패했습니다.',
-                                  variant: "destructive",
-                                  duration: 5000,
-                                })
-                              } finally {
-                                setIsGenerating(false)
-                              }
                             } else {
                               // 기타 경우
                               toast({
@@ -2734,7 +2609,6 @@ ${testData.message}
                             <>
                               <Wand2 className="h-4 w-4 mr-2" />
                               {getCurrentMethod() === 1 && "이미지 수정"}
-                              {getCurrentMethod() === 2 && "이미지 합성"}
                             </>
                           )}
                         </Button>
