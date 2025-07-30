@@ -92,9 +92,24 @@ async def generate_voice(
             else:
                 presigned_url = base_voice.s3_url  # fallback
         
-        # Task ID 생성
-        import uuid
-        task_id = str(uuid.uuid4())
+        # DB에 먼저 레코드 생성
+        generated_voice = GeneratedVoice(
+            influencer_id=influencer.influencer_id,
+            base_voice_id=base_voice.id,
+            text=request.text,
+            task_id=None,  # 더 이상 필요 없음
+            status="pending",
+            s3_url=None,  # 아직 생성되지 않음
+            s3_key=None,
+            duration=None,
+            file_size=None
+        )
+        db.add(generated_voice)
+        db.commit()
+        db.refresh(generated_voice)  # ID 가져오기
+        
+        voice_id = generated_voice.id
+        logger.info(f"음성 생성 레코드 생성: voice_id={voice_id}")
         
         # RunPod 클라이언트로 음성 생성 요청
         logger.info(f"음성 생성 요청: text={request.text[:50]}..., influencer_id={request.influencer_id}")
@@ -104,7 +119,7 @@ async def generate_voice(
             base_voice_url=presigned_url,  # presigned URL 사용
             influencer_id=request.influencer_id,
             base_voice_id=base_voice.id,  # base_voice ID 추가
-            task_id=task_id
+            voice_id=voice_id  # DB에서 생성된 ID 전달
         )
         
         logger.info(f"RunPod 서버 응답: {result}")
@@ -116,26 +131,15 @@ async def generate_voice(
         # RunPod는 항상 비동기로 처리됨
         if result.get("task_id"):
             runpod_task_id = result["task_id"]
-            logger.info(f"TTS 생성 작업 시작됨: runpod_task_id={runpod_task_id}, internal_task_id={task_id}")
+            logger.info(f"TTS 생성 작업 시작됨: runpod_task_id={runpod_task_id}, voice_id={voice_id}")
             
-            # 작업 정보를 데이터베이스에 저장 (상태: pending)
-            generated_voice = GeneratedVoice(
-                influencer_id=influencer.influencer_id,
-                base_voice_id=base_voice.id,
-                text=request.text,
-                task_id=task_id,  # 내부 task_id 사용
-                status="pending",
-                s3_url=None,  # 아직 생성되지 않음
-                s3_key=None,
-                duration=None,
-                file_size=None
-            )
-            db.add(generated_voice)
+            # RunPod task_id 업데이트
+            generated_voice.task_id = runpod_task_id
             db.commit()
             
             return {
-                "task_id": task_id,
-                "runpod_task_id": runpod_task_id,
+                "voice_id": voice_id,  # DB에서 생성된 ID
+                "task_id": runpod_task_id,  # RunPod task ID
                 "status": "pending",
                 "message": "TTS 생성 작업이 시작되었습니다. 잠시 후 음성이 생성됩니다.",
                 "text": request.text,
@@ -144,20 +148,16 @@ async def generate_voice(
         
         # 동기 작업인 경우 (즉시 s3_url 반환) - 기존 로직
         elif result.get("s3_url"):
-            generated_voice = GeneratedVoice(
-                influencer_id=influencer.influencer_id,
-                base_voice_id=base_voice.id,
-                text=request.text,
-                status="completed",
-                s3_url=result["s3_url"],
-                s3_key=result.get("s3_key", ""),
-                duration=result.get("duration"),
-                file_size=result.get("file_size")
-            )
-            db.add(generated_voice)
+            # 이미 생성된 레코드 업데이트
+            generated_voice.status = "completed"
+            generated_voice.s3_url = result["s3_url"]
+            generated_voice.s3_key = result.get("s3_key", "")
+            generated_voice.duration = result.get("duration")
+            generated_voice.file_size = result.get("file_size")
             db.commit()
             
             return {
+                "voice_id": voice_id,
                 "s3_url": result["s3_url"],
                 "duration": result.get("duration"),
                 "text": request.text,
@@ -279,21 +279,51 @@ async def receive_tts_result(
                     error="base_voice_id is required"
                 )
             
-            # 데이터베이스에 저장
-            generated_voice = GeneratedVoice(
-                influencer_id=influencer_id,  # 검증된 값 사용
-                base_voice_id=base_voice_id,  # 검증된 값 사용
-                text=metadata.get("text", ""),
-                task_id=job_id,
-                status="completed",
-                s3_url=s3_result["url"],
-                s3_key=s3_key,
-                duration=metadata.get("duration"),
-                file_size=metadata.get("file_size"),
-                metadata=json.dumps(metadata)  # 전체 메타데이터 저장
-            )
+            # 메타데이터에서 voice_id 가져오기
+            voice_id = metadata.get("voice_id")
             
-            db.add(generated_voice)
+            if not voice_id:
+                logger.error(f"voice_id가 없습니다. metadata: {metadata}")
+                return TTSResultResponse(
+                    success=False,
+                    message="Missing voice_id in metadata",
+                    error="voice_id is required"
+                )
+            
+            # 기존 레코드 조회 (voice_id로 검색)
+            existing_voice = db.query(GeneratedVoice).filter(
+                GeneratedVoice.id == voice_id
+            ).first()
+            
+            if existing_voice:
+                # 기존 레코드 업데이트
+                existing_voice.status = "completed"
+                existing_voice.s3_url = s3_result["url"]
+                existing_voice.s3_key = s3_key
+                existing_voice.duration = metadata.get("duration")
+                existing_voice.file_size = metadata.get("file_size")
+                existing_voice.metadata = json.dumps(metadata)
+                existing_voice.updated_at = datetime.now()
+                
+                logger.info(f"기존 TTS 레코드 업데이트: task_id={job_id}")
+            else:
+                # 기존 레코드가 없으면 새로 생성
+                generated_voice = GeneratedVoice(
+                    influencer_id=influencer_id,  # 검증된 값 사용
+                    base_voice_id=base_voice_id,  # 검증된 값 사용
+                    text=metadata.get("text", ""),
+                    task_id=job_id,
+                    status="completed",
+                    s3_url=s3_result["url"],
+                    s3_key=s3_key,
+                    duration=metadata.get("duration"),
+                    file_size=metadata.get("file_size"),
+                    metadata=json.dumps(metadata)  # 전체 메타데이터 저장
+                )
+                
+                db.add(generated_voice)
+                logger.info(f"새로운 TTS 레코드 생성: task_id={job_id}")
+            
             db.commit()
             
             return TTSResultResponse(

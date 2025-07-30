@@ -76,16 +76,16 @@ async def chatbot_chat(
         # API 사용량 추적
         await track_api_usage(db, str(influencer.influencer_id))
 
-        # VLLM 서비스 호출
+        # RunPod 서비스 호출
         try:
-            from app.services.vllm_client import (
-                vllm_generate_response,
-                vllm_health_check,
+            from app.services.runpod_client import (
+                runpod_generate_text,
+                runpod_health_check,
             )
 
-            # VLLM 서버 상태 확인
-            if not await vllm_health_check():
-                logger.warning("VLLM 서버에 연결할 수 없어 기본 응답을 사용합니다.")
+            # RunPod 서버 상태 확인
+            if not await runpod_health_check():
+                logger.warning("RunPod 서버에 연결할 수 없어 기본 응답을 사용합니다.")
                 response_text = f"안녕하세요! 저는 {influencer.influencer_name}입니다. '{request.message}'에 대한 답변을 드리겠습니다."
             else:
                 # 시스템 프롬프트 구성
@@ -95,53 +95,39 @@ async def chatbot_chat(
                     else f"당신은 {influencer.influencer_name}입니다. 도움이 되는 답변을 해주세요."
                 )
 
-                # VLLM 서버에서 응답 생성
-                # chatbot.py와 동일한 방식으로 처리
-                if influencer.influencer_id:
-                    model_id = str(influencer.influencer_id)
-                    
-                    # HF 토큰 가져오기 (chatbot.py와 동일한 방식)
-                    from app.models.user import HFTokenManage
-                    from app.core.encryption import decrypt_sensitive_data
-                    
-                    hf_token = None
-                    if hasattr(influencer, 'group_id') and influencer.group_id:
-                        hf_token_manage = db.query(HFTokenManage).filter(
-                            HFTokenManage.group_id == influencer.group_id
-                        ).order_by(HFTokenManage.created_at.desc()).first()
-                        
-                        if hf_token_manage:
-                            hf_token = decrypt_sensitive_data(str(hf_token_manage.hf_token_value))
-                    
-                    # VLLM 클라이언트 가져오기
-                    from app.services.vllm_client import get_vllm_client
-                    vllm_client = await get_vllm_client()
-                    
-                    # 어댑터 로드 (chatbot.py와 동일한 방식)
-                    try:
-                        await vllm_client.load_adapter(model_id=model_id, hf_repo_name=influencer.influencer_model_repo, hf_token=hf_token)
-                        logger.info(f"✅ VLLM 어댑터 로드 완료: {model_id}")
-                    except Exception as e:
-                        logger.warning(f"⚠️ 어댑터 로드 실패, 기본 모델 사용: {e}")
-                        # 어댑터 로드 실패 시 기본 모델 사용
-                        model_id = str(influencer.influencer_id)
-                else:
-                    model_id = str(influencer.influencer_id)
+                # RunPod 서버에서 응답 생성
+                lora_adapter = None
+                if influencer.influencer_id and influencer.influencer_model_repo:
+                    # LoRA 어댑터 이름 설정 (인플루언서 ID 사용)
+                    lora_adapter = str(influencer.influencer_id)
+                    logger.info(f"🔧 LoRA 어댑터 사용: {lora_adapter}")
                 
-                response_text = await vllm_generate_response(
-                    user_message=request.message,
+                # RunPod 텍스트 생성 요청
+                result = await runpod_generate_text(
+                    prompt=request.message,
+                    lora_adapter=lora_adapter,
                     system_message=system_message,
-                    influencer_name=str(influencer.influencer_name),
-                    model_id=model_id,
-                    max_new_tokens=200,
                     temperature=0.7,
+                    max_tokens=200,
+                    stream=False
                 )
+                
+                # RunPod 응답 처리
+                if result.get("status") == "completed" and result.get("output"):
+                    response_text = result["output"].get("generated_text", "")
+                elif result.get("id"):
+                    # 비동기 작업인 경우
+                    logger.info(f"⏳ RunPod 작업 시작됨: {result['id']}")
+                    # 여기서는 간단히 기본 응답 반환 (실제로는 작업 상태 확인 필요)
+                    response_text = f"안녕하세요! 저는 {influencer.influencer_name}입니다. 잠시만 기다려주세요."
+                else:
+                    response_text = f"안녕하세요! 저는 {influencer.influencer_name}입니다. '{request.message}'에 대한 답변을 드리겠습니다."
 
-                logger.info(f"✅ VLLM 응답 생성 성공: {influencer.influencer_name}")
+                logger.info(f"✅ RunPod 응답 생성 성공: {influencer.influencer_name}")
 
         except Exception as e:
-            logger.error(f"❌ VLLM 응답 생성 실패: {e}")
-            # VLLM 실패 시 기본 응답 사용
+            logger.error(f"❌ RunPod 응답 생성 실패: {e}")
+            # RunPod 실패 시 기본 응답 사용
             response_text = f"안녕하세요! 저는 {influencer.influencer_name}입니다. '{request.message}'에 대한 답변을 드리겠습니다."
 
         # 세션 ID 생성 (실제로는 더 복잡한 로직 필요)
@@ -177,15 +163,15 @@ async def chatbot_chat_stream(
 
         async def generate_stream():
             try:
-                # VLLM 서비스 호출
-                from app.services.vllm_client import (
-                    vllm_health_check,
-                    get_vllm_client,
+                # RunPod 서비스 호출
+                from app.services.runpod_client import (
+                    runpod_health_check,
+                    runpod_generate_text_stream,
                 )
 
-                # VLLM 서버 상태 확인
-                if not await vllm_health_check():
-                    logger.warning("VLLM 서버에 연결할 수 없어 기본 응답을 사용합니다.")
+                # RunPod 서버 상태 확인
+                if not await runpod_health_check():
+                    logger.warning("RunPod 서버에 연결할 수 없어 기본 응답을 사용합니다.")
                     error_response = f"안녕하세요! 저는 {influencer.influencer_name}입니다. '{request.message}'에 대한 답변을 드리겠습니다."
                     yield f"data: {json.dumps({'text': error_response})}\n\n"
                     yield f"data: {json.dumps({'done': True})}\n\n"
@@ -198,46 +184,21 @@ async def chatbot_chat_stream(
                     else f"당신은 {influencer.influencer_name}입니다. 도움이 되는 답변을 해주세요."
                 )
 
-                # VLLM 서버에서 스트리밍 응답 생성
-                if influencer.influencer_id:
-                    model_id = str(influencer.influencer_id)
-                    
-                    # HF 토큰 가져오기
-                    from app.models.user import HFTokenManage
-                    from app.core.encryption import decrypt_sensitive_data
-                    
-                    hf_token = None
-                    if hasattr(influencer, 'group_id') and influencer.group_id:
-                        hf_token_manage = db.query(HFTokenManage).filter(
-                            HFTokenManage.group_id == influencer.group_id
-                        ).order_by(HFTokenManage.created_at.desc()).first()
-                        
-                        if hf_token_manage:
-                            hf_token = decrypt_sensitive_data(str(hf_token_manage.hf_token_value))
-                    
-                    # VLLM 클라이언트 가져오기
-                    vllm_client = await get_vllm_client()
-                    
-                    # 어댑터 로드
-                    try:
-                        await vllm_client.load_adapter(model_id=model_id, hf_repo_name=influencer.influencer_model_repo, hf_token=hf_token)
-                        logger.info(f"✅ VLLM 어댑터 로드 완료: {model_id}")
-                    except Exception as e:
-                        logger.warning(f"⚠️ 어댑터 로드 실패, 기본 모델 사용: {e}")
-                        # 어댑터 로드 실패 시 기본 모델 사용
-                        model_id = str(influencer.influencer_id)
-                else:
-                    model_id = str(influencer.influencer_id)
+                # RunPod 서버에서 스트리밍 응답 생성
+                lora_adapter = None
+                if influencer.influencer_id and influencer.influencer_model_repo:
+                    # LoRA 어댑터 이름 설정 (인플루언서 ID 사용)
+                    lora_adapter = str(influencer.influencer_id)
+                    logger.info(f"🔧 LoRA 어댑터 사용: {lora_adapter}")
                 
                 # 스트리밍 응답 생성
                 token_count = 0
-                async for token in vllm_client.generate_response_stream(
-                    user_message=request.message,
+                async for token in runpod_generate_text_stream(
+                    prompt=request.message,
+                    lora_adapter=lora_adapter,
                     system_message=system_message,
-                    influencer_name=str(influencer.influencer_name),
-                    model_id=model_id,
-                    max_new_tokens=200,
                     temperature=0.7,
+                    max_tokens=200
                 ):
                     # 각 토큰을 실시간으로 클라이언트에 전송
                     logger.debug(f"🔄 스트리밍 토큰 전송: {repr(token)}")
@@ -251,11 +212,11 @@ async def chatbot_chat_stream(
                 
                 # 스트리밍 완료 신호
                 yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
-                logger.info(f"✅ VLLM 스트리밍 응답 생성 완료: {influencer.influencer_name}")
+                logger.info(f"✅ RunPod 스트리밍 응답 생성 완료: {influencer.influencer_name}")
 
             except Exception as e:
-                logger.error(f"❌ VLLM 스트리밍 응답 생성 실패: {e}")
-                # VLLM 실패 시 기본 응답 사용
+                logger.error(f"❌ RunPod 스트리밍 응답 생성 실패: {e}")
+                # RunPod 실패 시 기본 응답 사용
                 error_response = f"안녕하세요! 저는 {influencer.influencer_name}입니다. '{request.message}'에 대한 답변을 드리겠습니다."
                 yield f"data: {json.dumps({'text': error_response}, ensure_ascii=False)}\n\n"
                 yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
