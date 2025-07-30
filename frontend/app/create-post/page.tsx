@@ -610,19 +610,32 @@ export default function CreatePostPage() {
       }
 
       // 게시글 데이터 준비
+      const teamId = user?.teams?.[0]?.group_id || 1
+
+      if (!teamId) {
+        setError("팀 정보를 찾을 수 없습니다.")
+        setSubmitting(false)
+        return
+      }
+
       const boardData = {
         influencer_id: formData.influencer_id,
         board_topic: formData.board_topic,
         board_description: formData.board_description,
         board_platform: formData.board_platform,
         board_hash_tag: formData.board_hashtag.join(' '),
-        team_id: user?.teams?.[0]?.group_id || 1,
+        team_id: teamId,
         board_status: boardStatus,
         // 예약 발행 시 스케줄 정보 추가
         ...(publishType === 'scheduled' && {
           scheduled_at: `${scheduledDate}T${scheduledTime}:00`
         })
       };
+
+      console.log('게시글 데이터:', boardData)
+      console.log('이미지 개수:', formData.uploaded_images.length)
+      console.log('팀 ID:', teamId)
+      console.log('사용자 정보:', user)
 
       // 통합 API 사용: 게시글과 이미지를 함께 생성
       const formDataToSend = new FormData()
@@ -633,11 +646,12 @@ export default function CreatePostPage() {
         formDataToSend.append("files", image)
       })
 
-      await apiClient.post('/api/v1/boards/create-with-image', formDataToSend, {
-        headers: {
-          'Content-Type': 'multipart/form-data'
-        }
-      })
+      console.log('FormData 내용:')
+      for (let [key, value] of formDataToSend.entries()) {
+        console.log(`${key}:`, value)
+      }
+
+      await apiClient.post('/api/v1/boards/create-with-image', formDataToSend)
 
       router.push('/post_list')
     } catch (err) {
