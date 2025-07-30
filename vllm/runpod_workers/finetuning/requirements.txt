@@ -1,11 +1,12 @@
 runpod
 
 # Transformers 및 모델 관련
+
 transformers
 accelerate
 peft
 safetensors
-huggingface-hub
+huggingface_hub
 datasets
 
 # 훈련 관련
@@ -20,3 +21,9 @@ sentencepiece
 tqdm
 scikit-learn
 phonemizer
+
+inflect
+kanjize
+sudachipy
+sudachidict_full
+librosa
