@@ -92,6 +92,8 @@ export function useWebSocket(options: WebSocketOptions = {}) {
           optionsRef.current.onMessage?.(message)
 
           // 특정 타입별 핸들러
+          console.log('WebSocket message type:', message.type, 'data:', message.data)
+          
           switch (message.type) {
             case 'session_status':
             case 'session_created':
@@ -101,6 +103,7 @@ export function useWebSocket(options: WebSocketOptions = {}) {
               optionsRef.current.onGenerationProgress?.(message.data)
               break
             case 'generation_complete':
+              console.log('🎨 Generation complete message received in useWebSocket')
               optionsRef.current.onGenerationComplete?.(message.data)
               break
             case 'error':

@@ -75,7 +75,10 @@ export default function ChatPage() {
     
     setIsModelLoading(true)
     try {
+      console.log(`🔍 모델 데이터 로드 시작: influencer_id=${params.id}`);
       const data = await ModelService.getInfluencer(params.id as string)
+      console.log('📊 로드된 모델 데이터:', data);
+      
       setModel({
         id: data.influencer_id,
         name: data.influencer_name,
@@ -86,8 +89,15 @@ export default function ChatPage() {
         group_id: String(data.group_id || ''),
         image_url: data.image_url || undefined, // 올바른 필드명 사용
       })
+      console.log('✅ 모델 데이터 로드 성공');
     } catch (error: any) {
       console.error("Error loading model data:", error)
+      console.error('에러 상세:', {
+        status: error?.status,
+        message: error?.message,
+        response: error?.response,
+        data: error?.data
+      })
       
       // 토큰 검증 실패로 인한 401/403 에러 시 로그아웃
       if (error?.status === 401 || error?.status === 403) {
@@ -107,22 +117,41 @@ export default function ChatPage() {
     if (!model.id) return;
 
     const accessToken = tokenUtils.getToken();
-    const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'ws://localhost:8000';
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
+    
+    // HTTP URL을 WebSocket URL로 변환 (이미지 생성 페이지와 동일한 방식)
+    const wsProtocol = backendUrl.startsWith('https') ? 'wss:' : 'ws:';
+    const wsHost = backendUrl.replace(/^https?:\/\//, '');
+    const wsUrl = `${wsProtocol}//${wsHost}`;
 
     // influencer_id를 base64로 인코딩 (model_repo 대신 influencer_id 사용)
     const influencerIdEncoded = btoa(model.id);
 
-    const ws = new WebSocket(
-      `${apiBaseUrl}/api/v1/chatbot/chatbot/${influencerIdEncoded}?group_id=${model.group_id}&influencer_id=${model.id}&token=${accessToken}`
-    );
+    const wsFullUrl = `${wsUrl}/api/v1/chatbot/chatbot/${influencerIdEncoded}?group_id=${model.group_id}&influencer_id=${model.id}&token=${accessToken}`;
+    
+    console.log('🔌 WebSocket 연결 시도');
+    console.log(`- Backend URL: ${backendUrl}`);
+    console.log(`- WS URL: ${wsUrl}`);
+    console.log(`- Full URL: ${wsFullUrl}`);
+    console.log(`- Model ID: ${model.id}`);
+    console.log(`- Group ID: ${model.group_id}`);
+    console.log(`- Influencer ID (encoded): ${influencerIdEncoded}`);
+    console.log(`- Token 존재: ${accessToken ? 'Yes' : 'No'}`);
+    console.log(`- Token 길이: ${accessToken?.length || 0}`);
+    
+    const ws = new WebSocket(wsFullUrl);
     wsRef.current = ws;
 
     ws.onopen = () => {
-      // console.log("WebSocket 연결 성공");
+      console.log("WebSocket 연결 성공");
+      console.log(`연결 URL: ${ws.url}`);
+      console.log(`연결 상태: ${ws.readyState}`);
       setConnectionStatus('connected');
     };
 
     ws.onmessage = (event) => {
+      console.log('📨 WebSocket 메시지 수신:', event.data);
+      
       // 타임아웃 해제
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);
@@ -132,6 +161,7 @@ export default function ChatPage() {
       setIsLoading(false); // 응답 수신 시 로딩 상태 해제
       try {
         const data = JSON.parse(event.data);
+        console.log('📋 파싱된 메시지:', data);
 
         if (data.type === "token") {
           // 스트리밍 토큰 처리
@@ -229,6 +259,16 @@ export default function ChatPage() {
 
     ws.onerror = (e) => {
       console.error("WebSocket 에러:", e);
+      console.error(`WebSocket 에러 상세:`);
+      console.error(`- Type: ${e.type}`);
+      console.error(`- Target: ${e.target}`);
+      console.error(`- ReadyState: ${ws.readyState}`);
+      console.error(`- URL: ${ws.url}`);
+      console.error(`- Protocol: ${ws.protocol}`);
+      console.error(`- Extensions: ${ws.extensions}`);
+      console.error(`- Binary Type: ${ws.binaryType}`);
+      console.error(`- Buffered Amount: ${ws.bufferedAmount}`);
+      
       setConnectionStatus('error');
       setMessages(prev => [...prev, {
         id: Date.now().toString(),
@@ -238,8 +278,17 @@ export default function ChatPage() {
       }]);
     };
 
-    ws.onclose = () => {
-      // console.log("WebSocket 연결 종료");
+    ws.onclose = (event) => {
+      console.log("WebSocket 연결 종료");
+      console.log(`- Code: ${event.code}`);
+      console.log(`- Reason: ${event.reason}`);
+      console.log(`- Was Clean: ${event.wasClean}`);
+      console.log(`- ReadyState: ${ws.readyState}`);
+      
+      if (event.code === 1006) {
+        console.error("비정상적인 연결 종료 - 서버가 연결을 거부했거나 네트워크 문제가 있습니다.");
+      }
+      
       setConnectionStatus('disconnected');
     };
 
@@ -622,7 +671,7 @@ export default function ChatPage() {
                     <Textarea
                       value={inputMessage}
                       onChange={(e) => setInputMessage(e.target.value)}
-                      onKeyPress={handleKeyPress}
+                      onKeyDown={handleKeyPress}
                       placeholder={
                         connectionStatus === 'connected' ? "메시지를 입력하세요..." :
                           connectionStatus === 'connecting' ? "연결 중입니다..." :

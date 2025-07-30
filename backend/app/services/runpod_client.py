@@ -31,7 +31,7 @@ class RunPodClient:
     """RunPod Serverless API 클라이언트"""
     
     def __init__(self):
-        self.api_key = os.getenv("RUNPOD_API_KEY", "")
+        self.api_key = settings.RUNPOD_API_KEY
         self.base_url = "https://api.runpod.ai/v2"
         self.timeout = 300  # 5분 타임아웃
         

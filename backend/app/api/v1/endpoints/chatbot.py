@@ -113,6 +113,8 @@ async def chatbot(
     logger.info(f"🔗 [WS] Path: {websocket.scope.get('path', 'unknown')}")
     logger.info(f"🔗 [WS] Method: {websocket.scope.get('method', 'unknown')}")
     logger.info(f"🔗 [WS] Scheme: {websocket.scope.get('scheme', 'unknown')}")
+    logger.info(f"🔗 [WS] Full URL: {websocket.url}")
+    logger.info(f"🔗 [WS] Scope keys: {list(websocket.scope.keys())}")
     
     # Headers 로깅 (보안상 민감한 정보 제외)
     headers = dict(websocket.scope.get("headers", []))
@@ -167,6 +169,10 @@ async def chatbot(
         
     except Exception as e:
         logger.error(f"[WS] Query 파라미터 파싱 실패: {e}")
+        logger.error(f"[WS] Exception type: {type(e).__name__}")
+        logger.error(f"[WS] Full scope: {websocket.scope}")
+        import traceback
+        logger.error(f"[WS] Traceback: {traceback.format_exc()}")
         await websocket.close(code=1003, reason="Parameter parsing failed")
         return
     
@@ -174,8 +180,13 @@ async def chatbot(
     try:
         await websocket.accept()
         logger.info(f"[WS] WebSocket 연결 수락 완료")
+        logger.info(f"[WS] Connection state: {websocket.client_state}")
+        logger.info(f"[WS] Application state: {websocket.application_state}")
     except Exception as e:
         logger.error(f"[WS] WebSocket 연결 수락 실패: {e}")
+        logger.error(f"[WS] Exception type: {type(e).__name__}")
+        import traceback
+        logger.error(f"[WS] Traceback: {traceback.format_exc()}")
         return
     
     # JWT 토큰 검증 (연결 후)
@@ -265,11 +276,15 @@ async def chatbot(
 
     try:
         # RunPod 서버 상태 확인 (상세 로그 포함)
-        logger.info(f"[WS] RunPod 서버 상태 확인 시작...")
+        logger.info(f"[WS] ========== RunPod 서버 상태 확인 시작 ==========")
+        logger.info(f"[WS] Session ID: {session_id}")
+        logger.info(f"[WS] Model/LoRA repo: {lora_repo_decoded}")
+        logger.info(f"[WS] Group ID: {group_id}")
+        logger.info(f"[WS] Influencer ID: {influencer_id}")
         
-        # 환경변수 확인
-        import os
-        runpod_api_key = os.getenv("RUNPOD_API_KEY", "")
+        # 환경변수 확인 (settings 사용)
+        from app.core.config import settings
+        runpod_api_key = settings.RUNPOD_API_KEY
         logger.info(f"[WS] RUNPOD_API_KEY 설정됨: {'Yes' if runpod_api_key else 'No'}")
         if runpod_api_key:
             logger.info(f"[WS] RUNPOD_API_KEY 길이: {len(runpod_api_key)}자")
@@ -303,16 +318,11 @@ async def chatbot(
         try:
             from app.services.runpod_manager import get_vllm_manager
             vllm_manager = get_vllm_manager()
-            generation_endpoint_id = await vllm_manager.get_endpoint_id()
-            logger.info(f"[WS] vLLM Generation Endpoint ID: {generation_endpoint_id}")
-            
-            if not generation_endpoint_id:
-                logger.warning(f"[WS] ⚠️ vLLM Generation Endpoint ID가 없습니다")
-            else:
-                logger.info(f"[WS] ✅ vLLM Generation Endpoint 준비됨")
+            # endpoint_id는 RunPod Serverless에서는 필요하지 않음
+            logger.info(f"[WS] ✅ vLLM Manager 준비됨 (RunPod Serverless)")
                 
         except Exception as endpoint_error:
-            logger.error(f"[WS] ❌ vLLM Endpoint 확인 중 오류: {endpoint_error}")
+            logger.error(f"[WS] ❌ vLLM Manager 확인 중 오류: {endpoint_error}")
 
         logger.info(
             f"[WS] RunPod WebSocket 연결 시작: lora_repo={lora_repo_decoded}, group_id={group_id}, session_id={session_id}"
@@ -351,10 +361,12 @@ async def chatbot(
                 logger.info(f"[WS] 메시지 수신: {data[:100]}...")
 
                 # 메시지 파싱 (JSON 또는 일반 텍스트)
+                logger.info(f"[WS] 메시지 타입 분석 시작")
                 try:
                     message_data = json.loads(data)
                     message_type = message_data.get("type", "chat")
                     user_message = message_data.get("message", data)
+                    logger.info(f"[WS] JSON 메시지 파싱 성공: type={message_type}")
                     
                     # 히스토리 관련 명령 처리
                     if message_type == "get_history":
@@ -380,6 +392,7 @@ async def chatbot(
                     # 일반 텍스트 메시지로 처리
                     message_type = "chat"
                     user_message = data
+                    logger.info(f"[WS] 일반 텍스트 메시지로 처리")
 
                 # 히스토리 컨텍스트 추가 (OpenAI 요약 사용)
                 history_summary = ""  # 변수 초기화
@@ -398,6 +411,7 @@ async def chatbot(
                             logger.info(f"[WS] 간단한 히스토리 사용 ({len(chat_history.history)}개 대화)")
                     except Exception as e:
                         logger.warning(f"[WS] 히스토리 요약 실패, 요약 없이 진행: {e}")
+                        logger.warning(f"[WS] Summary error type: {type(e).__name__}")
                         enhanced_message = user_message
                 else:
                     enhanced_message = user_message
@@ -462,6 +476,11 @@ async def chatbot(
 
                 except Exception as e:
                     logger.error(f"[WS] RunPod 스트리밍 추론 중 오류: {e}")
+                    logger.error(f"[WS] Inference error type: {type(e).__name__}")
+                    logger.error(f"[WS] LoRA adapter: {lora_repo_decoded}")
+                    logger.error(f"[WS] User message: {user_message[:100]}..." if len(user_message) > 100 else f"[WS] User message: {user_message}")
+                    import traceback
+                    logger.error(f"[WS] Inference traceback:\n{traceback.format_exc()}")
                     await websocket.send_text(
                         json.dumps(
                             {
@@ -474,22 +493,33 @@ async def chatbot(
 
             except WebSocketDisconnect:
                 logger.info(f"[WS] WebSocket 연결 종료: lora_repo={lora_repo_decoded}, session_id={session_id}")
+                logger.info(f"[WS] 총 처리된 메시지 수: {len(chat_history.history)}")
                 break
             except Exception as e:
                 logger.error(f"[WS] WebSocket 처리 중 오류: {e}")
+                logger.error(f"[WS] Exception type: {type(e).__name__}")
+                import traceback
+                logger.error(f"[WS] Full traceback: {traceback.format_exc()}")
+                logger.error(f"[WS] Current message: {data[:200]}..." if len(data) > 200 else f"[WS] Current message: {data}")
                 await websocket.send_text(
                     json.dumps({"error_code": "WEBSOCKET_ERROR", "message": str(e)})
                 )
                 break
 
     except Exception as e:
-        logger.error(f"[WS] WebSocket 연결 처리 중 오류: {e}")
+        logger.error(f"[WS] ========== WebSocket 연결 처리 중 심각한 오류 ==========")
+        logger.error(f"[WS] Error: {e}")
+        logger.error(f"[WS] Exception type: {type(e).__name__}")
+        import traceback
+        logger.error(f"[WS] Full traceback:\n{traceback.format_exc()}")
+        logger.error(f"[WS] Session ID: {session_id if 'session_id' in locals() else 'Not created'}")
+        logger.error(f"[WS] ====================================================")
         try:
             await websocket.send_text(
                 json.dumps({"error_code": "CONNECTION_ERROR", "message": str(e)})
             )
         except:
-            pass
+            logger.error(f"[WS] Failed to send error message to client")
     finally:
         # 데이터베이스 연결 정리
         try:
