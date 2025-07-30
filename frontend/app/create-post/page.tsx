@@ -94,7 +94,7 @@ export default function CreatePostPage() {
   // 인플루언서 데이터 로딩
   useEffect(() => {
     if (isFetchingRef.current) return
-    
+
     const fetchInfluencers = async () => {
       try {
         isFetchingRef.current = true
@@ -490,7 +490,7 @@ export default function CreatePostPage() {
         hashtags: res.generated_hashtags || [],
       };
       setGenerated(generatedContent);
-      
+
       // 생성된 본문으로 바로 말투 변환 실행
       if (generatedContent.content && selectedInfluencer) {
         try {
@@ -601,9 +601,6 @@ export default function CreatePostPage() {
     setError(null)
 
     try {
-      // 백엔드 URL 가져오기
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
-
       // 발행 상태 결정
       let boardStatus = 1; // 기본값: 임시저장
       if (publishType === 'immediate') {
@@ -636,30 +633,22 @@ export default function CreatePostPage() {
         formDataToSend.append("files", image)
       })
 
-      const response = await fetch(`${backendUrl}/api/v1/boards/create-with-image`, {
-        method: 'POST',
+      await apiClient.post('/api/v1/boards/create-with-image', formDataToSend, {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
-          // Content-Type을 명시적으로 설정하지 않음 (브라우저가 자동으로 boundary 설정)
-        },
-        body: formDataToSend
-      })
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        const errorMessage = errorData.detail || errorData.message || '게시글 생성에 실패했습니다.';
-
-        // 인스타그램 업로드 관련 에러인 경우 특별 처리
-        if (errorMessage.includes('인스타그램') || errorMessage.includes('Instagram')) {
-          throw new Error('게시글이 생성되었지만 인스타그램 업로드에 실패했습니다. 인스타그램 계정 설정을 확인해주세요.');
+          'Content-Type': 'multipart/form-data'
         }
-
-        throw new Error(errorMessage);
-      }
+      })
 
       router.push('/post_list')
     } catch (err) {
-      setError(err instanceof Error ? err.message : '게시글 생성에 실패했습니다.')
+      const errorMessage = err instanceof Error ? err.message : '게시글 생성에 실패했습니다.'
+
+      // 인스타그램 업로드 관련 에러인 경우 특별 처리
+      if (errorMessage.includes('인스타그램') || errorMessage.includes('Instagram')) {
+        setError('게시글이 생성되었지만 인스타그램 업로드에 실패했습니다. 인스타그램 계정 설정을 확인해주세요.')
+      } else {
+        setError(errorMessage)
+      }
     } finally {
       setSubmitting(false)
     }
