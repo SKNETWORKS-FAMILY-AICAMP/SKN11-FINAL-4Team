@@ -46,9 +46,17 @@ RUN pip install --no-cache-dir \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# espeak 설치 확인
+RUN which espeak && espeak --version || echo "espeak not found"
+RUN which espeak-ng && espeak-ng --version || echo "espeak-ng not found"
+
+# espeak 심볼릭 링크 생성 (필요시)
+RUN ln -sf /usr/bin/espeak-ng /usr/bin/espeak || true
+
 # phonemizer 설치 확인 및 테스트
 RUN python3 -c "import phonemizer; print(f'Phonemizer version: {phonemizer.__version__}')"
-RUN python3 -c "from phonemizer.backend import EspeakBackend; print('EspeakBackend import successful')"
+RUN python3 -c "from phonemizer.backend.espeak.wrapper import EspeakWrapper; print(f'Espeak library: {EspeakWrapper.library()}')"
+RUN python3 -c "from phonemizer.backend import EspeakBackend; backend = EspeakBackend('ko'); print('EspeakBackend Korean test successful')"
 
 # zonos 모듈 복사 (존재 여부 확인)
 COPY zonos/ /app/zonos/

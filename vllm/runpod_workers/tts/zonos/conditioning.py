@@ -189,8 +189,15 @@ def clean(texts: list[str], languages: list[str]) -> list[str]:
 @cache
 def get_backend(language: str) -> "EspeakBackend":
     import logging
+    import os
 
     from phonemizer.backend import EspeakBackend
+
+    # espeak 경로 설정
+    if not os.environ.get('PHONEMIZER_ESPEAK_PATH'):
+        os.environ['PHONEMIZER_ESPEAK_PATH'] = '/usr/bin/espeak-ng'
+    if not os.environ.get('PHONEMIZER_ESPEAK_LIBRARY'):
+        os.environ['PHONEMIZER_ESPEAK_LIBRARY'] = '/usr/lib/x86_64-linux-gnu/libespeak-ng.so'
 
     logger = logging.getLogger("phonemizer")
     backend = EspeakBackend(
