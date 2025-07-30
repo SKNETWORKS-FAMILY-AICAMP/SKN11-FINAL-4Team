@@ -77,6 +77,16 @@ import os
 import json
 from pydantic import BaseModel
 from app.models.influencer import APICallAggregation
+from app.services.qa_generation_service import get_qa_generation_service
+from app.schemas.influencer_qa import (
+    ToneGenerationResponse,
+    QAGenerationRequest,
+    QAGenerationResponse,
+    QABatchSubmitRequest,
+    QABatchStatusResponse,
+    QAProcessResultsRequest,
+    QAProcessResultsResponse
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -1168,6 +1178,344 @@ async def _generate_question_for_character(
     )
 
     return response.choices[0].message.content.strip()
+
+
+# 통합 어투 생성 엔드포인트 (백엔드에서 직접 처리)
+@router.post("/{influencer_id}/generate-tone-variations", response_model=ToneGenerationResponse)
+async def generate_tone_variations_integrated(
+    influencer_id: str,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    인플루언서의 어투 변형 생성 (백엔드 통합 버전)
+    vLLM의 /generate_qa_fast 로직을 백엔드에서 직접 처리
+    """
+    from app.schemas.influencer_qa import ToneGenerationResponse
+    
+    user_id = current_user.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User ID not found")
+    
+    # 인플루언서 존재 확인
+    influencer = await get_influencer_by_id(db, user_id, influencer_id)
+    if not influencer:
+        raise HTTPException(status_code=404, detail="인플루언서를 찾을 수 없습니다")
+    
+    # QA 생성 서비스를 활용하여 어투 생성
+    qa_service = get_qa_generation_service()
+    
+    # 캐릭터 프로필 생성
+    character_profile = {
+        "name": influencer.influencer_name,
+        "description": influencer.influencer_description or "",
+        "age_range": influencer.age_range or "알 수 없음",
+        "gender": influencer.gender or "NON_BINARY",
+        "personality": influencer.influencer_personality or "친근하고 활발한 성격",
+        "mbti": influencer.mbti
+    }
+    
+    try:
+        # 어투 생성 실행
+        result = await qa_service.generate_tone_variations(character_profile)
+        
+        # 응답 반환
+        return ToneGenerationResponse(
+            question=result["question"],
+            responses=result["responses"],
+            generation_time_seconds=result["generation_time_seconds"],
+            method=result["method"]
+        )
+        
+    except Exception as e:
+        logger.error(f"어투 생성 실패: {e}")
+        raise HTTPException(status_code=500, detail=f"어투 생성 중 오류가 발생했습니다: {str(e)}")
+
+
+# QA 생성 관련 엔드포인트
+@router.post("/{influencer_id}/generate-qa", response_model=QAGenerationResponse)
+async def generate_qa_for_influencer(
+    influencer_id: str,
+    request: QAGenerationRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    인플루언서용 대량 QA 생성 (배치 처리용)
+    파인튜닝을 위한 대량의 QA 쌍을 도메인별로 생성
+    """
+    user_id = current_user.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User ID not found")
+    
+    # 인플루언서 존재 확인
+    influencer = await get_influencer_by_id(db, user_id, influencer_id)
+    if not influencer:
+        raise HTTPException(status_code=404, detail="인플루언서를 찾을 수 없습니다")
+    
+    # 작업 ID 생성
+    task_id = str(uuid.uuid4())
+    
+    # QA 생성 서비스
+    qa_service = get_qa_generation_service()
+    
+    # 배치 요청 생성
+    try:
+        result = await qa_service.generate_qa_for_influencer(
+            character_name=influencer.influencer_name,
+            character_description=influencer.influencer_description or "",
+            personality=influencer.influencer_personality or "친근하고 활발한 성격",
+            num_qa_pairs=request.num_qa_pairs,
+            domains=request.domains,
+            system_prompt=request.system_prompt or influencer.system_prompt
+        )
+        
+        # 배치 작업 정보를 DB에 저장
+        batch_key = BatchKey(
+            task_id=task_id,
+            influencer_id=influencer_id,
+            user_id=user_id,
+            qa_count=request.num_qa_pairs,
+            qa_domains=json.dumps(result["domains"]) if result["domains"] else None,
+            status=QAGenerationStatus.PENDING.value,
+            metadata={
+                "type": "qa_generation",
+                "batch_requests_count": result["total_requests"],
+                "qa_per_domain": result["qa_per_domain"]
+            }
+        )
+        db.add(batch_key)
+        db.commit()
+        
+        # 백그라운드에서 배치 파일 생성 및 제출
+        background_tasks.add_task(
+            _submit_qa_batch,
+            task_id,
+            result["batch_requests"],
+            db
+        )
+        
+        return QAGenerationResponse(
+            task_id=task_id,
+            status="accepted",
+            message=f"QA 생성 작업이 시작되었습니다. 총 {request.num_qa_pairs}개의 QA 쌍이 생성될 예정입니다.",
+            total_qa_pairs=request.num_qa_pairs,
+            domains=result["domains"],
+            qa_per_domain=result["qa_per_domain"]
+        )
+        
+    except Exception as e:
+        logger.error(f"QA 생성 중 오류 발생: {e}")
+        raise HTTPException(status_code=500, detail=f"QA 생성 중 오류가 발생했습니다: {str(e)}")
+
+
+async def _submit_qa_batch(task_id: str, batch_requests: List[Dict], db: Session):
+    """배치 요청을 OpenAI에 제출하는 백그라운드 작업"""
+    try:
+        qa_service = get_qa_generation_service()
+        
+        # 배치 파일 생성 및 업로드
+        file_id = await qa_service.create_batch_file(batch_requests)
+        
+        # 배치 작업 제출
+        batch_id = await qa_service.submit_batch(
+            file_id=file_id,
+            metadata={
+                "task_id": task_id,
+                "type": "influencer_qa_generation"
+            }
+        )
+        
+        # DB 업데이트
+        batch_key = db.query(BatchKey).filter(BatchKey.task_id == task_id).first()
+        if batch_key:
+            batch_key.batch_id = batch_id
+            batch_key.status = QAGenerationStatus.BATCH_SUBMITTED.value
+            batch_key.updated_at = datetime.utcnow()
+            db.commit()
+            
+        logger.info(f"✅ QA 배치 제출 완료: task_id={task_id}, batch_id={batch_id}")
+        
+    except Exception as e:
+        logger.error(f"❌ QA 배치 제출 실패: {e}")
+        # DB 업데이트 (실패 상태)
+        batch_key = db.query(BatchKey).filter(BatchKey.task_id == task_id).first()
+        if batch_key:
+            batch_key.status = QAGenerationStatus.FAILED.value
+            batch_key.error_message = str(e)
+            batch_key.updated_at = datetime.utcnow()
+            db.commit()
+
+
+@router.get("/qa-batch/status/{batch_id}", response_model=QABatchStatusResponse)
+async def get_qa_batch_status(
+    batch_id: str,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """QA 배치 작업 상태 조회"""
+    user_id = current_user.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User ID not found")
+    
+    # 배치 작업 확인
+    batch_key = db.query(BatchKey).filter(
+        BatchKey.batch_id == batch_id,
+        BatchKey.user_id == user_id
+    ).first()
+    
+    if not batch_key:
+        raise HTTPException(status_code=404, detail="배치 작업을 찾을 수 없습니다")
+    
+    # OpenAI 배치 상태 조회
+    qa_service = get_qa_generation_service()
+    
+    try:
+        status = await qa_service.get_batch_status(batch_id)
+        
+        # DB 상태 업데이트
+        if status["status"] == "completed":
+            batch_key.status = QAGenerationStatus.BATCH_COMPLETED.value
+        elif status["status"] == "failed":
+            batch_key.status = QAGenerationStatus.FAILED.value
+        elif status["status"] in ["in_progress", "validating", "finalizing"]:
+            batch_key.status = QAGenerationStatus.BATCH_PROCESSING.value
+        
+        batch_key.updated_at = datetime.utcnow()
+        db.commit()
+        
+        return QABatchStatusResponse(**status)
+        
+    except Exception as e:
+        logger.error(f"배치 상태 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail=f"배치 상태 조회 중 오류가 발생했습니다: {str(e)}")
+
+
+@router.post("/qa-batch/process-results", response_model=QAProcessResultsResponse)
+async def process_qa_batch_results(
+    request: QAProcessResultsRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """QA 배치 결과 처리 및 S3 업로드"""
+    user_id = current_user.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User ID not found")
+    
+    # 배치 작업 확인
+    batch_key = db.query(BatchKey).filter(
+        BatchKey.batch_id == request.batch_id,
+        BatchKey.user_id == user_id
+    ).first()
+    
+    if not batch_key:
+        raise HTTPException(status_code=404, detail="배치 작업을 찾을 수 없습니다")
+    
+    # QA 서비스와 S3 서비스
+    qa_service = get_qa_generation_service()
+    s3_service = get_s3_service()
+    
+    try:
+        # 배치 결과 처리
+        result = await qa_service.process_batch_results(
+            batch_id=request.batch_id,
+            output_file_id=request.output_file_id
+        )
+        
+        # S3에 업로드
+        if result["qa_pairs"] and s3_service.is_available():
+            # QA 데이터를 JSON으로 변환
+            qa_data = {
+                "influencer_id": request.influencer_id,
+                "batch_id": request.batch_id,
+                "qa_pairs": result["qa_pairs"],
+                "total_count": result["total_count"],
+                "created_at": datetime.utcnow().isoformat()
+            }
+            
+            # S3 키 생성
+            s3_key = f"qa_pairs/processed_qa_{batch_key.task_id}.json"
+            
+            # S3 업로드
+            s3_url = await s3_service.upload_json_data(
+                json_data=qa_data,
+                key=s3_key
+            )
+            
+            # DB 업데이트
+            batch_key.s3_qa_file_url = s3_url
+            batch_key.status = QAGenerationStatus.COMPLETED.value
+            batch_key.qa_count = result["total_count"]
+            batch_key.updated_at = datetime.utcnow()
+            db.commit()
+            
+            # 파인튜닝 자동 시작 (백그라운드)
+            if batch_key.is_finetuning_enabled:
+                background_tasks.add_task(
+                    _start_finetuning_after_qa,
+                    batch_key.influencer_id,
+                    s3_url,
+                    batch_key.task_id,
+                    db
+                )
+            
+            return QAProcessResultsResponse(
+                status="success",
+                qa_pairs=result["qa_pairs"],
+                total_count=result["total_count"],
+                errors=result["errors"],
+                error_count=result["error_count"],
+                s3_url=s3_url
+            )
+        else:
+            # S3 없이 결과만 반환
+            return QAProcessResultsResponse(
+                status="success",
+                qa_pairs=result["qa_pairs"],
+                total_count=result["total_count"],
+                errors=result["errors"],
+                error_count=result["error_count"],
+                s3_url=None
+            )
+            
+    except Exception as e:
+        logger.error(f"배치 결과 처리 실패: {e}")
+        
+        # DB 업데이트 (실패 상태)
+        batch_key.status = QAGenerationStatus.FAILED.value
+        batch_key.error_message = str(e)
+        batch_key.updated_at = datetime.utcnow()
+        db.commit()
+        
+        raise HTTPException(status_code=500, detail=f"배치 결과 처리 중 오류가 발생했습니다: {str(e)}")
+
+
+async def _start_finetuning_after_qa(
+    influencer_id: str,
+    s3_qa_file_url: str,
+    task_id: str,
+    db: Session
+):
+    """QA 생성 완료 후 파인튜닝 자동 시작"""
+    try:
+        finetuning_service = get_finetuning_service()
+        
+        success = await finetuning_service.start_finetuning_for_influencer(
+            influencer_id=influencer_id,
+            s3_qa_file_url=s3_qa_file_url,
+            db=db,
+            task_id=task_id
+        )
+        
+        if success:
+            logger.info(f"✅ 파인튜닝 자동 시작 성공: {influencer_id}")
+        else:
+            logger.error(f"❌ 파인튜닝 자동 시작 실패: {influencer_id}")
+            
+    except Exception as e:
+        logger.error(f"❌ 파인튜닝 자동 시작 중 오류: {e}")
 
 
 @router.post("/{influencer_id}/system-prompt")
