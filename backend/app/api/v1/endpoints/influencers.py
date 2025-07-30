@@ -1876,16 +1876,16 @@ async def chat_with_influencer(
         # API 사용량 추적
         await track_api_usage(db, str(api_key.influencer_id))
 
-        # VLLM 서비스 호출
+        # RunPod 서비스 호출
         try:
-            from app.services.vllm_client import (
-                vllm_generate_response,
-                vllm_health_check,
+            from app.services.runpod_client import (
+                runpod_generate_text,
+                runpod_health_check,
             )
 
-            # VLLM 서버 상태 확인
-            if not await vllm_health_check():
-                logger.warning("VLLM 서버에 연결할 수 없어 기본 응답을 사용합니다.")
+            # RunPod 서버 상태 확인
+            if not await runpod_health_check():
+                logger.warning("RunPod 서버에 연결할 수 없어 기본 응답을 사용합니다.")
                 response_text = f"안녕하세요! 저는 {api_key.influencer_name}입니다. '{request.message}'에 대한 답변을 드리겠습니다."
             else:
                 # 시스템 프롬프트 구성
@@ -1895,7 +1895,7 @@ async def chat_with_influencer(
                     else f"당신은 {api_key.influencer_name}입니다. 친근하고 도움이 되는 답변을 해주세요."
                 )
 
-                # VLLM 서버에서 응답 생성
+                # RunPod 서버에서 응답 생성
                 if api_key.influencer_model_repo:
                     model_id = str(api_key.influencer_model_repo)
 
@@ -1917,10 +1917,13 @@ async def chat_with_influencer(
                                 str(hf_token_manage.hf_token_value)
                             )
 
-                    # VLLM 클라이언트 가져오기
-                    from app.services.vllm_client import get_vllm_client
-
-                    vllm_client = await get_vllm_client()
+                    # RunPod 응답 생성
+                    response = await runpod_generate_text(
+                        prompt=request.message,
+                        lora_adapter=str(api_key.influencer_id),
+                        system_message=system_message,
+                        max_tokens=512
+                    )
 
                     # 어댑터 로드
                     try:

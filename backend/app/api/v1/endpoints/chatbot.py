@@ -10,11 +10,10 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.user import HFTokenManage
-from app.services.vllm_client import (
-    VLLMWebSocketClient,
-    VLLMClient,
-    get_vllm_client,
-    vllm_health_check,
+from app.services.runpod_client import (
+    get_runpod_client,
+    runpod_health_check,
+    runpod_generate_text_stream,
 )
 from app.core.encryption import decrypt_sensitive_data
 from app.services.hf_token_resolver import get_token_by_group
@@ -134,7 +133,7 @@ async def chatbot(
 
     try:
         # VLLM 서버 상태 확인
-        if not await vllm_health_check():
+        if not await runpod_health_check():
             logger.error(f"[WS] VLLM 서버 연결 실패 (URL: {settings.VLLM_BASE_URL})")
             await websocket.send_text(
                 json.dumps(
@@ -434,7 +433,7 @@ async def model_load(req: ModelLoadRequest, db: Session = Depends(get_db)):
             raise HTTPException(status_code=400, detail="HF 토큰이 없습니다.")
 
         # VLLM 서버 상태 확인
-        if not await vllm_health_check():
+        if not await runpod_health_check():
             raise HTTPException(
                 status_code=503, detail="VLLM 서버에 연결할 수 없습니다."
             )

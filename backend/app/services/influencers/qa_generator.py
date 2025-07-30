@@ -544,31 +544,19 @@ class InfluencerQAGenerator:
                 if tone_data:
                     print("🔍 tone_data 분석을 통한 시스템 프롬프트 생성 시작")
                     try:
-                        # vLLM 클라이언트 생성
-                        from app.services.vllm_client import VLLMClient, VLLMServerConfig
+                        # vLLM 클라이언트 사용 중단 - RunPod로 대체
+                        print("⚠️ vLLM 서버가 아닌 RunPod Serverless를 사용합니다")
+                        print("🔄 tone_data 분석 기능은 현재 지원되지 않습니다")
                         
-                        vllm_config = VLLMServerConfig(
-                            base_url=settings.VLLM_BASE_URL,
-                            timeout=getattr(settings, 'VLLM_TIMEOUT', 300)
-                        )
+                        # 기본 시스템 프롬프트 생성
+                        character_name = influencer_data.influencer_name
+                        personality = getattr(influencer_data, 'influencer_personality', '친근하고 활발한 성격')
                         
-                        # 캐릭터 정보 구성
-                        character_info = {
-                            "name": influencer_data.influencer_name,
-                            "age": getattr(influencer_data, 'influencer_age_group', '알 수 없음'),
-                            "personality": getattr(influencer_data, 'influencer_personality', '알 수 없음')
-                        }
+                        system_prompt = f"""당신은 {character_name}입니다. 
+{personality}을 가지고 있으며, 사용자와 친근하고 자연스럽게 대화합니다.
+대화할 때는 상대방을 존중하고, 공감하며, 도움이 되는 답변을 하려고 노력합니다."""
                         
-                        # tone_data 분석
-                        async with VLLMClient(vllm_config) as vllm_client:
-                            analysis_result = await vllm_client.analyze_tone_data(
-                                tone_data=tone_data,
-                                character_info=character_info
-                            )
-                        
-                        # 분석된 시스템 프롬프트 사용
-                        system_prompt = analysis_result.get("system_prompt", "")
-                        print(f"✅ 시스템 프롬프트 생성 완료: {system_prompt[:100]}...")
+                        print(f"✅ 기본 시스템 프롬프트 생성 완료: {system_prompt[:100]}...")
                         
                         # DB에 시스템 프롬프트 저장
                         influencer_data.system_prompt = system_prompt

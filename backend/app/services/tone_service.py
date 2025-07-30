@@ -15,7 +15,7 @@ from fastapi import HTTPException
 
 from app.schemas.influencer import ToneGenerationRequest
 from app.utils.data_mapping import create_character_data
-from app.services.vllm_client import vllm_health_check, VLLMClient, VLLMServerConfig
+from app.services.runpod_client import runpod_health_check, get_runpod_client
 from app.core.config import settings
 from fastapi import HTTPException
 
@@ -48,7 +48,7 @@ class ToneGenerationService:
         
         try:
             # vLLM 서버 상태 확인
-            if not await vllm_health_check():
+            if not await runpod_health_check():
                 raise HTTPException(status_code=503, detail="vLLM 서버에 접속할 수 없습니다")
             
             # 캐릭터 데이터 구성
@@ -161,30 +161,25 @@ class ToneGenerationService:
             HTTPException: vLLM 서버 오류 시 예외 발생
         """
         try:
-            # vLLM 서버 설정
-            vllm_config = VLLMServerConfig(
-                base_url=settings.VLLM_BASE_URL,
-                timeout=getattr(settings, 'VLLM_TIMEOUT', 300)
-            )
+            # RunPod 클라이언트 사용
+            client = get_runpod_client()
             
-            async with VLLMClient(vllm_config) as client:
-                # 🚀 고속 어투 생성 엔드포인트 호출 (fallback 제거)
-                response = await client.client.post(
-                    "/speech/generate_qa_fast",  # 고속 병렬 처리 엔드포인트
-                    json=vllm_request_data,
-                    timeout=60  # 안정적인 처리를 위해 타임아웃 증가
-                )
-                response.raise_for_status()
-                logger.info("✅ 고속 엔드포인트로 어투 생성 성공")
-                
-                result = response.json()
-                # 성능 정보 로깅
-                generation_time = result.get('generation_time_seconds', 0)
-                method = result.get('method', 'unknown')
-                character_name = vllm_request_data.get('character', {}).get('name', 'Unknown')
-                logger.info(f"✅ 고속 어투 생성 성공: {character_name} "
-                          f"(소요시간: {generation_time:.2f}초, 방식: {method})")
-                return result
+            # TODO: RunPod serverless로 어투 생성 구현 필요
+            # 현재는 임시로 빈 응답 반환
+            logger.warning("⚠️ RunPod serverless 어투 생성 미구현 - 임시 응답 반환")
+            
+            character_name = vllm_request_data.get('character', {}).get('name', 'Unknown')
+            
+            # 임시 응답 형식
+            result = {
+                "converted_response": vllm_request_data.get('user_message', ''),
+                "generation_time_seconds": 0.0,
+                "method": "placeholder",
+                "character": character_name
+            }
+            
+            logger.info(f"✅ 임시 어투 생성 응답 반환: {character_name}")
+            return result
                 
         except Exception as e:
             character_name = vllm_request_data.get('character', {}).get('name', 'Unknown')

@@ -21,7 +21,7 @@ from app.schemas.instagram import (
 )
 from app.core.instagram_service import InstagramService
 from app.core.security import get_current_user
-from app.services.vllm_client import vllm_generate_response, vllm_health_check, vllm_load_adapter_if_needed
+from app.services.runpod_client import runpod_generate_text, runpod_health_check
 from app.services.hf_token_resolver import get_token_for_influencer
 
 router = APIRouter()
@@ -474,9 +474,9 @@ async def generate_ai_response(message_text: str, influencer: AIInfluencer, send
         
         # vLLM 서버를 통한 AI 응답 생성
         try:
-            # vLLM 서버 상태 확인
-            if not await vllm_health_check():
-                logger.warning("⚠️ vLLM 서버에 접근할 수 없습니다. 기본 응답을 사용합니다.")
+            # RunPod 서버 상태 확인
+            if not await runpod_health_check():
+                logger.warning("⚠️ RunPod 서버에 접근할 수 없습니다. 기본 응답을 사용합니다.")
                 return f"안녕하세요! {influencer.influencer_name}입니다! 😊 메시지 감사해요! 더 자세히 말씀해주시면 도움드릴게요!"
             
             # 파인튜닝된 모델이 있는 경우 해당 모델 사용
@@ -485,30 +485,22 @@ async def generate_ai_response(message_text: str, influencer: AIInfluencer, send
                 logger.info(f"🤖 인플루언서 전용 모델 사용: {influencer.influencer_model_repo}")
                 model_id = influencer.influencer_model_repo
                 
-                # 필요시 어댑터 로드
-                hf_token, hf_username = await get_token_for_influencer(influencer, db)
-                
-                adapter_loaded = await vllm_load_adapter_if_needed(
-                    model_id=model_id,
-                    hf_repo_name=influencer.influencer_model_repo,
-                    hf_token=hf_token
-                )
-                
-                if not adapter_loaded:
-                    logger.warning(f"⚠️ 어댑터 로드 실패: {model_id}. 기본 모델을 사용합니다.")
-                    model_id = None
+                # RunPod는 동적으로 어댑터를 로드하므로 미리 로드할 필요 없음
+                logger.info(f"🤖 RunPod에서 동적으로 어댑터 로드: {model_id}")
             else:
                 logger.info(f"🤖 기본 AI 모델로 응답 생성")
             
-            # vLLM 서버로 응답 생성 요청
-            response = await vllm_generate_response(
-                user_message=message_text,
+            # RunPod 서버로 응답 생성 요청
+            result = await runpod_generate_text(
+                prompt=message_text,
+                lora_adapter=str(influencer.influencer_id) if model_id else None,
                 system_message=system_message,
-                influencer_name=influencer.influencer_name,
-                model_id=model_id,
-                max_new_tokens=300,
+                max_tokens=300,
                 temperature=0.7
             )
+            
+            # 결과에서 텍스트 추출
+            response = result.get("generated_text", "") or result.get("output", {}).get("generated_text", "")
             
             # 응답 후처리
             response = response.strip()
