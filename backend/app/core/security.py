@@ -123,7 +123,7 @@ def verify_token(token: str) -> Optional[dict]:
         
         # 서명 없이 페이로드 먼저 확인
         try:
-            unverified = jwt.decode(token, options={"verify_signature": False})
+            unverified = jwt.decode(token, key=settings.SECRET_KEY, options={"verify_signature": False})
             logger.info(f"🔐 토큰 페이로드 (서명 미검증): {unverified}")
             
             # 만료 시간 확인
