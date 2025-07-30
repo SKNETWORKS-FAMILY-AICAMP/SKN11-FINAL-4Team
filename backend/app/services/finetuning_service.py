@@ -553,7 +553,7 @@ class InfluencerFineTuningService:
             safe_name = model_repo.split("/")[-1] if "/" in model_repo else model_repo
         else:
             # 새로운 repo 경로 생성
-            safe_name = f"{english_name}-finetuned"
+            safe_name = f"EXAONE-{english_name}-finetuned"
             hf_repo_id = f"{hf_username}/{safe_name}"
 
         logger.info(

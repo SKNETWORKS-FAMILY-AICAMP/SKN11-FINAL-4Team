@@ -105,13 +105,44 @@ async def chatbot(
     lora_repo: str,
     group_id: int = Query(...),
     influencer_id: str = Query(None),
+    token: str = Query(...),  # JWT 토큰 필수
     db: Session = Depends(get_db),
 ):
+    # WebSocket 연결을 먼저 수락
+    await websocket.accept()
+    
+    # JWT 토큰 검증 (연결 후)
+    try:
+        from app.core.security import verify_token
+        payload = verify_token(token)
+        if not payload:
+            await websocket.send_text(
+                json.dumps({
+                    "error_code": "INVALID_TOKEN",
+                    "message": "유효하지 않은 토큰입니다."
+                })
+            )
+            await websocket.close()
+            return
+        
+        user_id = payload.get("sub")
+        logger.info(f"[WS] 토큰 검증 성공: user_id={user_id}")
+        
+    except Exception as e:
+        logger.error(f"[WS] 토큰 검증 실패: {e}")
+        await websocket.send_text(
+            json.dumps({
+                "error_code": "TOKEN_VERIFICATION_FAILED",
+                "message": "토큰 검증에 실패했습니다."
+            })
+        )
+        await websocket.close()
+        return
+
     # lora_repo는 base64로 인코딩되어 있으므로 디코딩
     try:
         lora_repo_decoded = base64.b64decode(lora_repo).decode()
     except Exception as e:
-        await websocket.accept()
         await websocket.send_text(
             json.dumps(
                 {
@@ -122,8 +153,6 @@ async def chatbot(
         )
         await websocket.close()
         return
-
-    await websocket.accept()
 
     # 세션별 히스토리 초기화
     session_id = f"{lora_repo_decoded}_{group_id}_{influencer_id or 'default'}"
