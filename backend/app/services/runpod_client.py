@@ -12,7 +12,12 @@ from typing import Optional, Dict, Any, AsyncIterator
 from datetime import datetime
 
 from app.core.config import settings
-from app.services.runpod_endpoint_manager import get_endpoint_manager
+from app.services.runpod_manager import (
+    get_tts_manager, 
+    get_vllm_manager, 
+    get_finetuning_manager,
+    get_runpod_manager  # 하위 호환성
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +34,14 @@ class RunPodClient:
         self.api_key = os.getenv("RUNPOD_API_KEY", "")
         self.base_url = "https://api.runpod.ai/v2"
         self.timeout = 300  # 5분 타임아웃
-        self.endpoint_manager = get_endpoint_manager()
+        
+        # 각 서비스별 매니저
+        self.tts_manager = get_tts_manager()
+        self.vllm_manager = get_vllm_manager()
+        self.finetuning_manager = get_finetuning_manager()
+        
+        # 하위 호환성
+        self.runpod_manager = get_runpod_manager()
         
         if not self.api_key:
             logger.warning("⚠️ RUNPOD_API_KEY가 설정되지 않았습니다")
@@ -37,15 +49,40 @@ class RunPodClient:
     async def get_endpoint_id(self, endpoint_type: str = "tts") -> str:
         """동적으로 엔드포인트 ID 가져오기"""
         try:
-            endpoint_id = await self.endpoint_manager.get_endpoint_id(endpoint_type)
-            if endpoint_id:
-                return endpoint_id
+            # 서비스별 매니저에서 엔드포인트 찾기
+            if endpoint_type == "tts":
+                manager = self.tts_manager
+            elif endpoint_type == "vllm":
+                manager = self.vllm_manager
+            elif endpoint_type == "finetuning":
+                manager = self.finetuning_manager
+            else:
+                logger.warning(f"⚠️ 알 수 없는 엔드포인트 타입: {endpoint_type}, TTS 매니저 사용")
+                manager = self.tts_manager
+            
+            endpoint = await manager.find_endpoint()
+            if endpoint and endpoint.get("id"):
+                return endpoint["id"]
+            
             # 폴백: 환경 변수에서 가져오기
             fallback_key = f"RUNPOD_{endpoint_type.upper()}_ENDPOINT_ID"
-            return os.getenv(fallback_key, "tpwska9ui667mu")
+            fallback_id = os.getenv(fallback_key, "")
+            
+            if not fallback_id:
+                # 기본값들
+                defaults = {
+                    "tts": "tpwska9ui667mu",
+                    "vllm": os.getenv("RUNPOD_VLLM_ENDPOINT_ID", ""),
+                    "finetuning": os.getenv("RUNPOD_FINETUNING_ENDPOINT_ID", "")
+                }
+                fallback_id = defaults.get(endpoint_type, "tpwska9ui667mu")
+            
+            logger.info(f"🔄 {endpoint_type} 엔드포인트 폴백 사용: {fallback_id}")
+            return fallback_id
+            
         except Exception as e:
-            logger.warning(f"⚠️ 엔드포인트 ID 조회 실패, 폴백 사용: {e}")
-            return os.getenv("RUNPOD_ENDPOINT_ID", "tpwska9ui667mu")
+            logger.warning(f"⚠️ {endpoint_type} 엔드포인트 ID 조회 실패, 폴백 사용: {e}")
+            return os.getenv(f"RUNPOD_{endpoint_type.upper()}_ENDPOINT_ID", "tpwska9ui667mu")
     
     async def get_generation_endpoint_id(self) -> str:
         """vLLM Generation 엔드포인트 ID"""
@@ -77,7 +114,7 @@ class RunPodClient:
             logger.warning("⚠️ RunPod API 키가 없습니다")
             return False
         
-        logger.info(f"✅ RunPod 엔드포인트 준비됨: {self.endpoint_id}")
+        logger.info("✅ RunPod 클라이언트 준비됨")
         return True
     
     async def generate_voice(
@@ -377,13 +414,10 @@ class RunPodClient:
             Dict[str, Any]: 다운로드 결과
         """
         try:
-            generation_endpoint_id = await self.get_generation_endpoint_id()
-            return await self.endpoint_manager.download_lora_adapter(
-                endpoint_id=generation_endpoint_id,
-                adapter_name=adapter_name,
-                hf_repo_id=hf_repo_id,
-                hf_token=hf_token
-            )
+            # Fine-tuning 서비스에서 LoRA 어댑터 다운로드 처리
+            # 실제 구현은 Fine-tuning 서비스에서 별도로 처리해야 함
+            logger.warning("⚠️ LoRA 어댑터 다운로드는 Fine-tuning 서비스에서 처리해야 합니다")
+            raise RunPodError("LoRA 어댑터 다운로드 기능이 아직 구현되지 않았습니다")
         except Exception as e:
             logger.error(f"❌ LoRA 어댑터 다운로드 요청 실패: {e}")
             raise RunPodError(f"LoRA 어댑터 다운로드 실패: {e}")

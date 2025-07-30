@@ -1,16 +1,18 @@
 """
 RunPod Serverless 관리 서비스
-RunPod API를 사용하여 serverless endpoint를 동적으로 생성/관리
+RunPod API를 사용하여 여러 타입의 serverless endpoint를 동적으로 생성/관리
+TTS, vLLM, Fine-tuning 각각의 엔드포인트를 별도로 관리
 """
 
 import os
 import json
 import logging
 import httpx
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Literal
 from datetime import datetime
 import os
 from dotenv import load_dotenv
+from abc import ABC, abstractmethod
 
 load_dotenv()
 
@@ -22,18 +24,49 @@ class RunPodManagerError(Exception):
     pass
 
 
-class RunPodManager:
-    """RunPod Serverless 엔드포인트 관리자"""
+ServiceType = Literal["tts", "vllm", "finetuning"]
+
+
+class BaseRunPodManager(ABC):
+    """RunPod 엔드포인트 관리자 베이스 클래스"""
     
-    def __init__(self):
+    def __init__(self, service_type: ServiceType):
         self.api_key = os.getenv("RUNPOD_API_KEY", "")
         self.base_url = "https://api.runpod.io/graphql"
-        self.docker_image = "fallsnowing/zonos-tts-worker"
-        self.endpoint_name = "zonos-tts-worker"
-        self.container_disk_size = 50  # GB
+        self.service_type = service_type
         
         if not self.api_key:
             raise RunPodManagerError("RUNPOD_API_KEY가 설정되지 않았습니다")
+    
+    @property
+    @abstractmethod
+    def docker_image(self) -> str:
+        """Docker 이미지명"""
+        pass
+    
+    @property
+    @abstractmethod
+    def endpoint_name(self) -> str:
+        """엔드포인트 이름"""
+        pass
+    
+    @property
+    @abstractmethod
+    def container_disk_size(self) -> int:
+        """컨테이너 디스크 크기 (GB)"""
+        pass
+    
+    @property
+    @abstractmethod
+    def env_vars(self) -> List[Dict[str, str]]:
+        """환경 변수"""
+        pass
+    
+    @property
+    @abstractmethod
+    def search_keywords(self) -> List[str]:
+        """엔드포인트 검색용 키워드"""
+        pass
     
     @property
     def headers(self) -> Dict[str, str]:
@@ -93,7 +126,7 @@ class RunPodManager:
             raise RunPodManagerError(f"엔드포인트 목록 조회 실패: {e}")
     
     async def find_endpoint(self) -> Optional[Dict[str, Any]]:
-        """zonos-tts-worker 엔드포인트 찾기"""
+        """서비스별 엔드포인트 찾기"""
         try:
             endpoints = await self.list_endpoints()
             
@@ -106,26 +139,30 @@ class RunPodManager:
                 endpoint_name = endpoint.get("name", "")
                 template_name = template.get("name", "")
                 
-                # Docker 이미지명이나 엔드포인트 이름에 "zonos" 또는 "tts"가 포함되어 있는지 확인
-                if (self.docker_image in image_name or 
-                    image_name in self.docker_image or
-                    "zonos" in image_name.lower() or
-                    "tts" in image_name.lower() or
-                    "zonos" in endpoint_name.lower() or
-                    "tts" in endpoint_name.lower() or
-                    "zonos" in template_name.lower() or
-                    "tts" in template_name.lower()):
-                    logger.info(f"✅ 기존 엔드포인트 찾음: {endpoint['id']}")
+                # Docker 이미지 정확 매칭 우선
+                if self.docker_image in image_name or image_name in self.docker_image:
+                    logger.info(f"✅ 기존 엔드포인트 찾음 (이미지 매칭): {endpoint['id']}")
                     logger.info(f"   - 엔드포인트 이름: {endpoint_name}")
                     logger.info(f"   - 템플릿 이름: {template_name}")
                     logger.info(f"   - Docker 이미지: {image_name}")
                     return endpoint
+                
+                # 키워드 매칭
+                for keyword in self.search_keywords:
+                    if (keyword in image_name.lower() or
+                        keyword in endpoint_name.lower() or
+                        keyword in template_name.lower()):
+                        logger.info(f"✅ 기존 엔드포인트 찾음 (키워드 '{keyword}' 매칭): {endpoint['id']}")
+                        logger.info(f"   - 엔드포인트 이름: {endpoint_name}")
+                        logger.info(f"   - 템플릿 이름: {template_name}")
+                        logger.info(f"   - Docker 이미지: {image_name}")
+                        return endpoint
             
-            logger.info("ℹ️ 기존 엔드포인트를 찾을 수 없습니다")
+            logger.info(f"ℹ️ {self.service_type} 엔드포인트를 찾을 수 없습니다")
             return None
             
         except Exception as e:
-            logger.error(f"❌ 엔드포인트 검색 실패: {e}")
+            logger.error(f"❌ {self.service_type} 엔드포인트 검색 실패: {e}")
             return None
     
     async def create_template(self) -> Dict[str, Any]:
@@ -149,10 +186,7 @@ class RunPodManager:
                 "containerDiskInGb": self.container_disk_size,
                 "volumeInGb": 0,
                 "ports": "8000/http",
-                "env": [
-                    {"key": "MODEL_NAME", "value": "zonos-tts"},
-                    {"key": "LANGUAGE", "value": "ko"}
-                ],
+                "env": self.env_vars,
                 "isServerless": True
             }
         }
@@ -320,49 +354,251 @@ class RunPodManager:
             return {"status": "error", "error": str(e)}
 
 
-# 싱글톤 인스턴스
-_runpod_manager = None
+# 각 서비스별 구체적인 매니저 클래스
+class TTSRunPodManager(BaseRunPodManager):
+    """TTS 서비스용 RunPod 매니저"""
+    
+    def __init__(self):
+        super().__init__("tts")
+    
+    @property
+    def docker_image(self) -> str:
+        return "fallsnowing/zonos-tts-worker"
+    
+    @property
+    def endpoint_name(self) -> str:
+        return "zonos-tts-worker"
+    
+    @property
+    def container_disk_size(self) -> int:
+        return 50  # GB
+    
+    @property
+    def env_vars(self) -> List[Dict[str, str]]:
+        return [
+            {"key": "MODEL_NAME", "value": "zonos-tts"},
+            {"key": "LANGUAGE", "value": "ko"}
+        ]
+    
+    @property
+    def search_keywords(self) -> List[str]:
+        return ["zonos", "tts", "voice", "speech"]
+
+
+class VLLMRunPodManager(BaseRunPodManager):
+    """vLLM 서비스용 RunPod 매니저"""
+    
+    def __init__(self):
+        super().__init__("vllm")
+    
+    @property
+    def docker_image(self) -> str:
+        return "fallsnowing/vllm-lora-worker"  # 실제 이미지명으로 변경 필요
+    
+    @property
+    def endpoint_name(self) -> str:
+        return "vllm-lora-worker"
+    
+    @property
+    def container_disk_size(self) -> int:
+        return 100  # GB - vLLM은 더 큰 저장소가 필요
+    
+    @property
+    def env_vars(self) -> List[Dict[str, str]]:
+        return [
+            {"key": "MODEL_NAME", "value": "meta-llama/Llama-2-7b-chat-hf"},
+            {"key": "MAX_MODEL_LEN", "value": "4096"},
+            {"key": "TENSOR_PARALLEL_SIZE", "value": "1"}
+        ]
+    
+    @property
+    def search_keywords(self) -> List[str]:
+        return ["vllm", "llama", "lora", "generation", "chat"]
+
+
+class FinetuningRunPodManager(BaseRunPodManager):
+    """Fine-tuning 서비스용 RunPod 매니저"""
+    
+    def __init__(self):
+        super().__init__("finetuning")
+    
+    @property
+    def docker_image(self) -> str:
+        return "fallsnowing/finetuning-worker"  # 실제 이미지명으로 변경 필요
+    
+    @property
+    def endpoint_name(self) -> str:
+        return "finetuning-worker"
+    
+    @property
+    def container_disk_size(self) -> int:
+        return 200  # GB - Fine-tuning은 더 많은 저장소가 필요
+    
+    @property
+    def env_vars(self) -> List[Dict[str, str]]:
+        return [
+            {"key": "BASE_MODEL", "value": "meta-llama/Llama-2-7b-chat-hf"},
+            {"key": "TRAINING_FRAMEWORK", "value": "axolotl"},
+            {"key": "MAX_STEPS", "value": "1000"}
+        ]
+    
+    @property
+    def search_keywords(self) -> List[str]:
+        return ["finetuning", "training", "axolotl", "lora", "qlora"]
+
+
+# 기존 RunPodManager를 BaseRunPodManager 상속으로 변경 (하위 호환성)
+class RunPodManager(TTSRunPodManager):
+    """기존 RunPodManager - TTS 매니저의 별칭 (하위 호환성)"""
+    pass
+
+
+# 싱글톤 인스턴스들
+_tts_manager = None
+_vllm_manager = None
+_finetuning_manager = None
+_runpod_manager = None  # 기존 호환성
+
+
+def get_tts_manager() -> TTSRunPodManager:
+    """TTS RunPod 매니저 싱글톤 인스턴스 반환"""
+    global _tts_manager
+    if _tts_manager is None:
+        _tts_manager = TTSRunPodManager()
+    return _tts_manager
+
+
+def get_vllm_manager() -> VLLMRunPodManager:
+    """vLLM RunPod 매니저 싱글톤 인스턴스 반환"""
+    global _vllm_manager
+    if _vllm_manager is None:
+        _vllm_manager = VLLMRunPodManager()
+    return _vllm_manager
+
+
+def get_finetuning_manager() -> FinetuningRunPodManager:
+    """Fine-tuning RunPod 매니저 싱글톤 인스턴스 반환"""
+    global _finetuning_manager
+    if _finetuning_manager is None:
+        _finetuning_manager = FinetuningRunPodManager()
+    return _finetuning_manager
 
 
 def get_runpod_manager() -> RunPodManager:
-    """RunPod 관리자 싱글톤 인스턴스 반환"""
+    """기존 RunPod 관리자 싱글톤 인스턴스 반환 (하위 호환성)"""
     global _runpod_manager
     if _runpod_manager is None:
         _runpod_manager = RunPodManager()
     return _runpod_manager
 
 
+def get_manager_by_service_type(service_type: ServiceType) -> BaseRunPodManager:
+    """서비스 타입별 매니저 반환"""
+    if service_type == "tts":
+        return get_tts_manager()
+    elif service_type == "vllm":
+        return get_vllm_manager()
+    elif service_type == "finetuning":
+        return get_finetuning_manager()
+    else:
+        raise ValueError(f"지원하지 않는 서비스 타입: {service_type}")
+
+
 # 서버 시작 시 초기화 함수
 async def initialize_runpod():
-    """서버 시작 시 RunPod 초기화"""
+    """서버 시작 시 RunPod 다중 서비스 초기화"""
     try:
-        logger.info("🏁 RunPod 초기화 시작")
+        logger.info("🏁 RunPod 다중 서비스 초기화 시작")
         
         # API 키 확인
         if not os.getenv("RUNPOD_API_KEY"):
             logger.warning("⚠️ RUNPOD_API_KEY가 설정되지 않았습니다. RunPod 기능이 비활성화됩니다.")
             return None
         
-        # 관리자 생성
-        manager = get_runpod_manager()
+        initialized_services = {}
         
-        # 엔드포인트 확인/생성
-        endpoint = await manager.get_or_create_endpoint()
+        # TTS 서비스 초기화
+        try:
+            logger.info("🎤 TTS 서비스 초기화 중...")
+            tts_manager = get_tts_manager()
+            tts_endpoint = await tts_manager.get_or_create_endpoint()
+            
+            if tts_endpoint:
+                initialized_services["tts"] = tts_endpoint
+                os.environ["RUNPOD_TTS_ENDPOINT_ID"] = tts_endpoint["id"]
+                logger.info(f"✅ TTS 서비스 초기화 완료: {tts_endpoint['id']}")
+            else:
+                logger.warning("⚠️ TTS 엔드포인트 초기화 실패")
+        except Exception as e:
+            logger.warning(f"⚠️ TTS 서비스 초기화 실패: {e}")
         
-        if endpoint:
-            logger.info(f"✅ RunPod 초기화 완료: {endpoint['id']}")
-            logger.info(f"   - 이름: {endpoint.get('name')}")
-            logger.info(f"   - Docker 이미지: {endpoint.get('dockerImage')}")
-            logger.info(f"   - 디스크 크기: {endpoint.get('containerDiskInGb')}GB")
+        # vLLM 서비스 초기화 (선택적)
+        try:
+            logger.info("🤖 vLLM 서비스 초기화 중...")
+            vllm_manager = get_vllm_manager()
+            vllm_endpoint = await vllm_manager.find_endpoint()  # 생성하지 말고 찾기만
             
-            # 엔드포인트 ID 환경 변수 설정
-            os.environ["RUNPOD_ENDPOINT_ID"] = endpoint["id"]
+            if vllm_endpoint:
+                initialized_services["vllm"] = vllm_endpoint
+                os.environ["RUNPOD_VLLM_ENDPOINT_ID"] = vllm_endpoint["id"]
+                logger.info(f"✅ vLLM 서비스 발견됨: {vllm_endpoint['id']}")
+            else:
+                logger.info("ℹ️ vLLM 엔드포인트를 찾을 수 없습니다 (필요시 수동 생성)")
+        except Exception as e:
+            logger.info(f"ℹ️ vLLM 서비스 확인 실패: {e}")
+        
+        # Fine-tuning 서비스 초기화 (선택적)
+        try:
+            logger.info("🏋️ Fine-tuning 서비스 초기화 중...")
+            finetuning_manager = get_finetuning_manager()
+            finetuning_endpoint = await finetuning_manager.find_endpoint()  # 생성하지 말고 찾기만
             
-            return endpoint
+            if finetuning_endpoint:
+                initialized_services["finetuning"] = finetuning_endpoint
+                os.environ["RUNPOD_FINETUNING_ENDPOINT_ID"] = finetuning_endpoint["id"]
+                logger.info(f"✅ Fine-tuning 서비스 발견됨: {finetuning_endpoint['id']}")
+            else:
+                logger.info("ℹ️ Fine-tuning 엔드포인트를 찾을 수 없습니다 (필요시 수동 생성)")
+        except Exception as e:
+            logger.info(f"ℹ️ Fine-tuning 서비스 확인 실패: {e}")
+        
+        # 하위 호환성을 위해 TTS 엔드포인트를 기본값으로 설정
+        if "tts" in initialized_services:
+            os.environ["RUNPOD_ENDPOINT_ID"] = initialized_services["tts"]["id"]
+        
+        if initialized_services:
+            logger.info(f"✅ RunPod 초기화 완료: {list(initialized_services.keys())} 서비스")
+            return initialized_services
         else:
-            logger.error("❌ RunPod 엔드포인트 초기화 실패")
+            logger.warning("⚠️ RunPod 서비스 초기화 실패 (TTS 기능이 제한될 수 있습니다)")
             return None
             
     except Exception as e:
         logger.error(f"❌ RunPod 초기화 중 오류: {e}")
+        return None
+
+
+async def initialize_service(service_type: ServiceType, create_if_missing: bool = False):
+    """특정 서비스 초기화"""
+    try:
+        logger.info(f"🔧 {service_type} 서비스 초기화 중...")
+        
+        manager = get_manager_by_service_type(service_type)
+        
+        if create_if_missing:
+            endpoint = await manager.get_or_create_endpoint()
+        else:
+            endpoint = await manager.find_endpoint()
+        
+        if endpoint:
+            env_key = f"RUNPOD_{service_type.upper()}_ENDPOINT_ID"
+            os.environ[env_key] = endpoint["id"]
+            logger.info(f"✅ {service_type} 서비스 초기화 완료: {endpoint['id']}")
+            return endpoint
+        else:
+            logger.warning(f"⚠️ {service_type} 엔드포인트를 찾을 수 없습니다")
+            return None
+            
+    except Exception as e:
+        logger.error(f"❌ {service_type} 서비스 초기화 실패: {e}")
         return None

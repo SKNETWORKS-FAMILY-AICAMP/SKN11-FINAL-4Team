@@ -72,17 +72,8 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"⚠️ RunPod 초기화 실패 (TTS 기능이 제한될 수 있습니다): {e}")
 
-    # RunPod 엔드포인트 동적 탐지 및 초기화
-    try:
-        from app.services.runpod_endpoint_manager import initialize_runpod_endpoints
-        
-        endpoints = await initialize_runpod_endpoints()
-        if endpoints:
-            logger.info(f"✅ RunPod 엔드포인트 동적 초기화 완료: {list(endpoints.keys())}")
-        else:
-            logger.warning("⚠️ RunPod 엔드포인트를 찾을 수 없습니다")
-    except Exception as e:
-        logger.warning(f"⚠️ RunPod 엔드포인트 초기화 실패: {e}")
+    # RunPod 엔드포인트는 이미 runpod_manager에서 초기화됨
+    # 중복 초기화 제거
 
     # MCP 서버 자동 실행 (데이터베이스에서 로드)
     try:
