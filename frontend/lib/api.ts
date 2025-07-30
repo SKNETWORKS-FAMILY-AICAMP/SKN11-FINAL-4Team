@@ -2,6 +2,14 @@ import { tokenUtils } from './auth'
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
 
+// 로그아웃 콜백 함수를 저장할 변수
+let logoutCallback: (() => void) | null = null
+
+// 로그아웃 콜백 설정 함수
+export const setLogoutCallback = (callback: () => void) => {
+  logoutCallback = callback
+}
+
 export class APIError extends Error {
   constructor(
     message: string,
@@ -89,6 +97,13 @@ class APIClient {
           data: data,
           url: response.url
         })
+        
+        // 401/403 에러 시 자동 로그아웃 처리
+        if ((response.status === 401 || response.status === 403) && logoutCallback) {
+          console.log('🔐 토큰 검증 실패로 인한 자동 로그아웃 처리')
+          tokenUtils.removeToken()
+          logoutCallback()
+        }
         
         // 오류 메시지 추출
         let errorMessage = `HTTP ${response.status}`
@@ -206,6 +221,13 @@ class APIClient {
       clearTimeout(timeoutId)
 
       if (!response.ok) {
+        // 401/403 에러 시 자동 로그아웃 처리
+        if ((response.status === 401 || response.status === 403) && logoutCallback) {
+          console.log('🔐 이미지 다운로드 시 토큰 검증 실패로 인한 자동 로그아웃 처리')
+          tokenUtils.removeToken()
+          logoutCallback()
+        }
+        
         throw new APIError(`HTTP ${response.status}`, response.status)
       }
 
@@ -278,6 +300,13 @@ class APIClient {
     }
 
     if (!response.ok) {
+      // 401/403 에러 시 자동 로그아웃 처리
+      if ((response.status === 401 || response.status === 403) && logoutCallback) {
+        console.log('🔐 파일 업로드 시 토큰 검증 실패로 인한 자동 로그아웃 처리')
+        tokenUtils.removeToken()
+        logoutCallback()
+      }
+      
       throw new APIError(
         data?.detail || data?.message || `HTTP ${response.status}`,
         response.status,

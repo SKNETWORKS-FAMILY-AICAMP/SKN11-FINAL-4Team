@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { useParams, useSearchParams } from "next/navigation"
+import { useParams, useSearchParams, useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -11,6 +11,7 @@ import { tokenUtils } from "@/lib/auth"
 import { ModelService } from "@/lib/services/model.service"
 import MCPService, { MCPChatResponse } from '@/lib/services/mcp.service'
 import { RAGService, RAGChatRequest } from '@/lib/services/rag.service'
+import { useAuth } from "@/hooks/use-auth"
 
 import {
   Send,
@@ -47,6 +48,8 @@ interface ChatModel {
 export default function ChatPage() {
   const params = useParams()
   const searchParams = useSearchParams()
+  const router = useRouter()
+  const { user, isAuthenticated, isLoading: authLoading, logout } = useAuth()
   const [model, setModel] = useState<ChatModel | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
   const [inputMessage, setInputMessage] = useState("")
@@ -59,8 +62,17 @@ export default function ChatPage() {
   const wsRef = useRef<WebSocket | null>(null)
   const timeoutRef = useRef<NodeJS.Timeout | null>(null)
 
+  // 인증 상태 확인
+  useEffect(() => {
+    if (!authLoading && !isAuthenticated) {
+      router.push('/login')
+    }
+  }, [authLoading, isAuthenticated, router])
+
   // 모델 데이터 로드
   const loadModelData = async () => {
+    if (!isAuthenticated) return
+    
     setIsModelLoading(true)
     try {
       const data = await ModelService.getInfluencer(params.id as string)
@@ -74,8 +86,16 @@ export default function ChatPage() {
         group_id: String(data.group_id || ''),
         image_url: data.image_url || undefined, // 올바른 필드명 사용
       })
-    } catch (error) {
-      // console.error("Error loading model data:", error)
+    } catch (error: any) {
+      console.error("Error loading model data:", error)
+      
+      // 토큰 검증 실패로 인한 401/403 에러 시 로그아웃
+      if (error?.status === 401 || error?.status === 403) {
+        console.log("토큰 검증 실패로 인한 로그아웃 처리")
+        await logout()
+        router.push('/login')
+        return
+      }
     } finally {
       setIsModelLoading(false)
     }
@@ -164,6 +184,15 @@ export default function ChatPage() {
         } else if (data.error_code) {
           // 기존 에러 응답 처리 (하위 호환성)
           setIsLoading(false);
+          
+          // 토큰 관련 오류 시 로그아웃 처리
+          if (data.error_code === "INVALID_TOKEN" || data.error_code === "TOKEN_VERIFICATION_FAILED") {
+            console.log("WebSocket 토큰 검증 실패로 인한 로그아웃 처리")
+            await logout()
+            router.push('/login')
+            return
+          }
+          
           setMessages(prev => [...prev, {
             id: Date.now().toString(),
             content: `오류: ${data.message || '알 수 없는 오류가 발생했습니다.'}`,
@@ -199,7 +228,7 @@ export default function ChatPage() {
     };
 
     ws.onerror = (e) => {
-      // console.error("WebSocket 에러:", e);
+      console.error("WebSocket 에러:", e);
       setConnectionStatus('error');
       setMessages(prev => [...prev, {
         id: Date.now().toString(),
@@ -254,6 +283,14 @@ export default function ChatPage() {
         }
       } catch (error: any) {
         console.log("❌ RAG 처리 중 오류:", error.message);
+        
+        // 토큰 검증 실패로 인한 401/403 에러 시 로그아웃
+        if (error?.status === 401 || error?.status === 403) {
+          console.log("RAG 서비스 토큰 검증 실패로 인한 로그아웃 처리")
+          await logout()
+          router.push('/login')
+          return
+        }
         // RAG 오류는 MCP로 fallback
       }
 
@@ -295,6 +332,14 @@ export default function ChatPage() {
         }
       } catch (error: any) {
         console.log("❌ MCP 처리 중 오류:", error.message);
+        
+        // 토큰 검증 실패로 인한 401/403 에러 시 로그아웃
+        if (error?.status === 401 || error?.status === 403) {
+          console.log("MCP 서비스 토큰 검증 실패로 인한 로그아웃 처리")
+          await logout()
+          router.push('/login')
+          return
+        }
         // MCP 오류는 SLLM으로 fallback
       }
 
@@ -386,8 +431,33 @@ export default function ChatPage() {
   }, [messages])
 
   useEffect(() => {
-    loadModelData()
-  }, [params.id])
+    if (isAuthenticated) {
+      loadModelData()
+    }
+  }, [params.id, isAuthenticated])
+
+  // 인증 상태 로딩 중
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex justify-center items-center">
+        <div className="text-center">
+          <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2" />
+          <span>인증 확인 중...</span>
+        </div>
+      </div>
+    )
+  }
+
+  // 인증되지 않은 사용자
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex justify-center items-center">
+        <div className="text-center">
+          <p className="text-red-500 text-lg">로그인이 필요합니다.</p>
+        </div>
+      </div>
+    )
+  }
 
   // 로딩 상태 렌더링
   if (isModelLoading) {
