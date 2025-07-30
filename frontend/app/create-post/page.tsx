@@ -94,7 +94,7 @@ export default function CreatePostPage() {
   // 인플루언서 데이터 로딩
   useEffect(() => {
     if (isFetchingRef.current) return
-    
+
     const fetchInfluencers = async () => {
       try {
         isFetchingRef.current = true
@@ -391,11 +391,6 @@ export default function CreatePostPage() {
     setImagePreviews(prev => prev.filter((_, i) => i !== index))
   }
 
-  // S3 연결 상태 확인
-
-
-
-
   // AI 생성 버튼 활성화 조건: 인플루언서 선택 + 주제 입력 + (설명 또는 이미지 중 하나 이상)
   const isGenerateEnabled = !!formData.influencer_id &&
     !!formData.board_topic &&
@@ -495,7 +490,7 @@ export default function CreatePostPage() {
         hashtags: res.generated_hashtags || [],
       };
       setGenerated(generatedContent);
-      
+
       // 생성된 본문으로 바로 말투 변환 실행
       if (generatedContent.content && selectedInfluencer) {
         try {
@@ -606,9 +601,6 @@ export default function CreatePostPage() {
     setError(null)
 
     try {
-      // 백엔드 URL 가져오기
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
-
       // 발행 상태 결정
       let boardStatus = 1; // 기본값: 임시저장
       if (publishType === 'immediate') {
@@ -618,19 +610,32 @@ export default function CreatePostPage() {
       }
 
       // 게시글 데이터 준비
+      const teamId = user?.teams?.[0]?.group_id || 1
+
+      if (!teamId) {
+        setError("팀 정보를 찾을 수 없습니다.")
+        setSubmitting(false)
+        return
+      }
+
       const boardData = {
         influencer_id: formData.influencer_id,
         board_topic: formData.board_topic,
         board_description: formData.board_description,
         board_platform: formData.board_platform,
         board_hash_tag: formData.board_hashtag.join(' '),
-        team_id: user?.teams?.[0]?.group_id || 1,
+        team_id: teamId,
         board_status: boardStatus,
         // 예약 발행 시 스케줄 정보 추가
         ...(publishType === 'scheduled' && {
           scheduled_at: `${scheduledDate}T${scheduledTime}:00`
         })
       };
+
+      console.log('게시글 데이터:', boardData)
+      console.log('이미지 개수:', formData.uploaded_images.length)
+      console.log('팀 ID:', teamId)
+      console.log('사용자 정보:', user)
 
       // 통합 API 사용: 게시글과 이미지를 함께 생성
       const formDataToSend = new FormData()
@@ -641,30 +646,23 @@ export default function CreatePostPage() {
         formDataToSend.append("files", image)
       })
 
-      const response = await fetch(`${backendUrl}/api/v1/boards/create-with-image`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
-          // Content-Type을 명시적으로 설정하지 않음 (브라우저가 자동으로 boundary 설정)
-        },
-        body: formDataToSend
-      })
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        const errorMessage = errorData.detail || errorData.message || '게시글 생성에 실패했습니다.';
-
-        // 인스타그램 업로드 관련 에러인 경우 특별 처리
-        if (errorMessage.includes('인스타그램') || errorMessage.includes('Instagram')) {
-          throw new Error('게시글이 생성되었지만 인스타그램 업로드에 실패했습니다. 인스타그램 계정 설정을 확인해주세요.');
-        }
-
-        throw new Error(errorMessage);
+      console.log('FormData 내용:')
+      for (let [key, value] of formDataToSend.entries()) {
+        console.log(`${key}:`, value)
       }
+
+      await apiClient.post('/api/v1/boards/create-with-image', formDataToSend)
 
       router.push('/post_list')
     } catch (err) {
-      setError(err instanceof Error ? err.message : '게시글 생성에 실패했습니다.')
+      const errorMessage = err instanceof Error ? err.message : '게시글 생성에 실패했습니다.'
+
+      // 인스타그램 업로드 관련 에러인 경우 특별 처리
+      if (errorMessage.includes('인스타그램') || errorMessage.includes('Instagram')) {
+        setError('게시글이 생성되었지만 인스타그램 업로드에 실패했습니다. 인스타그램 계정 설정을 확인해주세요.')
+      } else {
+        setError(errorMessage)
+      }
     } finally {
       setSubmitting(false)
     }
@@ -1248,7 +1246,7 @@ export default function CreatePostPage() {
                   <Button
                     type="button"
                     onClick={() => setShowPreview(true)}
-                    className="w-full"
+                    className="w-full bg-blue-500 hover:bg-blue-600"
                   >
                     <ImageIcon className="h-4 w-4 mr-2" />
                     게시글 미리보기
@@ -1267,6 +1265,7 @@ export default function CreatePostPage() {
               <Button
                 type="submit"
                 disabled={submitting || !isFormValid()}
+                className="bg-blue-500 hover:bg-blue-600"
               >
                 {submitting ? (
                   <>
@@ -1276,7 +1275,7 @@ export default function CreatePostPage() {
                 ) : (
                   <>
                     <Save className="h-4 w-4 mr-2" />
-                    게시글 저장
+                    게시글 발행
                   </>
                 )}
               </Button>
