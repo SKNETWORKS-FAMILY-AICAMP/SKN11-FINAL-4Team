@@ -37,7 +37,7 @@ COPY generation_worker.py .
 
 # 기본 모델 사전 다운로드 (선택사항 - 매우 큰 모델)
 RUN python3 -c "from huggingface_hub import snapshot_download; \
-    snapshot_download('LGAI-EXAONE/EXAONE-3.5-7.8B-Instruct', cache_dir='/app/models')"
+    snapshot_download('LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct', cache_dir='/app/models')"
 
 # 환경 변수로 모델 캐시 디렉토리 설정
 ENV HF_HOME=/app/models
