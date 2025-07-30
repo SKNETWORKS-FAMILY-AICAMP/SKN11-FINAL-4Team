@@ -64,11 +64,6 @@ print('DAC 모델 다운로드 중...'); \
 DacModel.from_pretrained('descript/dac_44khz', cache_dir='/app/models'); \
 print('DAC 모델 다운로드 성공');"
 
-
-
-
-
-
 # 권한 설정
 RUN chmod +x tts_worker.py
 
