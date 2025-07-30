@@ -9,8 +9,8 @@ import traceback
 from typing import Dict, Any, List
 import tempfile
 from datetime import datetime
-import asyncio
-import aiohttp
+import requests
+import json
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -113,24 +113,34 @@ def prepare_dataset(qa_data: List[Dict], system_message: str, tokenizer, max_len
     
     return tokenized_dataset
 
-async def send_to_backend(result_data: Dict[str, Any]):
-    """파인튜닝 결과를 Backend로 전송"""
+def send_to_backend_sync(result_data: Dict[str, Any]):
+    """파인튜닝 결과를 Backend로 전송 (동기 방식)"""
     backend_url = BACKEND_POST_URL
     
     if not backend_url:
         logger.warning("BACKEND_POST_URL이 설정되지 않음")
-        return
+        return None
     
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(backend_url, json=result_data, timeout=30) as response:
-                if response.status_code == 200:
-                    logger.info(f"✅ 백엔드로 결과 전송 성공: {result_data['task_id']}")
-                else:
-                    error_text = await response.text()
-                    logger.error(f"❌ 백엔드 응답 오류: {response.status_code}, {error_text}")
+        logger.info(f"📤 Backend로 파인튜닝 결과 전송: {backend_url}")
+        logger.info(f"📦 페이로드 크기: {len(json.dumps(result_data))} bytes")
+        
+        response = requests.post(
+            backend_url,
+            json=result_data,
+            timeout=60  # 파인튜닝 결과는 큰 데이터일 수 있으므로 타임아웃 증가
+        )
+        
+        if response.status_code == 200:
+            logger.info(f"✅ 백엔드로 결과 전송 성공: {result_data['task_id']}")
+            return response.json()
+        else:
+            logger.error(f"❌ 백엔드 응답 오류: {response.status_code} - {response.text}")
+            return None
+            
     except Exception as e:
         logger.error(f"❌ 백엔드 전송 실패: {e}")
+        return None
 
 def upload_to_huggingface(output_dir: str, hf_token: str, hf_repo_id: str) -> str:
     """Hugging Face에 모델 업로드"""
@@ -431,8 +441,10 @@ def handler(job):
             }
         }
         
-        # 백엔드로 결과 전송
-        asyncio.run(send_to_backend(result_data))
+        # 백엔드로 결과 전송 (동기 방식)
+        backend_response = send_to_backend_sync(result_data)
+        if backend_response:
+            logger.info(f"✅ Backend 응답: {backend_response}")
         
         # 결과 반환
         result = {
@@ -477,7 +489,9 @@ def handler(job):
                 "hf_repo_id": job_input.get("hf_repo_id", "")
             }
         }
-        asyncio.run(send_to_backend(result_data))
+        backend_response = send_to_backend_sync(result_data)
+        if backend_response:
+            logger.info(f"✅ Backend 응답: {backend_response}")
         
         return {
             "status": "failed",
@@ -505,7 +519,9 @@ def handler(job):
                 "hf_repo_id": job_input.get("hf_repo_id", "")
             }
         }
-        asyncio.run(send_to_backend(result_data))
+        backend_response = send_to_backend_sync(result_data)
+        if backend_response:
+            logger.info(f"✅ Backend 응답: {backend_response}")
         
         return {
             "status": "failed",
