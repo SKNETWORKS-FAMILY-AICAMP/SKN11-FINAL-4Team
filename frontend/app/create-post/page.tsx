@@ -391,11 +391,6 @@ export default function CreatePostPage() {
     setImagePreviews(prev => prev.filter((_, i) => i !== index))
   }
 
-  // S3 연결 상태 확인
-
-
-
-
   // AI 생성 버튼 활성화 조건: 인플루언서 선택 + 주제 입력 + (설명 또는 이미지 중 하나 이상)
   const isGenerateEnabled = !!formData.influencer_id &&
     !!formData.board_topic &&
@@ -1248,7 +1243,7 @@ export default function CreatePostPage() {
                   <Button
                     type="button"
                     onClick={() => setShowPreview(true)}
-                    className="w-full"
+                    className="w-full bg-blue-500 hover:bg-blue-600"
                   >
                     <ImageIcon className="h-4 w-4 mr-2" />
                     게시글 미리보기
@@ -1267,6 +1262,7 @@ export default function CreatePostPage() {
               <Button
                 type="submit"
                 disabled={submitting || !isFormValid()}
+                className="bg-blue-500 hover:bg-blue-600"
               >
                 {submitting ? (
                   <>
@@ -1276,7 +1272,7 @@ export default function CreatePostPage() {
                 ) : (
                   <>
                     <Save className="h-4 w-4 mr-2" />
-                    게시글 저장
+                    게시글 발행
                   </>
                 )}
               </Button>

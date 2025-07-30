@@ -10,17 +10,6 @@ import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog"
-import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -28,15 +17,10 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { Plus, Search, Edit, Eye, Calendar, User, Filter, X, Copy, ExternalLink, Heart, MessageCircle, MoreHorizontal, UploadCloud, Instagram, Users, BarChart3, Bookmark, Play, ImageIcon } from "lucide-react"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import apiClient from "@/lib/api"
 import { useToast } from "@/hooks/use-toast"
-import { InstagramPostingService } from "@/lib/services/instagram-posting.service"
 import { PostCard, Post } from "@/components/ui/post-card"
 import { convertUTCToKST, formatDateKorean, getRelativeTime } from "@/lib/utils/timezone"
-
-
-
 
 
 function PostListContent() {
@@ -746,8 +730,6 @@ function PostListContent() {
     }
   };
 
-
-
   return (
     <div className="min-h-screen bg-gray-50">
       <Navigation />
@@ -756,8 +738,8 @@ function PostListContent() {
         <div className="mb-8">
           <div className="flex justify-between items-center mb-6">
             <div>
-              <h1 className="text-3xl font-bold text-gray-900">게시글 관리</h1>
-              <p className="text-gray-600 mt-2">AI 인플루언서가 생성한 게시글을 관리하세요</p>
+              <h1 className="text-3xl font-bold text-gray-900">게시글 목록</h1>
+              <p className="text-gray-600 mt-2">AI 인플루언서가 생성한 게시글을 조회하세요</p>
             </div>
           </div>
 
