@@ -3,7 +3,6 @@ RunPod Serverless Worker for LoRA Fine-tuning
 EXAONE 모델 파인튜닝을 RunPod에서 실행
 """
 import os
-import sys
 import logging
 import torch
 import traceback
@@ -14,9 +13,6 @@ import asyncio
 import aiohttp
 from dotenv import load_dotenv
 load_dotenv()
-
-# vLLM 프로젝트의 pipeline 모듈 경로 추가
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 import runpod
 from transformers import (
@@ -446,7 +442,7 @@ def handler(job):
             "base_model": job_input["base_model"],
             "training_epochs": job_input["training_epochs"],
             "qa_data_count": len(job_input["qa_data"]),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(datetime.timezone.utc).isoformat()
         }
         
         logger.info(f"✅ 파인튜닝 완료: {hf_url}")

@@ -26,9 +26,6 @@ RUN pip install --no-cache-dir \
     runpod \
     aiohttp
 
-# vllm 파이프라인 코드 복사
-COPY ../../pipeline /workspace/pipeline
-
 # RunPod 핸들러 복사  
 COPY finetuning_worker.py /workspace/finetuning_worker.py
 
