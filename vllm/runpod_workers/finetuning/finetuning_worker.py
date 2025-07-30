@@ -226,30 +226,41 @@ def fine_tune_model(
         logger.info(f"📊 Train 데이터: {len(train_dataset)}개, Validation 데이터: {len(eval_dataset)}개")
         
         # 4. 트레이닝 설정
-        training_args = TrainingArguments(
-            output_dir=output_dir,
-            num_train_epochs=training_epochs,
-            per_device_train_batch_size=batch_size,
-            gradient_accumulation_steps=gradient_accumulation_steps,
-            warmup_steps=warmup_steps,
-            save_steps=save_steps,
-            logging_steps=logging_steps,
-            learning_rate=learning_rate,
-            weight_decay=0.001,
-            fp16=False,
-            bf16=True,
-            max_grad_norm=max_grad_norm,
-            save_total_limit=3,
-            load_best_model_at_end=True,  # validation 데이터셋이 있으므로 True로 복원
-            metric_for_best_model="loss",
-            greater_is_better=False,
-            evaluation_strategy="steps",  # save_steps와 동일하게 설정
-            eval_steps=save_steps,  # save_steps와 동일하게 설정
-            per_device_eval_batch_size=batch_size,  # evaluation batch size
-            group_by_length=True,
-            report_to=["none"],
-            remove_unused_columns=False,
-        )
+        # TrainingArguments 파라미터 준비
+        training_kwargs = {
+            "output_dir": output_dir,
+            "num_train_epochs": training_epochs,
+            "per_device_train_batch_size": batch_size,
+            "gradient_accumulation_steps": gradient_accumulation_steps,
+            "warmup_steps": warmup_steps,
+            "save_steps": save_steps,
+            "logging_steps": logging_steps,
+            "learning_rate": learning_rate,
+            "weight_decay": 0.001,
+            "fp16": False,
+            "bf16": True,
+            "max_grad_norm": max_grad_norm,
+            "save_total_limit": 3,
+            "load_best_model_at_end": True,
+            "metric_for_best_model": "loss",
+            "greater_is_better": False,
+            "eval_steps": save_steps,
+            "per_device_eval_batch_size": batch_size,
+            "group_by_length": True,
+            "report_to": ["none"],
+            "remove_unused_columns": False,
+        }
+        
+        # evaluation_strategy vs eval_strategy 호환성 처리
+        try:
+            # 최신 버전 시도
+            training_kwargs["evaluation_strategy"] = "steps"
+            training_args = TrainingArguments(**training_kwargs)
+        except TypeError:
+            # 구버전 호환성
+            training_kwargs.pop("evaluation_strategy", None)
+            training_kwargs["eval_strategy"] = "steps"
+            training_args = TrainingArguments(**training_kwargs)
         
         # 5. 트레이너 설정
         data_collator = DataCollatorForLanguageModeling(
