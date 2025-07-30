@@ -18,6 +18,7 @@ from app.services.vllm_client import (
 )
 from app.core.encryption import decrypt_sensitive_data
 from app.services.hf_token_resolver import get_token_by_group
+from app.services.chat_message_service import ChatMessageService
 import json
 import logging
 import base64
@@ -32,62 +33,7 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-class ChatHistory:
-    """채팅 히스토리 관리 클래스"""
-    
-    def __init__(self, max_chars: int = 1000):
-        self.history: List[Dict] = []
-        self.max_chars = max_chars
-    
-    def add_message(self, query: str, response: str, context: str = "", sources: List[Dict] = None, model_info: Dict = None):
-        """메시지 추가"""
-        message = {
-            "query": query,
-            "response": response,
-            "context": context,
-            "sources": sources or [],
-            "model_info": model_info or {},
-            "timestamp": datetime.now().isoformat()
-        }
-        
-        self.history.append(message)
-        self._truncate_history()
-    
-    def get_history_context(self, max_messages: int = 1) -> str:
-        """히스토리 컨텍스트 생성 (OpenAI 요약 사용으로 대체됨)"""
-        # OpenAI 요약을 사용하므로 이 메서드는 더 이상 사용하지 않음
-        return ""
-    
-    def _truncate_history(self):
-        """히스토리 자르기 (문자 수 기준)"""
-        if len(self.history) <= 1:
-            return
-        
-        # 최신 메시지부터 역순으로 계산
-        total_chars = 0
-        keep_messages = []
-        
-        for message in reversed(self.history):
-            query_length = len(message.get("query", ""))
-            response_length = len(message.get("response", ""))
-            total_message_length = query_length + response_length
-            
-            if total_chars + total_message_length > self.max_chars:
-                break
-            
-            total_chars += total_message_length
-            keep_messages.append(message)
-        
-        # 순서 복원
-        self.history = list(reversed(keep_messages))
-    
-    def get_history(self) -> List[Dict]:
-        """전체 히스토리 반환"""
-        return self.history.copy()
-    
-    def clear_history(self):
-        """히스토리 초기화"""
-        self.history.clear()
+# 메모리 히스토리 클래스 제거 - 데이터베이스만 사용
 
 
 class ModelLoadRequest(BaseModel):
@@ -95,8 +41,7 @@ class ModelLoadRequest(BaseModel):
     group_id: int
 
 
-# 전역 히스토리 저장소 (세션별)
-chat_histories: Dict[str, ChatHistory] = {}
+# 전역 히스토리 저장소 제거 - 데이터베이스만 사용
 
 
 @router.websocket("/chatbot/{lora_repo}")
@@ -125,12 +70,11 @@ async def chatbot(
 
     await websocket.accept()
 
-    # 세션별 히스토리 초기화
-    session_id = f"{lora_repo_decoded}_{group_id}_{influencer_id or 'default'}"
-    if session_id not in chat_histories:
-        chat_histories[session_id] = ChatHistory()
+    # 데이터베이스 히스토리 서비스 초기화
+    chat_message_service = ChatMessageService(db)
     
-    chat_history = chat_histories[session_id]
+    # 세션 관리 변수
+    current_session_id: Optional[str] = None
 
     try:
         # VLLM 서버 상태 확인
@@ -148,7 +92,7 @@ async def chatbot(
             return
 
         logger.info(
-            f"[WS] VLLM WebSocket 연결 시작: lora_repo={lora_repo_decoded}, group_id={group_id}, session_id={session_id}"
+            f"[WS] VLLM WebSocket 연결 시작: lora_repo={lora_repo_decoded}, group_id={group_id}"
         )
 
         # HF 토큰 가져오기
@@ -206,16 +150,46 @@ async def chatbot(
                     
                     # 히스토리 관련 명령 처리
                     if message_type == "get_history":
-                        history = chat_history.get_history()
-                        await websocket.send_text(
-                            json.dumps({
-                                "type": "history",
-                                "data": history
-                            })
-                        )
+                        # 현재 세션의 히스토리 조회
+                        if current_session_id:
+                            session_messages = chat_message_service.get_session_messages(current_session_id)
+                            
+                            # 세션 메시지를 히스토리 형식으로 변환
+                            history_data = []
+                            for msg in session_messages:
+                                if msg.message_content:  # 빈 메시지 제외
+                                    history_data.append({
+                                        "query": "이전 대화",
+                                        "response": msg.message_content,
+                                        "timestamp": msg.created_at.isoformat() if msg.created_at else None,
+                                        "source": "session",
+                                        "session_id": msg.session_id
+                                    })
+                            
+                            await websocket.send_text(
+                                json.dumps({
+                                    "type": "history",
+                                    "data": history_data
+                                })
+                            )
+                        else:
+                            await websocket.send_text(
+                                json.dumps({
+                                    "type": "history",
+                                    "data": []
+                                })
+                            )
                         continue
                     elif message_type == "clear_history":
-                        chat_history.clear_history()
+                        # 현재 세션 종료 (새 세션 시작)
+                        if current_session_id:
+                            chat_message_service.end_session(current_session_id)
+                            logger.info(f"[WS] 세션 종료 (히스토리 초기화): session_id={current_session_id}")
+                        
+                        # 새 세션 생성
+                        current_session_id = chat_message_service.create_session(influencer_id or "default")
+                        logger.info(f"[WS] 새 세션 생성 (히스토리 초기화): session_id={current_session_id}")
+                        
                         await websocket.send_text(
                             json.dumps({
                                 "type": "history_cleared",
@@ -229,21 +203,42 @@ async def chatbot(
                     message_type = "chat"
                     user_message = data
 
-                # 히스토리 컨텍스트 추가 (OpenAI 요약 사용)
+                # 세션 관리
+                if current_session_id is None:
+                    # 새 세션 생성
+                    current_session_id = chat_message_service.create_session(influencer_id or "default")
+                    logger.info(f"[WS] 새 세션 생성: session_id={current_session_id}")
+                
+                # 히스토리 컨텍스트 추가 (현재 세션 기반)
                 history_summary = ""  # 변수 초기화
-                if chat_history.history:
+                
+                # 현재 세션의 이전 메시지들 조회
+                session_messages = chat_message_service.get_session_messages(current_session_id)
+                
+                if session_messages and len(session_messages) > 1:  # 첫 번째 메시지(빈 세션) 제외
                     # OpenAI로 히스토리 요약
                     try:
-                        history_summary = await summarize_chat_history(chat_history.history, max_tokens=100)  # 80에서 100으로 증가
-                        if history_summary and len(history_summary) > 10:  # 의미있는 요약인지 확인
-                            enhanced_message = f"이전 대화 요약: {history_summary}\n\n현재 질문: {user_message}"
-                            logger.info(f"[WS] OpenAI 히스토리 요약 사용 ({len(chat_history.history)}개 대화, {len(history_summary)}자)")
+                        # 세션 메시지를 히스토리 형식으로 변환
+                        all_history = []
+                        for msg in session_messages[1:]:  # 첫 번째 빈 메시지 제외
+                            all_history.append({
+                                "query": msg.message_content[:100] + "...",  # 간단한 요약
+                                "response": msg.message_content
+                            })
+                        
+                        if all_history:
+                            history_summary = await summarize_chat_history(all_history, max_tokens=100)
+                            if history_summary and len(history_summary) > 10:
+                                enhanced_message = f"이전 대화 요약: {history_summary}\n\n현재 질문: {user_message}"
+                                logger.info(f"[WS] OpenAI 히스토리 요약 사용 (세션: {current_session_id}, 메시지: {len(all_history)}개, 요약: {len(history_summary)}자)")
+                            else:
+                                # 요약 실패 시 간단한 대체 방법 사용
+                                recent_chat = all_history[-1]
+                                simple_summary = f"마지막 질문: {recent_chat['query'][:50]}..."
+                                enhanced_message = f"이전: {simple_summary}\n\n현재 질문: {user_message}"
+                                logger.info(f"[WS] 간단한 히스토리 사용 (세션: {current_session_id}, 메시지: {len(all_history)}개)")
                         else:
-                            # 요약 실패 시 간단한 대체 방법 사용
-                            recent_chat = chat_history.history[-1]
-                            simple_summary = f"마지막 질문: {recent_chat['query'][:50]}..."
-                            enhanced_message = f"이전: {simple_summary}\n\n현재 질문: {user_message}"
-                            logger.info(f"[WS] 간단한 히스토리 사용 ({len(chat_history.history)}개 대화)")
+                            enhanced_message = user_message
                     except Exception as e:
                         logger.warning(f"[WS] 히스토리 요약 실패, 요약 없이 진행: {e}")
                         enhanced_message = user_message
@@ -292,24 +287,22 @@ async def chatbot(
                         json.dumps({"type": "complete", "content": ""})
                     )
 
-                    # 히스토리에 대화 추가 (완료 후에만)
+                    # 세션에 대화 저장 (완료 후에만)
                     if full_response.strip():
-                        model_info = {
-                            "mode": "vllm",
-                            "adapter": lora_repo_decoded,
-                            "temperature": 0.7,
-                            "influencer_name": str(influencer.influencer_name) if influencer else "한세나"
-                        }
-                        
-                        chat_history.add_message(
-                            query=user_message,
-                            response=full_response,
-                            context=history_summary if history_summary else "",  # 안전한 사용
-                            model_info=model_info
-                        )
+                        try:
+                            # 전체 대화 내용을 하나의 메시지로 저장
+                            full_conversation = f"사용자: {user_message}\n\nAI: {full_response}"
+                            chat_message_service.add_message_to_session(
+                                session_id=current_session_id,
+                                influencer_id=influencer_id or "default",
+                                message_content=full_conversation
+                            )
+                            logger.info(f"[WS] 세션에 대화 저장 완료: session_id={current_session_id}")
+                        except Exception as e:
+                            logger.error(f"[WS] 세션 저장 실패: {e}")
                     
                     logger.info(
-                        f"[WS] VLLM 스트리밍 응답 전송 완료 (토큰 수: {token_count}, 히스토리: {len(chat_history.history)}개)"
+                        f"[WS] VLLM 스트리밍 응답 전송 완료 (토큰 수: {token_count})"
                     )
 
                 except Exception as e:
@@ -325,7 +318,12 @@ async def chatbot(
                     )
 
             except WebSocketDisconnect:
-                logger.info(f"[WS] WebSocket 연결 종료: lora_repo={lora_repo_decoded}, session_id={session_id}")
+                # 세션 종료
+                if current_session_id:
+                    chat_message_service.end_session(current_session_id)
+                    logger.info(f"[WS] 세션 종료: session_id={current_session_id}")
+                
+                logger.info(f"[WS] WebSocket 연결 종료: lora_repo={lora_repo_decoded}")
                 break
             except Exception as e:
                 logger.error(f"[WS] WebSocket 처리 중 오류: {e}")

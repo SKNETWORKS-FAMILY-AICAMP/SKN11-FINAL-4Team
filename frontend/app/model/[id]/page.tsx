@@ -2889,15 +2889,7 @@ function ModelDetailContent() {
                   <span>이미지 업로드</span>
                 </Button>
 
-                {/* 갤러리에서 불러오기 버튼 */}
-                <Button
-                  variant="outline"
-                  onClick={openGalleryModal}
-                  className="flex items-center space-x-2"
-                >
-                  <ImageIcon className="h-4 w-4" />
-                  <span>갤러리에서 불러오기</span>
-                </Button>
+
               </div>
 
               {/* 저장 버튼과 제거 버튼 - 변경사항이 있을 때만 표시 */}
