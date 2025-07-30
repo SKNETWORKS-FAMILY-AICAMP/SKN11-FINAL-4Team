@@ -1,0 +1,72 @@
+# RunPod Serverless 배포 구성
+deployments:
+  tts:
+    name: "zonos-tts-worker"
+    docker_image: "your-registry/zonos-tts-worker:latest"
+    gpu_type: "RTX 3090"
+    gpu_count: 1
+    container_disk_in_gb: 20
+    volume_in_gb: 50
+    min_workers: 0
+    max_workers: 10
+    idle_timeout: 60  # 60초 동안 요청이 없으면 worker 종료
+    environment_variables:
+      MODEL_CACHE_DIR: "/runpod-volume/models"
+      LOG_LEVEL: "INFO"
+    
+  llm:
+    name: "vllm-generation-worker"
+    docker_image: "your-registry/vllm-worker:latest"
+    gpu_type: "A100"
+    gpu_count: 1
+    container_disk_in_gb: 50
+    volume_in_gb: 100
+    min_workers: 0
+    max_workers: 5
+    idle_timeout: 300  # 5분 동안 요청이 없으면 worker 종료
+    environment_variables:
+      MODEL_NAME: "LGAI-EXAONE/EXAONE-3.5-7.8B-Instruct"
+      TENSOR_PARALLEL_SIZE: "1"
+      GPU_MEMORY_UTILIZATION: "0.9"
+    
+  embedding:
+    name: "embedding-worker"
+    docker_image: "your-registry/embedding-worker:latest"
+    gpu_type: "RTX 3090"
+    gpu_count: 1
+    container_disk_in_gb: 20
+    volume_in_gb: 30
+    min_workers: 0
+    max_workers: 5
+    idle_timeout: 120
+    environment_variables:
+      MODEL_NAME: "intfloat/multilingual-e5-large-instruct"
+      
+  finetuning:
+    name: "finetuning-worker"
+    docker_image: "your-registry/finetuning-worker:latest"
+    gpu_type: "A100"
+    gpu_count: 2  # 파인튜닝은 더 많은 GPU 필요
+    container_disk_in_gb: 100
+    volume_in_gb: 200
+    min_workers: 0
+    max_workers: 2
+    idle_timeout: 600  # 10분
+    environment_variables:
+      TRAINING_OUTPUT_DIR: "/runpod-volume/outputs"
+
+# 로드 밸런싱 전략
+load_balancing:
+  strategy: "least_connections"  # 가장 연결이 적은 worker에 할당
+  health_check_interval: 30
+  retry_attempts: 3
+  timeout: 300  # 5분
+
+# 비용 최적화 설정
+cost_optimization:
+  spot_instances: true  # Spot 인스턴스 사용
+  auto_scaling:
+    enabled: true
+    scale_up_threshold: 80  # CPU/GPU 사용률 80% 이상시 스케일 업
+    scale_down_threshold: 20  # 20% 이하시 스케일 다운
+    cooldown_period: 60  # 스케일링 후 대기 시간
