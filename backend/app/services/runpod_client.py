@@ -70,7 +70,9 @@ class RunPodClient:
         self,
         text: str,
         voice_data_base64: str,
-        language: str = "ko"
+        language: str = "ko",
+        influencer_id: str = None,
+        base_voice_id: int = None
     ) -> Dict[str, Any]:
         """음성 생성 요청
         
@@ -78,6 +80,8 @@ class RunPodClient:
             text: 변환할 텍스트
             voice_data_base64: Base64로 인코딩된 음성 데이터
             language: 언어 코드 (기본값: ko)
+            influencer_id: 인플루언서 ID
+            base_voice_id: 베이스 음성 ID
             
         Returns:
             Dict[str, Any]: RunPod 응답 (task_id, status 등 포함)
@@ -88,7 +92,9 @@ class RunPodClient:
                 "input": {
                     "text": text,
                     "voice_data_base64": voice_data_base64,
-                    "language": language
+                    "language": language,
+                    "influencer_id": influencer_id,  # 인플루언서 ID 추가
+                    "base_voice_id": base_voice_id   # 베이스 음성 ID 추가
                 }
             }
             
@@ -202,6 +208,7 @@ async def runpod_generate_voice(
     text: str,
     base_voice_url: str,
     influencer_id: str = None,
+    base_voice_id: int = None,
     task_id: str = None
 ) -> Dict[str, Any]:
     """RunPod로 음성 생성 (편의 함수)"""
@@ -210,16 +217,14 @@ async def runpod_generate_voice(
     # 음성 데이터 다운로드 및 Base64 인코딩
     voice_data_base64 = await client.download_voice_data(base_voice_url)
     
-    # RunPod 요청
+    # RunPod 요청 (influencer_id와 base_voice_id를 직접 전달)
     result = await client.generate_voice(
         text=text,
         voice_data_base64=voice_data_base64,
-        language="ko"
+        language="ko",
+        influencer_id=influencer_id,  # TTS worker에 전달
+        base_voice_id=base_voice_id   # TTS worker에 전달
     )
-    
-    # influencer_id 추가 (로깅 및 추적용)
-    if influencer_id:
-        result["influencer_id"] = influencer_id
     
     # task_id 추가 (로깅 및 추적용)
     if task_id:

@@ -103,6 +103,7 @@ async def generate_voice(
             text=request.text,
             base_voice_url=presigned_url,  # presigned URL 사용
             influencer_id=request.influencer_id,
+            base_voice_id=base_voice.id,  # base_voice ID 추가
             task_id=task_id
         )
         
@@ -258,8 +259,30 @@ async def receive_tts_result(
             
             logger.info(f"S3 업로드 성공: {s3_result['url']}")
             
+            # 필수 필드 검증
+            influencer_id = metadata.get("influencer_id")
+            base_voice_id = metadata.get("base_voice_id")
+            
+            if not influencer_id:
+                logger.error(f"influencer_id가 없습니다. metadata: {metadata}")
+                return TTSResultResponse(
+                    success=False,
+                    message="Missing influencer_id in metadata",
+                    error="influencer_id is required"
+                )
+            
+            if not base_voice_id:
+                logger.error(f"base_voice_id가 없습니다. metadata: {metadata}")
+                return TTSResultResponse(
+                    success=False,
+                    message="Missing base_voice_id in metadata",
+                    error="base_voice_id is required"
+                )
+            
             # 데이터베이스에 저장
             generated_voice = GeneratedVoice(
+                influencer_id=influencer_id,  # 검증된 값 사용
+                base_voice_id=base_voice_id,  # 검증된 값 사용
                 text=metadata.get("text", ""),
                 task_id=job_id,
                 status="completed",

@@ -87,6 +87,8 @@ def validate_input(job_input: Dict[str, Any]) -> Dict[str, Any]:
         "emotion_name": job_input.get("emotion_name", None),
         "voice_data_base64": job_input.get("voice_data_base64", None),
         "output_format": job_input.get("output_format", "wav"),
+        "influencer_id": job_input.get("influencer_id", None),  # 인플루언서 ID 추가
+        "base_voice_id": job_input.get("base_voice_id", None),  # 베이스 음성 ID 추가
     }
     
     # 감정 이름으로 벡터 설정
@@ -302,7 +304,9 @@ def handler(job):
                 "duration": duration,
                 "file_size": len(audio_data),
                 "sample_rate": zonos_model.autoencoder.sampling_rate,
-                "created_at": datetime.now().isoformat()
+                "created_at": datetime.now().isoformat(),
+                "influencer_id": job_input.get("influencer_id"),  # 인플루언서 ID 추가
+                "base_voice_id": job_input.get("base_voice_id")   # 베이스 음성 ID 추가
             }
             
             # 동기 방식으로 Backend 전송

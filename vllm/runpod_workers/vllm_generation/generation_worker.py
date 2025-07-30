@@ -31,6 +31,7 @@ device = None
 # 기본 설정
 DEFAULT_MODEL = "LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct"
 DEFAULT_SYSTEM_MESSAGE = "당신은 도움이 되는 AI 어시스턴트입니다."
+LORA_ADAPTERS_BASE_PATH = os.environ.get("LORA_ADAPTERS_BASE_PATH", "/app/lora_adapters")
 
 def initialize_engine(model_name: str = DEFAULT_MODEL):
     """vLLM 엔진 초기화"""
