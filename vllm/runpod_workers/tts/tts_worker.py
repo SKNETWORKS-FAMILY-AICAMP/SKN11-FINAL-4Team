@@ -89,6 +89,7 @@ def validate_input(job_input: Dict[str, Any]) -> Dict[str, Any]:
         "output_format": job_input.get("output_format", "wav"),
         "influencer_id": job_input.get("influencer_id", None),  # 인플루언서 ID 추가
         "base_voice_id": job_input.get("base_voice_id", None),  # 베이스 음성 ID 추가
+        "voice_id": job_input.get("voice_id", None),  # 백엔드에서 전달한 DB ID
     }
     
     # 감정 이름으로 벡터 설정
@@ -296,7 +297,8 @@ def handler(job):
             
             # 메타데이터 구성
             metadata = {
-                "job_id": job_id,
+                "job_id": job_id,  # RunPod job_id (로깅용)
+                "voice_id": job_input.get("voice_id"),  # DB voice ID
                 "text": job_input["text"],
                 "text_length": len(job_input["text"]),
                 "language": job_input["language"],

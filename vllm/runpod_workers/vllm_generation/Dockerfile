@@ -44,6 +44,10 @@ ENV HF_HOME=/app/models
 ENV TRANSFORMERS_CACHE=/app/models
 ENV VLLM_CACHE_ROOT=/app/models
 
+# LoRA 어댑터 디렉토리 생성 및 환경 변수 설정
+RUN mkdir -p /app/lora_adapters
+ENV LORA_ADAPTERS_BASE_PATH=/app/lora_adapters
+
 # 헬스체크
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
     CMD python3 -c "import torch; import vllm; print('Health check passed')" || exit 1

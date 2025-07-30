@@ -116,13 +116,28 @@ def load_lora_adapter(adapter_path: str, adapter_name: str) -> Dict[str, Any]:
         return loaded_adapters[adapter_name]
     
     try:
-        # Hugging Face Hub에서 다운로드
+        # 경로 처리
         if adapter_path.startswith("hf://"):
+            # Hugging Face Hub에서 다운로드
             repo_id = adapter_path.replace("hf://", "")
             logger.info(f"📥 Hugging Face Hub에서 어댑터 다운로드: {repo_id}")
             local_path = snapshot_download(repo_id)
-        else:
+        elif adapter_path.startswith("/"):
+            # 절대 경로인 경우 그대로 사용
             local_path = adapter_path
+        else:
+            # 상대 경로인 경우 기본 경로에서 찾기
+            local_path = os.path.join(LORA_ADAPTERS_BASE_PATH, adapter_path)
+            logger.info(f"📂 고정 경로에서 어댑터 로드: {local_path}")
+        
+        # 경로 존재 확인
+        if not os.path.exists(local_path):
+            raise FileNotFoundError(f"LoRA 어댑터 경로를 찾을 수 없습니다: {local_path}")
+        
+        # adapter_config.json 파일 확인
+        adapter_config_path = os.path.join(local_path, "adapter_config.json")
+        if not os.path.exists(adapter_config_path):
+            raise FileNotFoundError(f"adapter_config.json 파일을 찾을 수 없습니다: {adapter_config_path}")
         
         # LoRA 어댑터 정보 생성
         adapter_info = {
@@ -133,7 +148,7 @@ def load_lora_adapter(adapter_path: str, adapter_name: str) -> Dict[str, Any]:
         }
         
         loaded_adapters[adapter_name] = adapter_info
-        logger.info(f"✅ LoRA 어댑터 로드 완료: {adapter_name}")
+        logger.info(f"✅ LoRA 어댑터 로드 완료: {adapter_name} (경로: {local_path})")
         
         return adapter_info
         
@@ -260,12 +275,13 @@ def handler(job):
             # 어댑터 로드
             if isinstance(adapter_info, dict):
                 adapter_name = adapter_info.get("name", "custom_adapter")
-                adapter_path = adapter_info["path"]
+                adapter_path = adapter_info.get("path", adapter_name)  # path가 없으면 name을 사용
             else:
-                # 문자열인 경우 (경로만 제공)
+                # 문자열인 경우
+                adapter_name = adapter_info
                 adapter_path = adapter_info
-                adapter_name = os.path.basename(adapter_path)
             
+            logger.info(f"🔄 LoRA 어댑터 로드 요청: name={adapter_name}, path={adapter_path}")
             loaded_adapter = load_lora_adapter(adapter_path, adapter_name)
             
             # LoRA Request 생성
