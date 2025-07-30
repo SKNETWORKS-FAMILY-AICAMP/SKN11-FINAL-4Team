@@ -35,3 +35,45 @@ class ToneGenerationResponse(BaseModel):
     responses: Dict[str, List[Dict[str, Any]]]  # 톤별 응답들
     generation_time_seconds: float
     method: str = "integrated_backend"
+
+
+class QAGenerationRequest(BaseModel):
+    """QA 생성 요청"""
+    num_qa_pairs: int = 2000
+    domains: Optional[List[str]] = None
+    system_prompt: Optional[str] = None
+
+
+class QAGenerationResponse(BaseModel):
+    """QA 생성 응답"""
+    task_id: str
+    status: str
+    message: str
+    batch_id: Optional[str] = None
+    total_requests: Optional[int] = None
+
+
+class QABatchSubmitRequest(BaseModel):
+    """QA 배치 제출 요청"""
+    file_id: str
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class QABatchStatusResponse(BaseModel):
+    """QA 배치 상태 응답"""
+    batch_id: str
+    status: str
+    created_at: int
+    completed_at: Optional[int] = None
+    request_counts: Optional[Dict[str, int]] = None
+    output_file_id: Optional[str] = None
+    error_file_id: Optional[str] = None
+
+
+class QABatchResultResponse(BaseModel):
+    """QA 배치 결과 응답"""
+    batch_id: str
+    qa_pairs: List[Dict[str, str]]
+    total_count: int
+    errors: List[Dict[str, Any]]
+    error_count: int
