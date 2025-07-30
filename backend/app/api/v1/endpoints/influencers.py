@@ -2532,7 +2532,7 @@ async def receive_finetuning_result(
                 error="Task not found"
             )
 
-        if request.status == "COMPLETED":
+        if request.status == "completed":
             # 허깅페이스 URL에서 레포 경로만 추출
             from app.utils.hf_utils import extract_hf_repo_path
 

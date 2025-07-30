@@ -127,6 +127,7 @@ async def lifespan(app: FastAPI):
         import traceback
         logger.error(f"   오류 상세: {traceback.format_exc()}")
 
+
     logger.info("✅ AIMEX API Server ready")
 
     yield
@@ -149,6 +150,7 @@ async def lifespan(app: FastAPI):
         logger.info("✅ 배치 모니터링이 정상적으로 중지되었습니다")
     except Exception as e:
         logger.error(f"❌ 배치 모니터링 중지 중 오류: {e}")
+
 
     # 스케줄러 서비스 중지
     try:
