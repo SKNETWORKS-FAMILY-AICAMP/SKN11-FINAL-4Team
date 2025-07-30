@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { tokenUtils, getUserFromToken, hasPermission, hasGroup, hasAnyGroup, isAdmin, canAccessModel, requiresPermissionRequest, canCreateModel, canCreatePost, canManageContent, isDefaultTeam } from '@/lib/auth'
 import type { AuthState, User } from '@/lib/types'
 import {BackendAuthService} from '@/lib/backend-auth'
+import { setLogoutCallback } from '@/lib/api'
 
 interface AuthContextType extends AuthState {
   login: (token: string) => void
@@ -53,6 +54,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       isAuthenticated: false,
       isLoading: false
     })
+    // 로그인 페이지로 이동
+    router.push('/login')
   }, [router])
 
   const initializeAuth = useCallback(async () => {
@@ -133,7 +136,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   // 초기 인증 상태 확인
   useEffect(() => {
     initializeAuth()
-  }, [])
+    
+    // API 클라이언트에 로그아웃 콜백 설정
+    setLogoutCallback(() => {
+      logout()
+    })
+  }, [logout])
 
   // 토큰 만료 확인 (별도 effect로 분리)
   useEffect(() => {
