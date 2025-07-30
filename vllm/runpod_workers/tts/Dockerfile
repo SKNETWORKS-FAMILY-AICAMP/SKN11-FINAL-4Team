@@ -23,7 +23,9 @@ RUN apt-get update && apt-get install -y \
     git \
     ffmpeg \
     libsndfile1 \
+    espeak \
     espeak-ng \
+    espeak-ng-data \
     libespeak-ng1 \
     build-essential \
     wget \
