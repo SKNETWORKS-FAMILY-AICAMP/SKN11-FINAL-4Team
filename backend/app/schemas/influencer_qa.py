@@ -77,3 +77,18 @@ class QABatchResultResponse(BaseModel):
     total_count: int
     errors: List[Dict[str, Any]]
     error_count: int
+
+
+class QAProcessResultsRequest(BaseModel):
+    """QA 결과 처리 요청"""
+    batch_id: str
+    output_file_id: str
+
+
+class QAProcessResultsResponse(BaseModel):
+    """QA 결과 처리 응답"""
+    batch_id: str
+    status: str
+    message: str
+    qa_count: Optional[int] = None
+    error_count: Optional[int] = None
