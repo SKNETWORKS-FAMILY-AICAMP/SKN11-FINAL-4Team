@@ -20,7 +20,7 @@ import runpod
 from vllm import LLM, SamplingParams
 from vllm.lora.request import LoRARequest
 from transformers import AutoTokenizer
-from huggingface_hub import snapshot_download
+from huggingface_hub import snapshot_download, hf_hub_download
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -176,7 +176,7 @@ class MultiVLLMManager:
                             loaded_adapter = None
                             for attempt_path in possible_paths:
                                 try:
-                                    loaded_adapter = load_lora_adapter(attempt_path, adapter_name)
+                                    loaded_adapter = load_lora_adapter(attempt_path, adapter_name, job_input.get("hf_token"))
                                     break
                                 except Exception:
                                     continue
@@ -184,7 +184,7 @@ class MultiVLLMManager:
                             if loaded_adapter is None:
                                 raise FileNotFoundError(f"모든 경로에서 어댑터를 찾을 수 없습니다: {adapter_name}")
                         else:
-                            loaded_adapter = load_lora_adapter(adapter_path, adapter_name)
+                            loaded_adapter = load_lora_adapter(adapter_path, adapter_name, job_input.get("hf_token"))
                     
                     # LoRA Request 생성
                     lora_request = LoRARequest(
@@ -464,7 +464,62 @@ def create_chat_prompt(
     
     return prompt
 
-def load_lora_adapter(adapter_path: str, adapter_name: str) -> Dict[str, Any]:
+def download_lora_files(repo_id: str, cache_dir: str, hf_token: Optional[str] = None) -> str:
+    """LoRA 어댑터 파일을 효율적으로 다운로드"""
+    import os
+    
+    # 캐시 경로 생성
+    local_path = os.path.join(cache_dir, repo_id.replace("/", "--"))
+    
+    # 이미 다운로드되어 있는지 확인
+    if os.path.exists(os.path.join(local_path, "adapter_config.json")):
+        logger.info(f"✅ 캐시된 어댑터 사용: {local_path}")
+        return local_path
+    
+    os.makedirs(local_path, exist_ok=True)
+    
+    # 필수 파일 목록
+    essential_files = [
+        "adapter_config.json",
+        "adapter_model.safetensors",
+        "adapter_model.bin",  # 폴백
+    ]
+    
+    download_kwargs = {}
+    if hf_token:
+        download_kwargs["token"] = hf_token
+        logger.info(f"🔑 HuggingFace 토큰 사용")
+    
+    # 필수 파일만 다운로드
+    downloaded = False
+    for filename in essential_files:
+        try:
+            logger.info(f"📥 다운로드 시도: {filename}")
+            local_file = hf_hub_download(
+                repo_id=repo_id,
+                filename=filename,
+                cache_dir=cache_dir,
+                local_dir=local_path,
+                **download_kwargs
+            )
+            logger.info(f"✅ 다운로드 성공: {filename}")
+            
+            # safetensors나 bin 파일 중 하나만 있으면 됨
+            if filename.endswith((".safetensors", ".bin")):
+                downloaded = True
+                break
+        except Exception as e:
+            logger.debug(f"⚠️ {filename} 다운로드 실패: {e}")
+            continue
+    
+    if not downloaded:
+        # 모든 파일 다운로드 실패 시 전체 스냅샷 다운로드
+        logger.warning("⚠️ 개별 파일 다운로드 실패, 전체 스냅샷 다운로드 시도")
+        local_path = snapshot_download(repo_id, cache_dir=cache_dir, **download_kwargs)
+    
+    return local_path
+
+def load_lora_adapter(adapter_path: str, adapter_name: str, hf_token: Optional[str] = None) -> Dict[str, Any]:
     """LoRA 어댑터 로드 (개선된 오류 처리)"""
     global loaded_adapters
     
@@ -480,7 +535,9 @@ def load_lora_adapter(adapter_path: str, adapter_name: str) -> Dict[str, Any]:
             # Hugging Face Hub에서 다운로드
             repo_id = adapter_path.replace("hf://", "")
             logger.info(f"📥 Hugging Face Hub에서 어댑터 다운로드: {repo_id}")
-            local_path = snapshot_download(repo_id, cache_dir="/app/lora_cache")
+            
+            # 효율적인 다운로드 사용
+            local_path = download_lora_files(repo_id, "/app/lora_cache", hf_token)
         elif adapter_path.startswith("/"):
             # 절대 경로인 경우 그대로 사용
             local_path = adapter_path
@@ -566,6 +623,7 @@ def validate_input(job_input: Dict[str, Any]) -> Dict[str, Any]:
         
         # LoRA 관련
         "lora_adapter": job_input.get("lora_adapter"),
+        "hf_token": job_input.get("hf_token"),
         
         # 스트리밍
         "stream": job_input.get("stream", False),

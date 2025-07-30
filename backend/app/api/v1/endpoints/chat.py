@@ -97,10 +97,23 @@ async def chatbot_chat(
 
                 # RunPod 서버에서 응답 생성
                 lora_adapter = None
+                hf_repo = None
+                hf_token = None
+                
                 if influencer.influencer_id and influencer.influencer_model_repo:
                     # LoRA 어댑터 이름 설정 (인플루언서 ID 사용)
                     lora_adapter = str(influencer.influencer_id)
-                    logger.info(f"🔧 LoRA 어댑터 사용: {lora_adapter}")
+                    hf_repo = str(influencer.influencer_model_repo)
+                    logger.info(f"🔧 LoRA 어댑터 사용: {lora_adapter}, HF repo: {hf_repo}")
+                    
+                    # HF 토큰 가져오기
+                    try:
+                        from app.services.hf_token_resolver import get_token_for_influencer
+                        hf_token, hf_username = await get_token_for_influencer(influencer, db)
+                        if hf_token:
+                            logger.info(f"🔑 HF 토큰 사용 (user: {hf_username})")
+                    except Exception as e:
+                        logger.warning(f"⚠️ HF 토큰 가져오기 실패: {e}")
                 
                 # RunPod 텍스트 생성 요청
                 result = await runpod_generate_text(
@@ -109,7 +122,9 @@ async def chatbot_chat(
                     system_message=system_message,
                     temperature=0.7,
                     max_tokens=200,
-                    stream=False
+                    stream=False,
+                    hf_token=hf_token,
+                    hf_repo=hf_repo
                 )
                 
                 # RunPod 응답 처리 (수정된 클라이언트에 맞게)
@@ -192,10 +207,23 @@ async def chatbot_chat_stream(
 
                 # RunPod 서버에서 스트리밍 응답 생성
                 lora_adapter = None
+                hf_repo = None
+                hf_token = None
+                
                 if influencer.influencer_id and influencer.influencer_model_repo:
                     # LoRA 어댑터 이름 설정 (인플루언서 ID 사용)
                     lora_adapter = str(influencer.influencer_id)
-                    logger.info(f"🔧 LoRA 어댑터 사용: {lora_adapter}")
+                    hf_repo = str(influencer.influencer_model_repo)
+                    logger.info(f"🔧 LoRA 어댑터 사용: {lora_adapter}, HF repo: {hf_repo}")
+                    
+                    # HF 토큰 가져오기
+                    try:
+                        from app.services.hf_token_resolver import get_token_for_influencer
+                        hf_token, hf_username = await get_token_for_influencer(influencer, db)
+                        if hf_token:
+                            logger.info(f"🔑 HF 토큰 사용 (user: {hf_username})")
+                    except Exception as e:
+                        logger.warning(f"⚠️ HF 토큰 가져오기 실패: {e}")
                 
                 # 스트리밍 응답 생성
                 token_count = 0
@@ -204,7 +232,9 @@ async def chatbot_chat_stream(
                     lora_adapter=lora_adapter,
                     system_message=system_message,
                     temperature=0.7,
-                    max_tokens=200
+                    max_tokens=200,
+                    hf_token=hf_token,
+                    hf_repo=hf_repo
                 ):
                     # 각 토큰을 실시간으로 클라이언트에 전송
                     logger.debug(f"🔄 스트리밍 토큰 전송: {repr(token)}")

@@ -250,7 +250,9 @@ class RunPodClient:
         temperature: float = 0.7,
         max_tokens: int = 512,
         top_p: float = 0.9,
-        stream: bool = False
+        stream: bool = False,
+        hf_token: Optional[str] = None,
+        hf_repo: Optional[str] = None
     ) -> Dict[str, Any]:
         """텍스트 생성 요청
         
@@ -281,7 +283,15 @@ class RunPodClient:
             
             # LoRA 어댑터가 있으면 추가
             if lora_adapter:
-                payload["input"]["lora_adapter"] = lora_adapter
+                # HF repo가 제공되면 hf:// 형식으로 변환
+                if hf_repo:
+                    payload["input"]["lora_adapter"] = f"hf://{hf_repo}"
+                else:
+                    payload["input"]["lora_adapter"] = lora_adapter
+                    
+                # HF 토큰이 있으면 추가
+                if hf_token:
+                    payload["input"]["hf_token"] = hf_token
             
             logger.info(f"🤖 RunPod 텍스트 생성 요청: prompt={prompt[:50]}...")
             
@@ -331,7 +341,9 @@ class RunPodClient:
         system_message: Optional[str] = None,
         temperature: float = 0.7,
         max_tokens: int = 512,
-        top_p: float = 0.9
+        top_p: float = 0.9,
+        hf_token: Optional[str] = None,
+        hf_repo: Optional[str] = None
     ) -> AsyncIterator[str]:
         """텍스트 생성 스트리밍
         
@@ -361,7 +373,15 @@ class RunPodClient:
             
             # LoRA 어댑터가 있으면 추가
             if lora_adapter:
-                payload["input"]["lora_adapter"] = lora_adapter
+                # HF repo가 제공되면 hf:// 형식으로 변환
+                if hf_repo:
+                    payload["input"]["lora_adapter"] = f"hf://{hf_repo}"
+                else:
+                    payload["input"]["lora_adapter"] = lora_adapter
+                    
+                # HF 토큰이 있으면 추가
+                if hf_token:
+                    payload["input"]["hf_token"] = hf_token
             
             logger.info(f"🤖 RunPod 텍스트 스트리밍 요청: prompt={prompt[:50]}...")
             
@@ -484,7 +504,9 @@ async def runpod_generate_text(
     system_message: Optional[str] = None,
     temperature: float = 0.7,
     max_tokens: int = 512,
-    stream: bool = False
+    stream: bool = False,
+    hf_token: Optional[str] = None,
+    hf_repo: Optional[str] = None
 ) -> Dict[str, Any]:
     """RunPod로 텍스트 생성 (편의 함수)"""
     client = get_runpod_client()
@@ -494,7 +516,9 @@ async def runpod_generate_text(
         system_message=system_message,
         temperature=temperature,
         max_tokens=max_tokens,
-        stream=stream
+        stream=stream,
+        hf_token=hf_token,
+        hf_repo=hf_repo
     )
 
 
@@ -503,7 +527,9 @@ async def runpod_generate_text_stream(
     lora_adapter: Optional[str] = None,
     system_message: Optional[str] = None,
     temperature: float = 0.7,
-    max_tokens: int = 512
+    max_tokens: int = 512,
+    hf_token: Optional[str] = None,
+    hf_repo: Optional[str] = None
 ) -> AsyncIterator[str]:
     """RunPod로 텍스트 스트리밍 생성 (편의 함수)"""
     client = get_runpod_client()
@@ -512,7 +538,9 @@ async def runpod_generate_text_stream(
         lora_adapter=lora_adapter,
         system_message=system_message,
         temperature=temperature,
-        max_tokens=max_tokens
+        max_tokens=max_tokens,
+        hf_token=hf_token,
+        hf_repo=hf_repo
     ):
         yield token
 
