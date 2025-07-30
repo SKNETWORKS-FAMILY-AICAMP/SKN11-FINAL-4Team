@@ -285,9 +285,9 @@ class RunPodClient:
             
             logger.info(f"🤖 RunPod 텍스트 생성 요청: prompt={prompt[:50]}...")
             
-            # Generation 엔드포인트 URL
+            # Generation 엔드포인트 URL (/runsync 사용 - 동기 처리)
             generation_endpoint_id = await self.get_generation_endpoint_id()
-            generation_url = f"{self.base_url}/{generation_endpoint_id}/run"
+            generation_url = f"{self.base_url}/{generation_endpoint_id}/runsync"
             
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.post(
@@ -304,7 +304,17 @@ class RunPodClient:
                 result = response.json()
                 logger.info(f"✅ RunPod 텍스트 생성 요청 성공: {result}")
                 
-                return result
+                # /runsync는 동기식이므로 바로 결과를 반환
+                if result.get("status") == "success":
+                    return {
+                        "status": "completed",
+                        "output": result
+                    }
+                else:
+                    return {
+                        "status": "failed", 
+                        "error": result.get("error", "알 수 없는 오류")
+                    }
                 
         except httpx.TimeoutException:
             error_msg = "RunPod 요청 시간 초과"
@@ -355,7 +365,7 @@ class RunPodClient:
             
             logger.info(f"🤖 RunPod 텍스트 스트리밍 요청: prompt={prompt[:50]}...")
             
-            # Generation 엔드포인트 URL
+            # Generation 엔드포인트 URL (/stream 사용)
             generation_endpoint_id = await self.get_generation_endpoint_id()
             generation_url = f"{self.base_url}/{generation_endpoint_id}/stream"
             

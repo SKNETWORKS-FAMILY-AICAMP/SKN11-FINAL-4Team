@@ -14,6 +14,7 @@ from app.services.runpod_client import (
     get_runpod_client,
     runpod_health_check,
     runpod_generate_text_stream,
+    runpod_generate_text,
 )
 from app.core.encryption import decrypt_sensitive_data
 from app.services.hf_token_resolver import get_token_by_group
@@ -132,14 +133,14 @@ async def chatbot(
     chat_history = chat_histories[session_id]
 
     try:
-        # VLLM 서버 상태 확인
+        # RunPod 서버 상태 확인
         if not await runpod_health_check():
-            logger.error(f"[WS] VLLM 서버 연결 실패 (URL: {settings.VLLM_BASE_URL})")
+            logger.error(f"[WS] RunPod 서버 연결 실패")
             await websocket.send_text(
                 json.dumps(
                     {
-                        "error_code": "VLLM_SERVER_UNAVAILABLE",
-                        "message": "VLLM 서버에 연결할 수 없습니다. 서버 상태를 확인해주세요.",
+                        "error_code": "RUNPOD_SERVER_UNAVAILABLE", 
+                        "message": "RunPod 서버에 연결할 수 없습니다. 서버 상태를 확인해주세요.",
                     }
                 )
             )
@@ -147,12 +148,14 @@ async def chatbot(
             return
 
         logger.info(
-            f"[WS] VLLM WebSocket 연결 시작: lora_repo={lora_repo_decoded}, group_id={group_id}, session_id={session_id}"
+            f"[WS] RunPod WebSocket 연결 시작: lora_repo={lora_repo_decoded}, group_id={group_id}, session_id={session_id}"
         )
 
-        # HF 토큰 가져오기
+        # HF 토큰 가져오기 (필요시)
         hf_token = await _get_hf_token_by_group(group_id, db)
 
+        # 인플루언서 정보 가져오기
+        influencer = None
         if influencer_id:
             from app.models.influencer import AIInfluencer
 
@@ -171,25 +174,8 @@ async def chatbot(
                     f"[WS] ⚠️ 저장된 시스템 프롬프트가 없어 기본 시스템 프롬프트 사용"
                 )
 
-        # VLLM 서버에 어댑터 로드
-        vllm_client = await get_vllm_client()
-        try:
-            await vllm_client.load_adapter(
-                lora_repo_decoded, lora_repo_decoded, hf_token
-            )
-            logger.info(f"[WS] VLLM 어댑터 로드 완료: {lora_repo_decoded}")
-        except Exception as e:
-            logger.error(f"[WS] VLLM 어댑터 로드 실패: {e}")
-            await websocket.send_text(
-                json.dumps(
-                    {
-                        "error_code": "VLLM_ADAPTER_LOAD_FAILED",
-                        "message": f"VLLM 어댑터 로드에 실패했습니다: {str(e)}",
-                    }
-                )
-            )
-            await websocket.close()
-            return
+        # RunPod는 어댑터 사전 로드가 필요하지 않음 (요청 시 지정)
+        logger.info(f"[WS] RunPod LoRA 어댑터 준비: {lora_repo_decoded}")
 
         # WebSocket 프록시 모드
         while True:
@@ -249,28 +235,24 @@ async def chatbot(
                 else:
                     enhanced_message = user_message
 
-                # VLLM 서버에서 스트리밍 응답 생성
+                # RunPod 서버에서 스트리밍 응답 생성
                 try:
-                    vllm_client = await get_vllm_client()
                     system_prompt = (
                         str(influencer.system_prompt)
                         if influencer and influencer.system_prompt
                         else "당신은 도움이 되는 AI 어시스턴트입니다."
                     )
 
-                    # 스트리밍 응답 생성
+                    # 스트리밍 응답 생성 (RunPod 사용)
                     token_count = 0
                     full_response = ""
                     
-                    async for token in vllm_client.generate_response_stream(
-                        user_message=enhanced_message,
+                    async for token in runpod_generate_text_stream(
+                        prompt=enhanced_message,
+                        lora_adapter=lora_repo_decoded,  # LoRA 어댑터 지정
                         system_message=system_prompt,
-                        influencer_name=(
-                            str(influencer.influencer_name) if influencer else "한세나"
-                        ),
-                        model_id=lora_repo_decoded,
-                        max_new_tokens=512,
                         temperature=0.7,
+                        max_tokens=512
                     ):
                         # 각 토큰을 실시간으로 클라이언트에 전송
                         await websocket.send_text(
@@ -294,7 +276,7 @@ async def chatbot(
                     # 히스토리에 대화 추가 (완료 후에만)
                     if full_response.strip():
                         model_info = {
-                            "mode": "vllm",
+                            "mode": "runpod",  # vllm → runpod 변경
                             "adapter": lora_repo_decoded,
                             "temperature": 0.7,
                             "influencer_name": str(influencer.influencer_name) if influencer else "한세나"
@@ -308,16 +290,16 @@ async def chatbot(
                         )
                     
                     logger.info(
-                        f"[WS] VLLM 스트리밍 응답 전송 완료 (토큰 수: {token_count}, 히스토리: {len(chat_history.history)}개)"
+                        f"[WS] RunPod 스트리밍 응답 전송 완료 (토큰 수: {token_count}, 히스토리: {len(chat_history.history)}개)"
                     )
 
                 except Exception as e:
-                    logger.error(f"[WS] VLLM 스트리밍 추론 중 오류: {e}")
+                    logger.error(f"[WS] RunPod 스트리밍 추론 중 오류: {e}")
                     await websocket.send_text(
                         json.dumps(
                             {
                                 "type": "error",
-                                "error_code": "VLLM_INFERENCE_ERROR",
+                                "error_code": "RUNPOD_INFERENCE_ERROR",
                                 "message": str(e),
                             }
                         )
@@ -425,34 +407,28 @@ async def summarize_chat_history(history: List[Dict], max_tokens: int = 80) -> s
 
 @router.post("/load_model")
 async def model_load(req: ModelLoadRequest, db: Session = Depends(get_db)):
-    """모델 로드 (VLLM 서버만 사용)"""
+    """모델 로드 (RunPod 서버리스 사용)"""
     try:
         # HF 토큰 가져오기
         hf_token = await _get_hf_token_by_group(req.group_id, db)
         if not hf_token:
             raise HTTPException(status_code=400, detail="HF 토큰이 없습니다.")
 
-        # VLLM 서버 상태 확인
+        # RunPod 서버 상태 확인
         if not await runpod_health_check():
             raise HTTPException(
-                status_code=503, detail="VLLM 서버에 연결할 수 없습니다."
+                status_code=503, detail="RunPod 서버에 연결할 수 없습니다."
             )
 
-        # VLLM 서버에 어댑터 로드
-        try:
-            vllm_client = await get_vllm_client()
-            await vllm_client.load_adapter(req.lora_repo, req.lora_repo, hf_token)
-            logger.info(f"[MODEL LOAD API] VLLM 어댑터 로드 성공: {req.lora_repo}")
-            return {
-                "success": True,
-                "message": "VLLM 서버에서 모델이 성공적으로 로드되었습니다.",
-                "server_type": "vllm",
-            }
-        except Exception as e:
-            logger.error(f"[MODEL LOAD API] VLLM 어댑터 로드 실패: {e}")
-            raise HTTPException(
-                status_code=500, detail=f"VLLM 어댑터 로드 실패: {str(e)}"
-            )
+        # RunPod 서버리스는 어댑터 사전 로드가 필요하지 않음
+        # 요청 시 동적으로 로드되므로 성공으로 반환
+        logger.info(f"[MODEL LOAD API] RunPod 어댑터 준비 완료: {req.lora_repo}")
+        return {
+            "success": True,
+            "message": "RunPod 서버에서 모델이 준비되었습니다. 요청 시 동적으로 로드됩니다.",
+            "server_type": "runpod",
+            "adapter_repo": req.lora_repo
+        }
 
     except HTTPException:
         raise

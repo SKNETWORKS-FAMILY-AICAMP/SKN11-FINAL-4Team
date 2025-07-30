@@ -112,15 +112,21 @@ async def chatbot_chat(
                     stream=False
                 )
                 
-                # RunPod 응답 처리
+                # RunPod 응답 처리 (수정된 클라이언트에 맞게)
                 if result.get("status") == "completed" and result.get("output"):
-                    response_text = result["output"].get("generated_text", "")
-                elif result.get("id"):
-                    # 비동기 작업인 경우
-                    logger.info(f"⏳ RunPod 작업 시작됨: {result['id']}")
-                    # 여기서는 간단히 기본 응답 반환 (실제로는 작업 상태 확인 필요)
-                    response_text = f"안녕하세요! 저는 {influencer.influencer_name}입니다. 잠시만 기다려주세요."
+                    # /runsync 동기 응답 처리
+                    output = result.get("output", {})
+                    if output.get("status") == "success":
+                        response_text = output.get("generated_text", "")
+                    else:
+                        response_text = f"안녕하세요! 저는 {influencer.influencer_name}입니다. 응답 생성 중 문제가 발생했습니다."
+                elif result.get("status") == "failed":
+                    # 실패한 경우
+                    logger.error(f"❌ RunPod 요청 실패: {result.get('error', 'Unknown error')}")
+                    response_text = f"안녕하세요! 저는 {influencer.influencer_name}입니다. '{request.message}'에 대한 답변을 드리겠습니다."
                 else:
+                    # 예상하지 못한 응답 형식
+                    logger.warning(f"⚠️ 예상하지 못한 RunPod 응답 형식: {result}")
                     response_text = f"안녕하세요! 저는 {influencer.influencer_name}입니다. '{request.message}'에 대한 답변을 드리겠습니다."
 
                 logger.info(f"✅ RunPod 응답 생성 성공: {influencer.influencer_name}")
