@@ -92,7 +92,7 @@ export default function ChatPage() {
       // 토큰 검증 실패로 인한 401/403 에러 시 로그아웃
       if (error?.status === 401 || error?.status === 403) {
         console.log("토큰 검증 실패로 인한 로그아웃 처리")
-        await logout()
+        logout()
         router.push('/login')
         return
       }
@@ -188,7 +188,7 @@ export default function ChatPage() {
           // 토큰 관련 오류 시 로그아웃 처리
           if (data.error_code === "INVALID_TOKEN" || data.error_code === "TOKEN_VERIFICATION_FAILED") {
             console.log("WebSocket 토큰 검증 실패로 인한 로그아웃 처리")
-            await logout()
+            logout()
             router.push('/login')
             return
           }
@@ -287,7 +287,7 @@ export default function ChatPage() {
         // 토큰 검증 실패로 인한 401/403 에러 시 로그아웃
         if (error?.status === 401 || error?.status === 403) {
           console.log("RAG 서비스 토큰 검증 실패로 인한 로그아웃 처리")
-          await logout()
+          logout()
           router.push('/login')
           return
         }
@@ -336,7 +336,7 @@ export default function ChatPage() {
         // 토큰 검증 실패로 인한 401/403 에러 시 로그아웃
         if (error?.status === 401 || error?.status === 403) {
           console.log("MCP 서비스 토큰 검증 실패로 인한 로그아웃 처리")
-          await logout()
+          logout()
           router.push('/login')
           return
         }
