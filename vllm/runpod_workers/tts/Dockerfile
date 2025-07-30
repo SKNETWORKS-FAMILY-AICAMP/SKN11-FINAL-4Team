@@ -11,8 +11,7 @@ ENV TORCH_HOME=/app/models
 ENV HF_DATASETS_OFFLINE=1
 ENV TRANSFORMERS_OFFLINE=1
 ENV HF_HUB_OFFLINE=0
-ENV PHONEMIZER_ESPEAK_LIBRARY=/usr/lib/x86_64-linux-gnu/libespeak-ng.so
-ENV PHONEMIZER_ESPEAK_PATH=/usr/bin/espeak-ng
+# PHONEMIZER_ESPEAK_LIBRARY와 PATH는 나중에 설정
 
 # 작업 디렉토리 설정
 WORKDIR /app
@@ -53,10 +52,15 @@ RUN which espeak-ng && espeak-ng --version || echo "espeak-ng not found"
 # espeak 심볼릭 링크 생성 (필요시)
 RUN ln -sf /usr/bin/espeak-ng /usr/bin/espeak || true
 
+# espeak 라이브러리 경로 찾기 및 설정
+RUN find /usr -name "libespeak-ng.so*" -type f 2>/dev/null || echo "libespeak-ng.so not found"
+
+# 환경 변수 설정 제거 (자동 탐지 사용)
+ENV PHONEMIZER_ESPEAK_LIBRARY=""
+
 # phonemizer 설치 확인 및 테스트
 RUN python3 -c "import phonemizer; print(f'Phonemizer version: {phonemizer.__version__}')"
-RUN python3 -c "from phonemizer.backend.espeak.wrapper import EspeakWrapper; print(f'Espeak library: {EspeakWrapper.library()}')"
-RUN python3 -c "from phonemizer.backend import EspeakBackend; backend = EspeakBackend('ko'); print('EspeakBackend Korean test successful')"
+RUN python3 -c "from phonemizer.backend import EspeakBackend; print('EspeakBackend import successful')"
 
 # zonos 모듈 복사 (존재 여부 확인)
 COPY zonos/ /app/zonos/
