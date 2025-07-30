@@ -494,14 +494,14 @@ function ModelDetailContent() {
     }
   };
 
-  // 게시글 데이터가 로드된 후 분석 데이터 업데이트
+  // 게시글 데이터가 로드된 후 분석 데이터 업데이트 (중복 호출 방지)
   React.useEffect(() => {
     if (posts.length >= 0) {
       // 빈 배열도 포함하여 초기 로드 시에도 실행
       loadAnalyticsData();
       loadWeeklyChartData(); // 7일간 차트 데이터도 함께 로드
     }
-  }, [posts]);
+  }, [posts.length]); // posts 배열 전체가 아닌 길이만 감지하여 불필요한 재호출 방지
 
   // 모델 데이터 로드
   const loadModelData = async () => {
@@ -1095,14 +1095,14 @@ function ModelDetailContent() {
     }
   };
 
-  // 컴포넌트 마운트 시 모델 데이터 로드
+  // 컴포넌트 마운트 시 모델 데이터 로드 (한 번만 실행)
   React.useEffect(() => {
     const loadData = async () => {
       await loadModelData();
       await loadPostsData();
     };
     loadData();
-  }, [params.id]);
+  }, [params.id]); // params.id가 변경될 때만 실행
 
   // 모델 데이터 로드 후 Instagram 상태 확인
   // 컴포넌트 언마운트 시 오디오 정리
@@ -1164,12 +1164,12 @@ function ModelDetailContent() {
   }, [isModelLoading, model, params.id]);
 
   // 예약된 게시글이 있을 때 주기적으로 상태 확인 (30초마다)
-  // 음성 탭이 선택되었을 때 음성 히스토리 로드
+  // 음성 탭이 선택되었을 때 음성 히스토리 로드 (한 번만)
   React.useEffect(() => {
-    if (activeTab === "voice" && !isLoadingVoiceHistory) {
+    if (activeTab === "voice" && !isLoadingVoiceHistory && voiceHistory.length === 0) {
       loadVoiceHistory();
     }
-  }, [activeTab]);
+  }, [activeTab, isLoadingVoiceHistory]); // voiceHistory.length 조건 추가하여 중복 로드 방지
 
   // pending 상태의 음성이 있을 때 주기적으로 상태 확인 (3초마다)
   React.useEffect(() => {
@@ -1242,6 +1242,140 @@ function ModelDetailContent() {
       return () => clearInterval(interval);
     }
   }, [voiceHistory, activeTab, params.id]);
+
+  // SSE 연결을 통한 음성 상태 실시간 모니터링 (기존 폴링 보완)
+  React.useEffect(() => {
+    let eventSource: EventSource | null = null;
+    
+    // pending 상태의 음성이 있고 voice 탭이 활성화되어 있을 때만 SSE 연결
+    const hasPendingVoices = voiceHistory.some(voice => voice.status === "pending");
+    
+    if (hasPendingVoices && activeTab === "voice") {
+      const token = tokenUtils.getToken();
+      if (!token) return;
+      
+      try {
+        // SSE 연결 생성 (토큰을 URL 파라미터로 전달)
+        eventSource = new EventSource(
+          `${process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000'}/api/v1/influencers/${params.id}/voices/status-stream?token=${token}`
+        );
+        
+        // 연결 성공
+        eventSource.onopen = () => {
+          console.log("✅ SSE 연결 성공: 음성 상태 모니터링 시작");
+        };
+        
+        // 메시지 수신
+        eventSource.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            
+            switch (data.event) {
+              case "voice_status_update":
+                // 음성 상태 업데이트
+                if (data.data && Array.isArray(data.data)) {
+                  setVoiceHistory(prev => {
+                    const updatedHistory = [...prev];
+                    
+                    // 새로 완료된/실패한 음성 찾기 (알림용)
+                    const newlyCompletedVoices: any[] = [];
+                    const newlyFailedVoices: any[] = [];
+                    
+                    data.data.forEach((updatedVoice: any) => {
+                      const index = updatedHistory.findIndex(v => v.id === updatedVoice.id);
+                      if (index !== -1) {
+                        const previousStatus = updatedHistory[index].status;
+                        const newStatus = updatedVoice.status;
+                        
+                        // 상태 변화 감지
+                        if (previousStatus === "pending" && newStatus === "completed") {
+                          newlyCompletedVoices.push(updatedVoice);
+                        } else if (previousStatus === "pending" && newStatus === "failed") {
+                          newlyFailedVoices.push(updatedVoice);
+                        }
+                        
+                        updatedHistory[index] = {
+                          ...updatedHistory[index],
+                          ...updatedVoice,
+                          createdAt: updatedVoice.created_at || updatedVoice.createdAt
+                        };
+                      }
+                    });
+                    
+                    // 기존 폴링 알림은 SSE가 활성화되면 비활성화
+                    // 알림 표시는 SSE에서만 처리
+                    if (newlyCompletedVoices.length > 0) {
+                      toast({
+                        title: "음성 생성 완료 (실시간)",
+                        description: `${newlyCompletedVoices.length}개의 음성이 성공적으로 생성되었습니다.`,
+                      });
+                      
+                      // 첫 번째 완료된 음성 자동 재생 (선택사항)
+                      if (newlyCompletedVoices[0]?.url) {
+                        handlePlayVoice(newlyCompletedVoices[0].url);
+                      }
+                    }
+                    if (newlyFailedVoices.length > 0) {
+                      toast({
+                        title: "음성 생성 실패 (실시간)",
+                        description: `${newlyFailedVoices.length}개의 음성 생성에 실패했습니다.`,
+                        variant: "destructive",
+                      });
+                    }
+                    
+                    return updatedHistory;
+                  });
+                  
+                  console.log("🔄 SSE: 음성 상태 업데이트", data.data);
+                }
+                break;
+                
+              case "all_completed":
+                // 모든 음성 생성 완료
+                console.log("✅ SSE: 모든 음성 생성 완료");
+                if (eventSource) {
+                  eventSource.close();
+                  eventSource = null;
+                }
+                break;
+                
+              case "error":
+                // 오류 발생
+                console.error("❌ SSE 오류:", data.data?.message);
+                if (eventSource) {
+                  eventSource.close();
+                  eventSource = null;
+                }
+                break;
+            }
+          } catch (error) {
+            console.error("SSE 메시지 파싱 오류:", error);
+          }
+        };
+        
+        // 연결 오류
+        eventSource.onerror = (error) => {
+          console.error("❌ SSE 연결 오류:", error);
+          if (eventSource) {
+            eventSource.close();
+            eventSource = null;
+          }
+        };
+        
+      } catch (error) {
+        console.error("SSE 연결 생성 실패:", error);
+      }
+    }
+    
+    // 컴포넌트 언마운트 또는 탭 변경 시 SSE 연결 해제
+    return () => {
+      if (eventSource) {
+        console.log("🔌 SSE 연결 해제");
+        eventSource.close();
+        eventSource = null;
+      }
+    };
+  }, [voiceHistory.filter(v => v.status === "pending").length, activeTab, params.id]);
 
   React.useEffect(() => {
     const hasScheduledPosts = posts.some((post) => post.status === "scheduled");

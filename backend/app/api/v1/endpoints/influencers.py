@@ -9,6 +9,7 @@ from fastapi import (
     Form,
     Header,
 )
+from fastapi.responses import StreamingResponse
 
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -16,6 +17,8 @@ import os
 import logging
 import json
 import uuid
+import asyncio
+import time
 from app.database import get_db
 from app.schemas.influencer import (
     AIInfluencer as AIInfluencerSchema,
@@ -2367,6 +2370,129 @@ async def get_voice_download_url(
             )
     else:
         raise HTTPException(status_code=404, detail="음성 파일을 찾을 수 없습니다")
+
+
+@router.get("/{influencer_id}/voices/status-stream")
+async def get_voice_status_stream(
+    influencer_id: str,
+    token: str = Query(...),  # URL 파라미터로 토큰 받기
+    db: Session = Depends(get_db),
+    s3_service: S3Service = Depends(get_s3_service),
+):
+    """음성 상태 변경을 실시간으로 스트리밍하는 SSE 엔드포인트"""
+    # JWT 토큰 검증
+    from app.core.security import verify_token
+    payload = verify_token(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User ID not found")
+
+    # 인플루언서 소유권 확인
+    influencer = (
+        db.query(AIInfluencer)
+        .filter(
+            AIInfluencer.influencer_id == influencer_id,
+            AIInfluencer.user_id == user_id,
+        )
+        .first()
+    )
+    
+    if not influencer:
+        raise HTTPException(status_code=404, detail="인플루언서를 찾을 수 없습니다")
+
+    async def event_stream():
+        """SSE 이벤트 스트림 생성기"""
+        last_check = {}  # 마지막 확인된 상태 저장
+        
+        try:
+            while True:
+                # 현재 pending 상태인 음성들 조회
+                pending_voices = (
+                    db.query(GeneratedVoice)
+                    .filter(
+                        GeneratedVoice.influencer_id == influencer.influencer_id,
+                        GeneratedVoice.status == "pending"
+                    )
+                    .all()
+                )
+                
+                # 상태가 변경된 음성들 확인
+                updated_voices = []
+                for voice in pending_voices:
+                    voice_id = str(voice.id)
+                    current_status = voice.status
+                    
+                    # 상태가 변경되었거나 처음 체크하는 경우
+                    if voice_id not in last_check or last_check[voice_id] != current_status:
+                        # S3에서 presigned URL 생성
+                        presigned_url = None
+                        if voice.s3_key and s3_service.is_available():
+                            try:
+                                presigned_url = s3_service.generate_presigned_url(
+                                    voice.s3_key, expiration=3600
+                                )
+                            except Exception as e:
+                                logger.error(f"S3 URL 생성 실패: {e}")
+                        
+                        voice_data = {
+                            "id": voice.id,
+                            "text": voice.text,
+                            "status": voice.status,
+                            "url": presigned_url,
+                            "s3_url": presigned_url,
+                            "duration": voice.duration,
+                            "created_at": voice.created_at.isoformat() if voice.created_at else None,
+                            "task_id": voice.task_id
+                        }
+                        
+                        updated_voices.append(voice_data)
+                        last_check[voice_id] = current_status
+                
+                # 변경된 음성이 있으면 클라이언트에 전송
+                if updated_voices:
+                    event_data = {
+                        "event": "voice_status_update",
+                        "data": updated_voices,
+                        "timestamp": time.time()
+                    }
+                    yield f"data: {json.dumps(event_data, ensure_ascii=False)}\n\n"
+                
+                # pending 상태인 음성이 없으면 연결 종료
+                if not pending_voices:
+                    event_data = {
+                        "event": "all_completed",
+                        "data": {"message": "모든 음성 생성이 완료되었습니다"},
+                        "timestamp": time.time()
+                    }
+                    yield f"data: {json.dumps(event_data, ensure_ascii=False)}\n\n"
+                    break
+                
+                # 3초 대기
+                await asyncio.sleep(3)
+                
+        except Exception as e:
+            logger.error(f"음성 상태 스트림 중 오류: {e}")
+            error_data = {
+                "event": "error",
+                "data": {"message": str(e)},
+                "timestamp": time.time()
+            }
+            yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/plain",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Content-Type": "text/event-stream",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "Cache-Control"
+        }
+    )
 
 
 @router.post("/finetuning/result", response_model=FineTuningResultResponse)
