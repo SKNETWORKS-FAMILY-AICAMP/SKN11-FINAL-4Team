@@ -65,7 +65,6 @@ export interface Post {
   instagram_link?: string
   influencerName?: string
   influencerDescription?: string
-  influencer_image_url?: string  // 인플루언서 프로필 이미지 URL 추가
 }
 
 interface PostCardProps {

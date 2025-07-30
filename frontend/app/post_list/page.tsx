@@ -25,7 +25,7 @@ import { convertUTCToKST, formatDateKorean, getRelativeTime } from "@/lib/utils/
 
 function PostListContent() {
   const [posts, setPosts] = useState<Post[]>([])
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const { toast } = useToast()
   const [searchTerm, setSearchTerm] = useState("")
   const [statusFilter, setStatusFilter] = useState<string>("all")
@@ -41,8 +41,7 @@ function PostListContent() {
   // 게시글 상세 보기 모달 상태
   const [selectedPost, setSelectedPost] = useState<Post | null>(null)
   const [isViewModalOpen, setIsViewModalOpen] = useState(false)
-  const [isEditing, setIsEditing] = useState(false)
-  const [isDetailLoading, setIsDetailLoading] = useState(false) // 상세보기 로딩 상태 추가
+  const [isEditing, setIsEditing] = useState(false);
   const [editTitle, setEditTitle] = useState("");
   const [editContent, setEditContent] = useState("");
   const [editHashtags, setEditHashtags] = useState("");
@@ -50,14 +49,6 @@ function PostListContent() {
   const [isSaving, setIsSaving] = useState(false);
   // 캐러셀 현재 이미지 인덱스 관리
   const [carouselIndices, setCarouselIndices] = useState<{ [key: string]: number }>({});
-
-  // 페이지네이션 상태
-  const [currentPage, setCurrentPage] = useState(1)
-  const [hasMore, setHasMore] = useState(true)
-  const [isLoadingMore, setIsLoadingMore] = useState(false)
-
-  // 인플루언서 정보 캐시 (N+1 문제 해결)
-  const [influencerCache, setInfluencerCache] = useState<{ [key: string]: any }>({})
 
   const isFetchingRef = useRef(false)
 
@@ -67,97 +58,91 @@ function PostListContent() {
   const router = useRouter()
 
   // API에서 게시글 목록 가져오기
-  const fetchPosts = async (page: number = 1, append: boolean = false) => {
+  const fetchPosts = async () => {
     if (isFetchingRef.current) return
 
     try {
       isFetchingRef.current = true
-      if (append) {
-        setIsLoadingMore(true)
-      } else {
-        setLoading(true)
-      }
+      setLoading(true)
 
-      const limit = 20 // 한 번에 로드할 게시글 수
-      const skip = (page - 1) * limit
+      const boardData = await apiClient.get<any[]>('/api/v1/boards')
 
-      const boardData = await apiClient.get<any[]>(`/api/v1/boards?skip=${skip}&limit=${limit}`)
+      // 각 게시글에 대해 인스타그램 통계 정보 가져오기
+      const transformedPosts: Post[] = await Promise.all(
+        boardData.map(async (board: any) => {
+          // 인플루언서 정보 조회
+          let influencerName = 'AI 인플루언서'
+          let influencerDescription = ''
 
-      // 최적화된 목록 데이터를 Post 형식으로 변환
-      const transformedPosts: Post[] = boardData.map((board: any) => {
-        // 인플루언서 정보를 캐시에 저장
-        if (board.influencer_id && board.influencer_name) {
-          setInfluencerCache(prev => ({
-            ...prev,
-            [board.influencer_id]: {
-              influencer_name: board.influencer_name,
-              influencer_description: board.influencer_description || '',
-              influencer_image_url: board.influencer_image_url || '', // 프로필 이미지 추가
-              instagram_connected_at: board.instagram_connected_at,
-              instagram_id: board.instagram_id,
-              instagram_access_token: board.instagram_access_token
+          if (board.influencer_id) {
+            try {
+              const influencerResponse = await apiClient.get<{
+                influencer_name?: string;
+                influencer_description?: string;
+              }>(`/api/v1/influencers/${board.influencer_id}`)
+              if (influencerResponse) {
+                influencerName = influencerResponse.influencer_name || 'AI 인플루언서'
+                influencerDescription = influencerResponse.influencer_description || ''
+              }
+            } catch (error) {
             }
-          }))
-        }
-
-        const basePost = {
-          ...board,
-          id: board.board_id,
-          title: board.board_topic,
-          content: board.board_description,
-          createdAt: board.created_at,
-          platform: getPlatformName(board.board_platform),
-          hashtags: board.board_hash_tag ? board.board_hash_tag.split(' ').filter((tag: string) => tag.trim()).map((tag: string) => tag.startsWith('#') ? tag : `#${tag}`) : [],
-          status: getStatusName(board.board_status),
-          author: board.influencer_name || 'AI 인플루언서',
-          modelName: board.influencer_name || 'AI 인플루언서',
-          scheduledAt: board.reservation_at,
-          publishedAt: board.published_at,
-          // 목록에서는 기본 인플루언서 정보만 사용
-          influencerName: board.influencer_name || 'AI 인플루언서',
-          influencerDescription: '', // 상세보기에서 로드
-          media: {
-            type: "image" as const, // 목록에서는 단일 이미지로 처리
-            urls: ["/placeholder.svg?height=400&width=400"], // 기본 플레이스홀더만 사용
-            thumbnailUrl: "/placeholder.svg?height=400&width=400"
           }
-        }
 
-        // 백엔드에서 제공하는 기본 인스타그램 통계 사용
-        const instagramStats = board.instagram_stats || {
-          like_count: 0,
-          comments_count: 0
-        }
+          const basePost = {
+            ...board,
+            id: board.board_id,
+            title: board.board_topic,
+            content: board.board_description,
+            createdAt: board.created_at,
+            platform: getPlatformName(board.board_platform),
+            hashtags: board.board_hash_tag ? board.board_hash_tag.split(' ').filter((tag: string) => tag.trim()).map((tag: string) => tag.startsWith('#') ? tag : `#${tag}`) : [],
+            status: getStatusName(board.board_status),
+            author: influencerName,
+            modelName: influencerName,
+            scheduledAt: board.reservation_at,
+            publishedAt: board.published_at,
+            // 인플루언서 정보: 별도 조회한 값 사용
+            influencerName: influencerName,
+            influencerDescription: influencerDescription,
+            media: {
+              type: board.image_url && board.image_url.split(",").length > 1 ? "carousel" as const : "image" as const,
+              urls: board.image_url ? board.image_url.split(",").map((url: string) => url.trim()).filter(Boolean) : ["/placeholder.svg?height=400&width=400"],
+              thumbnailUrl: board.image_url ? board.image_url.split(",")[0]?.trim() || "/placeholder.svg?height=400&width=400" : "/placeholder.svg?height=400&width=400"
+            }
+          }
 
-        return {
-          ...basePost,
-          engagement: {
-            likes: instagramStats.like_count || 0,
-            comments: instagramStats.comments_count || 0
-          },
-          // 목록에서는 기본 통계만 사용, 상세 통계는 상세보기에서 로드
-          instagram_stats: {
+          // 백엔드에서 제공하는 인스타그램 통계 사용
+          const instagramStats = board.instagram_stats || {
+            like_count: 0,
+            comments_count: 0,
             impressions: 0,
             reach: 0,
             profile_views: 0,
             follower_count: 0,
             saved_count: 0,
             video_views: 0
-          },
-          instagram_link: null // 상세보기에서 로드
-        }
-      })
+          }
 
-      if (append) {
-        setPosts(prev => [...prev, ...transformedPosts])
-      } else {
-        setPosts(transformedPosts)
-      }
+          return {
+            ...basePost,
+            engagement: {
+              likes: instagramStats.like_count || 0,
+              comments: instagramStats.comments_count || 0
+            },
+            instagram_stats: {
+              impressions: instagramStats.impressions || 0,
+              reach: instagramStats.reach || 0,
+              profile_views: instagramStats.profile_views || 0,
+              follower_count: instagramStats.follower_count || 0,
+              saved_count: instagramStats.saved_count || 0,
+              video_views: instagramStats.video_views || 0
+            },
+            instagram_link: board.instagram_link || null
+          }
+        })
+      )
 
-      // 더 로드할 게시글이 있는지 확인
-      setHasMore(transformedPosts.length === limit)
-      setCurrentPage(page)
-
+      setPosts(transformedPosts)
     } catch (error) {
       toast({
         title: "게시글 목록 불러오기 실패",
@@ -166,39 +151,8 @@ function PostListContent() {
       })
     } finally {
       setLoading(false)
-      setIsLoadingMore(false)
       isFetchingRef.current = false
     }
-  }
-
-  // 인플루언서 정보를 가져오는 함수 (캐시 우선)
-  const getInfluencerInfo = async (influencerId: string) => {
-    // 캐시에서 먼저 확인
-    if (influencerCache[influencerId]) {
-      return influencerCache[influencerId]
-    }
-
-    // 캐시에 없으면 API 호출
-    try {
-      const influencerInfo = await apiClient.get<any>(`/api/v1/influencers/${influencerId}`)
-      
-      // 캐시에 저장
-      setInfluencerCache(prev => ({
-        ...prev,
-        [influencerId]: influencerInfo
-      }))
-      
-      return influencerInfo
-    } catch (error) {
-      console.error('Failed to fetch influencer info:', error)
-      return null
-    }
-  }
-
-  // 더 많은 게시글 로드
-  const loadMorePosts = async () => {
-    if (!hasMore || isLoadingMore) return
-    await fetchPosts(currentPage + 1, true)
   }
 
   // 플랫폼 번호를 이름으로 변환
@@ -223,35 +177,8 @@ function PostListContent() {
 
   // 컴포넌트 마운트 시 데이터 가져오기
   useEffect(() => {
-    fetchPosts(1, false)
+    fetchPosts()
   }, [])
-
-  // 무한 스크롤을 위한 Intersection Observer
-  const observerRef = useRef<IntersectionObserver | null>(null)
-  const lastPostRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (observerRef.current) observerRef.current.disconnect()
-
-    observerRef.current = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting && hasMore && !isLoadingMore) {
-          loadMorePosts()
-        }
-      },
-      { threshold: 0.1 }
-    )
-
-    if (lastPostRef.current) {
-      observerRef.current.observe(lastPostRef.current)
-    }
-
-    return () => {
-      if (observerRef.current) {
-        observerRef.current.disconnect()
-      }
-    }
-  }, [hasMore, isLoadingMore, posts.length])
 
   // 예약된 게시글이 있을 때 주기적으로 상태 확인 (60초마다)
   useEffect(() => {
@@ -333,12 +260,12 @@ function PostListContent() {
 
 
   const handlePublishPost = async (postId: string | undefined) => {
-    if (!postId) return;
+    if (!postId) return
 
-    const postToPublish = posts.find(p => (p.id || p.board_id) === postId);
-    if (!postToPublish) return;
-
-    const postTitle = postToPublish.title || postToPublish.board_topic || "게시글";
+    // 발행할 게시글 정보 찾기
+    const postToPublish = posts.find((post) => (post.id || post.board_id) === postId)
+    const postTitle = postToPublish?.title || postToPublish?.board_topic || "게시글"
+    const platform = postToPublish?.platform || "소셜미디어"
 
     try {
       // 1. 먼저 데이터베이스 상태 업데이트
@@ -347,13 +274,19 @@ function PostListContent() {
       // 2. 인스타그램 플랫폼인 경우 자동 업로드 시도
       if (postToPublish?.platform === "Instagram" && postToPublish?.influencer_id) {
         try {
-          // 캐시된 인플루언서 정보 사용
-          const influencerInfo = await getInfluencerInfo(postToPublish.influencer_id);
-          const canUpload = influencerInfo?.instagram_connected_at ? true : false;
+          // 인스타그램 업로드 가능 여부 확인 (인플루언서 정보 확인)
+          let canUpload = false;
+          try {
+            const influencerInfo = await apiClient.get<any>(`/api/v1/influencers/${postToPublish.influencer_id}`);
+            canUpload = influencerInfo?.instagram_connected_at ? true : false;
+          } catch (error) {
+            canUpload = false;
+          }
 
           if (canUpload) {
             // 인스타그램에 업로드 - 실제 구현은 백엔드 API에 따라 달라질 수 있음
             // TODO: 실제 인스타그램 업로드 로직 구현 필요
+            // 현재는 주석 처리하여 빌드 에러 해결
             /*
             const result = await InstagramPostingService.postToInstagram({
               instagram_id: influencerInfo.instagram_id,
@@ -421,9 +354,14 @@ function PostListContent() {
     }
 
     try {
-      // 캐시된 인플루언서 정보 사용
-      const influencerInfo = await getInfluencerInfo(post.influencer_id);
-      const canUpload = influencerInfo?.instagram_connected_at ? true : false;
+      // 인스타그램 업로드 가능 여부 확인 (인플루언서 정보 확인)
+      let canUpload = false;
+      try {
+        const influencerInfo = await apiClient.get<any>(`/api/v1/influencers/${post.influencer_id}`);
+        canUpload = influencerInfo?.instagram_connected_at ? true : false;
+      } catch (error) {
+        canUpload = false;
+      }
 
       if (!canUpload) {
         toast({
@@ -434,22 +372,46 @@ function PostListContent() {
         return;
       }
 
-      // 인스타그램 업로드 로직 (실제 구현은 백엔드 API에 따라 달라질 수 있음)
+      // 인스타그램에 업로드 - 실제 구현은 백엔드 API에 따라 달라질 수 있음
       // TODO: 실제 인스타그램 업로드 로직 구현 필요
-      toast({
-        title: "📤 인스타그램 업로드 시작",
-        description: "인스타그램 업로드 기능은 아직 구현되지 않았습니다.",
-        variant: "default",
-      })
+      // 현재는 주석 처리하여 빌드 에러 해결
+      /*
+      const result = await InstagramPostingService.postToInstagram({
+        instagram_id: influencerInfo.instagram_id,
+        access_token: influencerInfo.instagram_access_token,
+        image_url: post.image_url,
+        caption: post.content || post.board_description
+      });
+      */
+      const result = { success: false, message: "인스타그램 업로드 기능은 아직 구현되지 않았습니다." };
 
-    } catch (error) {
+      if (result.success) {
+        toast({
+          title: "✅ 인스타그램 업로드 완료",
+          description: result.message,
+          variant: "default",
+        })
+
+        // 게시글 상태 업데이트
+        setPosts(posts => posts.map(p => {
+          if (p.board_id === post.board_id) {
+            return {
+              ...p,
+              status: 'published' as const,
+              publishedAt: new Date().toISOString()
+            };
+          }
+          return p;
+        }));
+      }
+    } catch (error: any) {
       toast({
         title: "❌ 인스타그램 업로드 실패",
-        description: error instanceof Error ? error.message : "알 수 없는 오류가 발생했습니다.",
+        description: error.message || "인스타그램 업로드 중 오류가 발생했습니다.",
         variant: "destructive",
       })
     }
-  };
+  }
 
   const handleApplyFilters = () => {
     setStatusFilter(tempStatusFilter)
@@ -465,83 +427,14 @@ function PostListContent() {
     setIsFilterModalOpen(true)
   }
 
-  // 상세보기 시 게시글 상세 정보 로드
-  const loadPostDetail = async (postId: string) => {
-    setIsDetailLoading(true); // 로딩 상태 시작
-    try {
-      console.log(`상세 정보 로드 시작: ${postId}`); // 디버깅 로그 추가
-      const boardDetail = await apiClient.get<any>(`/api/v1/boards/${postId}`)
-      console.log('받아온 상세 정보:', boardDetail); // 디버깅 로그 추가
-      
-      // API 응답으로부터 완전한 Post 객체 생성
-      const detailedPost: Post = {
-        id: boardDetail.board_id,
-        board_id: boardDetail.board_id,
-        title: boardDetail.board_topic || '',
-        content: boardDetail.board_description || '',
-        influencerName: boardDetail.influencer_name || 'AI 인플루언서',
-        influencerDescription: boardDetail.influencer_description || '',
-        influencer_image_url: boardDetail.influencer_image_url || '',
-        engagement: {
-          likes: boardDetail.instagram_stats?.like_count || 0,
-          comments: boardDetail.instagram_stats?.comments_count || 0
-        },
-        instagram_stats: {
-          impressions: boardDetail.instagram_stats?.impressions || 0,
-          reach: boardDetail.instagram_stats?.reach || 0,
-          profile_views: boardDetail.instagram_stats?.profile_views || 0,
-          follower_count: boardDetail.instagram_stats?.follower_count || 0,
-          saved_count: boardDetail.instagram_stats?.saved_count || 0,
-          video_views: boardDetail.instagram_stats?.video_views || 0
-        },
-        instagram_link: boardDetail.instagram_link || null,
-        // 상세보기에서는 전체 이미지 정보 사용
-        media: {
-          type: boardDetail.image_url && boardDetail.image_url.split(",").length > 1 ? "carousel" as const : "image" as const,
-          urls: boardDetail.image_url ? boardDetail.image_url.split(",").map((url: string) => url.trim()).filter(Boolean) : ["/placeholder.svg?height=400&width=400"],
-          thumbnailUrl: boardDetail.image_url ? boardDetail.image_url.split(",")[0]?.trim() || "/placeholder.svg?height=400&width=400" : "/placeholder.svg?height=400&width=400"
-        },
-        // 기타 필드들
-        platform: boardDetail.board_platform === 0 ? "Instagram" : "Blog",
-        status: boardDetail.board_status === 3 ? "published" : boardDetail.board_status === 2 ? "scheduled" : "draft",
-        hashtags: boardDetail.board_hash_tag ? boardDetail.board_hash_tag.split(' ').filter((tag: string) => tag.trim()).map((tag: string) => tag.startsWith('#') ? tag : `#${tag}`) : [],
-        created_at: boardDetail.created_at,
-        updated_at: boardDetail.updated_at,
-        publishedAt: boardDetail.published_at,
-        scheduledAt: boardDetail.reservation_at
-      }
-      
-      console.log('업데이트된 게시글 정보:', detailedPost); // 디버깅 로그 추가
-      setSelectedPost(detailedPost)
-    } catch (error) {
-      console.error('상세 정보 로드 실패:', error); // 상세 에러 로그 추가
-      toast({
-        title: "상세 정보 로드 실패",
-        description: error instanceof Error ? error.message : "상세 정보를 불러올 수 없습니다.",
-        variant: "destructive",
-      })
-    } finally {
-      setIsDetailLoading(false); // 로딩 상태 종료
-    }
-  }
-
   const handleViewPost = (post: Post) => {
-    console.log('상세보기 클릭된 게시글:', post); // 디버깅 로그 추가
-    console.log('post.id:', post.id, 'post.board_id:', post.board_id); // ID 확인
-    
-    // 먼저 selectedPost를 설정
     setSelectedPost(post)
     setIsViewModalOpen(true)
     setIsEditing(false)
-    
-    // 그 다음 상세 정보 로드
-    if (post.id) {
-      loadPostDetail(post.id)
-    } else if (post.board_id) {
-      loadPostDetail(post.board_id)
-    } else {
-      console.error('게시글 ID가 없습니다:', post); // 에러 로그 추가
-    }
+    setEditTitle(post.title || post.board_topic || "")
+    setEditContent(post.content || post.board_description || "")
+    setEditHashtags((post.hashtags || []).join(" "))
+    setEditScheduledAt(post.scheduledAt || "")
   }
 
 
@@ -1064,16 +957,6 @@ function PostListContent() {
                 variant="list"
               />
             ))}
-            {isLoadingMore && (
-              <div ref={lastPostRef} className="col-span-full text-center py-8">
-                <p className="text-gray-500 text-lg">게시글을 더 불러오는 중...</p>
-              </div>
-            )}
-            {hasMore && !isLoadingMore && (
-              <div ref={lastPostRef} className="col-span-full text-center py-8">
-                <p className="text-gray-500 text-lg">스크롤하여 더 많은 게시글을 불러오세요</p>
-              </div>
-            )}
           </div>
         )}
 
@@ -1094,314 +977,298 @@ function PostListContent() {
         )}
 
         {/* 게시글 상세 보기 모달 */}
-        {isViewModalOpen && selectedPost && (
-          <Dialog open={isViewModalOpen} onOpenChange={setIsViewModalOpen}>
-            <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-              <DialogHeader>
-                <DialogTitle className="flex items-center space-x-2">
-                  <Eye className="h-5 w-5" />
-                  <span>게시글 상세 보기</span>
-                </DialogTitle>
-                <div className="flex items-center space-x-2">
-                  {(selectedPost?.status === 'draft' || selectedPost?.status === 'scheduled') && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setIsEditing(!isEditing)}
-                      className="flex items-center space-x-1"
-                    >
-                      {isEditing ? (
-                        <>
-                          <Eye className="h-4 w-4" />
-                          <span>보기 모드</span>
-                        </>
+        <Dialog open={isViewModalOpen} onOpenChange={setIsViewModalOpen}>
+          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center space-x-2">
+                <Eye className="h-5 w-5" />
+                <span>게시글 상세 보기</span>
+              </DialogTitle>
+              <div className="flex items-center space-x-2">
+                {(selectedPost?.status === 'draft' || selectedPost?.status === 'scheduled') && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setIsEditing(!isEditing)}
+                    className="flex items-center space-x-1"
+                  >
+                    {isEditing ? (
+                      <>
+                        <Eye className="h-4 w-4" />
+                        <span>보기 모드</span>
+                      </>
+                    ) : (
+                      <>
+                        <Edit className="h-4 w-4" />
+                        <span>수정 모드</span>
+                      </>
+                    )}
+                  </Button>
+                )}
+                {isEditing && (
+                  <Button
+                    onClick={handleEditSave}
+                    size="sm"
+                    className="bg-blue-600 hover:bg-blue-700 text-white"
+                  >
+                    저장
+                  </Button>
+                )}
+                {selectedPost?.instagram_link && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => window.open(selectedPost.instagram_link, '_blank')}
+                    className="flex items-center space-x-1"
+                  >
+                    <ExternalLink className="h-4 w-4" />
+                    <span>인스타그램 보기</span>
+                  </Button>
+                )}
+
+              </div>
+            </DialogHeader>
+
+            {selectedPost && (
+              <div className="space-y-6">
+                {/* 게시글 기본 정보 */}
+                <div className="flex justify-between items-start pb-4 border-b">
+                  <div className="flex-1">
+                    <h3 className="font-semibold text-gray-900 mb-2">{selectedPost.title || selectedPost.board_topic}</h3>
+                    {/* 인플루언서 정보 */}
+                    <div className="flex items-center space-x-2 text-sm text-gray-500 mt-1">
+                      <div className="w-5 h-5 bg-gradient-to-br from-purple-500 to-pink-500 rounded-full flex items-center justify-center">
+                        <span className="text-white text-xs font-medium">AI</span>
+                      </div>
+                      <span className="font-medium text-gray-700">
+                        {selectedPost.influencerName || selectedPost.author || 'AI 인플루언서'}
+                      </span>
+                    </div>
+                    <div className="flex items-center space-x-2 text-sm text-gray-500 mt-1">
+                      <Calendar className="h-4 w-4" />
+                      {selectedPost.status === 'scheduled' && selectedPost.scheduledAt && selectedPost.scheduledAt.trim() !== '' ? (
+                        <span>예약 발행: {formatDate(selectedPost.scheduledAt || '')}</span>
+                      ) : selectedPost.status === 'published' && selectedPost.publishedAt && selectedPost.publishedAt.trim() !== '' ? (
+                        <span>발행: {formatDate(selectedPost.publishedAt || '')}</span>
+                      ) : selectedPost.status === 'published' ? (
+                        <span>발행됨 (날짜 정보 없음)</span>
+                      ) : selectedPost.status === 'scheduled' ? (
+                        <span>예약됨 (날짜 정보 없음)</span>
                       ) : (
-                        <>
-                          <Edit className="h-4 w-4" />
-                          <span>수정 모드</span>
-                        </>
+                        <span>임시저장</span>
                       )}
-                    </Button>
-                  )}
-                  {isEditing && (
-                    <Button
-                      onClick={handleEditSave}
-                      size="sm"
-                      className="bg-blue-600 hover:bg-blue-700 text-white"
-                    >
-                      저장
-                    </Button>
-                  )}
-                  {selectedPost?.instagram_link && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => window.open(selectedPost.instagram_link, '_blank')}
-                      className="flex items-center space-x-1"
-                    >
-                      <ExternalLink className="h-4 w-4" />
-                      <span>인스타그램 보기</span>
-                    </Button>
-                  )}
-                </div>
-              </DialogHeader>
-              
-              {isDetailLoading ? (
-                // 로딩 중일 때 표시
-                <div className="flex items-center justify-center py-12">
-                  <div className="flex flex-col items-center space-y-4">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-                    <p className="text-gray-600">게시글 정보를 불러오는 중...</p>
+                    </div>
+                  </div>
+
+                  {/* 오른쪽 상단에 배지들 배치 */}
+                  <div className="flex flex-col items-end space-y-2 ml-4">
+                    {selectedPost.platform && (
+                      <Badge className={
+                        selectedPost.platform === "Instagram" ? "bg-pink-100 text-pink-800 whitespace-nowrap" :
+                          selectedPost.platform === "Blog" ? "bg-orange-100 text-orange-800 whitespace-nowrap" :
+                            selectedPost.platform === "Facebook" ? "bg-blue-100 text-blue-800 whitespace-nowrap" :
+                              "bg-gray-100 text-gray-800 whitespace-nowrap"
+                      }>
+                        {selectedPost.platform}
+                      </Badge>
+                    )}
+                    <Badge className={
+                      selectedPost.status === "published" ? "bg-green-100 text-green-800 whitespace-nowrap" :
+                        selectedPost.status === "scheduled" ? "bg-blue-100 text-blue-800 whitespace-nowrap" :
+                          "bg-gray-100 text-gray-800 whitespace-nowrap"
+                    }>
+                      {selectedPost.status === "published" ? "발행됨" :
+                        selectedPost.status === "scheduled" ? "예약됨" : "임시저장"}
+                    </Badge>
                   </div>
                 </div>
-              ) : (
-                // 로딩 완료 후 기존 구조 유지
-                selectedPost && (
-                  <div className="space-y-6">
-                    {/* 게시글 기본 정보 */}
-                    <div className="flex justify-between items-start pb-4 border-b">
-                      <div className="flex-1">
-                        <h3 className="font-semibold text-gray-900 mb-2">{selectedPost.title || selectedPost.board_topic}</h3>
-                        {/* 인플루언서 정보 */}
-                        <div className="flex items-center space-x-2 text-sm text-gray-500 mt-1">
-                          {selectedPost.influencer_image_url ? (
-                            <img
-                              src={selectedPost.influencer_image_url}
-                              alt={selectedPost.influencerName || 'AI 인플루언서'}
-                              className="w-5 h-5 rounded-full object-cover"
-                            />
-                          ) : (
-                            <div className="w-5 h-5 bg-gradient-to-br from-purple-500 to-pink-500 rounded-full flex items-center justify-center">
-                              <span className="text-white text-xs font-medium">AI</span>
-                            </div>
-                          )}
-                          <span className="font-medium text-gray-700">
-                            {selectedPost.influencerName || selectedPost.author || 'AI 인플루언서'}
-                          </span>
-                        </div>
-                        <div className="flex items-center space-x-2 text-sm text-gray-500 mt-1">
-                          <Calendar className="h-4 w-4" />
-                          {selectedPost.status === 'scheduled' && selectedPost.scheduledAt && selectedPost.scheduledAt.trim() !== '' ? (
-                            <span>예약 발행: {formatDate(selectedPost.scheduledAt || '')}</span>
-                          ) : selectedPost.status === 'published' && selectedPost.publishedAt && selectedPost.publishedAt.trim() !== '' ? (
-                            <span>발행: {formatDate(selectedPost.publishedAt || '')}</span>
-                          ) : selectedPost.status === 'published' ? (
-                            <span>발행됨 (날짜 정보 없음)</span>
-                          ) : selectedPost.status === 'scheduled' ? (
-                            <span>예약됨 (날짜 정보 없음)</span>
-                          ) : (
-                            <span>임시저장</span>
-                          )}
-                        </div>
-                      </div>
 
-                      {/* 오른쪽 상단에 배지들 배치 */}
-                      <div className="flex flex-col items-end space-y-2 ml-4">
-                        {selectedPost.platform && (
-                          <Badge className={
-                            selectedPost.platform === "Instagram" ? "bg-pink-100 text-pink-800 whitespace-nowrap" :
-                              selectedPost.platform === "Blog" ? "bg-orange-100 text-orange-800 whitespace-nowrap" :
-                                selectedPost.platform === "Facebook" ? "bg-blue-100 text-blue-800 whitespace-nowrap" :
-                                  "bg-gray-100 text-gray-800 whitespace-nowrap"
-                          }>
-                            {selectedPost.platform}
+                {/* 게시글 내용 */}
+                <div className="space-y-2">
+                  <h4 className="text-sm font-medium text-gray-900">게시글 내용</h4>
+                  {isEditing && (selectedPost?.status === 'draft' || selectedPost?.status === 'scheduled') ? (
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">제목</label>
+                        <Input
+                          value={editTitle}
+                          onChange={(e) => setEditTitle(e.target.value)}
+                          placeholder="게시글 제목을 입력하세요"
+                          className="w-full"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">내용</label>
+                        <textarea
+                          value={editContent}
+                          onChange={(e) => setEditContent(e.target.value)}
+                          placeholder="게시글 내용을 입력하세요"
+                          className="w-full h-32 p-3 border border-gray-300 rounded-md resize-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">해시태그</label>
+                        <Input
+                          value={editHashtags}
+                          onChange={(e) => setEditHashtags(e.target.value)}
+                          placeholder="#해시태그1 #해시태그2"
+                          className="w-full"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">예약 시간</label>
+                        <Input
+                          type="datetime-local"
+                          value={editScheduledAt}
+                          onChange={(e) => setEditScheduledAt(e.target.value)}
+                          className="w-full"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="bg-gray-50 border rounded-lg p-4">
+                      <div className="whitespace-pre-wrap text-gray-800 leading-relaxed">
+                        {selectedPost.content || selectedPost.board_description}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* 해시태그 */}
+                {!isEditing && (
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-medium text-gray-900">해시태그</h4>
+                    <div className="flex flex-wrap gap-2">
+                      {(selectedPost.hashtags || []).map((tag, index) => (
+                        <span key={index} className="text-sm text-blue-600 bg-blue-50 px-3 py-1 rounded-full">
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+
+
+                {/* 미디어 정보 */}
+                {selectedPost.media && (
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-medium text-gray-900">미디어</h4>
+                    <div className="bg-gray-50 border rounded-lg p-4">
+                      <div className="flex items-center space-x-2 mb-2">
+                        <span className="text-sm font-medium text-gray-700">
+                          {selectedPost.media.type === "image" && "이미지"}
+                          {selectedPost.media.type === "video" && "비디오"}
+                          {selectedPost.media.type === "carousel" && "이미지"}
+                        </span>
+                        {selectedPost.media.type === "carousel" && (
+                          <Badge variant="outline" className="text-xs">
+                            {selectedPost.media.urls.length}개 파일
                           </Badge>
                         )}
-                        <Badge className={
-                          selectedPost.status === "published" ? "bg-green-100 text-green-800 whitespace-nowrap" :
-                            selectedPost.status === "scheduled" ? "bg-blue-100 text-blue-800 whitespace-nowrap" :
-                              "bg-gray-100 text-gray-800 whitespace-nowrap"
-                        }>
-                          {selectedPost.status === "published" ? "발행됨" :
-                            selectedPost.status === "scheduled" ? "예약됨" : "임시저장"}
-                        </Badge>
                       </div>
-                    </div>
-
-                    {/* 게시글 내용 */}
-                    <div className="space-y-2">
-                      <h4 className="text-sm font-medium text-gray-900">게시글 내용</h4>
-                      {isEditing && (selectedPost?.status === 'draft' || selectedPost?.status === 'scheduled') ? (
-                        <div className="space-y-4">
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">제목</label>
-                            <Input
-                              value={editTitle}
-                              onChange={(e) => setEditTitle(e.target.value)}
-                              placeholder="게시글 제목을 입력하세요"
-                              className="w-full"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">내용</label>
-                            <textarea
-                              value={editContent}
-                              onChange={(e) => setEditContent(e.target.value)}
-                              placeholder="게시글 내용을 입력하세요"
-                              className="w-full h-32 p-3 border border-gray-300 rounded-md resize-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">해시태그</label>
-                            <Input
-                              value={editHashtags}
-                              onChange={(e) => setEditHashtags(e.target.value)}
-                              placeholder="#해시태그1 #해시태그2"
-                              className="w-full"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">예약 시간</label>
-                            <Input
-                              type="datetime-local"
-                              value={editScheduledAt}
-                              onChange={(e) => setEditScheduledAt(e.target.value)}
-                              className="w-full"
-                            />
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="bg-gray-50 border rounded-lg p-4">
-                          <div className="whitespace-pre-wrap text-gray-800 leading-relaxed">
-                            {selectedPost.content || selectedPost.board_description}
-                          </div>
+                      {selectedPost.media?.urls && selectedPost.media.urls.length > 0 && (
+                        <div className="mt-2 flex gap-2 overflow-x-auto">
+                          {selectedPost.media.urls.map((url, index) => (
+                            <div key={index} className="relative flex-shrink-0">
+                              <img
+                                src={url}
+                                alt={`미디어 ${index + 1}`}
+                                className="w-32 h-32 object-cover rounded-lg border"
+                              />
+                              {selectedPost.media?.urls && selectedPost.media.urls.length > 1 && (
+                                <div className="absolute top-2 right-2 bg-black bg-opacity-50 text-white text-xs px-2 py-1 rounded">
+                                  {index + 1}/{selectedPost.media.urls.length}
+                                </div>
+                              )}
+                            </div>
+                          ))}
                         </div>
                       )}
                     </div>
+                  </div>
+                )}
 
-                    {/* 해시태그 */}
-                    {!isEditing && (
-                      <div className="space-y-2">
-                        <h4 className="text-sm font-medium text-gray-900">해시태그</h4>
-                        <div className="flex flex-wrap gap-2">
-                          {(selectedPost.hashtags || []).map((tag, index) => (
-                            <span key={index} className="text-sm text-blue-600 bg-blue-50 px-3 py-1 rounded-full">
-                              {tag}
+                {/* 성과 지표 */}
+                {selectedPost.status === "published" && selectedPost.engagement && (
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-medium text-gray-900">성과 지표</h4>
+                    <div className="bg-gray-50 rounded-lg p-4">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="text-center">
+                          <div className="flex items-center justify-center space-x-2 mb-1">
+                            <Heart className="h-5 w-5 text-red-500" />
+                            <span className="text-lg font-bold text-gray-900">
+                              {selectedPost.engagement.likes.toLocaleString()}
                             </span>
-                          ))}
+                          </div>
+                          <p className="text-sm text-gray-600">좋아요</p>
                         </div>
-                      </div>
-                    )}
-
-
-                    {/* 미디어 정보 */}
-                    {selectedPost.media && (
-                      <div className="space-y-2">
-                        <h4 className="text-sm font-medium text-gray-900">미디어</h4>
-                        <div className="bg-gray-50 border rounded-lg p-4">
-                          <div className="flex items-center space-x-2 mb-2">
-                            <span className="text-sm font-medium text-gray-700">
-                              {selectedPost.media.type === "image" && "이미지"}
-                              {selectedPost.media.type === "video" && "비디오"}
-                              {selectedPost.media.type === "carousel" && "이미지"}
+                        <div className="text-center">
+                          <div className="flex items-center justify-center space-x-2 mb-1">
+                            <MessageCircle className="h-5 w-5 text-blue-500" />
+                            <span className="text-lg font-bold text-gray-900">
+                              {selectedPost.engagement.comments.toLocaleString()}
                             </span>
-                            {selectedPost.media.type === "carousel" && (
-                              <Badge variant="outline" className="text-xs">
-                                {selectedPost.media.urls.length}개 파일
-                              </Badge>
-                            )}
                           </div>
-                          {selectedPost.media?.urls && selectedPost.media.urls.length > 0 && (
-                            <div className="mt-2 flex gap-2 overflow-x-auto">
-                              {selectedPost.media.urls.map((url, index) => (
-                                <div key={index} className="relative flex-shrink-0">
-                                  <img
-                                    src={url}
-                                    alt={`미디어 ${index + 1}`}
-                                    className="w-32 h-32 object-cover rounded-lg border"
-                                  />
-                                  {selectedPost.media?.urls && selectedPost.media.urls.length > 1 && (
-                                    <div className="absolute top-2 right-2 bg-black bg-opacity-50 text-white text-xs px-2 py-1 rounded">
-                                      {index + 1}/{selectedPost.media.urls.length}
-                                    </div>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
-                          )}
+                          <p className="text-sm text-gray-600">댓글</p>
                         </div>
-                      </div>
-                    )}
-
-                    {/* 성과 지표 */}
-                    {selectedPost.status === "published" && selectedPost.engagement && (
-                      <div className="space-y-2">
-                        <h4 className="text-sm font-medium text-gray-900">성과 지표</h4>
-                        <div className="bg-gray-50 rounded-lg p-4">
-                          <div className="grid grid-cols-2 gap-4">
-                            <div className="text-center">
-                              <div className="flex items-center justify-center space-x-2 mb-1">
-                                <Heart className="h-5 w-5 text-red-500" />
-                                <span className="text-lg font-bold text-gray-900">
-                                  {selectedPost.engagement.likes.toLocaleString()}
-                                </span>
-                              </div>
-                              <p className="text-sm text-gray-600">좋아요</p>
-                            </div>
-                            <div className="text-center">
-                              <div className="flex items-center justify-center space-x-2 mb-1">
-                                <MessageCircle className="h-5 w-5 text-blue-500" />
-                                <span className="text-lg font-bold text-gray-900">
-                                  {selectedPost.engagement.comments.toLocaleString()}
-                                </span>
-                              </div>
-                              <p className="text-sm text-gray-600">댓글</p>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* 플랫폼별 미리보기 */}
-                    <div className="space-y-2">
-                      <h4 className="text-sm font-medium text-gray-900">플랫폼 미리보기</h4>
-                      <div className="bg-gray-50 border rounded-lg p-4">
-                        {renderPlatformSpecificPost(selectedPost)}
                       </div>
                     </div>
-
-                    {/* 임시저장일 때만 재발행/삭제 버튼 */}
-                    {selectedPost && selectedPost.status === 'draft' && (
-                      <div className="flex gap-2 mt-8 justify-end">
-                        <Button
-                          variant="default"
-                          onClick={() => handlePublishPost(selectedPost.id || selectedPost.board_id)}
-                        >
-                          재발행
-                        </Button>
-                        <Button
-                          variant="destructive"
-                          onClick={async () => {
-                            if (window.confirm('정말로 이 임시저장 게시글을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.')) {
-                              try {
-                                await apiClient.delete(`/api/v1/boards/${selectedPost.id || selectedPost.board_id}`)
-                                setIsViewModalOpen(false)
-                                setPosts(posts => posts.filter(p => (p.id || p.board_id) !== (selectedPost.id || selectedPost.board_id)))
-                                toast({
-                                  title: '삭제 완료',
-                                  description: '임시저장 게시글이 삭제되었습니다.',
-                                  variant: 'default',
-                                })
-                              } catch (error) {
-                                toast({
-                                  title: '삭제 실패',
-                                  description: '게시글 삭제 중 오류가 발생했습니다.',
-                                  variant: 'destructive',
-                                })
-                              }
-                            }
-                          }}
-                        >
-                          삭제
-                        </Button>
-                      </div>
-                    )}
                   </div>
-                )
-              )}
-            </DialogContent>
-          </Dialog>
-        )}
+                )}
+
+
+
+                {/* 플랫폼별 미리보기 */}
+                <div className="space-y-2">
+                  <h4 className="text-sm font-medium text-gray-900">플랫폼 미리보기</h4>
+                  <div className="bg-gray-50 border rounded-lg p-4">
+                    {renderPlatformSpecificPost(selectedPost)}
+                  </div>
+                </div>
+
+                {/* 임시저장일 때만 재발행/삭제 버튼 */}
+                {selectedPost && selectedPost.status === 'draft' && (
+                  <div className="flex gap-2 mt-8 justify-end">
+                    <Button
+                      variant="default"
+                      onClick={() => handlePublishPost(selectedPost.id || selectedPost.board_id)}
+                    >
+                      재발행
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      onClick={async () => {
+                        if (window.confirm('정말로 이 임시저장 게시글을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.')) {
+                          try {
+                            await apiClient.delete(`/api/v1/boards/${selectedPost.id || selectedPost.board_id}`)
+                            setIsViewModalOpen(false)
+                            setPosts(posts => posts.filter(p => (p.id || p.board_id) !== (selectedPost.id || selectedPost.board_id)))
+                            toast({
+                              title: '삭제 완료',
+                              description: '임시저장 게시글이 삭제되었습니다.',
+                              variant: 'default',
+                            })
+                          } catch (error) {
+                            toast({
+                              title: '삭제 실패',
+                              description: '게시글 삭제 중 오류가 발생했습니다.',
+                              variant: 'destructive',
+                            })
+                          }
+                        }
+                      }}
+                    >
+                      삭제
+                    </Button>
+                  </div>
+                )}
+
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   )

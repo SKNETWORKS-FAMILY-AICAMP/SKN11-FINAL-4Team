@@ -75,7 +75,10 @@ export default function ChatPage() {
     
     setIsModelLoading(true)
     try {
+      console.log(`🔍 모델 데이터 로드 시작: influencer_id=${params.id}`);
       const data = await ModelService.getInfluencer(params.id as string)
+      console.log('📊 로드된 모델 데이터:', data);
+      
       setModel({
         id: data.influencer_id,
         name: data.influencer_name,
@@ -86,8 +89,15 @@ export default function ChatPage() {
         group_id: String(data.group_id || ''),
         image_url: data.image_url || undefined, // 올바른 필드명 사용
       })
+      console.log('✅ 모델 데이터 로드 성공');
     } catch (error: any) {
       console.error("Error loading model data:", error)
+      console.error('에러 상세:', {
+        status: error?.status,
+        message: error?.message,
+        response: error?.response,
+        data: error?.data
+      })
       
       // 토큰 검증 실패로 인한 401/403 에러 시 로그아웃
       if (error?.status === 401 || error?.status === 403) {
@@ -107,22 +117,41 @@ export default function ChatPage() {
     if (!model.id) return;
 
     const accessToken = tokenUtils.getToken();
-    const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'ws://localhost:8000';
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
+    
+    // HTTP URL을 WebSocket URL로 변환 (이미지 생성 페이지와 동일한 방식)
+    const wsProtocol = backendUrl.startsWith('https') ? 'wss:' : 'ws:';
+    const wsHost = backendUrl.replace(/^https?:\/\//, '');
+    const wsUrl = `${wsProtocol}//${wsHost}`;
 
     // influencer_id를 base64로 인코딩 (model_repo 대신 influencer_id 사용)
     const influencerIdEncoded = btoa(model.id);
 
-    const ws = new WebSocket(
-      `${apiBaseUrl}/api/v1/chatbot/chatbot/${influencerIdEncoded}?group_id=${model.group_id}&influencer_id=${model.id}&token=${accessToken}`
-    );
+    const wsFullUrl = `${wsUrl}/api/v1/chatbot/chatbot/${influencerIdEncoded}?group_id=${model.group_id}&influencer_id=${model.id}&token=${accessToken}`;
+    
+    console.log('🔌 WebSocket 연결 시도');
+    console.log(`- Backend URL: ${backendUrl}`);
+    console.log(`- WS URL: ${wsUrl}`);
+    console.log(`- Full URL: ${wsFullUrl}`);
+    console.log(`- Model ID: ${model.id}`);
+    console.log(`- Group ID: ${model.group_id}`);
+    console.log(`- Influencer ID (encoded): ${influencerIdEncoded}`);
+    console.log(`- Token 존재: ${accessToken ? 'Yes' : 'No'}`);
+    console.log(`- Token 길이: ${accessToken?.length || 0}`);
+    
+    const ws = new WebSocket(wsFullUrl);
     wsRef.current = ws;
 
     ws.onopen = () => {
-      // console.log("WebSocket 연결 성공");
+      console.log("WebSocket 연결 성공");
+      console.log(`연결 URL: ${ws.url}`);
+      console.log(`연결 상태: ${ws.readyState}`);
       setConnectionStatus('connected');
     };
 
     ws.onmessage = (event) => {
+      console.log('📨 WebSocket 메시지 수신:', event.data);
+      
       // 타임아웃 해제
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);
@@ -132,6 +161,7 @@ export default function ChatPage() {
       setIsLoading(false); // 응답 수신 시 로딩 상태 해제
       try {
         const data = JSON.parse(event.data);
+        console.log('📋 파싱된 메시지:', data);
 
         if (data.type === "token") {
           // 스트리밍 토큰 처리
@@ -144,35 +174,9 @@ export default function ChatPage() {
               const newContent = data.content;
               const currentContent = lastMessage.content;
 
-              // 로딩 메시지인지 확인 (단계별 로딩 메시지 패턴)
-              const loadingPatterns = [
-                /문서를 뒤적이는 중\.\.\./,
-                /관련 자료를 찾는 중\.\.\./,
-                /정보를 검색하는 중\.\.\./,
-                /컴퓨터를 뒤져보는 중\.\.\./,
-                /도구를 사용하는 중\.\.\./,
-                /외부 정보를 확인하는 중\.\.\./,
-                /답변을 생각하는 중\.\.\./,
-                /생각을 정리하는 중\.\.\./,
-                /답변을 작성하는 중\.\.\./,
-                /.*이\(가\) 문서를 뒤적이는 중\.\.\./,
-                /.*이\(가\) 관련 자료를 찾는 중\.\.\./,
-                /.*이\(가\) 컴퓨터를 뒤져보는 중\.\.\./,
-                /.*이\(가\) 도구를 사용하는 중\.\.\./,
-                /.*이\(가\) 답변을 생각하는 중\.\.\./,
-                /.*이\(가\) 생각을 정리하는 중\.\.\./
-              ];
-
-              const isLoadingMessage = loadingPatterns.some(pattern => pattern.test(currentContent));
-
-              if (isLoadingMessage) {
-                // 로딩 메시지인 경우 새로운 내용으로 교체
-                lastMessage.content = newContent;
-              } else {
-                // 이미 답변이 시작된 경우 중복 제거 후 추가
-                if (!currentContent.endsWith(newContent)) {
-                  lastMessage.content += newContent;
-                }
+              // 중복 제거: 새로운 토큰이 기존 내용의 끝과 중복되지 않는지 확인
+              if (!currentContent.endsWith(newContent)) {
+                lastMessage.content += newContent;
               }
             } else {
               // 새로운 스트리밍 메시지 생성
@@ -255,6 +259,16 @@ export default function ChatPage() {
 
     ws.onerror = (e) => {
       console.error("WebSocket 에러:", e);
+      console.error(`WebSocket 에러 상세:`);
+      console.error(`- Type: ${e.type}`);
+      console.error(`- Target: ${e.target}`);
+      console.error(`- ReadyState: ${ws.readyState}`);
+      console.error(`- URL: ${ws.url}`);
+      console.error(`- Protocol: ${ws.protocol}`);
+      console.error(`- Extensions: ${ws.extensions}`);
+      console.error(`- Binary Type: ${ws.binaryType}`);
+      console.error(`- Buffered Amount: ${ws.bufferedAmount}`);
+      
       setConnectionStatus('error');
       setMessages(prev => [...prev, {
         id: Date.now().toString(),
@@ -264,8 +278,17 @@ export default function ChatPage() {
       }]);
     };
 
-    ws.onclose = () => {
-      // console.log("WebSocket 연결 종료");
+    ws.onclose = (event) => {
+      console.log("WebSocket 연결 종료");
+      console.log(`- Code: ${event.code}`);
+      console.log(`- Reason: ${event.reason}`);
+      console.log(`- Was Clean: ${event.wasClean}`);
+      console.log(`- ReadyState: ${ws.readyState}`);
+      
+      if (event.code === 1006) {
+        console.error("비정상적인 연결 종료 - 서버가 연결을 거부했거나 네트워크 문제가 있습니다.");
+      }
+      
       setConnectionStatus('disconnected');
     };
 
@@ -275,58 +298,6 @@ export default function ChatPage() {
       }
     };
   }, [model]);
-
-  // 단계별 로딩 메시지 생성
-  const getLoadingMessage = (stage: 'rag' | 'mcp' | 'sllm' = 'sllm') => {
-    const stageMessages = {
-      rag: [
-        "문서를 뒤적이는 중...",
-        "관련 자료를 찾는 중...",
-        "정보를 검색하는 중..."
-      ],
-      mcp: [
-        "컴퓨터를 뒤져보는 중...",
-        "도구를 사용하는 중...",
-        "외부 정보를 확인하는 중..."
-      ],
-      sllm: [
-        "답변을 생각하는 중...",
-        "생각을 정리하는 중...",
-        "답변을 작성하는 중..."
-      ]
-    };
-    
-    const messages = stageMessages[stage];
-    const randomMessage = messages[Math.floor(Math.random() * messages.length)];
-    
-    // 인플루언서 이름이 있으면 맞춤 메시지
-    if (model?.name) {
-      const customMessages = {
-        rag: [
-          `${model.name}이(가) 문서를 뒤적이는 중...`,
-          `${model.name}이(가) 관련 자료를 찾는 중...`
-        ],
-        mcp: [
-          `${model.name}이(가) 컴퓨터를 뒤져보는 중...`,
-          `${model.name}이(가) 도구를 사용하는 중...`
-        ],
-        sllm: [
-          `${model.name}이(가) 답변을 생각하는 중...`,
-          `${model.name}이(가) 생각을 정리하는 중...`
-        ]
-      };
-      
-      const customMessageList = customMessages[stage];
-      const customMessage = customMessageList[Math.floor(Math.random() * customMessageList.length)];
-      
-      // 50% 확률로 맞춤 메시지, 50% 확률로 일반 메시지
-      if (Math.random() < 0.5) {
-        return customMessage;
-      }
-    }
-    
-    return randomMessage;
-  };
 
   // 메시지 전송
   const sendMessage = async () => {
@@ -343,16 +314,6 @@ export default function ChatPage() {
     setInputMessage("");
     setIsLoading(true);
 
-    // 초기 로딩 메시지 (RAG 단계)
-    const preparingMessage: Message = {
-      id: (Date.now() + 1).toString(),
-      content: getLoadingMessage('rag'),
-      sender: "bot",
-      timestamp: new Date(),
-      isStreaming: true
-    };
-    setMessages(prev => [...prev, preparingMessage]);
-
     try {
       // 1단계: RAG 분기처리 (문서 검색)
       let ragResult: string | null = null;
@@ -366,43 +327,8 @@ export default function ChatPage() {
         if (ragResponse && ragResponse.response && ragResponse.response.trim()) {
           ragResult = ragResponse.response.trim();
           console.log("✅ RAG 처리 성공:", ragResult.substring(0, 100) + "...");
-          
-          // RAG 결과가 있으면 SLLM으로 자연스러운 답변 생성
-          if (connectionStatus === 'connected' && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-            try {
-              const prompt = `사용자 질문: ${currentMessage}\n참고 문서 내용: ${ragResult}\n위 문서 내용을 바탕으로 답변해 주세요.`;
-              wsRef.current.send(prompt);
-              
-              // 타임아웃 설정 (30초)
-              timeoutRef.current = setTimeout(() => {
-                setIsLoading(false);
-                setMessages(prev => {
-                  const newMessages = [...prev];
-                  const lastMessage = newMessages[newMessages.length - 1];
-                  if (lastMessage && lastMessage.isStreaming) {
-                    lastMessage.content = "응답 시간이 초과되었습니다. 다시 시도해주세요.";
-                    lastMessage.isStreaming = false;
-                  }
-                  return newMessages;
-                });
-              }, 30000);
-              return;
-            } catch (error) {
-              console.error("RAG 결과 처리 중 오류:", error);
-              // RAG 결과 처리 실패 시 MCP로 fallback
-            }
-          }
         } else {
           console.log("❌ RAG 처리 실패 또는 문서 없음, MCP로 전환");
-          // MCP 단계로 전환 시 메시지 업데이트
-          setMessages(prev => {
-            const newMessages = [...prev];
-            const lastMessage = newMessages[newMessages.length - 1];
-            if (lastMessage && lastMessage.isStreaming) {
-              lastMessage.content = getLoadingMessage('mcp');
-            }
-            return newMessages;
-          });
         }
       } catch (error: any) {
         console.log("❌ RAG 처리 중 오류:", error.message);
@@ -426,15 +352,12 @@ export default function ChatPage() {
           // 타임아웃 설정 (30초)
           timeoutRef.current = setTimeout(() => {
             setIsLoading(false);
-            setMessages(prev => {
-              const newMessages = [...prev];
-              const lastMessage = newMessages[newMessages.length - 1];
-              if (lastMessage && lastMessage.isStreaming) {
-                lastMessage.content = "응답 시간이 초과되었습니다. 다시 시도해주세요.";
-                lastMessage.isStreaming = false;
-              }
-              return newMessages;
-            });
+            setMessages(prev => [...prev, {
+              id: (Date.now() + 1).toString(),
+              content: "응답 시간이 초과되었습니다. 다시 시도해주세요.",
+              sender: "bot",
+              timestamp: new Date(),
+            }]);
           }, 30000);
           return;
         } catch (error) {
@@ -453,43 +376,8 @@ export default function ChatPage() {
         if (mcpResponse && mcpResponse.response && mcpResponse.response.trim()) {
           mcpResult = mcpResponse.response.trim();
           console.log("✅ MCP 처리 성공:", mcpResult.substring(0, 100) + "...");
-          
-          // MCP 결과가 있으면 SLLM으로 자연스러운 답변 생성
-          if (connectionStatus === 'connected' && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-            try {
-              const prompt = `사용자 질문: ${currentMessage}\n도구 결과: ${mcpResult}\n위 정보를 바탕으로 답변해 주세요.`;
-              wsRef.current.send(prompt);
-              
-              // 타임아웃 설정 (30초)
-              timeoutRef.current = setTimeout(() => {
-                setIsLoading(false);
-                setMessages(prev => {
-                  const newMessages = [...prev];
-                  const lastMessage = newMessages[newMessages.length - 1];
-                  if (lastMessage && lastMessage.isStreaming) {
-                    lastMessage.content = "응답 시간이 초과되었습니다. 다시 시도해주세요.";
-                    lastMessage.isStreaming = false;
-                  }
-                  return newMessages;
-                });
-              }, 30000);
-              return;
-            } catch (error) {
-              console.error("MCP 결과 처리 중 오류:", error);
-              // MCP 결과 처리 실패 시 SLLM으로 fallback
-            }
-          }
         } else {
           console.log("❌ MCP 처리 실패 또는 도구 불필요, SLLM으로 전환");
-          // SLLM 단계로 전환 시 메시지 업데이트
-          setMessages(prev => {
-            const newMessages = [...prev];
-            const lastMessage = newMessages[newMessages.length - 1];
-            if (lastMessage && lastMessage.isStreaming) {
-              lastMessage.content = getLoadingMessage('sllm');
-            }
-            return newMessages;
-          });
         }
       } catch (error: any) {
         console.log("❌ MCP 처리 중 오류:", error.message);
@@ -513,15 +401,12 @@ export default function ChatPage() {
           // 타임아웃 설정 (30초)
           timeoutRef.current = setTimeout(() => {
             setIsLoading(false);
-            setMessages(prev => {
-              const newMessages = [...prev];
-              const lastMessage = newMessages[newMessages.length - 1];
-              if (lastMessage && lastMessage.isStreaming) {
-                lastMessage.content = "응답 시간이 초과되었습니다. 다시 시도해주세요.";
-                lastMessage.isStreaming = false;
-              }
-              return newMessages;
-            });
+            setMessages(prev => [...prev, {
+              id: (Date.now() + 1).toString(),
+              content: "응답 시간이 초과되었습니다. 다시 시도해주세요.",
+              sender: "bot",
+              timestamp: new Date(),
+            }]);
           }, 30000);
           return;
         } catch (error) {
@@ -538,56 +423,44 @@ export default function ChatPage() {
           // 타임아웃 설정 (30초)
           timeoutRef.current = setTimeout(() => {
             setIsLoading(false);
-            setMessages(prev => {
-              const newMessages = [...prev];
-              const lastMessage = newMessages[newMessages.length - 1];
-              if (lastMessage && lastMessage.isStreaming) {
-                lastMessage.content = "응답 시간이 초과되었습니다. 다시 시도해주세요.";
-                lastMessage.isStreaming = false;
-              }
-              return newMessages;
-            });
+            setMessages(prev => [...prev, {
+              id: (Date.now() + 1).toString(),
+              content: "응답 시간이 초과되었습니다. 다시 시도해주세요.",
+              sender: "bot",
+              timestamp: new Date(),
+            }]);
           }, 30000);
         } catch (error) {
           console.error("SLLM 처리 중 오류:", error);
           setIsLoading(false);
-          setMessages(prev => {
-            const newMessages = [...prev];
-            const lastMessage = newMessages[newMessages.length - 1];
-            if (lastMessage && lastMessage.isStreaming) {
-              lastMessage.content = "메시지 전송에 실패했습니다. 다시 시도해주세요.";
-              lastMessage.isStreaming = false;
-            }
-            return newMessages;
-          });
+          setMessages(prev => [...prev, {
+            id: (Date.now() + 1).toString(),
+            content: "메시지 전송에 실패했습니다. 다시 시도해주세요.",
+            sender: "bot",
+            timestamp: new Date(),
+          }]);
         }
         return;
       }
 
       // 6단계: WebSocket 연결 불가
       setIsLoading(false);
-      setMessages(prev => {
-        const newMessages = [...prev];
-        const lastMessage = newMessages[newMessages.length - 1];
-        if (lastMessage && lastMessage.isStreaming) {
-          lastMessage.content = "서버와의 연결이 끊어졌습니다. 재연결 버튼을 눌러주세요.";
-          lastMessage.isStreaming = false;
-        }
-        return newMessages;
-      });
+      setMessages(prev => [...prev, {
+        id: (Date.now() + 1).toString(),
+        content: "서버와의 연결이 끊어졌습니다. 재연결 버튼을 눌러주세요.",
+        sender: "bot",
+        timestamp: new Date(),
+      }]);
 
     } catch (error) {
       console.error("메시지 처리 중 오류:", error);
       setIsLoading(false);
-      setMessages(prev => {
-        const newMessages = [...prev];
-        const lastMessage = newMessages[newMessages.length - 1];
-        if (lastMessage && lastMessage.isStreaming) {
-          lastMessage.content = "메시지 처리 중 오류가 발생했습니다. 다시 시도해주세요.";
-          lastMessage.isStreaming = false;
-        }
-        return newMessages;
-      });
+      setMessages(prev => [...prev, {
+        id: (Date.now() + 1).toString(),
+        content: "메시지 처리 중 오류가 발생했습니다. 다시 시도해주세요.",
+        sender: "bot",
+        timestamp: new Date(),
+      }]);
     }
   };
 
@@ -751,26 +624,22 @@ export default function ChatPage() {
                     message.sender === "user" ? "justify-end" : "justify-start"
                   }`}
                 >
-                  {message.sender === "user" ? (
-                    // 사용자 메시지: 오른쪽 정렬, 아이콘 없음
-                    <div className="max-w-[70%] rounded-lg px-4 py-2 bg-blue-500 text-white">
-                      <p className="text-sm whitespace-pre-wrap">{message.content}</p>
-                      {message.isStreaming && (
-                        <div className="flex items-center mt-1">
-                          <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                          <span className="text-xs text-blue-100">생성 중...</span>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    // 봇 메시지: 왼쪽 정렬, 왼쪽에 아이콘
-                    <div className="flex items-start space-x-2 max-w-[70%]">
+                  <div
+                    className={`max-w-[70%] rounded-lg px-4 py-2 ${
+                      message.sender === "user"
+                        ? "bg-blue-500 text-white"
+                        : "bg-gray-100 text-gray-900"
+                    }`}
+                  >
+                    <div className="flex items-start space-x-2">
                       <Avatar className="h-6 w-6 flex-shrink-0">
-                        <AvatarFallback className="text-xs bg-gray-200 text-gray-700">
-                          <Bot className="h-3 w-3" />
+                        <AvatarFallback className={`text-xs ${
+                          message.sender === "user" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700"
+                        }`}>
+                          {message.sender === "user" ? <User className="h-3 w-3" /> : <Bot className="h-3 w-3" />}
                         </AvatarFallback>
                       </Avatar>
-                      <div className="flex-1 rounded-lg px-4 py-2 bg-gray-100 text-gray-900">
+                      <div className="flex-1">
                         <p className="text-sm whitespace-pre-wrap">{message.content}</p>
                         {message.isStreaming && (
                           <div className="flex items-center mt-1">
@@ -780,7 +649,7 @@ export default function ChatPage() {
                         )}
                       </div>
                     </div>
-                  )}
+                  </div>
                 </div>
               ))}
               <div ref={messagesEndRef} />
@@ -802,7 +671,7 @@ export default function ChatPage() {
                     <Textarea
                       value={inputMessage}
                       onChange={(e) => setInputMessage(e.target.value)}
-                      onKeyPress={handleKeyPress}
+                      onKeyDown={handleKeyPress}
                       placeholder={
                         connectionStatus === 'connected' ? "메시지를 입력하세요..." :
                           connectionStatus === 'connecting' ? "연결 중입니다..." :
