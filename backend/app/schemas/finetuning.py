@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from datetime import datetime
 
 
@@ -28,3 +28,11 @@ class FineTuningResultResponse(BaseModel):
     message: str
     task_id: str
     error: Optional[str] = None
+
+
+class QADataConversionRequest(BaseModel):
+    """QA 데이터 변환 요청"""
+    qa_data: List[Dict[str, str]]
+    influencer_name: str
+    personality: str
+    style_info: Optional[str] = ""

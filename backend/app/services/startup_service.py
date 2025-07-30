@@ -227,7 +227,7 @@ class StartupService:
                         from app.services.influencers.crud import get_influencer_by_id
 
                         try:
-                            influencer_data = get_influencer_by_id(
+                            influencer_data = await get_influencer_by_id(
                                 db, user_id_for_check, batch_job.influencer_id
                             )
                         except HTTPException:
@@ -378,7 +378,7 @@ class StartupService:
             cleaned_count = await self.cleanup_old_batch_jobs()
 
             logger.info(
-                f"✅ 시작시 작업 완료 - 재시작: {restarted_count}개, 정리: {cleaned_count}개, 어댑터 로드: {loaded_count}개"
+                f"✅ 시작시 작업 완료 - 재시작: {restarted_count}개, 정리: {cleaned_count}개"
             )
 
 

@@ -406,9 +406,13 @@ class VLLMRunPodManager(BaseRunPodManager):
     @property
     def env_vars(self) -> List[Dict[str, str]]:
         return [
-            {"key": "MODEL_NAME", "value": "meta-llama/Llama-2-7b-chat-hf"},
+            {"key": "MODEL_NAME", "value": "LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct"},
             {"key": "MAX_MODEL_LEN", "value": "4096"},
-            {"key": "TENSOR_PARALLEL_SIZE", "value": "1"}
+            {"key": "TENSOR_PARALLEL_SIZE", "value": "1"},
+            {"key": "GPU_MEMORY_UTILIZATION", "value": "0.85"},
+            {"key": "DISABLE_V2_BLOCK_MANAGER", "value": "true"},
+            {"key": "VLLM_ENGINE_ARGS", "value": "--gpu-memory-utilization 0.85 --max-model-len 4096"},
+            {"key": "PYTORCH_CUDA_ALLOC_CONF", "value": "expandable_segments:True"}
         ]
     
     @property
@@ -437,9 +441,13 @@ class FinetuningRunPodManager(BaseRunPodManager):
     @property
     def env_vars(self) -> List[Dict[str, str]]:
         return [
-            {"key": "BASE_MODEL", "value": "meta-llama/Llama-2-7b-chat-hf"},
+            {"key": "BASE_MODEL", "value": "LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct"},
             {"key": "TRAINING_FRAMEWORK", "value": "axolotl"},
-            {"key": "MAX_STEPS", "value": "1000"}
+            {"key": "MAX_STEPS", "value": "1000"},
+            {"key": "GPU_MEMORY_UTILIZATION", "value": "0.85"},
+            {"key": "DISABLE_V2_BLOCK_MANAGER", "value": "true"},
+            {"key": "VLLM_ENGINE_ARGS", "value": "--gpu-memory-utilization 0.85 --max-model-len 4096"},
+            {"key": "PYTORCH_CUDA_ALLOC_CONF", "value": "expandable_segments:True"}
         ]
     
     @property

@@ -433,8 +433,8 @@ class InfluencerFineTuningService:
                     influencer_name, personality, style_info
                 )
 
-            # QA 데이터 변환 (vLLM 서버 사용)
-            finetuning_data = await convert_qa_data_for_finetuning(
+            # QA 데이터 변환 (백엔드에서 직접 처리)
+            finetuning_data = convert_qa_data_for_finetuning(
                 qa_data, influencer_name, personality, style_info
             )
 
@@ -480,6 +480,14 @@ class InfluencerFineTuningService:
             # RunPod Serverless로 파인튜닝 요청
             logger.info(f"🚀 RunPod Serverless로 파인튜닝 요청: {hf_repo_id}")
             
+            logger.info(f"📋 RunPod 파인튜닝 요청 파라미터:")
+            logger.info(f"  - task_id: {task_id or f'ft_{influencer_id}_{int(time.time())}'}")
+            logger.info(f"  - qa_data 개수: {len(qa_data)}")
+            logger.info(f"  - system_message 길이: {len(system_message or system_prompt or '')}")
+            logger.info(f"  - hf_repo_id: {hf_repo_id}")
+            logger.info(f"  - training_epochs: {epochs}")
+            logger.info(f"  - influencer_id: {influencer_id}")
+            
             result = await self.runpod_client.start_finetuning(
                 task_id=task_id or f"ft_{influencer_id}_{int(time.time())}",
                 qa_data=qa_data,
@@ -490,12 +498,21 @@ class InfluencerFineTuningService:
                 influencer_id=influencer_id
             )
 
-            runpod_job_id = result.get("id")
-            if runpod_job_id:
-                logger.info(f"✅ RunPod 파인튜닝 작업 제출 완료: job_id={runpod_job_id}")
-                return runpod_job_id
+            logger.info(f"📊 RunPod 응답: {result}")
+            
+            if result.get("success"):
+                runpod_job_id = result.get("job_id")
+                if runpod_job_id:
+                    logger.info(f"✅ RunPod 파인튜닝 작업 제출 완료: job_id={runpod_job_id}")
+                    return runpod_job_id
+                else:
+                    error_msg = f"RunPod 응답에 job_id가 없음: {result}"
+                    logger.error(error_msg)
+                    raise Exception(error_msg)
             else:
-                raise Exception("RunPod 파인튜닝 작업 시작 실패")
+                error_msg = f"RunPod 파인튜닝 작업 시작 실패: {result.get('error', 'Unknown error')}"
+                logger.error(error_msg)
+                raise Exception(error_msg)
 
         except Exception as e:
             logger.error(f"RunPod 파인튜닝 실행 중 오류: {e}")
@@ -788,6 +805,13 @@ class InfluencerFineTuningService:
             )
 
             # 파인튜닝 작업 시작 (모델 인스턴스 직접 사용)
+            logger.info(f"📝 파인튜닝 작업 시작 중...")
+            logger.info(f"  - influencer_id: {influencer_id}")
+            logger.info(f"  - s3_qa_file_url: {s3_qa_file_url}")
+            logger.info(f"  - task_id: {task_id}")
+            logger.info(f"  - hf_token 존재: {'Yes' if hf_token else 'No'}")
+            logger.info(f"  - hf_username: {hf_username}")
+            
             ft_task_id = await self.start_finetuning_task(
                 influencer_id=influencer_id,
                 qa_task_id=f"startup_restart_{influencer_id}",
@@ -796,11 +820,16 @@ class InfluencerFineTuningService:
                 db=db,
                 task_id=task_id
             )
+            
+            logger.info(f"📝 파인튜닝 작업 ID 생성됨: {ft_task_id}")
 
             # 파인튜닝 실행
+            logger.info(f"🚀 파인튜닝 실행 시작...")
             success = await self.execute_finetuning_task(
                 ft_task_id, influencer_data, hf_token, db
             )
+            
+            logger.info(f"📊 파인튜닝 실행 결과: {'성공' if success else '실패'}")
 
             if success:
                 logger.info(f"✅ 인플루언서 파인튜닝 자동 시작 성공: {influencer_id}")
