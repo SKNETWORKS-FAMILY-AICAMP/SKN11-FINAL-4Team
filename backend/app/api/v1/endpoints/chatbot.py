@@ -103,19 +103,90 @@ chat_histories: Dict[str, ChatHistory] = {}
 async def chatbot(
     websocket: WebSocket,
     lora_repo: str,
-    group_id: int = Query(...),
-    influencer_id: str = Query(None),
-    token: str = Query(...),  # JWT 토큰 필수
-    db: Session = Depends(get_db),
 ):
+    # 매우 상세한 연결 정보 로그
+    client_host = websocket.client.host if websocket.client else "unknown"
+    client_port = websocket.client.port if websocket.client else "unknown"
+    
+    logger.info(f"🔗 [WS] WebSocket 연결 요청 시작")
+    logger.info(f"🔗 [WS] Client: {client_host}:{client_port}")
+    logger.info(f"🔗 [WS] Path: {websocket.scope.get('path', 'unknown')}")
+    logger.info(f"🔗 [WS] Method: {websocket.scope.get('method', 'unknown')}")
+    logger.info(f"🔗 [WS] Scheme: {websocket.scope.get('scheme', 'unknown')}")
+    
+    # Headers 로깅 (보안상 민감한 정보 제외)
+    headers = dict(websocket.scope.get("headers", []))
+    safe_headers = {}
+    for header_name, header_value in headers.items():
+        header_name_str = header_name.decode() if isinstance(header_name, bytes) else str(header_name)
+        header_value_str = header_value.decode() if isinstance(header_value, bytes) else str(header_value)
+        
+        # 민감한 헤더는 마스킹
+        if header_name_str.lower() in ['authorization', 'cookie', 'token']:
+            safe_headers[header_name_str] = f"{header_value_str[:10]}..." if len(header_value_str) > 10 else "***"
+        else:
+            safe_headers[header_name_str] = header_value_str
+    
+    logger.info(f"🔗 [WS] Headers: {safe_headers}")
+    
+    # WebSocket query 파라미터 수동 파싱
+    try:
+        from urllib.parse import parse_qs, urlparse
+        query_string = str(websocket.scope.get("query_string", b""), "utf-8")
+        query_params = parse_qs(query_string)
+        
+        logger.info(f"[WS] Raw query string: {query_string}")
+        logger.info(f"[WS] Parsed query params: {query_params}")
+        
+        # 필수 파라미터 추출
+        group_id = query_params.get("group_id", [None])[0]
+        influencer_id = query_params.get("influencer_id", [None])[0]
+        token = query_params.get("token", [None])[0]
+        
+        logger.info(f"[WS] 요청 파라미터: lora_repo={lora_repo}, group_id={group_id}, influencer_id={influencer_id}")
+        
+        if not group_id:
+            logger.error(f"[WS] group_id 파라미터가 없음")
+            await websocket.close(code=1003, reason="Missing group_id parameter")
+            return
+            
+        if not token:
+            logger.error(f"[WS] token 파라미터가 없음")
+            await websocket.close(code=1003, reason="Missing token parameter")
+            return
+        
+        try:
+            group_id = int(group_id)
+        except (ValueError, TypeError):
+            logger.error(f"[WS] group_id가 유효한 정수가 아님: {group_id}")
+            await websocket.close(code=1003, reason="Invalid group_id parameter")
+            return
+        
+        logger.info(f"[WS] 토큰 길이: {len(token)}자")
+        logger.info(f"[WS] 토큰 앞 50자: {token[:50]}..." if len(token) > 50 else f"[WS] 토큰 전체: {token}")
+        
+    except Exception as e:
+        logger.error(f"[WS] Query 파라미터 파싱 실패: {e}")
+        await websocket.close(code=1003, reason="Parameter parsing failed")
+        return
+    
     # WebSocket 연결을 먼저 수락
-    await websocket.accept()
+    try:
+        await websocket.accept()
+        logger.info(f"[WS] WebSocket 연결 수락 완료")
+    except Exception as e:
+        logger.error(f"[WS] WebSocket 연결 수락 실패: {e}")
+        return
     
     # JWT 토큰 검증 (연결 후)
     try:
         from app.core.security import verify_token
+        
+        logger.info(f"[WS] JWT 토큰 검증 시작...")
         payload = verify_token(token)
+        
         if not payload:
+            logger.error(f"[WS] JWT 토큰 검증 실패: payload가 None")
             await websocket.send_text(
                 json.dumps({
                     "error_code": "INVALID_TOKEN",
@@ -126,14 +197,45 @@ async def chatbot(
             return
         
         user_id = payload.get("sub")
-        logger.info(f"[WS] 토큰 검증 성공: user_id={user_id}")
+        user_email = payload.get("email")
+        user_name = payload.get("name")
+        groups = payload.get("groups", [])
+        permissions = payload.get("permissions", [])
+        
+        logger.info(f"[WS] ✅ 토큰 검증 성공!")
+        logger.info(f"[WS] 사용자 정보: user_id={user_id}, email={user_email}, name={user_name}")
+        logger.info(f"[WS] 권한 정보: groups={groups}, permissions={permissions}")
         
     except Exception as e:
-        logger.error(f"[WS] 토큰 검증 실패: {e}")
+        logger.error(f"[WS] ❌ 토큰 검증 중 예외 발생: {type(e).__name__}: {str(e)}")
+        logger.error(f"[WS] 토큰 디버그 정보:")
+        logger.error(f"[WS] - 토큰 타입: {type(token)}")
+        logger.error(f"[WS] - 토큰 길이: {len(token) if token else 'None'}")
+        logger.error(f"[WS] - 첫 10자: {token[:10] if token else 'None'}")
+        
+        import traceback
+        logger.error(f"[WS] 상세 스택 트레이스: {traceback.format_exc()}")
+        
         await websocket.send_text(
             json.dumps({
                 "error_code": "TOKEN_VERIFICATION_FAILED",
-                "message": "토큰 검증에 실패했습니다."
+                "message": f"토큰 검증에 실패했습니다: {str(e)}"
+            })
+        )
+        await websocket.close()
+        return
+
+    # 데이터베이스 연결 수동 생성
+    try:
+        from app.database import SessionLocal
+        db = SessionLocal()
+        logger.info(f"[WS] 데이터베이스 연결 생성 완료")
+    except Exception as e:
+        logger.error(f"[WS] 데이터베이스 연결 실패: {e}")
+        await websocket.send_text(
+            json.dumps({
+                "error_code": "DATABASE_CONNECTION_FAILED",
+                "message": "데이터베이스 연결에 실패했습니다."
             })
         )
         await websocket.close()
@@ -162,19 +264,55 @@ async def chatbot(
     chat_history = chat_histories[session_id]
 
     try:
-        # RunPod 서버 상태 확인
-        if not await runpod_health_check():
-            logger.error(f"[WS] RunPod 서버 연결 실패")
+        # RunPod 서버 상태 확인 (상세 로그 포함)
+        logger.info(f"[WS] RunPod 서버 상태 확인 시작...")
+        
+        # 환경변수 확인
+        import os
+        runpod_api_key = os.getenv("RUNPOD_API_KEY", "")
+        logger.info(f"[WS] RUNPOD_API_KEY 설정됨: {'Yes' if runpod_api_key else 'No'}")
+        if runpod_api_key:
+            logger.info(f"[WS] RUNPOD_API_KEY 길이: {len(runpod_api_key)}자")
+            logger.info(f"[WS] RUNPOD_API_KEY 앞 10자: {runpod_api_key[:10]}...")
+        
+        # RunPod 클라이언트 정보 확인
+        from app.services.runpod_client import get_runpod_client
+        runpod_client = get_runpod_client()
+        logger.info(f"[WS] RunPod 클라이언트 생성됨: {type(runpod_client)}")
+        logger.info(f"[WS] RunPod 클라이언트 base_url: {getattr(runpod_client, 'base_url', 'Unknown')}")
+        
+        health_status = await runpod_health_check()
+        logger.info(f"[WS] RunPod health check 결과: {health_status}")
+        
+        if not health_status:
+            logger.error(f"[WS] ❌ RunPod 서버 연결 실패")
             await websocket.send_text(
                 json.dumps(
                     {
                         "error_code": "RUNPOD_SERVER_UNAVAILABLE", 
-                        "message": "RunPod 서버에 연결할 수 없습니다. 서버 상태를 확인해주세요.",
+                        "message": "RunPod 서버에 연결할 수 없습니다. API 키를 확인해주세요.",
                     }
                 )
             )
             await websocket.close()
             return
+        
+        logger.info(f"[WS] ✅ RunPod 서버 상태 확인 완료")
+        
+        # RunPod vLLM endpoint 상태 추가 확인
+        try:
+            from app.services.runpod_manager import get_vllm_manager
+            vllm_manager = get_vllm_manager()
+            generation_endpoint_id = await vllm_manager.get_endpoint_id()
+            logger.info(f"[WS] vLLM Generation Endpoint ID: {generation_endpoint_id}")
+            
+            if not generation_endpoint_id:
+                logger.warning(f"[WS] ⚠️ vLLM Generation Endpoint ID가 없습니다")
+            else:
+                logger.info(f"[WS] ✅ vLLM Generation Endpoint 준비됨")
+                
+        except Exception as endpoint_error:
+            logger.error(f"[WS] ❌ vLLM Endpoint 확인 중 오류: {endpoint_error}")
 
         logger.info(
             f"[WS] RunPod WebSocket 연결 시작: lora_repo={lora_repo_decoded}, group_id={group_id}, session_id={session_id}"
@@ -352,6 +490,14 @@ async def chatbot(
             )
         except:
             pass
+    finally:
+        # 데이터베이스 연결 정리
+        try:
+            if 'db' in locals():
+                db.close()
+                logger.info(f"[WS] 데이터베이스 연결 정리 완료")
+        except Exception as e:
+            logger.error(f"[WS] 데이터베이스 연결 정리 실패: {e}")
 
 
 async def _get_hf_token_by_group(group_id: int, db: Session) -> str | None:

@@ -99,29 +99,90 @@ def create_access_token(
 def verify_token(token: str) -> Optional[dict]:
     """토큰 검증"""
     try:
-        # 디버그: SECRET_KEY 확인
-        logger.info(f"🔐 Verifying token with SECRET_KEY: {settings.SECRET_KEY[:20]}... (algorithm: {settings.ALGORITHM})")
+        # 토큰 기본 검증
+        if not token:
+            logger.error(f"❌ JWT verification failed: 토큰이 비어있음")
+            return None
         
+        if not isinstance(token, str):
+            logger.error(f"❌ JWT verification failed: 토큰이 문자열이 아님 (type: {type(token)})")
+            return None
+        
+        # 토큰 구조 확인 (JWT는 3개 부분으로 구성)
+        token_parts = token.split('.')
+        if len(token_parts) != 3:
+            logger.error(f"❌ JWT verification failed: 토큰 구조가 잘못됨 (parts: {len(token_parts)})")
+            return None
+        
+        # 디버그: SECRET_KEY 확인
+        logger.info(f"🔐 JWT 토큰 검증 시작:")
+        logger.info(f"🔐 - SECRET_KEY: {settings.SECRET_KEY[:20]}... (length: {len(settings.SECRET_KEY)})")
+        logger.info(f"🔐 - Algorithm: {settings.ALGORITHM}")
+        logger.info(f"🔐 - Token length: {len(token)}")
+        logger.info(f"🔐 - Token parts: {len(token_parts)} (header.payload.signature)")
+        
+        # 서명 없이 페이로드 먼저 확인
+        try:
+            unverified = jwt.decode(token, options={"verify_signature": False})
+            logger.info(f"🔐 토큰 페이로드 (서명 미검증): {unverified}")
+            
+            # 만료 시간 확인
+            exp = unverified.get('exp')
+            iat = unverified.get('iat')
+            current_time = datetime.utcnow().timestamp()
+            
+            if exp:
+                exp_datetime = datetime.fromtimestamp(exp)
+                logger.info(f"🔐 토큰 만료 시간: {exp_datetime} (현재: {datetime.fromtimestamp(current_time)})")
+                if exp < current_time:
+                    logger.error(f"❌ JWT verification failed: 토큰이 만료됨 (exp: {exp_datetime})")
+                    return None
+            
+            if iat:
+                iat_datetime = datetime.fromtimestamp(iat)
+                logger.info(f"🔐 토큰 발행 시간: {iat_datetime}")
+                
+        except Exception as decode_error:
+            logger.error(f"❌ 토큰 페이로드 디코딩 실패: {decode_error}")
+            return None
+        
+        # 실제 서명 검증
+        logger.info(f"🔐 서명 검증 시작...")
         payload = jwt.decode(
             token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
         )
+        
+        logger.info(f"✅ JWT 토큰 검증 성공!")
+        logger.info(f"✅ 사용자 ID: {payload.get('sub')}")
+        logger.info(f"✅ 이메일: {payload.get('email')}")
+        logger.info(f"✅ 그룹: {payload.get('groups', [])}")
+        
         return payload
+        
     except JWTError as e:
-        logger.error(f"❌ JWT verification failed: {str(e)}")
-        logger.error(f"Token prefix: {token[:20]}..." if len(token) > 20 else f"Token: {token}")
-        logger.error(f"SECRET_KEY configured: {'Yes' if settings.SECRET_KEY else 'No'}")
-        logger.error(f"SECRET_KEY value: {settings.SECRET_KEY[:20]}...")
-        logger.error(f"Algorithm: {settings.ALGORITHM}")
+        logger.error(f"❌ JWT verification failed: {type(e).__name__}: {str(e)}")
+        logger.error(f"❌ 토큰 정보:")
+        logger.error(f"   - Token prefix: {token[:20]}..." if len(token) > 20 else f"   - Token: {token}")
+        logger.error(f"   - SECRET_KEY configured: {'Yes' if settings.SECRET_KEY else 'No'}")
+        logger.error(f"   - SECRET_KEY prefix: {settings.SECRET_KEY[:20]}..." if settings.SECRET_KEY else "None")
+        logger.error(f"   - Algorithm: {settings.ALGORITHM}")
         
-        # 토큰 디코딩 시도 (서명 검증 없이)
-        try:
-            unverified = jwt.decode(token, options={"verify_signature": False})
-            logger.error(f"Token payload (unverified): {unverified}")
-            logger.error(f"Token issued at: {datetime.fromtimestamp(unverified.get('iat', 0))}")
-            logger.error(f"Token expires at: {datetime.fromtimestamp(unverified.get('exp', 0))}")
-        except:
-            logger.error("Failed to decode token without verification")
+        # 구체적인 오류 타입별 메시지
+        if "ExpiredSignatureError" in str(type(e)):
+            logger.error(f"❌ 토큰 만료 오류")
+        elif "InvalidSignatureError" in str(type(e)):
+            logger.error(f"❌ 서명 불일치 오류 - SECRET_KEY 확인 필요")
+        elif "DecodeError" in str(type(e)):
+            logger.error(f"❌ 토큰 디코딩 오류 - 토큰 형식 문제")
+        elif "InvalidTokenError" in str(type(e)):
+            logger.error(f"❌ 유효하지 않은 토큰")
         
+        return None
+        
+    except Exception as e:
+        logger.error(f"❌ JWT verification 예상치 못한 오류: {type(e).__name__}: {str(e)}")
+        import traceback
+        logger.error(f"❌ 스택 트레이스: {traceback.format_exc()}")
         return None
 
 
