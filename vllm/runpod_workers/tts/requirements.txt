@@ -11,3 +11,4 @@ sudachidict_full
 scipy
 numpy
 librosa
+python-dotenv

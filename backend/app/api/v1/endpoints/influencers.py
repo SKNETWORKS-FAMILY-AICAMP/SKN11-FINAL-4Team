@@ -26,7 +26,6 @@ from app.schemas.influencer import (
     StylePresetCreate,
     StylePresetWithMBTI,
     ModelMBTI as ModelMBTISchema,
-    FinetuningWebhookRequest,
     ToneGenerationRequest,
     SystemPromptSaveRequest,
     APIKeyResponse,
@@ -35,6 +34,7 @@ from app.schemas.influencer import (
     APIKeyTestRequest,
     APIKeyTestResponse,
 )
+from app.schemas.finetuning import FineTuningResultRequest, FineTuningResultResponse
 from app.core.security import get_current_user
 from app.core.permissions import check_team_resource_permission
 from app.services.influencers.crud import (
@@ -1111,97 +1111,6 @@ async def handle_openai_batch_webhook(
         return {"error": f"웹훅 처리 실패: {str(e)}"}
 
 
-@router.post("/webhooks/finetuning-complete")
-async def handle_finetuning_webhook(
-    webhook_data: FinetuningWebhookRequest,
-    db: Session = Depends(get_db),
-):
-    """파인튜닝 완료 웹훅 처리"""
-    logger.info(
-        f"🎯 파인튜닝 웹훅 수신: task_id={webhook_data.task_id}, status={webhook_data.status}"
-    )
-
-    try:
-        # VLLM task_id로 먼저 찾고, 없으면 일반 task_id로 찾기
-        batch_key_entry = (
-            db.query(BatchKey)
-            .filter(BatchKey.vllm_task_id == webhook_data.task_id)
-            .first()
-        )
-
-        if not batch_key_entry:
-            # 하위 호환성을 위해 task_id로도 검색
-            batch_key_entry = (
-                db.query(BatchKey)
-                .filter(BatchKey.task_id == webhook_data.task_id)
-                .first()
-            )
-
-        if not batch_key_entry:
-            logger.warning(
-                f"⚠️ 해당 task_id를 가진 BatchKey를 찾을 수 없음: {webhook_data.task_id}"
-            )
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="작업을 찾을 수 없습니다"
-            )
-
-        if webhook_data.status == "completed":
-            # 허깅페이스 URL에서 레포 경로만 추출
-            from app.utils.hf_utils import extract_hf_repo_path
-
-            hf_repo_path = extract_hf_repo_path(webhook_data.hf_model_url)
-
-            batch_key_entry.status = QAGenerationStatus.FINALIZED.value
-            batch_key_entry.hf_model_url = hf_repo_path  # 레포 경로만 저장
-            batch_key_entry.completed_at = datetime.now()
-            logger.info(
-                f"✅ 파인튜닝 완료: task_id={webhook_data.task_id}, 모델 레포={hf_repo_path}"
-            )
-
-            # AIInfluencer 모델 상태를 사용 가능으로 업데이트
-            influencer = (
-                db.query(AIInfluencer)
-                .filter(AIInfluencer.influencer_id == batch_key_entry.influencer_id)
-                .first()
-            )
-
-            if influencer:
-                influencer.learning_status = 1  # 1: 사용가능
-                if hf_repo_path:
-                    influencer.influencer_model_repo = hf_repo_path  # 레포 경로만 저장
-                logger.info(
-                    f"✅ 인플루언서 모델 상태 업데이트 완료: influencer_id={batch_key_entry.influencer_id}, status=사용 가능"
-                )
-        elif webhook_data.status == "failed":
-            batch_key_entry.status = QAGenerationStatus.FAILED.value
-            batch_key_entry.error_message = webhook_data.error_message
-            batch_key_entry.completed_at = datetime.now()
-            logger.error(
-                f"❌ 파인튜닝 실패: task_id={webhook_data.task_id}, 오류={webhook_data.error_message}"
-            )
-        else:
-            # 기타 상태 업데이트 (예: processing, validating 등)
-            batch_key_entry.status = webhook_data.status
-            logger.info(
-                f"🔄 파인튜닝 상태 업데이트: task_id={webhook_data.task_id}, 상태={webhook_data.status}"
-            )
-
-        db.commit()
-        return {
-            "message": "파인튜닝 웹훅 처리 완료",
-            "task_id": webhook_data.task_id,
-            "status": webhook_data.status,
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"❌ 파인튜닝 웹훅 처리 중 오류: {str(e)}", exc_info=True)
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"파인튜닝 웹훅 처리 실패: {str(e)}",
-        )
 
 
 # 말투 생성 관련 API
@@ -2107,3 +2016,107 @@ async def get_voice_download_url(
             )
     else:
         raise HTTPException(status_code=404, detail="음성 파일을 찾을 수 없습니다")
+
+
+@router.post("/finetuning/result", response_model=FineTuningResultResponse)
+async def receive_finetuning_result(
+    request: FineTuningResultRequest,
+    db: Session = Depends(get_db),
+):
+    """vLLM Worker로부터 파인튜닝 결과 수신"""
+    logger.info(
+        f"🎯 파인튜닝 결과 수신: task_id={request.task_id}, status={request.status}"
+    )
+    
+    try:
+        # VLLM task_id로 먼저 찾고, 없으면 일반 task_id로 찾기
+        batch_key_entry = (
+            db.query(BatchKey)
+            .filter(BatchKey.vllm_task_id == request.task_id)
+            .first()
+        )
+
+        if not batch_key_entry:
+            # 하위 호환성을 위해 task_id로도 검색
+            batch_key_entry = (
+                db.query(BatchKey)
+                .filter(BatchKey.task_id == request.task_id)
+                .first()
+            )
+
+        if not batch_key_entry:
+            logger.warning(
+                f"⚠️ 해당 task_id를 가진 BatchKey를 찾을 수 없음: {request.task_id}"
+            )
+            return FineTuningResultResponse(
+                success=False,
+                message="작업을 찾을 수 없습니다",
+                task_id=request.task_id,
+                error="Task not found"
+            )
+
+        if request.status == "COMPLETED":
+            # 허깅페이스 URL에서 레포 경로만 추출
+            from app.utils.hf_utils import extract_hf_repo_path
+
+            hf_repo_path = extract_hf_repo_path(request.hf_model_url)
+
+            batch_key_entry.status = QAGenerationStatus.FINALIZED.value
+            batch_key_entry.hf_model_url = hf_repo_path  # 레포 경로만 저장
+            batch_key_entry.completed_at = datetime.now()
+            
+            # 메타데이터 저장
+            if request.metadata:
+                batch_key_entry.metadata = json.dumps(request.metadata)
+            
+            logger.info(
+                f"✅ 파인튜닝 완료: task_id={request.task_id}, 모델 레포={hf_repo_path}"
+            )
+
+            # AIInfluencer 모델 상태를 사용 가능으로 업데이트
+            influencer = (
+                db.query(AIInfluencer)
+                .filter(AIInfluencer.influencer_id == batch_key_entry.influencer_id)
+                .first()
+            )
+
+            if influencer:
+                influencer.learning_status = 1  # 1: 사용가능
+                if hf_repo_path:
+                    influencer.influencer_model_repo = hf_repo_path  # 레포 경로만 저장
+                logger.info(
+                    f"✅ 인플루언서 모델 상태 업데이트 완료: influencer_id={batch_key_entry.influencer_id}, status=사용 가능"
+                )
+                
+        elif request.status == "FAILED":
+            batch_key_entry.status = QAGenerationStatus.FAILED.value
+            batch_key_entry.error_message = request.error_message
+            batch_key_entry.completed_at = datetime.now()
+            logger.error(
+                f"❌ 파인튜닝 실패: task_id={request.task_id}, 오류={request.error_message}"
+            )
+        else:
+            # 기타 상태 업데이트 (예: processing, validating 등)
+            batch_key_entry.status = request.status
+            logger.info(
+                f"🔄 파인튜닝 상태 업데이트: task_id={request.task_id}, 상태={request.status}"
+            )
+
+        db.commit()
+        
+        return FineTuningResultResponse(
+            success=True,
+            message=f"파인튜닝 결과 처리 완료: {request.status}",
+            task_id=request.task_id
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ 파인튜닝 결과 처리 중 오류: {e}")
+        db.rollback()
+        
+        return FineTuningResultResponse(
+            success=False,
+            message="파인튜닝 결과 처리 실패",
+            task_id=request.task_id,
+            error=str(e)
+        )

@@ -63,6 +63,15 @@ async def lifespan(app: FastAPI):
     logger.info(f"🔑 JWT ALGORITHM: {settings.ALGORITHM}")
     logger.info(f"🔑 ACCESS_TOKEN_EXPIRE_MINUTES: {settings.ACCESS_TOKEN_EXPIRE_MINUTES}")
 
+    # RunPod 서버 초기화
+    try:
+        from app.services.runpod_manager import initialize_runpod
+        
+        await initialize_runpod()
+        logger.info("✅ RunPod 초기화 완료")
+    except Exception as e:
+        logger.warning(f"⚠️ RunPod 초기화 실패 (TTS 기능이 제한될 수 있습니다): {e}")
+
     # MCP 서버 자동 실행 (데이터베이스에서 로드)
     try:
         from app.services.mcp_server_manager import get_mcp_server_manager
