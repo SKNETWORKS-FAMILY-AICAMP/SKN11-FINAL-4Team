@@ -12,6 +12,7 @@ from typing import Optional, Dict, Any, AsyncIterator
 from datetime import datetime
 
 from app.core.config import settings
+from app.services.runpod_endpoint_manager import get_endpoint_manager
 
 logger = logging.getLogger(__name__)
 
@@ -28,29 +29,37 @@ class RunPodClient:
         self.api_key = os.getenv("RUNPOD_API_KEY", "")
         self.base_url = "https://api.runpod.ai/v2"
         self.timeout = 300  # 5분 타임아웃
+        self.endpoint_manager = get_endpoint_manager()
         
         if not self.api_key:
             logger.warning("⚠️ RUNPOD_API_KEY가 설정되지 않았습니다")
     
-    @property
-    def endpoint_id(self) -> str:
+    async def get_endpoint_id(self, endpoint_type: str = "tts") -> str:
         """동적으로 엔드포인트 ID 가져오기"""
-        return os.getenv("RUNPOD_ENDPOINT_ID", "tpwska9ui667mu")
+        try:
+            endpoint_id = await self.endpoint_manager.get_endpoint_id(endpoint_type)
+            if endpoint_id:
+                return endpoint_id
+            # 폴백: 환경 변수에서 가져오기
+            fallback_key = f"RUNPOD_{endpoint_type.upper()}_ENDPOINT_ID"
+            return os.getenv(fallback_key, "tpwska9ui667mu")
+        except Exception as e:
+            logger.warning(f"⚠️ 엔드포인트 ID 조회 실패, 폴백 사용: {e}")
+            return os.getenv("RUNPOD_ENDPOINT_ID", "tpwska9ui667mu")
     
-    @property
-    def generation_endpoint_id(self) -> str:
+    async def get_generation_endpoint_id(self) -> str:
         """vLLM Generation 엔드포인트 ID"""
-        return os.getenv("RUNPOD_GENERATION_ENDPOINT_ID", "vllm-generation-endpoint")
+        return await self.get_endpoint_id("vllm")
     
-    @property
-    def endpoint_url(self) -> str:
+    async def get_endpoint_url(self, endpoint_type: str = "tts") -> str:
         """RunPod 엔드포인트 URL"""
-        return f"{self.base_url}/{self.endpoint_id}/run"
+        endpoint_id = await self.get_endpoint_id(endpoint_type)
+        return f"{self.base_url}/{endpoint_id}/run"
     
-    @property
-    def status_url(self) -> str:
+    async def get_status_url(self, endpoint_type: str = "tts") -> str:
         """RunPod 상태 확인 URL"""
-        return f"{self.base_url}/{self.endpoint_id}/status"
+        endpoint_id = await self.get_endpoint_id(endpoint_type)
+        return f"{self.base_url}/{endpoint_id}/status"
     
     @property
     def headers(self) -> Dict[str, str]:
@@ -106,13 +115,16 @@ class RunPodClient:
                 }
             }
             
+            endpoint_url = await self.get_endpoint_url("tts")
+            endpoint_id = await self.get_endpoint_id("tts")
+            
             logger.info(f"🎤 RunPod TTS 요청: text={text[:50]}...")
-            logger.info(f"📍 엔드포인트 URL: {self.endpoint_url}")
-            logger.info(f"🆔 엔드포인트 ID: {self.endpoint_id}")
+            logger.info(f"📍 엔드포인트 URL: {endpoint_url}")
+            logger.info(f"🆔 엔드포인트 ID: {endpoint_id}")
             
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.post(
-                    self.endpoint_url,
+                    endpoint_url,
                     headers=self.headers,
                     json=payload
                 )
@@ -150,7 +162,8 @@ class RunPodClient:
             Dict[str, Any]: 작업 상태 정보
         """
         try:
-            url = f"{self.base_url}/{self.endpoint_id}/status/{job_id}"
+            endpoint_id = await self.get_endpoint_id("tts")
+            url = f"{self.base_url}/{endpoint_id}/status/{job_id}"
             
             async with httpx.AsyncClient(timeout=10) as client:
                 response = await client.get(
@@ -236,7 +249,8 @@ class RunPodClient:
             logger.info(f"🤖 RunPod 텍스트 생성 요청: prompt={prompt[:50]}...")
             
             # Generation 엔드포인트 URL
-            generation_url = f"{self.base_url}/{self.generation_endpoint_id}/run"
+            generation_endpoint_id = await self.get_generation_endpoint_id()
+            generation_url = f"{self.base_url}/{generation_endpoint_id}/run"
             
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.post(
@@ -305,7 +319,8 @@ class RunPodClient:
             logger.info(f"🤖 RunPod 텍스트 스트리밍 요청: prompt={prompt[:50]}...")
             
             # Generation 엔드포인트 URL
-            generation_url = f"{self.base_url}/{self.generation_endpoint_id}/stream"
+            generation_endpoint_id = await self.get_generation_endpoint_id()
+            generation_url = f"{self.base_url}/{generation_endpoint_id}/stream"
             
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 async with client.stream(
@@ -344,6 +359,34 @@ class RunPodClient:
         except Exception as e:
             logger.error(f"❌ RunPod 텍스트 스트리밍 실패: {e}")
             yield f"오류: 텍스트 생성 실패 - {e}"
+    
+    async def download_lora_adapter(
+        self,
+        adapter_name: str,
+        hf_repo_id: str,
+        hf_token: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """LoRA 어댑터 다운로드 요청
+        
+        Args:
+            adapter_name: 어댑터 이름
+            hf_repo_id: HuggingFace 레포지토리 ID
+            hf_token: HuggingFace 토큰 (private repo의 경우)
+            
+        Returns:
+            Dict[str, Any]: 다운로드 결과
+        """
+        try:
+            generation_endpoint_id = await self.get_generation_endpoint_id()
+            return await self.endpoint_manager.download_lora_adapter(
+                endpoint_id=generation_endpoint_id,
+                adapter_name=adapter_name,
+                hf_repo_id=hf_repo_id,
+                hf_token=hf_token
+            )
+        except Exception as e:
+            logger.error(f"❌ LoRA 어댑터 다운로드 요청 실패: {e}")
+            raise RunPodError(f"LoRA 어댑터 다운로드 실패: {e}")
 
 
 # 싱글톤 인스턴스
@@ -428,3 +471,17 @@ async def runpod_generate_text_stream(
         max_tokens=max_tokens
     ):
         yield token
+
+
+async def runpod_download_lora_adapter(
+    adapter_name: str,
+    hf_repo_id: str,
+    hf_token: Optional[str] = None
+) -> Dict[str, Any]:
+    """RunPod로 LoRA 어댑터 다운로드 (편의 함수)"""
+    client = get_runpod_client()
+    return await client.download_lora_adapter(
+        adapter_name=adapter_name,
+        hf_repo_id=hf_repo_id,
+        hf_token=hf_token
+    )
