@@ -1,0 +1,22 @@
+# RunPod 기본
+runpod==1.6.0
+
+# Transformers 및 모델 관련
+transformers>=4.35.0
+accelerate>=0.25.0
+peft>=0.7.0
+safetensors>=0.4.0
+huggingface-hub
+datasets>=2.14.0
+
+# 훈련 관련
+bitsandbytes>=0.41.0
+scipy>=1.10.0
+wandb>=0.15.0  # 선택사항 - 학습 모니터링용
+tensorboard>=2.13.0  # 선택사항
+
+# 기타 유틸리티
+numpy>=1.24.0
+sentencepiece>=0.1.99
+tqdm>=4.65.0
+scikit-learn>=1.3.0
