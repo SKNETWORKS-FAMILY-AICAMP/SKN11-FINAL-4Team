@@ -218,6 +218,13 @@ def fine_tune_model(
         
         tokenized_dataset = prepare_dataset(qa_data, system_message, tokenizer)
         
+        # 데이터셋을 train/validation으로 분할 (90:10 비율)
+        train_test_split = tokenized_dataset.train_test_split(test_size=0.1, seed=42)
+        train_dataset = train_test_split['train']
+        eval_dataset = train_test_split['test']
+        
+        logger.info(f"📊 Train 데이터: {len(train_dataset)}개, Validation 데이터: {len(eval_dataset)}개")
+        
         # 4. 트레이닝 설정
         training_args = TrainingArguments(
             output_dir=output_dir,
@@ -233,9 +240,12 @@ def fine_tune_model(
             bf16=True,
             max_grad_norm=max_grad_norm,
             save_total_limit=3,
-            load_best_model_at_end=True,
+            load_best_model_at_end=True,  # validation 데이터셋이 있으므로 True로 복원
             metric_for_best_model="loss",
             greater_is_better=False,
+            evaluation_strategy="steps",  # save_steps와 동일하게 설정
+            eval_steps=save_steps,  # save_steps와 동일하게 설정
+            per_device_eval_batch_size=batch_size,  # evaluation batch size
             group_by_length=True,
             report_to=["none"],
             remove_unused_columns=False,
@@ -250,10 +260,11 @@ def fine_tune_model(
         trainer = Trainer(
             model=model,
             args=training_args,
-            train_dataset=tokenized_dataset,
+            train_dataset=train_dataset,  # train_dataset으로 변경
+            eval_dataset=eval_dataset,     # eval_dataset 추가
             tokenizer=tokenizer,
             data_collator=data_collator,
-            callbacks=[EarlyStoppingCallback(early_stopping_patience=3)]
+            callbacks=[EarlyStoppingCallback(early_stopping_patience=3)]  # EarlyStoppingCallback 복원
         )
         
         # 6. 학습 실행

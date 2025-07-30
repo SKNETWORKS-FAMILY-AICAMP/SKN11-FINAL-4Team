@@ -11,6 +11,8 @@ ENV TORCH_HOME=/app/models
 ENV HF_DATASETS_OFFLINE=1
 ENV TRANSFORMERS_OFFLINE=1
 ENV HF_HUB_OFFLINE=0
+ENV PHONEMIZER_ESPEAK_LIBRARY=/usr/lib/x86_64-linux-gnu/libespeak-ng.so
+ENV PHONEMIZER_ESPEAK_PATH=/usr/bin/espeak-ng
 
 # 작업 디렉토리 설정
 WORKDIR /app
@@ -33,14 +35,18 @@ RUN pip install --upgrade pip setuptools wheel
 
 # PyTorch 먼저 설치 (CUDA 11.8 호환)
 RUN pip install --no-cache-dir \
-    torch==2.1.0+cu118 \
-    torchvision==0.16.0+cu118 \
-    torchaudio==2.1.0+cu118 \
+    torch \
+    torchvision \
+    torchaudio \
     --index-url https://download.pytorch.org/whl/cu118
 
 # requirements.txt 복사 및 설치
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+
+# phonemizer 설치 확인 및 테스트
+RUN python3 -c "import phonemizer; print(f'Phonemizer version: {phonemizer.__version__}')"
+RUN python3 -c "from phonemizer.backend import EspeakBackend; print('EspeakBackend import successful')"
 
 # zonos 모듈 복사 (존재 여부 확인)
 COPY zonos/ /app/zonos/

@@ -1,7 +1,6 @@
-# RunPod 기본
-runpod==1.6.0
+runpod
 
-# vLLM 엔진
+
 vllm>=0.4.0
 ray>=2.8.0  # vLLM 의존성
 

@@ -1,7 +1,13 @@
 runpod
 transformers
 huggingface_hub
+torchaudio
 inflect
 safetensors
-huggingface_hub
 kanjize
+phonemizer
+sudachipy
+sudachidict_full
+scipy
+numpy
+librosa
