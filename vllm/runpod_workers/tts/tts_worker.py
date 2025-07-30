@@ -11,8 +11,7 @@ import torchaudio
 import base64
 import io
 import traceback
-import httpx
-import asyncio
+import requests
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 from dotenv import load_dotenv
@@ -184,12 +183,12 @@ def encode_audio(wav_tensor: torch.Tensor, sample_rate: int, format: str = "wav"
     return audio_base64
 
 
-async def send_to_backend(audio_base64: str, metadata: Dict[str, Any]):
-    """생성된 음성을 Backend로 전송"""
+def send_to_backend_sync(audio_base64: str, metadata: Dict[str, Any]):
+    """생성된 음성을 Backend로 전송 (동기 방식)"""
     backend_url = os.getenv('BACKEND_POST_URL')
     if not backend_url:
         logger.warning("BACKEND_POST_URL이 설정되지 않았습니다")
-        return
+        return None
     
     try:
         # POST 페이로드 구성
@@ -201,23 +200,27 @@ async def send_to_backend(audio_base64: str, metadata: Dict[str, Any]):
         logger.info(f"📤 Backend로 음성 데이터 전송: {backend_url}")
         logger.info(f"📦 페이로드 크기: {len(json.dumps(payload))} bytes")
         
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                backend_url,
-                json=payload,
-                timeout=60.0  # 큰 음성 파일을 위해 타임아웃 증가
-            )
+        response = requests.post(
+            backend_url,
+            json=payload,
+            timeout=60  # 큰 음성 파일을 위해 타임아웃 증가
+        )
+        
+        if response.status_code == 200:
+            logger.info(f"✅ Backend 전송 성공: {response.status_code}")
+            return response.json()
+        else:
+            logger.error(f"❌ Backend 전송 실패: {response.status_code} - {response.text}")
+            return None
             
-            if response.status_code == 200:
-                logger.info(f"✅ Backend 전송 성공: {response.status_code}")
-                return response.json()
-            else:
-                logger.error(f"❌ Backend 전송 실패: {response.status_code} - {response.text}")
-                return None
-                
     except Exception as e:
         logger.error(f"❌ Backend 전송 중 오류: {str(e)}")
         return None
+
+async def send_to_backend(audio_base64: str, metadata: Dict[str, Any]):
+    """생성된 음성을 Backend로 전송 (비동기 - 사용하지 않음)"""
+    # RunPod 환경에서는 동기 방식 사용
+    return send_to_backend_sync(audio_base64, metadata)
 
 
 
@@ -302,18 +305,11 @@ def handler(job):
                 "created_at": datetime.now().isoformat()
             }
             
-            # 비동기 함수 실행
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            
-            try:
-                backend_response = loop.run_until_complete(
-                    send_to_backend(audio_base64, metadata)
-                )
-                if backend_response:
-                    logger.info(f"✅ Backend 응답: {backend_response}")
-            finally:
-                loop.close()
+            # 동기 방식으로 Backend 전송
+            logger.info("🔔 Backend로 음성 데이터 전송 중...")
+            backend_response = send_to_backend_sync(audio_base64, metadata)
+            if backend_response:
+                logger.info(f"✅ Backend 응답: {backend_response}")
         
         logger.info("✅ TTS 생성 완료")
         return result

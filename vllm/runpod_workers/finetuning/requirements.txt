@@ -27,3 +27,6 @@ kanjize
 sudachipy
 sudachidict_full
 librosa
+
+python-dotenv
+requests

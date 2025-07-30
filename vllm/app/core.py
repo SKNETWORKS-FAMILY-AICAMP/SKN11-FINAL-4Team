@@ -113,6 +113,14 @@ async def run_finetuning_pipeline(qa_data: List[Dict], system_message: str,
         logger.info(f"🔄 파인튜닝 파이프라인 실행: {hf_repo_id}")
         logger.info(f"🔍 파이프라인 QA 데이터: 개수={len(qa_data)}")
         
+        # GPU 메모리 체크
+        import torch
+        if torch.cuda.is_available():
+            gpu_mem = torch.cuda.get_device_properties(0).total_memory / 1024**3
+            logger.info(f"🖥️ GPU 메모리: {gpu_mem:.2f}GB")
+            if gpu_mem < 16:  # 16GB 미만이면 경고
+                logger.warning(f"⚠️ GPU 메모리가 부족할 수 있습니다 ({gpu_mem:.2f}GB < 16GB)")
+        
         # 멀티프로세싱 사용 여부 확인 (기본값: true)
         use_multiprocessing = os.getenv('USE_FINETUNING_MULTIPROCESSING', 'true').lower() == 'true'
         
@@ -135,7 +143,11 @@ async def run_finetuning_pipeline(qa_data: List[Dict], system_message: str,
             if response['status'] == 'success':
                 return response['hf_model_url']
             else:
-                raise Exception(response.get('error', '파인튜닝 실패'))
+                error_msg = response.get('error', '파인튜닝 실패')
+                if 'out of memory' in error_msg.lower():
+                    logger.error(f"❌ GPU 메모리 부족: {error_msg}")
+                    logger.info("💡 해결 방법: batch_size 감소, LoRA rank 감소, 또는 더 큰 GPU 사용")
+                raise Exception(error_msg)
         else:
             # 스레드 방식 (가벼운 격리)
             logger.info("🧵 파인튜닝을 별도 스레드에서 실행 (비블로킹)")
@@ -154,6 +166,15 @@ async def run_finetuning_pipeline(qa_data: List[Dict], system_message: str,
         
         logger.info(f"✅ 파인튜닝 파이프라인 실행 완료: {hf_repo_id}")
             
+    except RuntimeError as e:
+        if "out of memory" in str(e) or "CUDA out of memory" in str(e):
+            logger.error(f"❌ GPU 메모리 부족 오류: {e}")
+            logger.info("💡 다음을 시도해보세요:")
+            logger.info("  1. batch_size를 1로 줄이기")
+            logger.info("  2. gradient_accumulation_steps 늘리기")
+            logger.info("  3. LoRA rank를 4 이하로 줄이기")
+            logger.info("  4. max_length를 512로 줄이기")
+        raise e
     except Exception as e:
         logger.error(f"❌ 파인튜닝 파이프라인 실행 실패: {e}")
         raise e

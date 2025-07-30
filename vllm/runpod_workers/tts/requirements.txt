@@ -12,3 +12,4 @@ scipy
 numpy
 librosa
 python-dotenv
+requests

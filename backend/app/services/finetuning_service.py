@@ -706,7 +706,8 @@ class InfluencerFineTuningService:
                 hf_token=hf_token,
                 epochs=task.training_epochs,
                 task_id=task.qa_batch_task_id,
-                system_prompt=task.system_prompt or system_message
+                system_prompt=task.system_prompt or system_message,
+                influencer_id=task.influencer_id
             )
 
             if vllm_task_id:

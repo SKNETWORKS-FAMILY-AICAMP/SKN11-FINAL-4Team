@@ -5,13 +5,15 @@ EXAONE 모델 파인튜닝을 RunPod에서 실행
 import os
 import sys
 import logging
-import json
 import torch
 import traceback
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 import tempfile
-import shutil
 from datetime import datetime
+import asyncio
+import aiohttp
+from dotenv import load_dotenv
+load_dotenv()
 
 # vLLM 프로젝트의 pipeline 모듈 경로 추가
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -27,7 +29,7 @@ from transformers import (
 )
 from peft import LoraConfig, get_peft_model, TaskType, prepare_model_for_kbit_training
 from datasets import Dataset
-from huggingface_hub import HfApi, create_repo, Repository
+from huggingface_hub import HfApi, create_repo
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -35,6 +37,7 @@ logger = logging.getLogger(__name__)
 
 # 전역 변수
 DEFAULT_MODEL = "LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct"
+BACKEND_POST_URL = os.getenv('BACKEND_POST_URL', 'http://localhost:8000/api/v1/influencers/finetuning/result')
 
 class ExaoneDataPreprocessor:
     """EXAONE 모델용 데이터 전처리"""
@@ -113,6 +116,25 @@ def prepare_dataset(qa_data: List[Dict], system_message: str, tokenizer, max_len
     )
     
     return tokenized_dataset
+
+async def send_to_backend(result_data: Dict[str, Any]):
+    """파인튜닝 결과를 Backend로 전송"""
+    backend_url = BACKEND_POST_URL
+    
+    if not backend_url:
+        logger.warning("BACKEND_POST_URL이 설정되지 않음")
+        return
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(backend_url, json=result_data, timeout=30) as response:
+                if response.status_code == 200:
+                    logger.info(f"✅ 백엔드로 결과 전송 성공: {result_data['task_id']}")
+                else:
+                    error_text = await response.text()
+                    logger.error(f"❌ 백엔드 응답 오류: {response.status_code}, {error_text}")
+    except Exception as e:
+        logger.error(f"❌ 백엔드 전송 실패: {e}")
 
 def upload_to_huggingface(output_dir: str, hf_token: str, hf_repo_id: str) -> str:
     """Hugging Face에 모델 업로드"""
@@ -339,7 +361,9 @@ def validate_input(job_input: Dict[str, Any]) -> Dict[str, Any]:
         "warmup_steps": int(job_input.get("warmup_steps", 10)),
         "save_steps": int(job_input.get("save_steps", 50)),
         "logging_steps": int(job_input.get("logging_steps", 10)),
-        "max_grad_norm": float(job_input.get("max_grad_norm", 0.3))
+        "max_grad_norm": float(job_input.get("max_grad_norm", 0.3)),
+        "task_id": job_input.get("task_id", "unknown"),
+        "influencer_id": job_input.get("influencer_id", "")
     }
     
     return validated
@@ -365,6 +389,10 @@ def handler(job):
         logger.info(f"📝 QA 데이터 개수: {len(job_input['qa_data'])}")
         logger.info(f"🎯 타겟 모델: {job_input['base_model']}")
         logger.info(f"📚 학습 에폭: {job_input['training_epochs']}")
+        
+        # 필요한 값들 추출
+        task_id = job_input["task_id"]
+        influencer_id = job_input["influencer_id"]
         
         # GPU 정보 출력
         if torch.cuda.is_available():
@@ -392,6 +420,24 @@ def handler(job):
             progress_callback=update_progress
         )
         
+        # 성공 시 백엔드로 결과 전송
+        result_data = {
+            "task_id": task_id,
+            "influencer_id": influencer_id,
+            "status": "completed",
+            "hf_model_url": hf_url,
+            "error_message": None,
+            "metadata": {
+                "training_epochs": job_input["training_epochs"],
+                "qa_data_count": len(job_input["qa_data"]),
+                "hf_repo_id": job_input["hf_repo_id"],
+                "base_model": job_input["base_model"]
+            }
+        }
+        
+        # 백엔드로 결과 전송
+        asyncio.run(send_to_backend(result_data))
+        
         # 결과 반환
         result = {
             "status": "success",
@@ -406,10 +452,64 @@ def handler(job):
         logger.info(f"✅ 파인튜닝 완료: {hf_url}")
         return result
         
+    except RuntimeError as e:
+        error_msg = str(e)
+        if "out of memory" in error_msg.lower():
+            logger.error(f"❌ GPU 메모리 부족: {error_msg}")
+            
+            # GPU 메모리 상태 로깅
+            if torch.cuda.is_available():
+                allocated = torch.cuda.memory_allocated() / 1024**3
+                reserved = torch.cuda.memory_reserved() / 1024**3
+                logger.error(f"GPU 메모리 - 할당: {allocated:.2f}GB, 예약: {reserved:.2f}GB")
+            
+            error_message = "GPU 메모리 부족. batch_size나 LoRA rank를 줄여주세요."
+        else:
+            logger.error(f"❌ 런타임 오류: {error_msg}")
+            error_message = error_msg
+        
+        # 실패 결과 백엔드로 전송
+        result_data = {
+            "task_id": job_input.get("task_id", "unknown"),
+            "influencer_id": job_input.get("influencer_id", ""),
+            "status": "failed",
+            "hf_model_url": None,
+            "error_message": error_message,
+            "metadata": {
+                "training_epochs": job_input.get("training_epochs", 3),
+                "qa_data_count": len(job_input.get("qa_data", [])),
+                "hf_repo_id": job_input.get("hf_repo_id", "")
+            }
+        }
+        asyncio.run(send_to_backend(result_data))
+        
+        return {
+            "status": "failed",
+            "error": error_message,
+            "traceback": traceback.format_exc(),
+            "progress": current_progress,
+            "last_status": current_status
+        }
+        
     except Exception as e:
         error_msg = f"파인튜닝 처리 중 오류 발생: {str(e)}"
         logger.error(f"❌ {error_msg}")
         logger.error(traceback.format_exc())
+        
+        # 실패 결과 백엔드로 전송
+        result_data = {
+            "task_id": job_input.get("task_id", "unknown"),
+            "influencer_id": job_input.get("influencer_id", ""),
+            "status": "failed",
+            "hf_model_url": None,
+            "error_message": str(e),
+            "metadata": {
+                "training_epochs": job_input.get("training_epochs", 3),
+                "qa_data_count": len(job_input.get("qa_data", [])),
+                "hf_repo_id": job_input.get("hf_repo_id", "")
+            }
+        }
+        asyncio.run(send_to_backend(result_data))
         
         return {
             "status": "failed",
