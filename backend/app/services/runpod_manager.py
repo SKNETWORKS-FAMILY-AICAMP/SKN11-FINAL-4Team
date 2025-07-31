@@ -580,10 +580,24 @@ class VLLMRunPodManager(BaseRunPodManager):
                     raise RunPodManagerError(error_msg)
                 
                 result = response.json()
-                logger.info(f"✅ vLLM 텍스트 생성 성공")
                 
-                # /runsync는 동기식이므로 바로 결과를 반환
-                if result.get("status") == "success":
+                logger.info(f"✅ vLLM 텍스트 생성 성공",result)
+                
+                # RunPod 응답 형식 처리
+                if result.get("status") == "COMPLETED":
+                    # output 내부의 generated_text 추출
+                    output = result.get("output", {})
+                    generated_text = output.get("generated_text", "")
+                    
+                    return {
+                        "status": "completed",
+                        "generated_text": generated_text,
+                        "model": output.get("model", ""),
+                        "lora_adapter": output.get("lora_adapter", ""),
+                        "used_lora": output.get("used_lora", False)
+                    }
+                elif result.get("status") == "success":
+                    # 이전 형식 호환성을 위한 처리
                     return {
                         "status": "completed",
                         "output": result

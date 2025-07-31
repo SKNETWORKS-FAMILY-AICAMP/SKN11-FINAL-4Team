@@ -1923,13 +1923,17 @@ async def chat_with_influencer(
                         stream=False
                     )
 
-                    # 응답 텍스트 추출
-                    if result.get("status") == "completed" and result.get("output"):
-                        output = result["output"]
-                        if output.get("status") == "success":
-                            response_text = output.get("generated_text", "")
-                        else:
-                            response_text = f"안녕하세요! 저는 {api_key.influencer_name}입니다. '{request.message}'에 대한 답변을 드리겠습니다."
+                    # 응답 텍스트 추출 (간소화된 형식)
+                    if result.get("status") == "completed":
+                        # 새로운 형식: generated_text가 직접 반환됨
+                        response_text = result.get("generated_text", "")
+                        if not response_text:
+                            # 이전 형식 호환성을 위한 처리
+                            output = result.get("output", {})
+                            if isinstance(output, dict) and output.get("generated_text"):
+                                response_text = output.get("generated_text", "")
+                            else:
+                                response_text = f"안녕하세요! 저는 {api_key.influencer_name}입니다. '{request.message}'에 대한 답변을 드리겠습니다."
                     else:
                         response_text = f"안녕하세요! 저는 {api_key.influencer_name}입니다. '{request.message}'에 대한 답변을 드리겠습니다."
 
