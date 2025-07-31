@@ -12,6 +12,8 @@ import base64
 import io
 import traceback
 import requests
+import aiohttp
+import asyncio
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 from dotenv import load_dotenv
@@ -90,6 +92,7 @@ def validate_input(job_input: Dict[str, Any]) -> Dict[str, Any]:
         "influencer_id": job_input.get("influencer_id", None),  # 인플루언서 ID 추가
         "base_voice_id": job_input.get("base_voice_id", None),  # 베이스 음성 ID 추가
         "voice_id": job_input.get("voice_id", None),  # 백엔드에서 전달한 DB ID
+        "use_async": job_input.get("use_async", False),  # 비동기 처리 옵션
     }
     
     # 감정 이름으로 벡터 설정
@@ -221,14 +224,45 @@ def send_to_backend_sync(audio_base64: str, metadata: Dict[str, Any]):
         return None
 
 async def send_to_backend(audio_base64: str, metadata: Dict[str, Any]):
-    """생성된 음성을 Backend로 전송 (비동기 - 사용하지 않음)"""
-    # RunPod 환경에서는 동기 방식 사용
-    return send_to_backend_sync(audio_base64, metadata)
+    """생성된 음성을 Backend로 전송 (비동기 방식)"""
+    backend_url = os.getenv('BACKEND_POST_URL')
+    if not backend_url:
+        logger.warning("BACKEND_POST_URL이 설정되지 않았습니다")
+        return None
+    
+    try:
+        # POST 페이로드 구성
+        payload = {
+            "audio_base64": audio_base64,
+            "metadata": metadata
+        }
+        
+        logger.info(f"📤 Backend로 음성 데이터 비동기 전송: {backend_url}")
+        logger.info(f"📦 페이로드 크기: {len(json.dumps(payload))} bytes")
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                backend_url,
+                json=payload,
+                timeout=aiohttp.ClientTimeout(total=60)  # 큰 음성 파일을 위해 타임아웃 증가
+            ) as response:
+                if response.status == 200:
+                    result = await response.json()
+                    logger.info(f"✅ Backend 비동기 전송 성공: {response.status}")
+                    return result
+                else:
+                    text = await response.text()
+                    logger.error(f"❌ Backend 비동기 전송 실패: {response.status} - {text}")
+                    return None
+            
+    except Exception as e:
+        logger.error(f"❌ Backend 비동기 전송 중 오류: {str(e)}")
+        return None
 
 
 
-def handler(job):
-    """RunPod 핸들러 함수"""
+async def handler(job):
+    """RunPod 비동기 핸들러 함수"""
     try:
         # 로깅
         logger.info("📥 새로운 TTS 요청 수신")
@@ -308,12 +342,20 @@ def handler(job):
                 "sample_rate": zonos_model.autoencoder.sampling_rate,
                 "created_at": datetime.now().isoformat(),
                 "influencer_id": job_input.get("influencer_id"),  # 인플루언서 ID 추가
-                "base_voice_id": job_input.get("base_voice_id")   # 베이스 음성 ID 추가
+                "base_voice_id": job_input.get("base_voice_id"),   # 베이스 음성 ID 추가
+                "status": "success"  # 성공 상태 명시
             }
             
-            # 동기 방식으로 Backend 전송
-            logger.info("🔔 Backend로 음성 데이터 전송 중...")
-            backend_response = send_to_backend_sync(audio_base64, metadata)
+            # 동기 또는 비동기 방식으로 Backend 전송
+            use_async = job.get("input", {}).get("use_async", False)
+            
+            if use_async:
+                logger.info("🔔 Backend로 음성 데이터 비동기 전송 중...")
+                backend_response = await send_to_backend(audio_base64, metadata)
+            else:
+                logger.info("🔔 Backend로 음성 데이터 동기 전송 중...")
+                backend_response = send_to_backend_sync(audio_base64, metadata)
+                
             if backend_response:
                 logger.info(f"✅ Backend 응답: {backend_response}")
         
@@ -324,6 +366,40 @@ def handler(job):
         error_msg = f"TTS 처리 중 오류 발생: {str(e)}"
         logger.error(f"❌ {error_msg}")
         logger.error(traceback.format_exc())
+        
+        # 실패 시에도 Backend로 전송
+        if os.getenv('BACKEND_POST_URL'):
+            logger.info("🔔 Backend로 실패 상태 전송 중...")
+            
+            # 실패 메타데이터 구성
+            error_metadata = {
+                "job_id": job.get("id", "unknown"),
+                "voice_id": job.get("input", {}).get("voice_id"),
+                "text": job.get("input", {}).get("text", ""),
+                "text_length": len(job.get("input", {}).get("text", "")),
+                "language": job.get("input", {}).get("language", "ko"),
+                "emotion": job.get("input", {}).get("emotion_name", "neutral"),
+                "duration": 0,
+                "file_size": 0,
+                "sample_rate": 0,
+                "created_at": datetime.now().isoformat(),
+                "influencer_id": job.get("input", {}).get("influencer_id"),
+                "base_voice_id": job.get("input", {}).get("base_voice_id"),
+                "status": "failed",
+                "error": error_msg,
+                "error_type": type(e).__name__
+            }
+            
+            # 실패 응답 전송 (audio_base64는 빈 문자열로)
+            use_async = job.get("input", {}).get("use_async", False)
+            
+            if use_async:
+                backend_response = await send_to_backend("", error_metadata)
+            else:
+                backend_response = send_to_backend_sync("", error_metadata)
+                
+            if backend_response:
+                logger.info(f"✅ Backend 실패 응답 전송 완료: {backend_response}")
         
         return {
             "error": error_msg,
