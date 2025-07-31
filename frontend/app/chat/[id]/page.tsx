@@ -281,7 +281,7 @@ export default function ChatPage() {
             console.log("✅ 메시지에 TTS 음성 데이터 저장 완료");
           }
         } else if (data.type === "influencer_info") {
-          // 인플루언서 정보 업데이트
+          // 인플루언서 정보 업데이트 - UI에는 표시하지 않음
           console.log("👤 인플루언서 정보 수신:", data.data);
           console.log("👤 이미지 URL:", data.data?.image_url);
           if (data.data) {
@@ -297,6 +297,7 @@ export default function ChatPage() {
               return updatedModel;
             });
           }
+          // 메시지 리스트에 추가하지 않음 - UI에 표시되지 않도록 함
         } else {
           // 기존 일반 응답 처리 (하위 호환성)
           setIsLoading(false);
