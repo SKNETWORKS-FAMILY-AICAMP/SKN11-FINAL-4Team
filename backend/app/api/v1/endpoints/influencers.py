@@ -1527,6 +1527,15 @@ async def save_system_prompt(
         )
 
     try:
+        # 사용자 정보 조회 (팀 정보 포함)
+        from app.models.user import User
+        user = db.query(User).filter(User.user_id == user_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # 사용자가 속한 그룹 ID 목록
+        user_group_ids = [team.group_id for team in user.teams] if user.teams else []
+
         # 인플루언서 조회
         influencer = await get_influencer_by_id(db, user_id, influencer_id)
         if not influencer:
@@ -1962,6 +1971,8 @@ async def chat_with_influencer(
 async def track_api_usage(db: Session, influencer_id: str):
     """API 사용량을 추적하여 APICallAggregation 테이블에 기록"""
     try:
+        logger.info(f"📊 API 사용량 추적 시작 - influencer_id: {influencer_id}")
+        
         from datetime import date
 
         # 해당 인플루언서의 API 키 조회
@@ -1972,8 +1983,10 @@ async def track_api_usage(db: Session, influencer_id: str):
         )
 
         if not api_key:
-            logger.warning(f"API 키를 찾을 수 없음 - influencer_id: {influencer_id}")
+            logger.warning(f"⚠️ API 키를 찾을 수 없음 - influencer_id: {influencer_id}")
             return
+
+        logger.info(f"🔑 API 키 조회 성공 - api_id: {api_key.api_id}")
 
         today = date.today()
 
@@ -1989,10 +2002,11 @@ async def track_api_usage(db: Session, influencer_id: str):
 
         if existing_aggregation:
             # 기존 데이터가 있으면 호출 횟수 증가
+            old_count = existing_aggregation.daily_call_count
             existing_aggregation.daily_call_count += 1
             existing_aggregation.updated_at = datetime.utcnow()
             logger.info(
-                f"✅ API 사용량 업데이트 - influencer_id: {influencer_id}, daily_calls: {existing_aggregation.daily_call_count}"
+                f"✅ 기존 집계 업데이트 - api_id: {api_key.api_id}, influencer_id: {influencer_id}, 이전: {old_count}, 현재: {existing_aggregation.daily_call_count}"
             )
 
         else:
@@ -2006,10 +2020,11 @@ async def track_api_usage(db: Session, influencer_id: str):
             )
             db.add(new_aggregation)
             logger.info(
-                f"✅ 새로운 API 사용량 기록 생성 - influencer_id: {influencer_id}, daily_calls: 1"
+                f"🆕 새로운 집계 생성 - api_id: {api_key.api_id}, influencer_id: {influencer_id}, daily_calls: 1"
             )
 
         db.commit()
+        logger.info(f"💾 API 사용량 추적 완료 - influencer_id: {influencer_id}, api_id: {api_key.api_id}")
 
     except Exception as e:
         logger.error(

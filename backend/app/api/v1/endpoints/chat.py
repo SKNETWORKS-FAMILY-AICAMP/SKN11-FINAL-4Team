@@ -279,13 +279,28 @@ async def chatbot_chat_stream(
 async def track_api_usage(db: Session, influencer_id: str):
     """API 사용량 추적"""
     try:
+        logger.info(f"📊 API 사용량 추적 시작 - influencer_id: {influencer_id}")
+        
+        # API 키 조회
+        api_key = (
+            db.query(InfluencerAPI)
+            .filter(InfluencerAPI.influencer_id == influencer_id)
+            .first()
+        )
+        
+        if not api_key:
+            logger.warning(f"⚠️ API 키를 찾을 수 없음 - influencer_id: {influencer_id}")
+            return
+        
+        logger.info(f"🔑 API 키 조회 성공 - api_id: {api_key.api_id}")
+        
         today = datetime.now().date()
 
         # 오늘 날짜의 API 호출 집계 조회
         aggregation = (
             db.query(APICallAggregation)
             .filter(
-                APICallAggregation.influencer_id == influencer_id,
+                APICallAggregation.api_id == api_key.api_id,
                 APICallAggregation.created_at >= today,
             )
             .first()
@@ -293,23 +308,28 @@ async def track_api_usage(db: Session, influencer_id: str):
 
         if aggregation:
             # 기존 집계 업데이트
-            setattr(aggregation, "daily_call_count", aggregation.daily_call_count + 1)
-            setattr(aggregation, "updated_at", datetime.now())
+            old_count = aggregation.daily_call_count
+            aggregation.daily_call_count += 1
+            aggregation.updated_at = datetime.now()
+            logger.info(f"✅ 기존 집계 업데이트 - api_id: {api_key.api_id}, 이전: {old_count}, 현재: {aggregation.daily_call_count}")
         else:
             # 새로운 집계 생성
             aggregation = APICallAggregation(
+                api_id=api_key.api_id,
                 influencer_id=influencer_id,
                 daily_call_count=1,
                 created_at=datetime.now(),
                 updated_at=datetime.now(),
             )
             db.add(aggregation)
+            logger.info(f"🆕 새로운 집계 생성 - api_id: {api_key.api_id}, influencer_id: {influencer_id}")
 
         db.commit()
+        logger.info(f"💾 API 사용량 추적 완료 - influencer_id: {influencer_id}, api_id: {api_key.api_id}")
 
     except Exception as e:
         # API 사용량 추적 실패는 로그만 남기고 계속 진행
-        logger.error(f"API usage tracking failed: {e}")
+        logger.error(f"❌ API usage tracking failed: {e}")
         db.rollback()
 
 
