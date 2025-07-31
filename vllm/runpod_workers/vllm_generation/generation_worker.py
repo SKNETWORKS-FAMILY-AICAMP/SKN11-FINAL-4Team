@@ -397,7 +397,7 @@ async def stream_handler(job):
 
 
 def handler(job):
-    """RunPod handler - run 엔드포인트 (비동기 작업 ID 반환)"""
+    """RunPod handler - run 엔드포인트 (동기 처리)"""
     try:
         logger.info("📥 Run 요청 수신")
         
@@ -405,24 +405,26 @@ def handler(job):
         if llm_engine is None:
             initialize_engine()
         
-        # 작업 ID 생성
-        job_id = str(uuid.uuid4())
-        
         # 페이로드
         payload = job["input"]
         
-        # 비동기 처리를 위한 작업 정보 반환
-        logger.info(f"✅ 작업 생성 완료 - ID: {job_id}")
+        # 텍스트 생성 (동기적으로 처리)
+        generated_text = generate_response(payload)
+        
+        logger.info(f"✅ Run 요청 처리 완료 - 길이: {len(generated_text)}")
         
         return {
-            "id": job_id,
-            "status": "IN_PROGRESS",
-            "delayTime": 0
+            "status": "completed",
+            "generated_text": generated_text,
+            "output": {
+                "generated_text": generated_text
+            }
         }
         
     except Exception as e:
         logger.error(f"❌ Run 핸들러 오류: {e}")
         return {
+            "status": "failed",
             "error": str(e),
             "traceback": traceback.format_exc()
         }
@@ -554,6 +556,5 @@ if __name__ == "__main__":
     runpod.serverless.start({
         "handler": handler,              # /run 엔드포인트
         "sync_handler": sync_handler,    # /runsync 엔드포인트
-        "stream_handler": stream_handler, # /stream 엔드포인트 (실시간 스트리밍)
-        "return_aggregate_stream": True  # 스트리밍 응답 집계 활성화
+        "stream_handler": stream_handler # /stream 엔드포인트 (실시간 스트리밍)
     })
