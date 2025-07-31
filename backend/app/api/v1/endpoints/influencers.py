@@ -1875,16 +1875,12 @@ async def chat_with_influencer(
 
         # RunPod 서비스 호출
         try:
-            from app.services.runpod_client import (
-                runpod_generate_text,
-                runpod_health_check,
-                vllm_generate_response,
-                get_runpod_client,
-            )
+            from app.services.runpod_manager import get_vllm_manager
 
-            # RunPod 서버 상태 확인
-            if not await runpod_health_check():
-                logger.warning("RunPod 서버에 연결할 수 없어 기본 응답을 사용합니다.")
+            # vLLM 매니저 가져오기 및 서버 상태 확인
+            vllm_manager = get_vllm_manager()
+            if not await vllm_manager.health_check():
+                logger.warning("vLLM 서버에 연결할 수 없어 기본 응답을 사용합니다.")
                 response_text = f"안녕하세요! 저는 {api_key.influencer_name}입니다. '{request.message}'에 대한 답변을 드리겠습니다."
             else:
                 # 시스템 프롬프트 구성
@@ -1916,30 +1912,31 @@ async def chat_with_influencer(
                                 str(hf_token_manage.hf_token_value)
                             )
 
-                    # RunPod 응답 생성
-                    response = await runpod_generate_text(
+                    # vLLM 매니저로 응답 생성
+                    result = await vllm_manager.generate_text(
                         prompt=request.message,
                         lora_adapter=str(api_key.influencer_id),
                         hf_repo=model_id,  # HuggingFace repository 경로
                         hf_token=hf_token,  # HF 토큰
                         system_message=system_message,
-                        max_tokens=512
+                        max_tokens=512,
+                        stream=False
                     )
 
-                    # RunPod에서는 LoRA 어댑터 로드가 자동으로 처리됨
-                    # vLLM과의 호환성을 위해 model_id를 유지
-                    logger.info(f"✅ RunPod에서 모델 사용 준비: {model_id}")
-                else:
-                    model_id = str(api_key.influencer_id)
+                    # 응답 텍스트 추출
+                    if result.get("status") == "completed" and result.get("output"):
+                        output = result["output"]
+                        if output.get("status") == "success":
+                            response_text = output.get("generated_text", "")
+                        else:
+                            response_text = f"안녕하세요! 저는 {api_key.influencer_name}입니다. '{request.message}'에 대한 답변을 드리겠습니다."
+                    else:
+                        response_text = f"안녕하세요! 저는 {api_key.influencer_name}입니다. '{request.message}'에 대한 답변을 드리겠습니다."
 
-                response_text = await vllm_generate_response(
-                    user_message=request.message,
-                    system_message=system_message,
-                    influencer_name=str(api_key.influencer_name),
-                    model_id=model_id,
-                    max_new_tokens=200,
-                    temperature=0.7,
-                )
+                    logger.info(f"✅ vLLM 매니저에서 모델 사용 준비: {model_id}")
+                else:
+                    # 기본 응답
+                    response_text = f"안녕하세요! 저는 {api_key.influencer_name}입니다. '{request.message}'에 대한 답변을 드리겠습니다."
 
                 logger.info(f"✅ VLLM 응답 생성 성공: {api_key.influencer_name}")
 

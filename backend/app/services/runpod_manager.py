@@ -457,6 +457,15 @@ class TTSRunPodManager(BaseRunPodManager):
         except Exception as e:
             logger.error(f"❌ TTS 음성 생성 실패: {e}")
             raise RunPodManagerError(f"TTS 음성 생성 실패: {e}")
+    
+    async def health_check(self) -> bool:
+        """TTS 엔드포인트 상태 확인"""
+        try:
+            endpoint = await self.find_endpoint()
+            return endpoint is not None and endpoint.get("id") is not None
+        except Exception as e:
+            logger.warning(f"⚠️ TTS 상태 확인 실패: {e}")
+            return False
 
 
 class VLLMRunPodManager(BaseRunPodManager):
@@ -608,7 +617,7 @@ class VLLMRunPodManager(BaseRunPodManager):
         hf_token: Optional[str] = None,
         hf_repo: Optional[str] = None
     ):
-        """vLLM 스트리밍 텍스트 생성"""
+        """vLLM 스트리밍 텍스트 생성 (실제 /stream 엔드포인트 사용)"""
         import httpx
         import json
         
@@ -616,7 +625,10 @@ class VLLMRunPodManager(BaseRunPodManager):
             # 엔드포인트 찾기
             endpoint = await self.find_endpoint()
             if not endpoint or not endpoint.get("id"):
-                raise RunPodManagerError("vLLM 엔드포인트를 찾을 수 없습니다")
+                logger.warning("⚠️ vLLM 엔드포인트를 찾을 수 없어 폴백 방식을 사용합니다")
+                async for token in self._fallback_streaming(prompt, lora_adapter, system_message, temperature, max_tokens, hf_token, hf_repo):
+                    yield token
+                return
             
             endpoint_id = endpoint["id"]
             
@@ -627,24 +639,25 @@ class VLLMRunPodManager(BaseRunPodManager):
                     "system_message": system_message,
                     "temperature": temperature,
                     "max_tokens": max_tokens,
-                    "stream": True  # 스트리밍 모드
+                    "stream": True
                 }
             }
             
             # LoRA 어댑터가 있으면 추가
             if lora_adapter:
-                logger.info(f"🔧 [Stream] LoRA 어댑터 설정: lora_adapter={lora_adapter}, hf_repo={hf_repo}")
+                logger.info(f"🔧 LoRA 어댑터 설정: lora_adapter={lora_adapter}, hf_repo={hf_repo}")
                 if hf_repo:
-                    payload["input"]["lora_adapter"] = f"hf://{hf_repo}"
-                    logger.info(f"✅ [Stream] HF repository 경로 사용: hf://{hf_repo}")
+                    payload["input"]["lora_adapter"] = lora_adapter
+                    payload["input"]["hf_repo"] = hf_repo
+                    logger.info(f"✅ HF repository 경로 사용: {hf_repo}")
                 else:
                     payload["input"]["lora_adapter"] = lora_adapter
-                    logger.warning(f"⚠️ [Stream] HF repository 없이 UUID 사용: {lora_adapter}")
+                    logger.warning(f"⚠️ HF repository 없이 UUID 사용: {lora_adapter}")
                     
                 # HF 토큰이 있으면 추가
                 if hf_token:
                     payload["input"]["hf_token"] = hf_token
-                    logger.info(f"🔑 [Stream] HF 토큰 포함 (길이: {len(hf_token)})")
+                    logger.info(f"🔑 HF 토큰 포함 (길이: {len(hf_token)})")
             
             # RunPod API 호출
             base_url = "https://api.runpod.ai/v2"
@@ -655,59 +668,131 @@ class VLLMRunPodManager(BaseRunPodManager):
             
             headers = {
                 "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
+                "Accept": "text/event-stream",
+                "Cache-Control": "no-cache"
             }
             
-            # 스트리밍 호출 사용
-            url = f"{base_url}/{endpoint_id}/stream"
+            # 스트리밍 엔드포인트를 먼저 시도
+            stream_url = f"{base_url}/{endpoint_id}/stream"
             
-            logger.info(f"🌊 vLLM 스트리밍 텍스트 생성 요청: {url}")
-            logger.info(f"📦 [Stream] Payload: {json.dumps(payload, indent=2, ensure_ascii=False)}")
+            logger.info(f"🌊 vLLM 스트리밍 요청: {stream_url}")
+            logger.info(f"📦 Payload: {json.dumps(payload, indent=2, ensure_ascii=False)}")
             
-            async with httpx.AsyncClient(timeout=300) as client:
-                async with client.stream('POST', url, headers=headers, json=payload) as response:
-                    if response.status_code != 200:
-                        error_msg = f"RunPod 스트리밍 API 오류: {response.status_code} - {await response.aread()}"
-                        logger.error(f"❌ {error_msg}")
-                        logger.error(f"❌ 요청 URL: {url}")
-                        logger.error(f"❌ 엔드포인트 ID: {endpoint_id}")
-                        raise RunPodManagerError(error_msg)
-                    
-                    # 스트리밍 응답 처리
-                    async for line in response.aiter_lines():
-                        if line.strip():
-                            try:
-                                # SSE 형식 파싱
+            try:
+                async with httpx.AsyncClient(timeout=300) as client:
+                    async with client.stream(
+                        "POST", 
+                        stream_url, 
+                        headers=headers, 
+                        json=payload
+                    ) as response:
+                        
+                        if response.status_code == 200:
+                            logger.info("✅ 실제 스트리밍 시작")
+                            
+                            # SSE 스트림 처리
+                            async for line in response.aiter_lines():
                                 if line.startswith("data: "):
-                                    json_data = line[6:]  # "data: " 제거
-                                    data = json.loads(json_data)
-                                    
-                                    # 토큰이나 텍스트 추출
-                                    if "token" in data:
-                                        yield data["token"]
-                                    elif "text" in data:
-                                        yield data["text"]
-                                    elif "generated_text" in data:
-                                        yield data["generated_text"]
-                                    elif "output" in data and isinstance(data["output"], str):
-                                        yield data["output"]
-                                    
-                                    # 완료 신호 확인
-                                    if data.get("done") or data.get("finished"):
-                                        break
-                                        
-                            except json.JSONDecodeError:
-                                # JSON이 아닌 라인은 무시
-                                continue
-                            except Exception as e:
-                                logger.warning(f"⚠️ 스트리밍 라인 처리 실패: {e}, line: {line}")
-                                continue
-                    
-                    logger.info(f"✅ vLLM 스트리밍 텍스트 생성 완료")
+                                    data_str = line[6:]  # "data: " 제거
+                                    if data_str.strip():
+                                        try:
+                                            data = json.loads(data_str)
+                                            
+                                            # 토큰이 있으면 yield
+                                            if "text" in data and data["text"]:
+                                                yield data["text"]
+                                            
+                                            # 완료 신호 확인
+                                            if data.get("finished") or data.get("done"):
+                                                logger.info("✅ 스트리밍 완료")
+                                                break
+                                                
+                                        except json.JSONDecodeError:
+                                            continue
+                            
+                            return  # 성공적으로 스트리밍 완료
+                            
+                        elif response.status_code == 404:
+                            logger.warning("⚠️ /stream 엔드포인트가 존재하지 않아 폴백 방식을 사용합니다")
+                        else:
+                            logger.warning(f"⚠️ 스트리밍 요청 실패 ({response.status_code}), 폴백 방식을 사용합니다")
+                            
+            except Exception as stream_error:
+                logger.warning(f"⚠️ 스트리밍 연결 실패: {stream_error}, 폴백 방식을 사용합니다")
+            
+            # 스트리밍 실패시 폴백 방식 사용
+            async for token in self._fallback_streaming(prompt, lora_adapter, system_message, temperature, max_tokens, hf_token, hf_repo):
+                yield token
                     
         except Exception as e:
-            logger.error(f"❌ vLLM 스트리밍 텍스트 생성 실패: {e}")
-            raise RunPodManagerError(f"vLLM 스트리밍 텍스트 생성 실패: {e}")
+            logger.error(f"❌ vLLM 스트리밍 실패: {e}")
+            # 오류 발생 시 기본 오류 메시지를 스트리밍으로 반환
+            yield f"오류가 발생했습니다: {str(e)}"
+    
+    async def _fallback_streaming(
+        self,
+        prompt: str,
+        lora_adapter: Optional[str] = None,
+        system_message: Optional[str] = None,
+        temperature: float = 0.7,
+        max_tokens: int = 512,
+        hf_token: Optional[str] = None,
+        hf_repo: Optional[str] = None
+    ):
+        """폴백 스트리밍 방식 (동기 호출 후 토큰 분할)"""
+        logger.info("🌊 폴백 스트리밍 방식 사용")
+        
+        try:
+            # 동기 호출로 완전한 응답을 받은 후 청크로 나누어 스트리밍
+            result = await self.generate_text(
+                prompt=prompt,
+                lora_adapter=lora_adapter,
+                system_message=system_message,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                hf_token=hf_token,
+                hf_repo=hf_repo,
+                stream=False
+            )
+            
+            # 응답에서 텍스트 추출
+            generated_text = ""
+            if result.get("status") == "completed" and result.get("output"):
+                output = result["output"]
+                if output.get("status") == "success":
+                    generated_text = output.get("generated_text", "")
+                else:
+                    generated_text = "응답 생성에 실패했습니다."
+            else:
+                generated_text = result.get("generated_text", "응답 생성에 실패했습니다.")
+            
+            # 텍스트를 토큰 단위로 나누어 스트리밍 시뮬레이션
+            if generated_text:
+                import asyncio
+                import re
+                
+                # 한국어와 영어를 고려한 토큰 분할 (단어 및 구두점 기준)
+                tokens = re.findall(r'\S+|\s+', generated_text)
+                
+                logger.info(f"🌊 폴백 스트리밍 시작: {len(tokens)}개 토큰")
+                
+                for i, token in enumerate(tokens):
+                    # 스트리밍 효과를 위한 짧은 지연
+                    if i > 0:  # 첫 번째 토큰은 바로 전송
+                        await asyncio.sleep(0.05)  # 50ms 지연
+                    
+                    yield token
+                
+                logger.info(f"✅ 폴백 스트리밍 완료: {len(tokens)}개 토큰 전송")
+            else:
+                # 빈 응답인 경우 기본 메시지 반환
+                yield "죄송합니다. 응답을 생성할 수 없습니다."
+                    
+        except Exception as e:
+            logger.error(f"❌ vLLM 폴백 스트리밍 실패: {e}")
+            # 오류 발생 시 기본 오류 메시지를 스트리밍으로 반환
+            yield f"오류가 발생했습니다: {str(e)}"
 
 
 class FinetuningRunPodManager(BaseRunPodManager):

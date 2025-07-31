@@ -474,9 +474,10 @@ async def generate_ai_response(message_text: str, influencer: AIInfluencer, send
         
         # vLLM 서버를 통한 AI 응답 생성
         try:
-            # RunPod 서버 상태 확인
-            if not await runpod_health_check():
-                logger.warning("⚠️ RunPod 서버에 접근할 수 없습니다. 기본 응답을 사용합니다.")
+            # vLLM 매니저 가져오기 및 서버 상태 확인
+            vllm_manager = get_vllm_manager()
+            if not await vllm_manager.health_check():
+                logger.warning("⚠️ vLLM 서버에 접근할 수 없습니다. 기본 응답을 사용합니다.")
                 return f"안녕하세요! {influencer.influencer_name}입니다! 😊 메시지 감사해요! 더 자세히 말씀해주시면 도움드릴게요!"
             
             # 파인튜닝된 모델이 있는 경우 해당 모델 사용
@@ -490,18 +491,26 @@ async def generate_ai_response(message_text: str, influencer: AIInfluencer, send
             else:
                 logger.info(f"🤖 기본 AI 모델로 응답 생성")
             
-            # RunPod 서버로 응답 생성 요청
-            result = await runpod_generate_text(
+            # vLLM 매니저로 응답 생성 요청
+            result = await vllm_manager.generate_text(
                 prompt=message_text,
                 lora_adapter=str(influencer.influencer_id) if model_id else None,
                 hf_repo=model_id if model_id else None,  # HuggingFace repository 경로
                 system_message=system_message,
                 max_tokens=300,
-                temperature=0.7
+                temperature=0.7,
+                stream=False
             )
             
             # 결과에서 텍스트 추출
-            response = result.get("generated_text", "") or result.get("output", {}).get("generated_text", "")
+            if result.get("status") == "completed" and result.get("output"):
+                output = result["output"]
+                if output.get("status") == "success":
+                    response = output.get("generated_text", "")
+                else:
+                    response = ""
+            else:
+                response = result.get("generated_text", "")
             
             # 응답 후처리
             response = response.strip()

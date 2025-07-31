@@ -62,10 +62,9 @@ async def generate_voice(
         raise HTTPException(status_code=400, detail="텍스트는 500자 이하여야 합니다")
     
     try:
-        # RunPod 서버 상태 확인
-        from app.services.runpod_client import runpod_health_check
-        
-        runpod_available = await runpod_health_check()
+        # TTS 매니저로 서버 상태 확인
+        tts_manager = get_tts_manager()
+        runpod_available = await tts_manager.health_check()
         if not runpod_available:
             logger.error("RunPod 서버를 사용할 수 없습니다")
             raise HTTPException(

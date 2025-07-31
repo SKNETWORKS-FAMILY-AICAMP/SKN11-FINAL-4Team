@@ -18,7 +18,7 @@ from app.models.influencer import AIInfluencer
 from app.models.user import HFTokenManage
 from app.core.encryption import decrypt_sensitive_data
 from app.core.security import get_current_user
-from app.services.runpod_client import get_runpod_client
+from app.services.runpod_manager import get_vllm_manager
 import logging
 
 logger = logging.getLogger(__name__)

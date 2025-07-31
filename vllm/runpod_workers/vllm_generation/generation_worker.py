@@ -1251,9 +1251,13 @@ def cleanup():
         logger.info("🧹 GPU 메모리 정리 완료")
 
 def stream_handler(job):
-    """RunPod 스트리밍 핸들러 함수"""
+    """RunPod 폴링 기반 스트리밍 핸들러 함수"""
     try:
-        logger.info("📥 새로운 스트리밍 생성 요청 수신")
+        logger.info("📥 새로운 폴링 기반 스트리밍 생성 요청 수신")
+        
+        # 스트리밍 요청 ID 생성
+        stream_id = str(uuid.uuid4())
+        logger.info(f"🔖 스트리밍 ID 생성: {stream_id}")
         
         # 엔진 초기화 확인
         if llm_engine is None:
@@ -1262,10 +1266,21 @@ def stream_handler(job):
         
         # 입력 검증
         job_input = validate_input(job["input"])
+        job_input["stream_id"] = stream_id
         
-        # 스트리밍 지원 확인
-        if not job_input["stream"]:
-            job_input["stream"] = True  # 스트림 핸들러에서는 강제로 스트리밍 활성화
+        # 스트리밍 상태 초기화
+        streaming_state = {
+            "id": stream_id,
+            "status": "initializing",
+            "tokens": [],
+            "generated_text": "",
+            "token_count": 0,
+            "start_time": time.time(),
+            "error": None
+        }
+        
+        # 전역 스트리밍 상태 저장소에 추가
+        STREAMING_STATES[stream_id] = streaming_state
         
         # LoRA 어댑터 처리
         lora_request = None
@@ -1349,77 +1364,43 @@ def stream_handler(job):
             n=1  # 스트리밍에서는 n=1 고정
         )
         
-        # 스트리밍 텍스트 생성
-        logger.info("🚀 스트리밍 텍스트 생성 시작...")
+        # 백그라운드에서 텍스트 생성 시작
+        logger.info("🚀 백그라운드 텍스트 생성 시작...")
         
-        generated_text = ""
-        token_count = 0
-        start_time = time.time()
+        # 스트리밍 상태 업데이트
+        streaming_state["status"] = "generating"
+        streaming_state["model"] = DEFAULT_MODEL
+        streaming_state["used_lora"] = job_input["lora_adapter"] is not None
+        streaming_state["lora_adapter"] = adapter_name if lora_request else None
+        streaming_state["temperature"] = job_input["temperature"]
+        streaming_state["max_tokens"] = job_input["max_tokens"]
         
-        # 첫 번째 청크 - 메타데이터
-        yield {
-            "status": "streaming",
-            "type": "start",
-            "model": DEFAULT_MODEL,
-            "used_lora": job_input["lora_adapter"] is not None,
-            "lora_adapter": adapter_name if lora_request else None,
-            "temperature": job_input["temperature"],
-            "max_tokens": job_input["max_tokens"]
+        # 백그라운드 생성 태스크 시작
+        asyncio.create_task(_background_generate(
+            job_input["prompt"],
+            sampling_params,
+            lora_request,
+            stream_id,
+            job_input["influencer_name"]
+        ))
+        
+        # 즉시 스트리밍 ID 반환
+        return {
+            "status": "success",
+            "stream_id": stream_id,
+            "message": "스트리밍이 시작되었습니다. /stream/{stream_id} 엔드포인트로 상태를 확인하세요."
         }
         
-        try:
-            # vLLM 스트리밍 생성
-            for text_chunk in generate_text_stream(
-                prompt=job_input["prompt"],
-                sampling_params=sampling_params,
-                lora_request=lora_request
-            ):
-                cleaned_chunk = clean_response(text_chunk, job_input["influencer_name"])
-                generated_text += cleaned_chunk
-                token_count += len(cleaned_chunk.split())
-                
-                # 텍스트 청크 전송
-                yield {
-                    "status": "streaming",
-                    "type": "content",
-                    "text": cleaned_chunk,
-                    "generated_text": generated_text,
-                    "token_count": token_count,
-                    "elapsed_time": time.time() - start_time
-                }
-        
-        except Exception as e:
-            logger.error(f"❌ 스트리밍 생성 중 오류: {e}")
-            yield {
-                "status": "failed",
-                "error": str(e),
-                "type": "error"
-            }
-            return
-        
-        # 마지막 청크 - 완료
-        total_time = time.time() - start_time
-        yield {
-            "status": "completed",
-            "type": "end",
-            "generated_text": generated_text,
-            "token_count": token_count,
-            "total_time": total_time,
-            "tokens_per_second": token_count / total_time if total_time > 0 else 0
-        }
-        
-        logger.info(f"✅ 스트리밍 생성 완료 (총 {total_time:.2f}초, {token_count} 토큰)")
         
     except Exception as e:
-        error_msg = f"스트리밍 처리 중 오류 발생: {str(e)}"
+        error_msg = f"폴링 스트리밍 초기화 중 오류 발생: {str(e)}"
         logger.error(f"❌ {error_msg}")
         logger.error(traceback.format_exc())
         
-        yield {
+        return {
             "status": "failed",
             "error": error_msg,
-            "traceback": traceback.format_exc(),
-            "type": "error"
+            "traceback": traceback.format_exc()
         }
 
 # RunPod 서버리스 실행

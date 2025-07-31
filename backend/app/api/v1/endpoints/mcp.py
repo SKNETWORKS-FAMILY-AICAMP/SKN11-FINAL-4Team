@@ -762,9 +762,10 @@ async def debug_tools():
 async def get_vllm_status():
     """VLLM 서버 상태를 확인합니다."""
     try:
-        from app.services.runpod_client import runpod_health_check
+        from app.services.runpod_manager import get_vllm_manager
 
-        is_healthy = await runpod_health_check()
+        vllm_manager = get_vllm_manager()
+        is_healthy = await vllm_manager.health_check()
         return {
             "status": "healthy" if is_healthy else "unhealthy",
             "timestamp": datetime.now().isoformat(),
@@ -782,7 +783,7 @@ async def get_vllm_status():
 async def test_vllm_connection():
     """VLLM 연결을 테스트합니다."""
     try:
-        from app.services.runpod_client import get_runpod_client
+        from app.services.runpod_manager import get_vllm_manager
 
         # RunPod 클라이언트로 변경 필요
         # TODO: RunPod serverless API로 구현
@@ -811,7 +812,7 @@ async def load_vllm_adapter(
 ):
     """VLLM 어댑터를 로드합니다."""
     try:
-        from app.services.runpod_client import get_runpod_client
+        from app.services.runpod_manager import get_vllm_manager
 
         # RunPod에서는 어댑터 로드가 다르게 처리됨
         # TODO: RunPod serverless adapter 로드 구현
@@ -835,7 +836,7 @@ async def load_vllm_adapter(
 async def list_vllm_adapters():
     """로드된 VLLM 어댑터 목록을 가져옵니다."""
     try:
-        from app.services.runpod_client import get_runpod_client
+        from app.services.runpod_manager import get_vllm_manager
 
         # RunPod에서는 어댑터 관리가 다르게 처리됨
         # TODO: RunPod serverless adapter 목록 구현
@@ -858,7 +859,7 @@ async def list_vllm_adapters():
 async def unload_vllm_adapter(model_id: str):
     """VLLM 어댑터를 언로드합니다."""
     try:
-        from app.services.runpod_client import get_runpod_client
+        from app.services.runpod_manager import get_vllm_manager
 
         # RunPod에서는 어댑터 언로드가 다르게 처리됨
         # TODO: RunPod serverless adapter 언로드 구현
