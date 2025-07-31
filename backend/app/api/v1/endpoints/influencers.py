@@ -2494,6 +2494,55 @@ async def get_voice_status_stream(
     )
 
 
+@router.post("/fix-model-repos")
+async def fix_model_repos(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """잘못된 model_repo 경로를 수정하는 임시 엔드포인트"""
+    try:
+        from app.services.hf_token_resolver import get_token_for_influencer
+        
+        # user/로 시작하는 모든 인플루언서 찾기
+        influencers = db.query(AIInfluencer).filter(
+            AIInfluencer.influencer_model_repo.like("user/%")
+        ).all()
+        
+        fixed_count = 0
+        for influencer in influencers:
+            try:
+                # HF 토큰의 사용자명 가져오기
+                hf_token, hf_username = await get_token_for_influencer(influencer, db)
+                
+                if hf_username and influencer.influencer_model_repo:
+                    old_repo = influencer.influencer_model_repo
+                    # user/uuid -> actual-username/uuid
+                    if old_repo.startswith("user/"):
+                        uuid_part = old_repo.split("/")[1]
+                        new_repo = f"{hf_username}/{uuid_part}"
+                        influencer.influencer_model_repo = new_repo
+                        fixed_count += 1
+                        logger.info(f"✅ 수정됨: {old_repo} -> {new_repo}")
+            except Exception as e:
+                logger.error(f"❌ {influencer.influencer_id} 수정 실패: {e}")
+                continue
+        
+        db.commit()
+        
+        return {
+            "message": f"{fixed_count}개의 model_repo 경로가 수정되었습니다",
+            "fixed_count": fixed_count
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ model_repo 수정 실패: {e}")
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
 @router.post("/finetuning/result", response_model=FineTuningResultResponse)
 async def receive_finetuning_result(
     request: FineTuningResultRequest,
@@ -2558,7 +2607,23 @@ async def receive_finetuning_result(
 
             if influencer:
                 influencer.learning_status = 1  # 1: 사용가능
+                
+                # HF 레포 경로 처리
                 if hf_repo_path:
+                    # HF 토큰의 사용자명 가져오기
+                    try:
+                        from app.services.hf_token_resolver import get_token_for_influencer
+                        hf_token, hf_username = await get_token_for_influencer(influencer, db)
+                        
+                        # user/uuid 형태인 경우 실제 사용자명으로 교체
+                        if hf_repo_path.startswith("user/") and hf_username:
+                            # user/uuid -> actual-username/uuid
+                            uuid_part = hf_repo_path.split("/")[1]
+                            hf_repo_path = f"{hf_username}/{uuid_part}"
+                            logger.info(f"🔧 HF 레포 경로 수정: {hf_repo_path}")
+                    except Exception as e:
+                        logger.warning(f"⚠️ HF 사용자명 가져오기 실패: {e}")
+                    
                     influencer.influencer_model_repo = hf_repo_path  # 레포 경로만 저장
                 logger.info(
                     f"✅ 인플루언서 모델 상태 업데이트 완료: influencer_id={batch_key_entry.influencer_id}, status=사용 가능"

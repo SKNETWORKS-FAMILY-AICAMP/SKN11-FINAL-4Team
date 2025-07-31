@@ -294,6 +294,7 @@ class RunPodClient:
                     payload["input"]["hf_token"] = hf_token
             
             logger.info(f"🤖 RunPod 텍스트 생성 요청: prompt={prompt[:50]}...")
+            logger.info(f"📦 Payload: {json.dumps(payload, indent=2, ensure_ascii=False)}")
             
             # Generation 엔드포인트 URL (/runsync 사용 - 동기 처리)
             generation_endpoint_id = await self.get_generation_endpoint_id()

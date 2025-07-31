@@ -105,6 +105,7 @@ async def chatbot_chat(
                 if influencer.influencer_id and influencer.influencer_model_repo:
                     # LoRA 어댑터 이름 설정 (인플루언서 ID 사용)
                     lora_adapter = str(influencer.influencer_id)
+                    # DB에 저장된 HF 레포지토리 경로 사용
                     hf_repo = str(influencer.influencer_model_repo)
                     logger.info(f"🔧 LoRA 어댑터 사용: {lora_adapter}, HF repo: {hf_repo}")
                     
@@ -215,6 +216,7 @@ async def chatbot_chat_stream(
                 if influencer.influencer_id and influencer.influencer_model_repo:
                     # LoRA 어댑터 이름 설정 (인플루언서 ID 사용)
                     lora_adapter = str(influencer.influencer_id)
+                    # DB에 저장된 HF 레포지토리 경로 사용
                     hf_repo = str(influencer.influencer_model_repo)
                     logger.info(f"🔧 LoRA 어댑터 사용: {lora_adapter}, HF repo: {hf_repo}")
                     

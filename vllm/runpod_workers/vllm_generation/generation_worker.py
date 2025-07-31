@@ -157,34 +157,41 @@ class MultiVLLMManager:
                         adapter_name = adapter_info.get("name", "custom_adapter")
                         adapter_path = adapter_info.get("path", adapter_name)
                     else:
-                        adapter_name = str(adapter_info)
                         adapter_path = str(adapter_info)
+                        # hf:// 경로에서 어댑터 이름 추출
+                        if adapter_path.startswith("hf://"):
+                            # hf://username/model-name -> model-name을 어댑터 이름으로 사용
+                            repo_parts = adapter_path.replace("hf://", "").split("/")
+                            if len(repo_parts) >= 2:
+                                adapter_name = repo_parts[-1]  # 모델 이름 부분
+                            else:
+                                adapter_name = adapter_path.replace("hf://", "")
+                        else:
+                            adapter_name = adapter_path
                     
-                    # 어댑터 로드 (sync_handler와 동일한 로직)
+                    logger.info(f"📋 어댑터 처리: name='{adapter_name}', path='{adapter_path}'")
+                    
+                    # 어댑터 로드
                     if adapter_name in loaded_adapters:
                         loaded_adapter = loaded_adapters[adapter_name]
+                        logger.info(f"✅ 캐시된 어댑터 사용: {adapter_name}")
                     else:
+                        # HF 토큰 가져오기
+                        hf_token = job_input.get("hf_token")
+                        if hf_token:
+                            logger.info(f"🔑 HF 토큰 발견: {hf_token[:10]}...")
+                        
+                        # hf:// 경로라면 바로 로드
+                        if adapter_path.startswith("hf://"):
+                            loaded_adapter = load_lora_adapter(adapter_path, adapter_name, hf_token)
                         # UUID 형태라면 다양한 경로에서 찾기 시도
-                        if len(adapter_path) == 36 and adapter_path.count('-') == 4:
-                            possible_paths = [
-                                adapter_path,
-                                os.path.join(LORA_ADAPTERS_BASE_PATH, adapter_path),
-                                f"hf://username/{adapter_path}",
-                                f"hf://user/{adapter_name}",
-                            ]
-                            
-                            loaded_adapter = None
-                            for attempt_path in possible_paths:
-                                try:
-                                    loaded_adapter = load_lora_adapter(attempt_path, adapter_name, job_input.get("hf_token"))
-                                    break
-                                except Exception:
-                                    continue
-                            
-                            if loaded_adapter is None:
-                                raise FileNotFoundError(f"모든 경로에서 어댑터를 찾을 수 없습니다: {adapter_name}")
+                        elif len(adapter_path) == 36 and adapter_path.count('-') == 4:
+                            logger.warning(f"⚠️ UUID 형태의 어댑터 경로는 지원하지 않습니다: {adapter_path}")
+                            logger.warning(f"   백엔드에서 HF repo 경로를 전달해야 합니다.")
+                            raise FileNotFoundError(f"UUID 형태의 어댑터는 지원하지 않습니다. HF repo 경로를 사용하세요.")
                         else:
-                            loaded_adapter = load_lora_adapter(adapter_path, adapter_name, job_input.get("hf_token"))
+                            # 로컬 경로로 시도
+                            loaded_adapter = load_lora_adapter(adapter_path, adapter_name, hf_token)
                     
                     # LoRA Request 생성
                     lora_request = LoRARequest(
@@ -467,6 +474,7 @@ def create_chat_prompt(
 def download_lora_files(repo_id: str, cache_dir: str, hf_token: Optional[str] = None) -> str:
     """LoRA 어댑터 파일을 효율적으로 다운로드"""
     import os
+    import subprocess
     
     # 캐시 경로 생성
     local_path = os.path.join(cache_dir, repo_id.replace("/", "--"))
@@ -478,6 +486,92 @@ def download_lora_files(repo_id: str, cache_dir: str, hf_token: Optional[str] = 
     
     os.makedirs(local_path, exist_ok=True)
     
+    # 방법 1: Git Clone 사용 (가장 빠름)
+    try:
+        # Git LFS 설치 확인
+        subprocess.run(["git", "lfs", "install"], capture_output=True, check=True)
+        
+        # Git clone URL 구성
+        if hf_token:
+            # 토큰을 포함한 URL
+            clone_url = f"https://oauth2:{hf_token}@huggingface.co/{repo_id}"
+            logger.info(f"🔑 HuggingFace 토큰으로 인증된 Git clone 사용")
+        else:
+            clone_url = f"https://huggingface.co/{repo_id}"
+        
+        # GIT_LFS_SKIP_SMUDGE=1로 포인터만 다운로드 (LoRA는 작아서 괜찮음)
+        env = os.environ.copy()
+        env["GIT_LFS_SKIP_SMUDGE"] = "1"
+        
+        logger.info(f"🚀 Git clone 시작: {repo_id}")
+        
+        # sparse-checkout으로 필요한 파일만 다운로드
+        cmd_clone = ["git", "clone", "--depth", "1", "--filter=blob:none", clone_url, local_path]
+        result = subprocess.run(cmd_clone, env=env, capture_output=True, text=True, timeout=30)
+        
+        if result.returncode == 0:
+            # sparse-checkout 설정
+            subprocess.run(["git", "-C", local_path, "sparse-checkout", "init"], check=True)
+            subprocess.run(["git", "-C", local_path, "sparse-checkout", "set", 
+                          "adapter_config.json", "adapter_model.safetensors", "adapter_model.bin"], 
+                          check=True)
+            
+            # LFS 파일 다운로드
+            subprocess.run(["git", "-C", local_path, "lfs", "pull", "--include", 
+                          "adapter_model.safetensors,adapter_model.bin"], 
+                          check=True)
+            
+            logger.info(f"✅ Git clone 다운로드 성공")
+            return local_path
+        else:
+            logger.warning(f"⚠️ Git clone 실패: {result.stderr}")
+            
+    except subprocess.CalledProcessError as e:
+        logger.warning(f"⚠️ Git 명령 실패: {e}")
+    except Exception as e:
+        logger.warning(f"⚠️ Git clone 오류: {e}")
+    
+    # 방법 2: HF CLI 사용
+    try:
+        # 환경 변수 설정
+        env = os.environ.copy()
+        if hf_token:
+            env["HUGGING_FACE_HUB_TOKEN"] = hf_token
+            logger.info(f"🔑 HuggingFace 토큰 사용")
+        
+        # hf download 명령어 구성
+        cmd = [
+            "huggingface-cli", "download",
+            repo_id,
+            "--local-dir", local_path,
+            "--include", "adapter_config.json",
+            "--include", "adapter_model.safetensors",
+            "--include", "adapter_model.bin",
+            "--quiet"
+        ]
+        
+        if hf_token:
+            cmd.extend(["--token", hf_token])
+        
+        logger.info(f"🚀 HF CLI로 다운로드 시작: {repo_id}")
+        result = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=60)
+        
+        if result.returncode == 0:
+            logger.info(f"✅ HF CLI 다운로드 성공")
+            return local_path
+        else:
+            logger.warning(f"⚠️ HF CLI 다운로드 실패: {result.stderr}")
+            
+    except subprocess.TimeoutExpired:
+        logger.warning("⚠️ HF CLI 다운로드 시간 초과")
+    except FileNotFoundError:
+        logger.warning("⚠️ huggingface-cli가 설치되지 않음, Python API 사용")
+    except Exception as e:
+        logger.warning(f"⚠️ HF CLI 다운로드 오류: {e}")
+    
+    # HF CLI 실패 시 Python API로 폴백
+    logger.info("📥 Python API로 다운로드 시도")
+    
     # 필수 파일 목록
     essential_files = [
         "adapter_config.json",
@@ -488,7 +582,6 @@ def download_lora_files(repo_id: str, cache_dir: str, hf_token: Optional[str] = 
     download_kwargs = {}
     if hf_token:
         download_kwargs["token"] = hf_token
-        logger.info(f"🔑 HuggingFace 토큰 사용")
     
     # 필수 파일만 다운로드
     downloaded = False
