@@ -1920,6 +1920,8 @@ async def chat_with_influencer(
                     response = await runpod_generate_text(
                         prompt=request.message,
                         lora_adapter=str(api_key.influencer_id),
+                        hf_repo=model_id,  # HuggingFace repository 경로
+                        hf_token=hf_token,  # HF 토큰
                         system_message=system_message,
                         max_tokens=512
                     )

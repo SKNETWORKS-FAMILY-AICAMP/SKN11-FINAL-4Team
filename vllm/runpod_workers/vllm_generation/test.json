@@ -1,0 +1,12 @@
+{
+  "input": {
+    "user_message": "안녕하세요",
+    "system_message": "당신은 도움이 되는 AI 어시스턴트입니다.",
+    "influencer_name": "어시스턴트",
+    "max_new_tokens": 50,
+    "temperature": 0.7,
+    "do_sample": true,
+    "use_chat_template": true,
+    "model_id": null
+  }
+}

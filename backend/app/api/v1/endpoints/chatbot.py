@@ -10,12 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.user import HFTokenManage
-from app.services.runpod_client import (
-    get_runpod_client,
-    runpod_health_check,
-    runpod_generate_text_stream,
-    runpod_generate_text,
-)
+from app.services.runpod_manager import get_vllm_manager
 from app.core.encryption import decrypt_sensitive_data
 from app.services.hf_token_resolver import get_token_by_group
 from app.services.chat_message_service import ChatMessageService
@@ -234,14 +229,12 @@ async def chatbot(
             logger.info(f"[WS] RUNPOD_API_KEY 길이: {len(runpod_api_key)}자")
             logger.info(f"[WS] RUNPOD_API_KEY 앞 10자: {runpod_api_key[:10]}...")
         
-        # RunPod 클라이언트 정보 확인
-        from app.services.runpod_client import get_runpod_client
-        runpod_client = get_runpod_client()
-        logger.info(f"[WS] RunPod 클라이언트 생성됨: {type(runpod_client)}")
-        logger.info(f"[WS] RunPod 클라이언트 base_url: {getattr(runpod_client, 'base_url', 'Unknown')}")
+        # vLLM 매니저 정보 확인
+        vllm_manager = get_vllm_manager()
+        logger.info(f"[WS] vLLM Manager 생성됨: {type(vllm_manager)}")
         
-        health_status = await runpod_health_check()
-        logger.info(f"[WS] RunPod health check 결과: {health_status}")
+        health_status = await vllm_manager.health_check()
+        logger.info(f"[WS] vLLM health check 결과: {health_status}")
         
         if not health_status:
             logger.error(f"[WS] ❌ RunPod 서버 연결 실패")
@@ -258,15 +251,7 @@ async def chatbot(
         
         logger.info(f"[WS] ✅ RunPod 서버 상태 확인 완료")
         
-        # RunPod vLLM endpoint 상태 추가 확인
-        try:
-            from app.services.runpod_manager import get_vllm_manager
-            vllm_manager = get_vllm_manager()
-            # endpoint_id는 RunPod Serverless에서는 필요하지 않음
-            logger.info(f"[WS] ✅ vLLM Manager 준비됨 (RunPod Serverless)")
-                
-        except Exception as endpoint_error:
-            logger.error(f"[WS] ❌ vLLM Manager 확인 중 오류: {endpoint_error}")
+        logger.info(f"[WS] ✅ vLLM Manager 준비됨 (RunPod Serverless)")
 
         logger.info(
             f"[WS] RunPod WebSocket 연결 시작: lora_repo={lora_repo_decoded}, group_id={group_id}, session_id={session_id}"
@@ -277,6 +262,7 @@ async def chatbot(
 
         # 인플루언서 정보 가져오기
         influencer = None
+        hf_repo = None
         if influencer_id:
             from app.models.influencer import AIInfluencer
 
@@ -294,6 +280,11 @@ async def chatbot(
                 logger.info(
                     f"[WS] ⚠️ 저장된 시스템 프롬프트가 없어 기본 시스템 프롬프트 사용"
                 )
+            
+            # HuggingFace repository 경로 가져오기
+            if influencer and influencer.influencer_model_repo:
+                hf_repo = str(influencer.influencer_model_repo)
+                logger.info(f"[WS] 🔧 HF Repository: {hf_repo}")
 
         # RunPod는 어댑터 사전 로드가 필요하지 않음 (요청 시 지정)
         logger.info(f"[WS] RunPod LoRA 어댑터 준비: {lora_repo_decoded}")
@@ -426,8 +417,40 @@ async def chatbot(
                             logger.warning(f"[WS] 히스토리 처리 실패, 요약 없이 진행: {e}")
                             enhanced_message = user_message
 
-                # RunPod 서버에서 스트리밍 응답 생성
+                # MCP 처리 로직 추가
                 try:
+                    # MCP 처리 (도구 사용)
+                    mcp_result = None
+                    try:
+                        from app.services.mcp_service import MCPService
+                        
+                        logger.info(f"[WS] MCP 처리 시작: {user_message[:50]}...")
+                        
+                        # MCP 서비스 인스턴스 생성
+                        mcp_service = MCPService(db)
+                        
+                        # MCP 메시지 처리
+                        mcp_response = await mcp_service.process_message(
+                            message=user_message,
+                            influencer_id=influencer_id or ""
+                        )
+                        
+                        if mcp_response and mcp_response.get("response"):
+                            mcp_result = mcp_response["response"]
+                            logger.info(f"[WS] ✅ MCP 처리 성공")
+                        else:
+                            logger.info(f"[WS] ❌ MCP 처리 실패 또는 도구 불필요, SLLM으로 전환")
+                    except Exception as e:
+                        logger.error(f"[WS] MCP 처리 중 오류: {e}")
+                    
+                    # 최종 메시지 구성
+                    final_prompt = enhanced_message
+                    
+                    if mcp_result:
+                        # MCP 결과가 있으면 도구 결과 기반 응답 생성
+                        final_prompt = f"사용자 질문: {user_message}\n도구 결과: {mcp_result}\n위 정보를 바탕으로 답변해 주세요."
+                    # else: enhanced_message (히스토리 포함된 원본 메시지) 사용
+                    
                     system_prompt = (
                         str(influencer.system_prompt)
                         if influencer and influencer.system_prompt
@@ -438,9 +461,11 @@ async def chatbot(
                     token_count = 0
                     full_response = ""
                     
-                    async for token in runpod_generate_text_stream(
-                        prompt=enhanced_message,
-                        lora_adapter=lora_repo_decoded,  # LoRA 어댑터 지정
+                    async for token in vllm_manager.generate_text_stream(
+                        prompt=final_prompt,
+                        lora_adapter=influencer_id if influencer_id else lora_repo_decoded,  # LoRA 어댑터 이름
+                        hf_repo=hf_repo,  # HuggingFace repository 경로
+                        hf_token=hf_token,  # HF 토큰
                         system_message=system_prompt,
                         temperature=0.7,
                         max_tokens=512
@@ -708,8 +733,11 @@ async def model_load(req: ModelLoadRequest, db: Session = Depends(get_db)):
         if not hf_token:
             raise HTTPException(status_code=400, detail="HF 토큰이 없습니다.")
 
+        # vLLM 매니저 가져오기
+        vllm_manager = get_vllm_manager()
+        
         # RunPod 서버 상태 확인
-        if not await runpod_health_check():
+        if not await vllm_manager.health_check():
             raise HTTPException(
                 status_code=503, detail="RunPod 서버에 연결할 수 없습니다."
             )

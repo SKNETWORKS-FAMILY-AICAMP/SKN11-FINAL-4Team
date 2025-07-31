@@ -9,7 +9,7 @@ import os
 from app.database import get_db
 from app.models.influencer import AIInfluencer
 from app.models.voice import VoiceBase, GeneratedVoice
-from app.services.runpod_client import get_runpod_client, runpod_generate_voice
+from app.services.runpod_manager import get_tts_manager
 from app.services.s3_service import get_s3_service
 from app.core.security import get_current_user
 from app.schemas.tts import TTSResultRequest, TTSResultResponse, TTSResultMetadata
@@ -111,10 +111,11 @@ async def generate_voice(
         voice_id = generated_voice.id
         logger.info(f"음성 생성 레코드 생성: voice_id={voice_id}")
         
-        # RunPod 클라이언트로 음성 생성 요청
+        # TTS 매니저로 음성 생성 요청
         logger.info(f"음성 생성 요청: text={request.text[:50]}..., influencer_id={request.influencer_id}")
         
-        result = await runpod_generate_voice(
+        tts_manager = get_tts_manager()
+        result = await tts_manager.generate_voice(
             text=request.text,
             base_voice_url=presigned_url,  # presigned URL 사용
             influencer_id=request.influencer_id,

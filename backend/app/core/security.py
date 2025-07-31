@@ -426,6 +426,9 @@ class APIKeyAuth:
                     detail="Influencer not found",
                 )
             
+            # 인플루언서 정보 로그
+            logger.info(f"🔍 조회된 인플루언서: id={influencer.influencer_id}, name={influencer.influencer_name}, model_repo={influencer.influencer_model_repo}")
+            
             # 챗봇 옵션이 활성화된 인플루언서만 접근 가능
             if influencer.chatbot_option is not True:
                 logger.warning(f"⚠️ 챗봇이 비활성화된 인플루언서 접근 시도: {influencer.influencer_name}")

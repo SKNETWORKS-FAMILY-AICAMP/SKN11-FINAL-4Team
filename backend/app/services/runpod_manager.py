@@ -145,6 +145,7 @@ class BaseRunPodManager(ABC):
                     logger.info(f"   - 엔드포인트 이름: {endpoint_name}")
                     logger.info(f"   - 템플릿 이름: {template_name}")
                     logger.info(f"   - Docker 이미지: {image_name}")
+                    logger.info(f"   - 전체 엔드포인트 정보: {endpoint}")
                     return endpoint
                 
                 # 키워드 매칭
@@ -383,6 +384,79 @@ class TTSRunPodManager(BaseRunPodManager):
     @property
     def search_keywords(self) -> List[str]:
         return ["zonos", "tts", "voice", "speech"]
+    
+    async def generate_voice(
+        self,
+        text: str,
+        voice_id: Optional[str] = None,
+        language: str = "ko",
+        **kwargs
+    ) -> Dict[str, Any]:
+        """TTS 음성 생성"""
+        import httpx
+        import json
+        
+        try:
+            # 엔드포인트 찾기
+            endpoint = await self.find_endpoint()
+            if not endpoint or not endpoint.get("id"):
+                raise RunPodManagerError("TTS 엔드포인트를 찾을 수 없습니다")
+            
+            endpoint_id = endpoint["id"]
+            
+            # 페이로드 구성
+            payload = {
+                "input": {
+                    "text": text,
+                    "language": language
+                }
+            }
+            
+            # 음성 ID가 있으면 추가
+            if voice_id:
+                payload["input"]["voice_id"] = voice_id
+            
+            # 추가 파라미터가 있으면 추가
+            for key, value in kwargs.items():
+                if value is not None:
+                    payload["input"][key] = value
+            
+            # RunPod API 호출
+            base_url = "https://api.runpod.ai/v2"
+            api_key = os.getenv("RUNPOD_API_KEY")
+            
+            if not api_key:
+                raise RunPodManagerError("RUNPOD_API_KEY가 설정되지 않았습니다")
+            
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json"
+            }
+            
+            # 동기 호출 사용
+            url = f"{base_url}/{endpoint_id}/runsync"
+            
+            logger.info(f"🎵 TTS 음성 생성 요청: {url}")
+            logger.info(f"📦 Payload: {json.dumps(payload, indent=2, ensure_ascii=False)}")
+            
+            async with httpx.AsyncClient(timeout=300) as client:
+                response = await client.post(url, headers=headers, json=payload)
+                
+                if response.status_code != 200:
+                    error_msg = f"RunPod TTS API 오류: {response.status_code} - {response.text}"
+                    logger.error(f"❌ {error_msg}")
+                    logger.error(f"❌ 요청 URL: {url}")
+                    logger.error(f"❌ 엔드포인트 ID: {endpoint_id}")
+                    raise RunPodManagerError(error_msg)
+                
+                result = response.json()
+                logger.info(f"✅ TTS 음성 생성 성공")
+                
+                return result
+                    
+        except Exception as e:
+            logger.error(f"❌ TTS 음성 생성 실패: {e}")
+            raise RunPodManagerError(f"TTS 음성 생성 실패: {e}")
 
 
 class VLLMRunPodManager(BaseRunPodManager):
@@ -393,7 +467,7 @@ class VLLMRunPodManager(BaseRunPodManager):
     
     @property
     def docker_image(self) -> str:
-        return "fallsnowing/vllm-lora-worker"  # 실제 이미지명으로 변경 필요
+        return "fallsnowing/exaone-vllm-worker"  # 실제 RunPod에서 사용 중인 이미지
     
     @property
     def endpoint_name(self) -> str:
@@ -418,6 +492,222 @@ class VLLMRunPodManager(BaseRunPodManager):
     @property
     def search_keywords(self) -> List[str]:
         return ["vllm", "llama", "lora", "generation", "chat"]
+    
+    async def generate_text(
+        self,
+        prompt: str,
+        lora_adapter: Optional[str] = None,
+        system_message: Optional[str] = None,
+        temperature: float = 0.7,
+        max_tokens: int = 512,
+        hf_token: Optional[str] = None,
+        hf_repo: Optional[str] = None,
+        stream: bool = False
+    ) -> Dict[str, Any]:
+        """vLLM 텍스트 생성"""
+        import httpx
+        import json
+        
+        try:
+            # 엔드포인트 찾기
+            endpoint = await self.find_endpoint()
+            if not endpoint or not endpoint.get("id"):
+                raise RunPodManagerError("vLLM 엔드포인트를 찾을 수 없습니다")
+            
+            endpoint_id = endpoint["id"]
+            
+            # 페이로드 구성
+            payload = {
+                "input": {
+                    "prompt": prompt,
+                    "system_message": system_message,
+                    "temperature": temperature,
+                    "max_tokens": max_tokens,
+                    "stream": stream
+                }
+            }
+            
+            # LoRA 어댑터가 있으면 추가
+            if lora_adapter:
+                logger.info(f"🔧 LoRA 어댑터 설정: lora_adapter={lora_adapter}, hf_repo={hf_repo}")
+                if hf_repo:
+                    payload["input"]["lora_adapter"] = f"hf://{hf_repo}"
+                    logger.info(f"✅ HF repository 경로 사용: hf://{hf_repo}")
+                else:
+                    payload["input"]["lora_adapter"] = lora_adapter
+                    logger.warning(f"⚠️ HF repository 없이 UUID 사용: {lora_adapter}")
+                    
+                # HF 토큰이 있으면 추가
+                if hf_token:
+                    payload["input"]["hf_token"] = hf_token
+                    logger.info(f"🔑 HF 토큰 포함 (길이: {len(hf_token)})")
+            
+            # RunPod API 호출
+            base_url = "https://api.runpod.ai/v2"
+            api_key = os.getenv("RUNPOD_API_KEY")
+            
+            if not api_key:
+                raise RunPodManagerError("RUNPOD_API_KEY가 설정되지 않았습니다")
+            
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json"
+            }
+            
+            # 동기 호출 사용
+            url = f"{base_url}/{endpoint_id}/runsync"
+            
+            logger.info(f"🤖 vLLM 텍스트 생성 요청: {url}")
+            logger.info(f"📦 Payload: {json.dumps(payload, indent=2, ensure_ascii=False)}")
+            
+            async with httpx.AsyncClient(timeout=300) as client:
+                response = await client.post(url, headers=headers, json=payload)
+                
+                if response.status_code != 200:
+                    error_msg = f"RunPod API 오류: {response.status_code} - {response.text}"
+                    logger.error(f"❌ {error_msg}")
+                    logger.error(f"❌ 요청 URL: {url}")
+                    logger.error(f"❌ 엔드포인트 ID: {endpoint_id}")
+                    raise RunPodManagerError(error_msg)
+                
+                result = response.json()
+                logger.info(f"✅ vLLM 텍스트 생성 성공")
+                
+                # /runsync는 동기식이므로 바로 결과를 반환
+                if result.get("status") == "success":
+                    return {
+                        "status": "completed",
+                        "output": result
+                    }
+                else:
+                    return {
+                        "status": "failed", 
+                        "error": result.get("error", "알 수 없는 오류")
+                    }
+                    
+        except Exception as e:
+            logger.error(f"❌ vLLM 텍스트 생성 실패: {e}")
+            raise RunPodManagerError(f"vLLM 텍스트 생성 실패: {e}")
+    
+    async def health_check(self) -> bool:
+        """vLLM 엔드포인트 상태 확인"""
+        try:
+            endpoint = await self.find_endpoint()
+            return endpoint is not None and endpoint.get("id") is not None
+        except Exception as e:
+            logger.warning(f"⚠️ vLLM 상태 확인 실패: {e}")
+            return False
+    
+    async def generate_text_stream(
+        self,
+        prompt: str,
+        lora_adapter: Optional[str] = None,
+        system_message: Optional[str] = None,
+        temperature: float = 0.7,
+        max_tokens: int = 512,
+        hf_token: Optional[str] = None,
+        hf_repo: Optional[str] = None
+    ):
+        """vLLM 스트리밍 텍스트 생성"""
+        import httpx
+        import json
+        
+        try:
+            # 엔드포인트 찾기
+            endpoint = await self.find_endpoint()
+            if not endpoint or not endpoint.get("id"):
+                raise RunPodManagerError("vLLM 엔드포인트를 찾을 수 없습니다")
+            
+            endpoint_id = endpoint["id"]
+            
+            # 페이로드 구성
+            payload = {
+                "input": {
+                    "prompt": prompt,
+                    "system_message": system_message,
+                    "temperature": temperature,
+                    "max_tokens": max_tokens,
+                    "stream": True  # 스트리밍 모드
+                }
+            }
+            
+            # LoRA 어댑터가 있으면 추가
+            if lora_adapter:
+                logger.info(f"🔧 [Stream] LoRA 어댑터 설정: lora_adapter={lora_adapter}, hf_repo={hf_repo}")
+                if hf_repo:
+                    payload["input"]["lora_adapter"] = f"hf://{hf_repo}"
+                    logger.info(f"✅ [Stream] HF repository 경로 사용: hf://{hf_repo}")
+                else:
+                    payload["input"]["lora_adapter"] = lora_adapter
+                    logger.warning(f"⚠️ [Stream] HF repository 없이 UUID 사용: {lora_adapter}")
+                    
+                # HF 토큰이 있으면 추가
+                if hf_token:
+                    payload["input"]["hf_token"] = hf_token
+                    logger.info(f"🔑 [Stream] HF 토큰 포함 (길이: {len(hf_token)})")
+            
+            # RunPod API 호출
+            base_url = "https://api.runpod.ai/v2"
+            api_key = os.getenv("RUNPOD_API_KEY")
+            
+            if not api_key:
+                raise RunPodManagerError("RUNPOD_API_KEY가 설정되지 않았습니다")
+            
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json"
+            }
+            
+            # 스트리밍 호출 사용
+            url = f"{base_url}/{endpoint_id}/stream"
+            
+            logger.info(f"🌊 vLLM 스트리밍 텍스트 생성 요청: {url}")
+            logger.info(f"📦 [Stream] Payload: {json.dumps(payload, indent=2, ensure_ascii=False)}")
+            
+            async with httpx.AsyncClient(timeout=300) as client:
+                async with client.stream('POST', url, headers=headers, json=payload) as response:
+                    if response.status_code != 200:
+                        error_msg = f"RunPod 스트리밍 API 오류: {response.status_code} - {await response.aread()}"
+                        logger.error(f"❌ {error_msg}")
+                        logger.error(f"❌ 요청 URL: {url}")
+                        logger.error(f"❌ 엔드포인트 ID: {endpoint_id}")
+                        raise RunPodManagerError(error_msg)
+                    
+                    # 스트리밍 응답 처리
+                    async for line in response.aiter_lines():
+                        if line.strip():
+                            try:
+                                # SSE 형식 파싱
+                                if line.startswith("data: "):
+                                    json_data = line[6:]  # "data: " 제거
+                                    data = json.loads(json_data)
+                                    
+                                    # 토큰이나 텍스트 추출
+                                    if "token" in data:
+                                        yield data["token"]
+                                    elif "text" in data:
+                                        yield data["text"]
+                                    elif "generated_text" in data:
+                                        yield data["generated_text"]
+                                    elif "output" in data and isinstance(data["output"], str):
+                                        yield data["output"]
+                                    
+                                    # 완료 신호 확인
+                                    if data.get("done") or data.get("finished"):
+                                        break
+                                        
+                            except json.JSONDecodeError:
+                                # JSON이 아닌 라인은 무시
+                                continue
+                            except Exception as e:
+                                logger.warning(f"⚠️ 스트리밍 라인 처리 실패: {e}, line: {line}")
+                                continue
+                    
+                    logger.info(f"✅ vLLM 스트리밍 텍스트 생성 완료")
+                    
+        except Exception as e:
+            logger.error(f"❌ vLLM 스트리밍 텍스트 생성 실패: {e}")
+            raise RunPodManagerError(f"vLLM 스트리밍 텍스트 생성 실패: {e}")
 
 
 class FinetuningRunPodManager(BaseRunPodManager):

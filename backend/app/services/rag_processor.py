@@ -11,11 +11,7 @@ import logging
 from typing import List, Dict, Optional, Tuple, Any
 from dataclasses import dataclass
 from app.services.openai_service_simple import OpenAIService
-from app.services.runpod_client import (
-    get_runpod_client,
-    runpod_health_check,
-    runpod_generate_text_stream,
-)
+from app.services.runpod_manager import get_vllm_manager
 from app.services.rag_service import get_rag_service, RAGService
 
 logger = logging.getLogger(__name__)

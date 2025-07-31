@@ -21,7 +21,7 @@ from app.schemas.instagram import (
 )
 from app.core.instagram_service import InstagramService
 from app.core.security import get_current_user
-from app.services.runpod_client import runpod_generate_text, runpod_health_check
+from app.services.runpod_manager import get_vllm_manager
 from app.services.hf_token_resolver import get_token_for_influencer
 
 router = APIRouter()
@@ -494,6 +494,7 @@ async def generate_ai_response(message_text: str, influencer: AIInfluencer, send
             result = await runpod_generate_text(
                 prompt=message_text,
                 lora_adapter=str(influencer.influencer_id) if model_id else None,
+                hf_repo=model_id if model_id else None,  # HuggingFace repository 경로
                 system_message=system_message,
                 max_tokens=300,
                 temperature=0.7

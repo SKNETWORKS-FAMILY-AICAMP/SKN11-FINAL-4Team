@@ -1083,23 +1083,47 @@ def warmup_test():
     warmup_success = False
     
     try:
+        # test.json 파일 확인
+        test_json_path = os.path.join(os.path.dirname(__file__), "test.json")
+        
+        if os.path.exists(test_json_path):
+            logger.info(f"📄 test.json 파일 발견: {test_json_path}")
+            with open(test_json_path, 'r', encoding='utf-8') as f:
+                test_data = json.load(f)
+                test_input = test_data.get("input", {})
+                logger.info("✅ test.json 파일 로드 완료")
+        else:
+            logger.info("⚠️ test.json 파일이 없어 기본 테스트 입력 사용")
+            test_input = {
+                "user_message": "안녕하세요",
+                "system_message": "당신은 도움이 되는 AI 어시스턴트입니다.",
+                "influencer_name": "어시스턴트",
+                "max_new_tokens": 50,
+                "temperature": 0.7,
+                "do_sample": True,
+                "use_chat_template": True
+            }
+        
         # 1단계: 베이스 모델 웜업
         logger.info("🚀 1단계: 베이스 모델 웜업 중...")
         
-        test_input = {
-            "prompt": "Hello",  # 간단한 영어 프롬프트
-            "temperature": 0.1,  # 결정적 출력을 위해 낮은 temperature
-            "max_tokens": 5,     # 빠른 테스트를 위해 적은 토큰
-            "top_p": 0.9,
-            "top_k": 50,
-            "repetition_penalty": 1.0,
+        # vLLM 호환 입력으로 변환
+        vllm_input = {
+            "prompt": test_input.get("user_message", "Hello"),
+            "system_message": test_input.get("system_message", DEFAULT_SYSTEM_MESSAGE),
+            "influencer_name": test_input.get("influencer_name"),
+            "temperature": test_input.get("temperature", 0.7),
+            "max_tokens": test_input.get("max_new_tokens", 50),
+            "top_p": test_input.get("top_p", 0.9),
+            "top_k": test_input.get("top_k", 50),
+            "repetition_penalty": test_input.get("repetition_penalty", 1.0),
             "stop_sequences": ["[|Human|", "[|System|]", "<|im_end|>", "</s>"],
-            "lora_adapter": None,
+            "lora_adapter": test_input.get("model_id"),
             "stream": False,
             "n": 1
         }
         
-        validated_input = validate_input(test_input)
+        validated_input = validate_input(vllm_input)
         
         sampling_params = SamplingParams(
             temperature=validated_input["temperature"],
@@ -1123,8 +1147,9 @@ def warmup_test():
         if results and len(results) > 0:
             generated_text = clean_response(results[0])
             logger.info(f"✅ 베이스 모델 웜업 성공!")
-            logger.info(f"📝 생성된 텍스트: '{generated_text}'")
+            logger.info(f"📝 생성된 텍스트: '{generated_text[:100]}...'")  # 처음 100자만 표시
             logger.info(f"⏱️ 베이스 모델 생성 시간: {base_generation_time:.2f}초")
+            logger.info(f"🔥 GPU가 웜업되어 첫 요청부터 빠른 응답이 가능합니다!")
             warmup_success = True
         else:
             logger.warning("⚠️ 베이스 모델 웜업 결과가 비어있습니다")
@@ -1197,7 +1222,12 @@ def warmup_test():
             total = torch.cuda.get_device_properties(0).total_memory / 1e9
             logger.info(f"📊 GPU 메모리 상태 - 할당: {allocated:.2f}GB, 예약: {reserved:.2f}GB, 총: {total:.2f}GB")
         
-        logger.info("🎯 전체 웜업 완료 - 워커가 최적 성능으로 준비되었습니다!")
+        logger.info("="*50)
+        logger.info("🎯 vLLM 워커 웜업 완료!")
+        logger.info("✅ 베이스 모델: EXAONE-3.5-2.4B-Instruct")
+        logger.info("✅ GPU 메모리: 최적화 완료")
+        logger.info("✅ 첫 요청부터 빠른 응답 가능")
+        logger.info("="*50)
         return warmup_success
             
     except Exception as e:
