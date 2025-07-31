@@ -17,15 +17,33 @@ from vllm.lora.request import LoRARequest
 from transformers import AutoTokenizer
 from huggingface_hub import snapshot_download
 
+# GPU 메모리 모니터링을 위한 라이브러리
+try:
+    import torch
+    GPU_MONITORING_AVAILABLE = True
+except ImportError:
+    GPU_MONITORING_AVAILABLE = False
+    logger.warning("⚠️ PyTorch 미설치 - GPU 메모리 모니터링 비활성화")
+
 # 로깅 설정
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# 전역 변수
+# 전역 변수 및 엔진 상태 관리
 llm_engine = None
 async_llm_engine = None
 tokenizer = None
 loaded_adapters = {}
+_engine_initialized = False
+_async_engine_initialized = False
+_initialization_lock = None
+
+# 락 초기화는 실제 사용 시점에 수행
+def get_initialization_lock():
+    global _initialization_lock
+    if _initialization_lock is None:
+        _initialization_lock = asyncio.Lock()
+    return _initialization_lock
 
 # 스트리밍 모드 설정
 ENABLE_STREAMING = os.environ.get("ENABLE_STREAMING", "true").lower() == "true"
@@ -47,12 +65,20 @@ except ImportError:
 
 
 async def initialize_async_engine(model_name: str = DEFAULT_MODEL):
-    """vLLM AsyncLLMEngine 초기화"""
-    global async_llm_engine, tokenizer
+    """vLLM AsyncLLMEngine 초기화 (싱글톤 패턴)"""
+    global async_llm_engine, tokenizer, _async_engine_initialized
     
-    if async_llm_engine is not None:
+    # 이미 초기화된 경우 반환
+    if _async_engine_initialized and async_llm_engine is not None:
         logger.info("✅ 비동기 엔진이 이미 초기화되어 있습니다.")
-        return
+        return async_llm_engine
+    
+    # 초기화 중인 경우 대기 (동시 초기화 방지)
+    lock = get_initialization_lock()
+    async with lock:
+        # 락 획득 후 다시 확인
+        if _async_engine_initialized and async_llm_engine is not None:
+            return async_llm_engine
     
     logger.info(f"🔧 vLLM AsyncLLMEngine 초기화 시작: {model_name}")
     
@@ -69,29 +95,36 @@ async def initialize_async_engine(model_name: str = DEFAULT_MODEL):
                 enable_lora=True,
                 max_lora_rank=64,
                 max_loras=10,
-                gpu_memory_utilization=0.85,
+                gpu_memory_utilization=0.75,  # GPU 메모리 사용률 조정
                 max_model_len=4096,
+                enforce_eager=True,  # 메모리 안정성 향상
             )
             
-            # AsyncLLMEngine 초기화
+                # AsyncLLMEngine 초기화
             async_llm_engine = AsyncLLMEngine.from_engine_args(engine_args)
-            logger.info("✅ vLLM AsyncLLMEngine 초기화 완료")
+            _async_engine_initialized = True
+            logger.info("✅ vLLM AsyncLLMEngine 초기화 완룜")
+            log_gpu_memory()  # 초기화 후 메모리 상태 로그
         else:
             logger.warning("⚠ AsyncLLMEngine 사용 불가 - 동기 엔진으로 대체")
             raise ImportError("AsyncLLMEngine not available")
         
+        return async_llm_engine
+        
     except Exception as e:
         logger.error(f"❌ 비동기 엔진 초기화 실패: {str(e)}")
+        _async_engine_initialized = False
         raise
 
 
 def initialize_engine(model_name: str = DEFAULT_MODEL):
-    """vLLM 엔진 초기화 (동기)"""
-    global llm_engine, tokenizer
+    """vLLM 엔진 초기화 (동기, 싱글톤 패턴)"""
+    global llm_engine, tokenizer, _engine_initialized
     
-    if llm_engine is not None:
+    # 이미 초기화된 경우 반환
+    if _engine_initialized and llm_engine is not None:
         logger.info("✅ 엔진이 이미 초기화되어 있습니다.")
-        return
+        return llm_engine
     
     logger.info(f"🔧 vLLM 엔진 초기화 시작: {model_name}")
     
@@ -107,14 +140,19 @@ def initialize_engine(model_name: str = DEFAULT_MODEL):
             enable_lora=True,
             max_lora_rank=64,
             max_loras=10,
-            gpu_memory_utilization=0.85,
+            gpu_memory_utilization=0.75,  # GPU 메모리 사용률 조정
             max_model_len=4096,
+            enforce_eager=True,  # 메모리 안정성 향상
         )
         
+        _engine_initialized = True
         logger.info("✅ vLLM 엔진 초기화 완료")
+        log_gpu_memory()  # 초기화 후 메모리 상태 로그
+        return llm_engine
         
     except Exception as e:
         logger.error(f"❌ 엔진 초기화 실패: {str(e)}")
+        _engine_initialized = False
         raise
 
 
@@ -284,13 +322,15 @@ async def stream_handler(job):
     try:
         logger.info("📥 Stream 요청 수신")
         
-        # 스트리밍 모드에 따른 엔진 초기화
+        # 스트리밍 모드에 따른 엔진 초기화 (싱글톤 보장)
         if ENABLE_STREAMING and AsyncLLMEngine is not None:
-            if async_llm_engine is None:
+            if not _async_engine_initialized or async_llm_engine is None:
+                logger.info("🔧 비동기 엔진 초기화 필요 - 첫 스트림 요청")
                 await initialize_async_engine()
             engine_to_use = async_llm_engine
         else:
-            if llm_engine is None:
+            if not _engine_initialized or llm_engine is None:
+                logger.info("🔧 동기 엔진 초기화 필요 - 첫 스트림 요청")
                 initialize_engine()
             engine_to_use = llm_engine
         
@@ -401,8 +441,9 @@ def handler(job):
     try:
         logger.info("📥 Run 요청 수신")
         
-        # 엔진 초기화 확인
-        if llm_engine is None:
+        # 엔진 초기화 확인 (싱글톤 보장)
+        if not _engine_initialized or llm_engine is None:
+            logger.info("🔧 엔진 초기화 필요 - 첫 요청")
             initialize_engine()
         
         # 페이로드
@@ -435,8 +476,9 @@ def sync_handler(job):
     try:
         logger.info("📥 RunSync 요청 수신")
         
-        # 엔진 초기화 확인
-        if llm_engine is None:
+        # 엔진 초기화 확인 (싱글톤 보장)
+        if not _engine_initialized or llm_engine is None:
+            logger.info("🔧 엔진 초기화 필요 - 첫 요청")
             initialize_engine()
         
         # 페이로드
@@ -464,28 +506,89 @@ def sync_handler(job):
 
 
 
+def get_gpu_memory_info():
+    """실시간 GPU 메모리 사용량 모니터링"""
+    if not GPU_MONITORING_AVAILABLE:
+        return "GPU 모니터링 비활성화"
+    
+    try:
+        if torch.cuda.is_available():
+            total_memory = torch.cuda.get_device_properties(0).total_memory / (1024**3)  # GB
+            reserved_memory = torch.cuda.memory_reserved(0) / (1024**3)  # GB
+            allocated_memory = torch.cuda.memory_allocated(0) / (1024**3)  # GB
+            free_memory = total_memory - reserved_memory
+            
+            return {
+                "total_gb": round(total_memory, 2),
+                "reserved_gb": round(reserved_memory, 2),
+                "allocated_gb": round(allocated_memory, 2),
+                "free_gb": round(free_memory, 2),
+                "utilization_percent": round((reserved_memory / total_memory) * 100, 1)
+            }
+        else:
+            return "CUDA 비활성화"
+    except Exception as e:
+        return f"GPU 메모리 모니터링 오류: {e}"
+
+
+def log_gpu_memory():
+    """간단한 GPU 메모리 로그 출력"""
+    memory_info = get_gpu_memory_info()
+    if isinstance(memory_info, dict):
+        logger.info(f"📊 GPU 메모리: {memory_info['reserved_gb']:.1f}GB/{memory_info['total_gb']:.1f}GB "
+                   f"({memory_info['utilization_percent']:.1f}% 사용, {memory_info['free_gb']:.1f}GB 여유)")
+    else:
+        logger.info(f"📊 GPU 메모리: {memory_info}")
+
+
+def cleanup_engines():
+    """엔진 정리 및 메모리 해제"""
+    global llm_engine, async_llm_engine, _engine_initialized, _async_engine_initialized
+    
+    try:
+        logger.info("🧹 엔진 정리 시작...")
+        log_gpu_memory()  # 정리 전 메모리 상태
+        
+        if llm_engine is not None:
+            logger.info("🧹 동기 엔진 정리 중...")
+            # vLLM 엔진은 자동으로 GPU 메모리를 해제함
+            llm_engine = None
+            _engine_initialized = False
+            
+        if async_llm_engine is not None:
+            logger.info("🧹 비동기 엔진 정리 중...")
+            async_llm_engine = None
+            _async_engine_initialized = False
+        
+        # GPU 메모리 강제 정리 (선택적)
+        if GPU_MONITORING_AVAILABLE and torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            logger.info("🧹 GPU 캐시 정리 완료")
+            
+        log_gpu_memory()  # 정리 후 메모리 상태
+        logger.info("✅ 엔진 정리 완료")
+        
+    except Exception as e:
+        logger.error(f"❌ 엔진 정리 실패: {e}")
+
+
 def warmup_test():
     """워커 웜업 테스트"""
     try:
         logger.info("🔥 워커 웜업 시작...")
         
-        # 테스트 페이로드
-        test_payload = {
-            "hf_token": os.environ.get("HF_TOKEN", ""),
-            "hf_repo": "LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct",  # 베이스 모델로 테스트
-            "system_message": DEFAULT_SYSTEM_MESSAGE,
-            "prompt": "안녕하세요",
-            "temperature": 0.7,
-            "max_tokens": 50
-        }
+        # 현재 초기화된 엔진이 없으면 웜업 불가
+        if not _engine_initialized or llm_engine is None:
+            logger.warning("⚠️ 웜업 대상 엔진이 없습니다")
+            return False
         
         # 베이스 모델로 간단한 생성 테스트
         start_time = time.time()
         
         # 프롬프트 생성
         prompt = create_chat_prompt(
-            user_message=test_payload["prompt"],
-            system_message=test_payload["system_message"]
+            user_message="안녕하세요",
+            system_message=DEFAULT_SYSTEM_MESSAGE
         )
         
         # 샘플링 파라미터
@@ -540,11 +643,14 @@ if __name__ == "__main__":
                 initialize_engine(DEFAULT_MODEL)
                 logger.info("✅ LLM 엔진 초기화 완료")
             
-            # 웜업 테스트
-            if warmup_test():
-                logger.info("🔥 워커 웜업 완료 - 최적의 성능으로 요청 대기 중")
+            # 웜업 테스트 (동기 엔진이 있는 경우에만)
+            if _engine_initialized and llm_engine is not None:
+                if warmup_test():
+                    logger.info("🔥 워커 웜업 완료 - 최적의 성능으로 요청 대기 중")
+                else:
+                    logger.warning("⚠️ 웜업 실패 - 첫 요청 시 지연 가능")
             else:
-                logger.warning("⚠️ 웜업 실패 - 첫 요청 시 지연 가능")
+                logger.info("ℹ️ 비동기 엔진 모드 - 웜업 테스트 건너뛰기")
                 
         except Exception as e:
             logger.error(f"❌ 초기화 실패: {e}")
