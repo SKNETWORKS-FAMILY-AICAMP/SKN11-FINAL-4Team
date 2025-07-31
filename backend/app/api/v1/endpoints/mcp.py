@@ -195,17 +195,25 @@ class MCPToolProcessor:
                         args_schema = tool.get("args_schema", {})
                         required_params = args_schema.get("required", [])
                         properties = args_schema.get("properties", {})
-                        
+
                         # 매개변수 정보 문자열 생성
                         params_info = []
                         for param_name, param_info in properties.items():
                             param_type = param_info.get("type", "string")
                             param_desc = param_info.get("description", "")
-                            required = "필수" if param_name in required_params else "선택"
-                            params_info.append(f"  - {param_name} ({param_type}): {param_desc} [{required}]")
-                        
-                        params_str = "\n".join(params_info) if params_info else "  - 매개변수 없음"
-                        
+                            required = (
+                                "필수" if param_name in required_params else "선택"
+                            )
+                            params_info.append(
+                                f"  - {param_name} ({param_type}): {param_desc} [{required}]"
+                            )
+
+                        params_str = (
+                            "\n".join(params_info)
+                            if params_info
+                            else "  - 매개변수 없음"
+                        )
+
                     else:
                         # 객체 형태인 경우 - 다양한 속성 시도
                         name = None
@@ -228,28 +236,42 @@ class MCPToolProcessor:
                             name = str(tool.__class__.__name__)
                         if description is None:
                             description = "No description"
-                        
+
                         # 매개변수 정보 추출 (객체의 경우)
                         params_str = "  - 매개변수 정보 없음"
-                        if hasattr(tool, 'args_schema'):
+                        if hasattr(tool, "args_schema"):
                             args_schema = tool.args_schema
                             if isinstance(args_schema, dict):
                                 required_params = args_schema.get("required", [])
                                 properties = args_schema.get("properties", {})
-                                
+
                                 params_info = []
                                 for param_name, param_info in properties.items():
                                     param_type = param_info.get("type", "string")
                                     param_desc = param_info.get("description", "")
-                                    required = "필수" if param_name in required_params else "선택"
-                                    params_info.append(f"  - {param_name} ({param_type}): {param_desc} [{required}]")
-                                
-                                params_str = "\n".join(params_info) if params_info else "  - 매개변수 없음"
+                                    required = (
+                                        "필수"
+                                        if param_name in required_params
+                                        else "선택"
+                                    )
+                                    params_info.append(
+                                        f"  - {param_name} ({param_type}): {param_desc} [{required}]"
+                                    )
 
-                    tools_description_parts.append(f"- {name}: {description}\n매개변수:\n{params_str}")
+                                params_str = (
+                                    "\n".join(params_info)
+                                    if params_info
+                                    else "  - 매개변수 없음"
+                                )
+
+                    tools_description_parts.append(
+                        f"- {name}: {description}\n매개변수:\n{params_str}"
+                    )
                 except Exception as e:
                     logger.warning(f"도구 정보 파싱 실패: {e}, 도구: {tool}")
-                    tools_description_parts.append(f"- Unknown: No description\n매개변수:\n  - 매개변수 정보 없음")
+                    tools_description_parts.append(
+                        f"- Unknown: No description\n매개변수:\n  - 매개변수 정보 없음"
+                    )
 
             tools_description = "\n".join(tools_description_parts)
             logger.info(f"📋 사용 가능한 도구 목록:\n{tools_description}")
@@ -360,7 +382,7 @@ class MCPToolProcessor:
                         return None
 
                     tool_type = get_tool_type(tool_name, all_tools)
-                    
+
                     # 모든 MCP 도구에 대해 범용적인 파싱 적용
                     parse_prompt = (
                         "아래 도구 결과에서 순수한 결과 값만 추출해주세요. "
@@ -374,7 +396,7 @@ class MCPToolProcessor:
                         "중요: 결과 값 자체만 전달하세요. 추가 설명, 요약, 해석은 포함하지 마세요.\n"
                         f"\n도구 결과:\n{result}"
                     )
-                    
+
                     parsed_result = await self.openai_service.openai_tool_selection(
                         user_prompt=parse_prompt,
                         system_prompt="당신은 도구 결과에서 순수한 데이터만 추출하는 AI입니다. 추가 설명이나 해석 없이 결과 값 자체만 반환하세요.",
@@ -417,20 +439,31 @@ class MCPToolProcessor:
                 logger.info(f"🔍 선택된 검색 도구: {search_tool}")
 
                 try:
-                    # 웹검색 실행
+                    # 웹검색 실행 - 동적 서버 사용
                     search_parameters = {"query": message}
 
-                    # websearch 서버에서 도구 실행
-                    search_result = await self.mcp_client_service.execute_tool(
-                        "websearch", search_tool, search_parameters
+                    # 사용 가능한 서버에서 검색 도구 찾기
+                    available_servers = (
+                        await self.mcp_client_service.get_available_servers()
                     )
+                    search_result = None
 
-                    if search_result:
-                        logger.info(f"✅ 웹검색 성공: {search_result[:200]}...")
-                        return search_result, [search_tool]
-                    else:
-                        logger.warning("❌ 웹검색 실패")
-                        return None, []
+                    for server in available_servers:
+                        try:
+                            search_result = await self.mcp_client_service.execute_tool(
+                                server, search_tool, search_parameters
+                            )
+                            if search_result:
+                                logger.info(
+                                    f"✅ {server} 서버에서 웹검색 성공: {search_result[:200]}..."
+                                )
+                                return search_result, [search_tool]
+                        except Exception as e:
+                            logger.debug(f"❌ {server} 서버에서 웹검색 실패: {e}")
+                            continue
+
+                    logger.warning("❌ 모든 서버에서 웹검색 실패")
+                    return None, []
 
                 except Exception as e:
                     logger.error(f"❌ 웹검색 중 오류: {e}")
