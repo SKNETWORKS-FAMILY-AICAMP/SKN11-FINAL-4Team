@@ -346,4 +346,14 @@ def cleanup():
 # RunPod 서버리스 실행
 if __name__ == "__main__":
     logger.info("🚀 RunPod Zonos TTS Worker 시작")
+    
+    # Zonos 엔진 미리 초기화 (첫 요청 대기 시간 단축)
+    logger.info("⏳ Zonos 엔진 사전 초기화 중...")
+    try:
+        initialize_model()
+        logger.info("✅ Zonos 엔진 사전 초기화 완료 - 첫 요청 응답 시간이 개선됩니다")
+    except Exception as e:
+        logger.error(f"❌ Zonos 엔진 사전 초기화 실패: {str(e)}")
+        logger.warning("⚠️ 첫 요청 시 초기화가 진행됩니다")
+    
     runpod.serverless.start({"handler": handler})
