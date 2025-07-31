@@ -181,13 +181,13 @@ function PostListContent() {
     // 캐시에 없으면 API 호출
     try {
       const influencerInfo = await apiClient.get<any>(`/api/v1/influencers/${influencerId}`)
-      
+
       // 캐시에 저장
       setInfluencerCache(prev => ({
         ...prev,
         [influencerId]: influencerInfo
       }))
-      
+
       return influencerInfo
     } catch (error) {
       console.error('Failed to fetch influencer info:', error)
@@ -472,7 +472,7 @@ function PostListContent() {
       console.log(`상세 정보 로드 시작: ${postId}`); // 디버깅 로그 추가
       const boardDetail = await apiClient.get<any>(`/api/v1/boards/${postId}`)
       console.log('받아온 상세 정보:', boardDetail); // 디버깅 로그 추가
-      
+
       // API 응답으로부터 완전한 Post 객체 생성
       const detailedPost: Post = {
         id: boardDetail.board_id,
@@ -510,7 +510,7 @@ function PostListContent() {
         publishedAt: boardDetail.published_at,
         scheduledAt: boardDetail.reservation_at
       }
-      
+
       console.log('업데이트된 게시글 정보:', detailedPost); // 디버깅 로그 추가
       setSelectedPost(detailedPost)
     } catch (error) {
@@ -528,12 +528,12 @@ function PostListContent() {
   const handleViewPost = (post: Post) => {
     console.log('상세보기 클릭된 게시글:', post); // 디버깅 로그 추가
     console.log('post.id:', post.id, 'post.board_id:', post.board_id); // ID 확인
-    
+
     // 먼저 selectedPost를 설정
     setSelectedPost(post)
     setIsViewModalOpen(true)
     setIsEditing(false)
-    
+
     // 그 다음 상세 정보 로드
     if (post.id) {
       loadPostDetail(post.id)
@@ -1145,7 +1145,7 @@ function PostListContent() {
                   )}
                 </div>
               </DialogHeader>
-              
+
               {isDetailLoading ? (
                 // 로딩 중일 때 표시
                 <div className="flex items-center justify-center py-12">
