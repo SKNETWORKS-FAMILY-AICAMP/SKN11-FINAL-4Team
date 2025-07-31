@@ -212,16 +212,11 @@ async def chatbot(
         await websocket.close()
         return
 
-    await websocket.accept()
-
     # 데이터베이스 히스토리 서비스 초기화
     chat_message_service = ChatMessageService(db)
     # 세션별 히스토리 초기화
     session_id = f"{lora_repo_decoded}_{group_id}_{influencer_id or 'default'}"
-    if session_id not in chat_histories:
-        chat_histories[session_id] = ChatHistory()
-    
-    chat_history = chat_histories[session_id]
+    current_session_id = None  # 현재 세션 ID 초기화
 
     try:
         # RunPod 서버 상태 확인 (상세 로그 포함)
@@ -497,15 +492,8 @@ async def chatbot(
                             "influencer_name": str(influencer.influencer_name) if influencer else "한세나"
                         }
                         
-                        chat_history.add_message(
-                            query=user_message,
-                            response=full_response,
-                            context=history_summary if history_summary else "",  # 안전한 사용
-                            model_info=model_info
-                        )
-                    
                     logger.info(
-                        f"[WS] RunPod 스트리밍 응답 전송 완료 (토큰 수: {token_count}, 히스토리: {len(chat_history.history)}개)"
+                        f"[WS] RunPod 스트리밍 응답 전송 완료 (토큰 수: {token_count})"
                     )
 
                 except Exception as e:

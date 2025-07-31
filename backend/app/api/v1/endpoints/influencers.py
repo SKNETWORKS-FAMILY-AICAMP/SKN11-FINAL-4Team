@@ -39,6 +39,7 @@ from app.schemas.influencer import (
 )
 from app.schemas.finetuning import FineTuningResultRequest, FineTuningResultResponse
 from app.core.security import get_current_user
+from app.models.user import User
 from app.core.permissions import check_team_resource_permission
 from app.services.influencers.crud import (
     get_influencers_list,
