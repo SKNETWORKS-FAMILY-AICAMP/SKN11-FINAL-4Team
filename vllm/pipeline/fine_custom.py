@@ -137,8 +137,8 @@ def setup_lora_config(model):
     
     lora_config = LoraConfig(
         task_type=TaskType.CAUSAL_LM,
-        r=8,  # rank를 줄여서 안정성 확보
-        lora_alpha=16,  # alpha도 줄임
+        r=4,  # rank를 더 줄여서 메모리 절약
+        lora_alpha=8,  # alpha도 더 줄임
         lora_dropout=0.05,
         target_modules=attention_modules,
         bias="none",
@@ -260,7 +260,7 @@ def setup_training_arguments(training_epochs: int, output_dir="./exaone-lora-res
         metric_for_best_model="loss",
         greater_is_better=False,  
         bf16=True,
-        gradient_checkpointing=False, 
+        gradient_checkpointing=True,  # 메모리 절약을 위해 활성화
         dataloader_pin_memory=False,
         remove_unused_columns=False,
         report_to="none",
@@ -338,6 +338,16 @@ def main(qa_data: list[dict], system_message: str, hf_token: str, hf_repo_id: st
     
     # 시작 전 GPU 메모리 정리
     cleanup_gpu_memory()
+    
+    # GPU 메모리 상태 로깅
+    if torch.cuda.is_available():
+        print(f"\n=== 파인튜닝 시작 시 GPU 상태 ===")
+        print(f"사용 가능한 GPU 수: {torch.cuda.device_count()}")
+        for i in range(torch.cuda.device_count()):
+            props = torch.cuda.get_device_properties(i)
+            print(f"GPU {i}: {props.name}, 메모리: {props.total_memory / 1024**3:.2f}GB")
+            if 'CUDA_VISIBLE_DEVICES' in os.environ:
+                print(f"CUDA_VISIBLE_DEVICES: {os.environ['CUDA_VISIBLE_DEVICES']}")
     
     # 1. 모델과 토크나이저 로드
     model, tokenizer = load_model_and_tokenizer()
@@ -419,21 +429,55 @@ def main(qa_data: list[dict], system_message: str, hf_token: str, hf_repo_id: st
     )
     
     try:
+        # GPU 메모리 상태 확인
+        if torch.cuda.is_available():
+            gpu_memory_before = torch.cuda.memory_allocated() / 1024**3
+            print(f"🔍 훈련 시작 전 GPU 메모리 사용량: {gpu_memory_before:.2f}GB")
+        
         trainer.train()
         print("훈련 완료!")
-    except Exception as e:
-        print(f"훈련 중 오류 발생: {e}")
-        
-        # 더 자세한 디버깅 정보
-        print("\n=== 추가 디버깅 정보 ===")
-        print(f"모델 타입: {type(model)}")
-        print(f"Base model 타입: {type(model.base_model) if hasattr(model, 'base_model') else 'N/A'}")
-        
-        # PEFT 설정 확인
-        if hasattr(model, 'peft_config'):
-            print(f"PEFT config: {model.peft_config}")
-        
-        raise
+    except RuntimeError as e:
+        if "out of memory" in str(e) or "CUDA out of memory" in str(e):
+            print(f"❌ GPU 메모리 부족 오류 발생: {e}")
+            
+            # GPU 메모리 상태 출력
+            if torch.cuda.is_available():
+                print(f"\n=== GPU 메모리 상태 ===")
+                print(f"할당된 메모리: {torch.cuda.memory_allocated() / 1024**3:.2f}GB")
+                print(f"예약된 메모리: {torch.cuda.memory_reserved() / 1024**3:.2f}GB")
+                print(f"최대 할당 메모리: {torch.cuda.max_memory_allocated() / 1024**3:.2f}GB")
+                
+                # 메모리 정리 시도
+                torch.cuda.empty_cache()
+                print("GPU 메모리 캐시 정리 완료")
+            
+            # 더 작은 설정으로 재시도 제안
+            print("\n💡 해결 방법:")
+            print("1. batch_size를 줄이거나 gradient_accumulation_steps를 늘리세요")
+            print("2. max_length를 줄이세요 (현재 1024)")
+            print("3. LoRA rank를 줄이세요 (현재 8)")
+            print("4. 더 큰 GPU를 사용하세요")
+            
+            raise
+        else:
+            print(f"훈련 중 오류 발생: {e}")
+            
+            # 더 자세한 디버깅 정보
+            print("\n=== 추가 디버깅 정보 ===")
+            print(f"모델 타입: {type(model)}")
+            print(f"Base model 타입: {type(model.base_model) if hasattr(model, 'base_model') else 'N/A'}")
+            
+            # PEFT 설정 확인
+            if hasattr(model, 'peft_config'):
+                print(f"PEFT config: {model.peft_config}")
+            
+            # GPU 메모리 상태
+            if torch.cuda.is_available():
+                print(f"\n=== GPU 메모리 상태 ===")
+                print(f"할당된 메모리: {torch.cuda.memory_allocated() / 1024**3:.2f}GB")
+                print(f"예약된 메모리: {torch.cuda.memory_reserved() / 1024**3:.2f}GB")
+            
+            raise
     
     # 14. 모델 저장
     trainer.save_model()

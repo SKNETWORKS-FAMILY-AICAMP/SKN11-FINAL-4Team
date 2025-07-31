@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  vllm-worker:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - RUNPOD_AI_API_KEY=test_key
+      - RUNPOD_WEBHOOK_URL=http://localhost:8000/webhook
+      - CUDA_VISIBLE_DEVICES=0
+      - PYTHONUNBUFFERED=1
+      # Idle 상태 유지 설정
+      - PRELOAD_MODEL=true  # 시작 시 모델 사전 로드
+      - ENABLE_KEEP_ALIVE=true  # Keep-Alive 활성화
+      - KEEP_ALIVE_INTERVAL=300  # 5분마다 상태 체크
+      - KEEP_ALIVE_INFERENCE_INTERVAL=1800  # 30분마다 추론 실행 (테스트용 짧게)
+    volumes:
+      # 로컬 테스트 서버 마운트
+      - ./local_test_server.py:/app/local_test_server.py
+      # LoRA 어댑터 디렉토리 (있는 경우)
+      - ./lora_adapters:/app/lora_adapters
+      # 모델 캐시 디렉토리 (재시작 시 다운로드 방지)
+      - vllm_models:/app/models
+    # GPU 사용 (NVIDIA Docker 필요)
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    # 로컬 테스트 서버로 실행
+    command: python3 local_test_server.py
+
+  # Production 모드 (실제 워커 실행)
+  vllm-worker-prod:
+    build: .
+    ports:
+      - "8001:8000"
+    environment:
+      - RUNPOD_AI_API_KEY=${RUNPOD_AI_API_KEY}
+      - CUDA_VISIBLE_DEVICES=0
+      - PYTHONUNBUFFERED=1
+      # Idle 상태 유지 설정
+      - PRELOAD_MODEL=true
+      - ENABLE_KEEP_ALIVE=true
+      - KEEP_ALIVE_INTERVAL=300
+      - KEEP_ALIVE_INFERENCE_INTERVAL=3600  # Production에서는 1시간
+    volumes:
+      - ./lora_adapters:/app/lora_adapters
+      - vllm_models:/app/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    # 실제 워커로 실행
+    command: python3 -u generation_worker.py
+    profiles:
+      - production
+
+volumes:
+  vllm_models:
+    driver: local

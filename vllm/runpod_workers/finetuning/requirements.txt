@@ -1,0 +1,32 @@
+runpod
+
+# Transformers 및 모델 관련
+
+transformers
+accelerate
+peft
+safetensors
+huggingface_hub
+datasets
+
+# 훈련 관련
+bitsandbytes
+scipy
+wandb
+tensorboard
+
+# 기타 유틸리티
+numpy
+sentencepiece
+tqdm
+scikit-learn
+phonemizer
+
+inflect
+kanjize
+sudachipy
+sudachidict_full
+librosa
+
+python-dotenv
+requests

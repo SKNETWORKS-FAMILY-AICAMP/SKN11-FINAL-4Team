@@ -47,7 +47,7 @@ finetuning_queue: asyncio.Queue = None # 파인튜닝 작업을 위한 큐
 
 # 환경 변수
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-FINETUNING_WEBHOOK_URL = os.getenv("FINETUNING_WEBHOOK_URL")
+FINETUNING_POST_URL = os.getenv("FINETUNING_POST_URL")  # 새로운 POST URL
 
 def get_speech_generator() -> SpeechGenerator:
     """
@@ -63,38 +63,48 @@ def get_speech_generator() -> SpeechGenerator:
         )
     logger.info("✅ SpeechGenerator 인스턴스 생성 (for OpenAI API)")
     return SpeechGenerator(api_key=api_key)
-FINETUNING_WEBHOOK_URL = os.getenv("FINETUNING_WEBHOOK_URL")
 
-async def send_finetuning_webhook(task_id: str, status: str, hf_model_url: Optional[str] = None, error_message: Optional[str] = None):
-    """파인튜닝 완료/실패 시 백엔드 서버로 웹훅 전송"""
-    if not FINETUNING_WEBHOOK_URL:
-        logger.warning("⚠️ FINETUNING_WEBHOOK_URL이 설정되지 않아 웹훅을 전송하지 않습니다.")
+async def send_finetuning_result(task_id: str, status: str, hf_model_url: Optional[str] = None, error_message: Optional[str] = None):
+    """파인튜닝 완료/실패 시 백엔드 서버로 결과 전송"""
+    # POST URL 사용
+    post_url = FINETUNING_POST_URL
+    
+    if not post_url:
+        logger.warning("⚠️ FINETUNING_POST_URL이 설정되지 않아 결과를 전송하지 않습니다.")
         return
 
     task = finetuning_tasks.get(task_id)
     if not task:
-        logger.error(f"웹훅 전송 실패: 작업 {task_id}를 찾을 수 없습니다.")
+        logger.error(f"결과 전송 실패: 작업 {task_id}를 찾을 수 없습니다.")
         return
 
+    # POST 방식으로 변경된 페이로드
     payload = {
         "task_id": task_id,
         "influencer_id": task["influencer_id"],
         "status": status,
         "hf_model_url": hf_model_url,
-        "error_message": error_message
+        "error_message": error_message,
+        "metadata": {
+            "training_epochs": task.get("training_epochs"),
+            "created_at": task.get("created_at"),
+            "updated_at": task.get("updated_at"),
+            "qa_data_count": len(task.get("qa_data", [])),
+            "hf_repo_id": task.get("hf_repo_id")
+        }
     }
 
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.post(FINETUNING_WEBHOOK_URL, json=payload, timeout=30.0)
+            response = await client.post(post_url, json=payload, timeout=30.0)
             response.raise_for_status()
-            logger.info(f"✅ 파인튜닝 웹훅 전송 성공: {task_id}, 상태: {status}, 응답: {response.status_code}")
+            logger.info(f"✅ 파인튜닝 결과 전송 성공: {task_id}, 상태: {status}, 응답: {response.status_code}")
     except httpx.RequestError as e:
-        logger.error(f"❌ 파인튜닝 웹훅 전송 실패 (RequestError): {task_id}, {e}")
+        logger.error(f"❌ 파인튜닝 결과 전송 실패 (RequestError): {task_id}, {e}")
     except httpx.HTTPStatusError as e:
-        logger.error(f"❌ 파인튜닝 웹훅 전송 실패 (HTTPStatusError): {task_id}, 상태 코드: {e.response.status_code}, 응답: {e.response.text}")
+        logger.error(f"❌ 파인튜닝 결과 전송 실패 (HTTPStatusError): {task_id}, 상태 코드: {e.response.status_code}, 응답: {e.response.text}")
     except Exception as e:
-        logger.error(f"❌ 파인튜닝 웹훅 전송 중 알 수 없는 오류: {task_id}, {e}")
+        logger.error(f"❌ 파인튜닝 결과 전송 중 알 수 없는 오류: {task_id}, {e}")
 
 async def run_finetuning_pipeline(qa_data: List[Dict], system_message: str, 
                                 hf_token: str, hf_repo_id: str, training_epochs: int) -> Optional[str]:
@@ -102,6 +112,14 @@ async def run_finetuning_pipeline(qa_data: List[Dict], system_message: str,
     try:
         logger.info(f"🔄 파인튜닝 파이프라인 실행: {hf_repo_id}")
         logger.info(f"🔍 파이프라인 QA 데이터: 개수={len(qa_data)}")
+        
+        # GPU 메모리 체크
+        import torch
+        if torch.cuda.is_available():
+            gpu_mem = torch.cuda.get_device_properties(0).total_memory / 1024**3
+            logger.info(f"🖥️ GPU 메모리: {gpu_mem:.2f}GB")
+            if gpu_mem < 16:  # 16GB 미만이면 경고
+                logger.warning(f"⚠️ GPU 메모리가 부족할 수 있습니다 ({gpu_mem:.2f}GB < 16GB)")
         
         # 멀티프로세싱 사용 여부 확인 (기본값: true)
         use_multiprocessing = os.getenv('USE_FINETUNING_MULTIPROCESSING', 'true').lower() == 'true'
@@ -125,7 +143,11 @@ async def run_finetuning_pipeline(qa_data: List[Dict], system_message: str,
             if response['status'] == 'success':
                 return response['hf_model_url']
             else:
-                raise Exception(response.get('error', '파인튜닝 실패'))
+                error_msg = response.get('error', '파인튜닝 실패')
+                if 'out of memory' in error_msg.lower():
+                    logger.error(f"❌ GPU 메모리 부족: {error_msg}")
+                    logger.info("💡 해결 방법: batch_size 감소, LoRA rank 감소, 또는 더 큰 GPU 사용")
+                raise Exception(error_msg)
         else:
             # 스레드 방식 (가벼운 격리)
             logger.info("🧵 파인튜닝을 별도 스레드에서 실행 (비블로킹)")
@@ -144,6 +166,15 @@ async def run_finetuning_pipeline(qa_data: List[Dict], system_message: str,
         
         logger.info(f"✅ 파인튜닝 파이프라인 실행 완료: {hf_repo_id}")
             
+    except RuntimeError as e:
+        if "out of memory" in str(e) or "CUDA out of memory" in str(e):
+            logger.error(f"❌ GPU 메모리 부족 오류: {e}")
+            logger.info("💡 다음을 시도해보세요:")
+            logger.info("  1. batch_size를 1로 줄이기")
+            logger.info("  2. gradient_accumulation_steps 늘리기")
+            logger.info("  3. LoRA rank를 4 이하로 줄이기")
+            logger.info("  4. max_length를 512로 줄이기")
+        raise e
     except Exception as e:
         logger.error(f"❌ 파인튜닝 파이프라인 실행 실패: {e}")
         raise e
@@ -245,8 +276,8 @@ async def execute_finetuning(task_id: str):
         logger.error(f"❌ 파인튜닝 실패: {task_id}, {e}")
         error_message = str(e)
     finally:
-        # 파인튜닝 완료/실패 시 웹훅 전송
-        await send_finetuning_webhook(
+        # 파인튜닝 완료/실패 시 결과 전송
+        await send_finetuning_result(
             task_id=task_id,
             status=task["status"],
             hf_model_url=hf_model_url,

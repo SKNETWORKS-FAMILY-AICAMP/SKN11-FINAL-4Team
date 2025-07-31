@@ -41,9 +41,13 @@ def finetuning_worker_process(request_queue: Queue, response_queue: Queue, statu
     
     os.environ['CUDA_VISIBLE_DEVICES'] = str(finetuning_gpu_id)
     
+    # PyTorch 메모리 최적화 설정
+    os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:512'
+    
     logger.info(f"🔧 파인튜닝 워커 시작")
     logger.info(f"🖥️ CUDA_VISIBLE_DEVICES={os.environ['CUDA_VISIBLE_DEVICES']} (물리적 GPU {finetuning_gpu_id})")
     logger.info(f"📍 파인튜닝은 GPU {finetuning_gpu_id}번에서 실행됩니다")
+    logger.info(f"⚙️ PyTorch CUDA 메모리 최적화 설정: {os.environ['PYTORCH_CUDA_ALLOC_CONF']}")
     
     while True:
         try:
@@ -66,6 +70,18 @@ def finetuning_worker_process(request_queue: Queue, response_queue: Queue, statu
             try:
                 # fine_custom 모듈 import
                 from pipeline import fine_custom
+                
+                # GPU 메모리 체크
+                import torch
+                if torch.cuda.is_available():
+                    gpu_mem_before = torch.cuda.memory_allocated() / 1024**3
+                    gpu_total = torch.cuda.get_device_properties(0).total_memory / 1024**3
+                    logger.info(f"🖥️ GPU 메모리 상태: {gpu_mem_before:.2f}GB / {gpu_total:.2f}GB")
+                    
+                    # 메모리 부족 경고
+                    available_mem = gpu_total - gpu_mem_before
+                    if available_mem < 10:  # 10GB 미만이면 경고
+                        logger.warning(f"⚠️ GPU 메모리 부족 경고: 사용 가능 {available_mem:.2f}GB")
                 
                 # 파인튜닝 실행
                 logger.info(f"🚀 파인튜닝 실행 중: {task_id}")
@@ -93,6 +109,35 @@ def finetuning_worker_process(request_queue: Queue, response_queue: Queue, statu
                 
                 logger.info(f"✅ 파인튜닝 완료: {task_id}")
                 
+            except RuntimeError as e:
+                error_str = str(e)
+                if "out of memory" in error_str.lower() or "cuda out of memory" in error_str.lower():
+                    logger.error(f"❌ GPU 메모리 부족으로 파인튜닝 실패: {e}")
+                    
+                    # GPU 메모리 상태 출력
+                    if torch.cuda.is_available():
+                        logger.error(f"📊 GPU 메모리 상태:")
+                        logger.error(f"  - 할당된 메모리: {torch.cuda.memory_allocated() / 1024**3:.2f}GB")
+                        logger.error(f"  - 예약된 메모리: {torch.cuda.memory_reserved() / 1024**3:.2f}GB")
+                        logger.error(f"  - 최대 할당 메모리: {torch.cuda.max_memory_allocated() / 1024**3:.2f}GB")
+                    
+                    error_message = f"GPU 메모리 부족: {error_str}\n\n해결 방법:\n1. batch_size를 1로 설정\n2. LoRA rank를 4 이하로 설정\n3. max_length를 512로 제한\n4. 더 큰 GPU 사용"
+                else:
+                    logger.error(f"❌ 파인튜닝 실패: {e}")
+                    logger.error(traceback.format_exc())
+                    error_message = str(e)
+                
+                response = {
+                    'task_id': task_id,
+                    'status': 'error',
+                    'error': error_message
+                }
+                
+                status_dict[task_id] = {
+                    'status': 'failed',
+                    'progress': 0,
+                    'message': f'파인튜닝 실패: {error_message}'
+                }
             except Exception as e:
                 logger.error(f"❌ 파인튜닝 실패: {e}")
                 logger.error(traceback.format_exc())

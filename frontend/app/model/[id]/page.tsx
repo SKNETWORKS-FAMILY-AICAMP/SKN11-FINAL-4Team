@@ -265,9 +265,10 @@ function ModelDetailContent() {
     }>
   >([]);
 
-  // 7일간 API 호출수 데이터 로드
-  const loadWeeklyChartData = async () => {
+  // 통합 분석 데이터 로드 함수
+  const loadAllAnalyticsData = async () => {
     try {
+      // API 호출을 한 번만 수행
       const apiUsageResponse = (await apiClient.get(
         `/api/v1/analytics/api-calls/`,
       )) as any;
@@ -276,6 +277,20 @@ function ModelDetailContent() {
       const influencerApiCalls = apiUsageResponse.filter(
         (call: any) => call.influencer_id === params.id?.toString(),
       );
+
+      // loadAnalyticsData 로직
+      await loadAnalyticsDataWithApiCalls(influencerApiCalls);
+      
+      // loadWeeklyChartData 로직
+      await loadWeeklyChartDataWithApiCalls(influencerApiCalls);
+    } catch (error) {
+      console.error("분석 데이터 로드 실패:", error);
+    }
+  };
+
+  // 7일간 API 호출수 데이터 로드 (API 호출 데이터를 받아서 처리)
+  const loadWeeklyChartDataWithApiCalls = async (influencerApiCalls: any[]) => {
+    try {
 
       // 최근 7일간 데이터 생성
       const last7Days = [];
@@ -419,8 +434,8 @@ function ModelDetailContent() {
     }
   };
 
-  // 분석 데이터 로드 - 게시글 데이터 기반으로 계산
-  const loadAnalyticsData = async () => {
+  // 분석 데이터 로드 (API 호출 데이터를 받아서 처리)
+  const loadAnalyticsDataWithApiCalls = async (influencerApiCalls: any[]) => {
     try {
       // 게시글 데이터가 로드된 후 분석 데이터 계산
       const publishedPosts = posts.filter((p) => p.status === "published");
@@ -432,16 +447,6 @@ function ModelDetailContent() {
       };
 
       try {
-        // 올바른 analytics API 호출
-        const apiUsageResponse = (await apiClient.get(
-          `/api/v1/analytics/api-calls/`,
-        )) as any;
-
-        // 특정 인플루언서의 API 호출 데이터 필터링
-        const influencerApiCalls = apiUsageResponse.filter(
-          (call: any) => call.influencer_id === params.id?.toString(),
-        );
-
         // 총 API 호출 수와 오늘 호출 수 계산
         const totalCalls = influencerApiCalls.reduce(
           (sum: number, call: any) => sum + (call.daily_call_count || 0),
@@ -495,12 +500,48 @@ function ModelDetailContent() {
     }
   };
 
+  // 원래 함수들 (독립적으로 호출될 때를 위해 유지)
+  const loadWeeklyChartData = async () => {
+    try {
+      const apiUsageResponse = (await apiClient.get(
+        `/api/v1/analytics/api-calls/`,
+      )) as any;
+
+      const influencerApiCalls = apiUsageResponse.filter(
+        (call: any) => call.influencer_id === params.id?.toString(),
+      );
+
+      await loadWeeklyChartDataWithApiCalls(influencerApiCalls);
+    } catch (error) {
+      console.error("주간 차트 데이터 로드 실패:", error);
+    }
+  };
+
+  const loadAnalyticsData = async () => {
+    try {
+      const apiUsageResponse = (await apiClient.get(
+        `/api/v1/analytics/api-calls/`,
+      )) as any;
+
+      const influencerApiCalls = apiUsageResponse.filter(
+        (call: any) => call.influencer_id === params.id?.toString(),
+      );
+
+      await loadAnalyticsDataWithApiCalls(influencerApiCalls);
+    } catch (error) {
+      console.error("분석 데이터 로드 실패:", error);
+    }
+  };
+
+  // posts 데이터 로드 추적
+  const analyticsLoadedRef = useRef(false);
+  
   // 게시글 데이터가 로드된 후 분석 데이터 업데이트 (중복 호출 방지)
   React.useEffect(() => {
-    if (posts.length >= 0) {
+    if (!analyticsLoadedRef.current && posts.length >= 0) {
+      analyticsLoadedRef.current = true;
       // 빈 배열도 포함하여 초기 로드 시에도 실행
-      loadAnalyticsData();
-      loadWeeklyChartData(); // 7일간 차트 데이터도 함께 로드
+      loadAllAnalyticsData(); // 통합 함수 호출
     }
   }, [posts.length]); // posts 배열 전체가 아닌 길이만 감지하여 불필요한 재호출 방지
 
@@ -1096,14 +1137,20 @@ function ModelDetailContent() {
     }
   };
 
+  // 초기 데이터 로드 상태 추적
+  const initialLoadRef = useRef(false);
+  
   // 컴포넌트 마운트 시 모델 데이터 로드 (한 번만 실행)
   React.useEffect(() => {
-    const loadData = async () => {
-      await loadModelData();
-      await loadPostsData();
-    };
-    loadData();
-  }, [params.id]); // params.id가 변경될 때만 실행
+    if (!initialLoadRef.current) {
+      initialLoadRef.current = true;
+      const loadData = async () => {
+        await loadModelData();
+        await loadPostsData();
+      };
+      loadData();
+    }
+  }, []); // 의존성 배열을 비워서 마운트 시 한 번만 실행
 
   // 모델 데이터 로드 후 Instagram 상태 확인
   // 컴포넌트 언마운트 시 오디오 정리
@@ -1116,8 +1163,12 @@ function ModelDetailContent() {
     };
   }, []);
 
+  // 모델 관련 추가 데이터 로드 추적
+  const modelExtraDataLoadedRef = useRef(false);
+  
   React.useEffect(() => {
-    if (!isModelLoading && model) {
+    if (!isModelLoading && model && !modelExtraDataLoadedRef.current) {
+      modelExtraDataLoadedRef.current = true;
       // 베이스 음성 확인
       checkBaseVoice();
       const checkInstagramStatus = async () => {
@@ -1165,12 +1216,21 @@ function ModelDetailContent() {
   }, [isModelLoading, model, params.id]);
 
   // 예약된 게시글이 있을 때 주기적으로 상태 확인 (30초마다)
-  // 음성 탭이 선택되었을 때 음성 히스토리 로드 (한 번만)
+  // 음성 탭을 로드한 적이 있는지 추적
+  const voiceTabLoadedRef = useRef(false);
+  
+  // 음성 탭이 선택되었을 때 음성 히스토리 로드 (탭당 한 번만)
   React.useEffect(() => {
-    if (activeTab === "voice" && !isLoadingVoiceHistory && voiceHistory.length === 0) {
+    if (activeTab === "voice" && !voiceTabLoadedRef.current && !isLoadingVoiceHistory) {
+      voiceTabLoadedRef.current = true;
       loadVoiceHistory();
     }
-  }, [activeTab, isLoadingVoiceHistory]); // voiceHistory.length 조건 추가하여 중복 로드 방지
+    
+    // 탭이 변경될 때 ref 리셋
+    if (activeTab !== "voice") {
+      voiceTabLoadedRef.current = false;
+    }
+  }, [activeTab, isLoadingVoiceHistory]); // activeTab과 isLoadingVoiceHistory만 의존성으로 사용
 
   // pending 상태의 음성이 있을 때 주기적으로 상태 확인 (3초마다)
   React.useEffect(() => {

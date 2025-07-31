@@ -1,0 +1,15 @@
+runpod
+transformers
+huggingface_hub
+torchaudio
+inflect
+safetensors
+kanjize
+phonemizer
+sudachipy
+sudachidict_full
+scipy
+numpy
+librosa
+python-dotenv
+requests
