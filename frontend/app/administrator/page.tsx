@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { User, ShieldCheck, ShieldX, Plus, Trash2, Users, Eye, Key, Loader2, FileText, Upload, ChevronDown, Download } from "lucide-react"
+import { User, ShieldCheck, ShieldX, Plus, Trash2, Users, Eye, Key, Loader2, Upload, ChevronDown, Download } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { AlertDialog, AlertDialogTrigger, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogCancel, AlertDialogAction } from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
@@ -16,7 +16,6 @@ import { Badge } from "@/components/ui/badge"
 
 import { useToast } from "@/hooks/use-toast"
 import { AdminService, type AdminTeam, type AdminUser, type AdminHFToken, type AdminCreateHFTokenRequest } from "@/lib/services/admin.service"
-import { VectorDBService } from "@/lib/services/vector-db.service"
 import { apiClient } from "@/lib/api"
 
 export default function AdministratorPage() {
@@ -58,41 +57,6 @@ export default function AdministratorPage() {
   const [editingTokenAlias, setEditingTokenAlias] = useState<string>("")
   const [isEditingAlias, setIsEditingAlias] = useState(false)
 
-  // 문서 관리 관련 상태들
-  const [documents, setDocuments] = useState<any[]>([])
-  const [loadingDocuments, setLoadingDocuments] = useState(false)
-  const [uploadingDocument, setUploadingDocument] = useState(false)
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([])
-
-  // 문서 목록 로드 함수
-  const loadVectorizedDocuments = async () => {
-    try {
-      setLoadingDocuments(true)
-      const data = await apiClient.get<any>('/api/v1/documents/vectorized')
-      console.log('API Data:', data)
-
-      setDocuments(data.documents.map((doc: any) => ({
-        id: doc.documents_id,
-        name: doc.documents_name,
-        size: `${(doc.file_size / 1024 / 1024).toFixed(2)} MB`,
-        uploaded_at: new Date(doc.created_at).toLocaleDateString('ko-KR'),
-        status: doc.is_vectorized === 1 ? 'processed' : 'processing',
-        s3_url: doc.s3_url
-      })))
-    } catch (error) {
-      console.error('문서 목록 조회 실패:', error)
-      toast({
-        title: "문서 목록 조회 실패",
-        description: "벡터화된 문서 목록을 불러오는데 실패했습니다.",
-        variant: "destructive",
-      })
-    } finally {
-      setLoadingDocuments(false)
-    }
-  }
-
-
-
   const isFetchingDataRef = useRef(false)
   const isFetchingTokensRef = useRef(false)
 
@@ -130,12 +94,6 @@ export default function AdministratorPage() {
     fetchHFTokens()
   }, [])
 
-  // 문서 탭이 활성화될 때 문서 목록 로드
-  useEffect(() => {
-    if (activeTab === "documents") {
-      loadVectorizedDocuments()
-    }
-  }, [activeTab])
 
   // HF 토큰 데이터 로드
   const fetchHFTokens = async () => {
@@ -515,12 +473,6 @@ export default function AdministratorPage() {
           icon: <Key className="h-5 w-5 text-yellow-600" />,
           description: "AI 모델 사용을 위한 토큰을 관리하세요"
         }
-      case "documents":
-        return {
-          title: "문서 관리",
-          icon: <FileText className="h-5 w-5 text-green-600" />,
-          description: "RAG 챗봇에서 사용할 문서를 업로드하고 관리할 수 있습니다"
-        }
       default:
         return {
           title: "관리자 설정",
@@ -600,17 +552,6 @@ export default function AdministratorPage() {
                     >
                       <Key className="inline-block mr-1 h-4 w-4 align-text-bottom" />
                       허깅페이스 토큰
-                    </button>
-                    <button
-                      onClick={() => setActiveTab("documents")}
-                      className={`flex-1 py-3 rounded-tr-lg border-b-0 text-base font-semibold transition-all duration-200 focus:outline-none
-                        ${activeTab === "documents"
-                          ? "bg-white text-green-600 border-x border-t border-green-500 z-10"
-                          : "bg-gray-100 text-gray-500 border-x border-t border-b border-gray-200 hover:text-green-600"}
-                      `}
-                    >
-                      <FileText className="inline-block mr-1 h-4 w-4 align-text-bottom" />
-                      문서 관리
                     </button>
                   </div>
                 </CardHeader>
@@ -1162,325 +1103,6 @@ export default function AdministratorPage() {
                               </div>
                             </div>
                           )}
-                        </CardContent>
-                      </Card>
-                    </>
-                  )}
-                  {activeTab === "documents" && (
-                    <>
-                      {/* 문서 관리 카드 내용 */}
-                      <Card>
-                        <CardHeader>
-                          <CardTitle className="flex items-center gap-2">
-                            <FileText className="h-5 w-5 text-green-600" />
-                            문서 관리
-                          </CardTitle>
-                          <CardDescription>
-                            RAG 챗봇에서 사용할 문서를 업로드하고 관리할 수 있습니다
-                          </CardDescription>
-                        </CardHeader>
-                        <CardContent>
-                          {/* 문서 업로드 섹션 */}
-                          <div className="mb-6 pb-6 border-b">
-                            <h4 className="font-medium text-gray-900 mb-4">문서 업로드</h4>
-
-                            {/* 드래그 앤 드롭 영역 */}
-                            <div
-                              className={`relative group transition-all duration-300`}
-                              onDragOver={(e) => {
-                                e.preventDefault()
-                                e.stopPropagation()
-                              }}
-                              onDrop={(e) => {
-                                e.preventDefault()
-                                e.stopPropagation()
-                                const files = Array.from(e.dataTransfer.files)
-                                // PDF 파일만 필터링하고 첫 번째 파일만 선택
-                                const pdfFiles = files.filter(file => file.type === 'application/pdf')
-                                if (pdfFiles.length > 0) {
-                                  setSelectedFiles([pdfFiles[0]])
-                                }
-                              }}
-                            >
-                              <div
-                                className={`
-                                  relative overflow-hidden rounded-xl border-2 border-dashed transition-all duration-300
-                                  ${selectedFiles.length > 0
-                                    ? "border-blue-500 bg-gradient-to-br from-blue-50 to-indigo-50 shadow-lg shadow-blue-100"
-                                    : "border-gray-300 bg-gradient-to-br from-gray-50 to-white hover:border-blue-400 hover:bg-gradient-to-br hover:from-blue-50 hover:to-indigo-50"
-                                  }
-                                `}
-                                onDragEnter={(e) => {
-                                  e.preventDefault()
-                                  e.stopPropagation()
-                                }}
-                                onDragLeave={(e) => {
-                                  e.preventDefault()
-                                  e.stopPropagation()
-                                }}
-                              >
-                                {/* 배경 패턴 */}
-                                <div className="absolute inset-0 opacity-5">
-                                  <div className="absolute top-4 left-4 w-8 h-8 border-2 border-gray-400 rounded-lg"></div>
-                                  <div className="absolute top-12 right-8 w-6 h-6 border-2 border-gray-400 rounded-full"></div>
-                                  <div className="absolute bottom-8 left-12 w-4 h-4 border-2 border-gray-400 rotate-45"></div>
-                                  <div className="absolute bottom-16 right-4 w-10 h-10 border-2 border-gray-400 rounded-lg"></div>
-                                </div>
-
-                                <div className="relative p-12 text-center">
-                                  {/* 아이콘 영역 */}
-                                  <div className={`
-                                    relative mx-auto mb-6 w-20 h-20 rounded-full flex items-center justify-center transition-all duration-300
-                                    ${selectedFiles.length > 0
-                                      ? "bg-blue-100 shadow-lg shadow-blue-200"
-                                      : "bg-gray-100 group-hover:bg-blue-100 group-hover:shadow-lg group-hover:shadow-blue-200"
-                                    }
-                                  `}>
-                                    <Upload className={`
-                                      h-8 w-8 transition-all duration-300
-                                      ${selectedFiles.length > 0
-                                        ? "text-blue-600 scale-110"
-                                        : "text-gray-500 group-hover:text-blue-600 group-hover:scale-110"
-                                      }
-                                    `} />
-                                    {/* 애니메이션 효과 */}
-                                    {selectedFiles.length > 0 && (
-                                      <div className="absolute inset-0 rounded-full border-2 border-blue-300 animate-ping"></div>
-                                    )}
-                                  </div>
-
-                                  {/* 텍스트 영역 */}
-                                  <div className="space-y-3">
-                                    <h3 className={`
-                                      text-xl font-semibold transition-colors duration-300
-                                      ${selectedFiles.length > 0 ? "text-blue-700" : "text-gray-800 group-hover:text-blue-700"}
-                                    `}>
-                                      {selectedFiles.length > 0 ? "여기에 놓으세요!" : "문서 업로드"}
-                                    </h3>
-                                    <p className={`
-                                      text-sm transition-colors duration-300 max-w-md mx-auto
-                                      ${selectedFiles.length > 0 ? "text-blue-600" : "text-gray-600 group-hover:text-blue-600"}
-                                    `}>
-                                      RAG 챗봇 학습용 문서를 드래그하여 놓거나 클릭하여 선택하세요
-                                    </p>
-                                    <p className="text-xs text-gray-500">
-                                      지원 형식: PDF (단일 파일만 업로드 가능)
-                                    </p>
-                                  </div>
-
-                                  {/* 파일 선택 버튼 */}
-                                  <div className="mt-6">
-                                    <input
-                                      type="file"
-                                      accept=".pdf"
-                                      multiple
-                                      onChange={(e) => {
-                                        const files = Array.from(e.target.files || [])
-                                        // PDF 파일만 필터링하고 첫 번째 파일만 선택
-                                        const pdfFiles = files.filter(file => file.type === 'application/pdf')
-                                        if (pdfFiles.length > 0) {
-                                          setSelectedFiles([pdfFiles[0]])
-                                        }
-                                      }}
-                                      className="hidden"
-                                      id="document-upload"
-                                    />
-                                    <label htmlFor="document-upload">
-                                      <Button
-                                        className={`
-                                          transition-all duration-300 cursor-pointer
-                                          ${selectedFiles.length > 0
-                                            ? "bg-blue-600 hover:bg-blue-700 text-white shadow-lg"
-                                            : "bg-white hover:bg-blue-50 text-gray-700 border-gray-300 hover:border-blue-400 hover:text-blue-700 shadow-sm hover:shadow-md"
-                                          }
-                                        `}
-                                        asChild
-                                      >
-                                        <span className="flex items-center gap-2">
-                                          <Upload className="h-4 w-4" />
-                                          파일 선택
-                                        </span>
-                                      </Button>
-                                    </label>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* 선택된 파일 */}
-                            {selectedFiles.length > 0 && (
-                              <div className="mt-4">
-                                <h5 className="font-medium text-gray-900 mb-2">선택된 파일</h5>
-                                <div className="space-y-2">
-                                  {selectedFiles.map((file, index) => (
-                                    <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                                      <div className="flex items-center gap-3">
-                                        <FileText className="h-5 w-5 text-gray-500" />
-                                        <div>
-                                          <p className="font-medium text-sm">{file.name}</p>
-                                          <p className="text-xs text-gray-500">
-                                            {(file.size / 1024 / 1024).toFixed(2)} MB
-                                          </p>
-                                        </div>
-                                      </div>
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() => {
-                                          setSelectedFiles([])
-                                        }}
-                                      >
-                                        <Trash2 className="h-4 w-4" />
-                                      </Button>
-                                    </div>
-                                  ))}
-                                </div>
-
-
-
-                                <div className="flex gap-2 mt-4">
-                                  <Button
-                                    onClick={() => setSelectedFiles([])}
-                                    variant="outline"
-                                    size="sm"
-                                  >
-                                    파일 제거
-                                  </Button>
-                                  <Button
-                                    onClick={async () => {
-                                      try {
-                                        setUploadingDocument(true)
-
-                                        // 벡터DB에 문서 업로드
-                                        const result = await VectorDBService.uploadAndStoreDocuments(
-                                          selectedFiles
-                                        )
-
-                                        if (result.success) {
-                                          toast({
-                                            title: "업로드 완료",
-                                            description: `벡터DB가 초기화되고 ${result.stored_count}개의 문서 청크가 성공적으로 저장되었습니다.`,
-                                            variant: "default",
-                                          })
-                                          setSelectedFiles([])
-                                          // 문서 목록 새로고침
-                                          loadVectorizedDocuments()
-                                        } else {
-                                          throw new Error('업로드 실패')
-                                        }
-                                      } catch (error) {
-                                        console.error('문서 업로드 실패:', error)
-                                        toast({
-                                          title: "업로드 실패",
-                                          description: "문서 업로드 중 오류가 발생했습니다.",
-                                          variant: "destructive",
-                                        })
-                                      } finally {
-                                        setUploadingDocument(false)
-                                      }
-                                    }}
-                                    disabled={selectedFiles.length === 0 || uploadingDocument}
-                                    className="bg-blue-600 hover:bg-blue-700 text-white"
-                                  >
-                                    {uploadingDocument ? (
-                                      <>
-                                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                        업로드 중...
-                                      </>
-                                    ) : (
-                                      <>
-                                        <Upload className="h-4 w-4 mr-2" />
-                                        업로드
-                                      </>
-                                    )}
-                                  </Button>
-                                </div>
-                              </div>
-                            )}
-                          </div>
-
-
-
-                          {/* 벡터화된 문서 목록 섹션 */}
-                          <div>
-                            <div className="flex items-center justify-between mb-4">
-                              <h4 className="font-medium text-gray-900">벡터화된 문서</h4>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={loadVectorizedDocuments}
-                                disabled={loadingDocuments}
-                              >
-                                {loadingDocuments ? (
-                                  <Loader2 className="h-4 w-4 animate-spin" />
-                                ) : (
-                                  '새로고침'
-                                )}
-                              </Button>
-                            </div>
-
-                            {documents.length === 0 ? (
-                              <div className="text-center py-12">
-                                <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                                <p className="text-lg font-medium text-gray-900 mb-2">업로드된 문서가 없습니다</p>
-                                <p className="text-gray-600">위에서 문서를 업로드해보세요</p>
-                              </div>
-                            ) : (
-                              <div className="space-y-3">
-                                {documents.map((doc) => (
-                                  <div key={doc.id} className="flex items-center justify-between p-4 border rounded-lg">
-                                    <div className="flex items-center gap-3">
-                                      <FileText className="h-5 w-5 text-gray-500" />
-                                      <div>
-                                        <p className="font-medium">{doc.name}</p>
-                                        <p className="text-sm text-gray-500">
-                                          {doc.size} • {doc.uploaded_at}
-                                        </p>
-                                      </div>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                      <Badge
-                                        variant={doc.status === 'processed' ? 'default' : 'secondary'}
-                                        className="text-xs"
-                                      >
-                                        {doc.status === 'processed' ? '벡터화 완료' : '벡터화 중'}
-                                      </Badge>
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={async () => {
-                                          try {
-                                            const data = await apiClient.get<any>(`/api/v1/documents/${doc.id}/download`)
-                                            if (data.success && data.download_url) {
-                                              // 새 창에서 다운로드 링크 열기
-                                              window.open(data.download_url, '_blank')
-                                              toast({
-                                                title: "다운로드 시작",
-                                                description: `${doc.name} 다운로드가 시작되었습니다.`,
-                                                variant: "default",
-                                              })
-                                            } else {
-                                              throw new Error('다운로드 URL 생성 실패')
-                                            }
-                                          } catch (error) {
-                                            console.error('문서 다운로드 실패:', error)
-                                            toast({
-                                              title: "다운로드 실패",
-                                              description: "문서 다운로드 중 오류가 발생했습니다.",
-                                              variant: "destructive",
-                                            })
-                                          }
-                                        }}
-                                      >
-                                        <Download className="h-4 w-4" />
-                                      </Button>
-
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
                         </CardContent>
                       </Card>
                     </>

@@ -283,7 +283,6 @@ class RunPodClient:
             
             # LoRA 어댑터가 있으면 추가
             if lora_adapter:
-                # HF repo가 제공되면 hf:// 형식으로 변환
                 if hf_repo:
                     payload["input"]["lora_adapter"] = f"hf://{hf_repo}"
                 else:
@@ -428,6 +427,203 @@ class RunPodClient:
             logger.error(f"❌ RunPod 텍스트 스트리밍 실패: {e}")
             yield f"오류: 텍스트 생성 실패 - {e}"
     
+    async def generate_response(
+        self,
+        user_message: str,
+        system_message: Optional[str] = None,
+        influencer_name: str = "어시스턴트",
+        model_id: Optional[str] = None,
+        max_new_tokens: int = 150,
+        temperature: float = 0.7,
+        do_sample: bool = True,
+        use_chat_template: bool = True,
+    ) -> Dict[str, Any]:
+        """vLLM 호환 응답 생성 메소드
+        
+        Args:
+            user_message: 사용자 메시지
+            system_message: 시스템 메시지
+            influencer_name: 인플루언서 이름
+            model_id: 모델 ID (LoRA 어댑터)
+            max_new_tokens: 최대 새 토큰 수
+            temperature: 생성 온도
+            do_sample: 샘플링 여부
+            use_chat_template: 챗 템플릿 사용 여부
+            
+        Returns:
+            Dict[str, Any]: 응답 결과
+        """
+        try:
+            # vLLM과 동일한 형식의 payload 구성
+            vllm_payload = {
+                "user_message": user_message,
+                "system_message": system_message or "당신은 도움이 되는 AI 어시스턴트입니다.",
+                "influencer_name": influencer_name,
+                "max_new_tokens": max_new_tokens,
+                "temperature": temperature,
+                "do_sample": do_sample,
+                "use_chat_template": use_chat_template,
+            }
+            
+            # model_id는 DB에서 가져온 HF repo 경로 그대로 사용
+            if model_id:
+                vllm_payload["model_id"] = model_id
+            
+            # RunPod 형식으로 감싸기
+            payload = {
+                "input": vllm_payload
+            }
+            
+            logger.info(f"🤖 RunPod vLLM 호환 요청: user_message={user_message[:50]}...")
+            logger.info(f"📦 Payload: {json.dumps(payload, indent=2, ensure_ascii=False)}")
+            
+            # Generation 엔드포인트 URL (/runsync 사용 - 동기 처리)
+            generation_endpoint_id = await self.get_generation_endpoint_id()
+            generation_url = f"{self.base_url}/{generation_endpoint_id}/runsync"
+            
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.post(
+                    generation_url,
+                    headers=self.headers,
+                    json=payload
+                )
+                
+                if response.status_code != 200:
+                    error_msg = f"RunPod API 오류: {response.status_code} - {response.text}"
+                    logger.error(f"❌ {error_msg}")
+                    raise RunPodError(error_msg)
+                
+                result = response.json()
+                logger.info(f"✅ RunPod vLLM 호환 요청 성공")
+                
+                # vLLM 형식으로 응답 변환
+                if result.get("status") == "success" and result.get("output"):
+                    output = result["output"]
+                    # vLLM 응답 형식에 맞춰 변환
+                    return {
+                        "response": output.get("text", output.get("generated_text", "")),
+                        "model_id": model_id,
+                        "usage": output.get("usage", {}),
+                        "runpod_response": result
+                    }
+                else:
+                    return {
+                        "response": "",
+                        "error": result.get("error", "알 수 없는 오류"),
+                        "runpod_response": result
+                    }
+                
+        except httpx.TimeoutException:
+            error_msg = "RunPod 요청 시간 초과"
+            logger.error(f"❌ {error_msg}")
+            raise RunPodError(error_msg)
+        except Exception as e:
+            logger.error(f"❌ RunPod vLLM 호환 응답 생성 실패: {e}")
+            raise RunPodError(f"응답 생성 실패: {e}")
+    
+    async def generate_response_stream(
+        self,
+        user_message: str,
+        system_message: Optional[str] = None,
+        influencer_name: str = "어시스턴트",
+        model_id: Optional[str] = None,
+        max_new_tokens: int = 150,
+        temperature: float = 0.7,
+        do_sample: bool = True,
+        use_chat_template: bool = True,
+    ) -> AsyncIterator[str]:
+        """vLLM 호환 스트리밍 응답 생성
+        
+        Args:
+            user_message: 사용자 메시지
+            system_message: 시스템 메시지
+            influencer_name: 인플루언서 이름
+            model_id: 모델 ID (LoRA 어댑터)
+            max_new_tokens: 최대 새 토큰 수
+            temperature: 생성 온도
+            do_sample: 샘플링 여부
+            use_chat_template: 챗 템플릿 사용 여부
+            
+        Yields:
+            str: 생성된 텍스트 토큰
+        """
+        try:
+            # vLLM과 동일한 형식의 payload 구성
+            vllm_payload = {
+                "user_message": user_message,
+                "system_message": system_message or "당신은 도움이 되는 AI 어시스턴트입니다.",
+                "influencer_name": influencer_name,
+                "max_new_tokens": max_new_tokens,
+                "temperature": temperature,
+                "do_sample": do_sample,
+                "use_chat_template": use_chat_template,
+                "stream": True
+            }
+            
+            # model_id는 DB에서 가져온 HF repo 경로 그대로 사용
+            if model_id:
+                vllm_payload["model_id"] = model_id
+            
+            # RunPod 형식으로 감싸기
+            payload = {
+                "input": vllm_payload
+            }
+            
+            logger.info(f"🤖 RunPod vLLM 호환 스트리밍 요청: user_message={user_message[:50]}...")
+            
+            # Generation 엔드포인트 URL (/stream 사용)
+            generation_endpoint_id = await self.get_generation_endpoint_id()
+            generation_url = f"{self.base_url}/{generation_endpoint_id}/stream"
+            
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                async with client.stream(
+                    "POST",
+                    generation_url,
+                    headers=self.headers,
+                    json=payload
+                ) as response:
+                    if response.status_code != 200:
+                        error_text = await response.aread()
+                        error_msg = f"RunPod API 오류: {response.status_code} - {error_text.decode()}"
+                        logger.error(f"❌ {error_msg}")
+                        yield f"오류: {error_msg}"
+                        return
+                    
+                    async for line in response.aiter_lines():
+                        if line.startswith("data: "):
+                            try:
+                                data = json.loads(line[6:])
+                                if "text" in data:
+                                    # 유니코드 이스케이프 시퀀스 처리
+                                    text = data["text"]
+                                    try:
+                                        if "\\u" in text:
+                                            decoded_text = text.encode('utf-8').decode('unicode_escape')
+                                        else:
+                                            decoded_text = text
+                                    except (UnicodeDecodeError, ValueError):
+                                        decoded_text = text
+                                    
+                                    logger.debug(f"🔄 VLLM 토큰 수신: {repr(decoded_text)}")
+                                    yield decoded_text
+                                elif "error" in data:
+                                    logger.error(f"❌ RunPod 스트리밍 오류: {data['error']}")
+                                    yield f"오류: {data['error']}"
+                                    break
+                                elif "done" in data and data["done"]:
+                                    break
+                            except json.JSONDecodeError:
+                                logger.warning(f"⚠️ JSON 파싱 실패: {line}")
+                                continue
+                
+        except httpx.TimeoutException:
+            error_msg = "RunPod 스트리밍 시간 초과"
+            logger.error(f"❌ {error_msg}")
+            yield f"오류: {error_msg}"
+        except Exception as e:
+            logger.error(f"❌ RunPod vLLM 호환 스트리밍 실패: {e}")
+            yield f"오류: 스트리밍 생성 실패 - {e}"
+    
     async def download_lora_adapter(
         self,
         adapter_name: str,
@@ -558,3 +754,23 @@ async def runpod_download_lora_adapter(
         hf_repo_id=hf_repo_id,
         hf_token=hf_token
     )
+
+
+# vLLM 호환 편의 함수들
+async def vllm_generate_response(
+    user_message: str,
+    system_message: Optional[str] = None,
+    influencer_name: str = "어시스턴트",
+    model_id: Optional[str] = None,
+    **kwargs
+) -> str:
+    """vLLM에서 응답 생성 (편의 함수) - RunPod 백엔드 사용"""
+    client = get_runpod_client()
+    result = await client.generate_response(
+        user_message=user_message,
+        system_message=system_message,
+        influencer_name=influencer_name,
+        model_id=model_id,
+        **kwargs
+    )
+    return result.get("response", "")

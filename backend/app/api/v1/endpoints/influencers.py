@@ -1878,6 +1878,8 @@ async def chat_with_influencer(
             from app.services.runpod_client import (
                 runpod_generate_text,
                 runpod_health_check,
+                vllm_generate_response,
+                get_runpod_client,
             )
 
             # RunPod 서버 상태 확인
@@ -1922,19 +1924,9 @@ async def chat_with_influencer(
                         max_tokens=512
                     )
 
-                    # 어댑터 로드
-                    try:
-                        # model_id는 인플루언서 ID로, hf_repo_name은 실제 레포지토리 경로로 사용
-                        await vllm_client.load_adapter(
-                            model_id=str(api_key.influencer_id),
-                            hf_repo_name=model_id,
-                            hf_token=hf_token,
-                        )
-                        logger.info(f"✅ VLLM 어댑터 로드 완료: {model_id}")
-                    except Exception as e:
-                        logger.warning(f"⚠️ 어댑터 로드 실패, 기본 모델 사용: {e}")
-                        # 어댑터 로드 실패 시 기본 모델 사용
-                        model_id = str(api_key.influencer_id)
+                    # RunPod에서는 LoRA 어댑터 로드가 자동으로 처리됨
+                    # vLLM과의 호환성을 위해 model_id를 유지
+                    logger.info(f"✅ RunPod에서 모델 사용 준비: {model_id}")
                 else:
                     model_id = str(api_key.influencer_id)
 
