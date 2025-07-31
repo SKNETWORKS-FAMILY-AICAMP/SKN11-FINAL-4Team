@@ -37,6 +37,12 @@ DEFAULT_MODEL = "LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct"
 DEFAULT_SYSTEM_MESSAGE = "당신은 도움이 되는 AI 어시스턴트입니다."
 LORA_ADAPTERS_BASE_PATH = os.environ.get("LORA_ADAPTERS_BASE_PATH", "/app/lora_adapters")
 
+# Idle 상태 유지 설정
+ENABLE_KEEP_ALIVE = os.environ.get("ENABLE_KEEP_ALIVE", "true").lower() == "true"
+KEEP_ALIVE_INTERVAL = int(os.environ.get("KEEP_ALIVE_INTERVAL", "300"))  # 5분
+KEEP_ALIVE_INFERENCE_INTERVAL = int(os.environ.get("KEEP_ALIVE_INFERENCE_INTERVAL", "3600"))  # 1시간
+PRELOAD_MODEL = os.environ.get("PRELOAD_MODEL", "true").lower() == "true"
+
 class MultiVLLMManager:
     """멀티 vLLM 요청 관리자"""
     
@@ -1403,29 +1409,90 @@ def stream_handler(job):
             "traceback": traceback.format_exc()
         }
 
+# Idle 상태 유지를 위한 백그라운드 스레드
+def keep_alive_thread():
+    """모델을 메모리에 유지하고 주기적으로 상태를 체크하는 스레드"""
+    last_inference_time = 0
+    last_status_log = 0
+    
+    while True:
+        try:
+            if llm_engine is not None:
+                current_time = time.time()
+                
+                # GPU 메모리 상태 확인
+                if torch.cuda.is_available():
+                    memory_allocated = torch.cuda.memory_allocated(0) / 1e9
+                    memory_reserved = torch.cuda.memory_reserved(0) / 1e9
+                    memory_total = torch.cuda.get_device_properties(0).total_memory / 1e9
+                    
+                    # 30분마다 상태 로깅
+                    if current_time - last_status_log >= 1800:
+                        logger.info(f"💓 Keep-Alive - GPU 메모리: {memory_allocated:.1f}/{memory_total:.1f}GB 사용 중")
+                        logger.info(f"🔥 모델이 메모리에 로드된 상태로 유지 중 - 즉시 응답 가능")
+                        last_status_log = current_time
+                
+                # 설정된 간격마다 간단한 추론 실행하여 모델 활성 상태 유지
+                if current_time - last_inference_time >= KEEP_ALIVE_INFERENCE_INTERVAL:
+                    logger.info("🔄 Keep-Alive 추론 실행 중...")
+                    sampling_params = SamplingParams(
+                        temperature=0.1,
+                        max_tokens=5,
+                        top_p=0.9
+                    )
+                    keep_alive_prompt = create_chat_prompt(
+                        user_message="Hi",
+                        system_message="You are a helpful assistant."
+                    )
+                    _ = generate_text(keep_alive_prompt, sampling_params)
+                    logger.info("✅ Keep-Alive 추론 완료 - 모델 활성 상태 확인")
+                    last_inference_time = current_time
+            
+            # 설정된 간격마다 체크
+            time.sleep(KEEP_ALIVE_INTERVAL)
+            
+        except Exception as e:
+            logger.error(f"❌ Keep-Alive 스레드 오류: {e}")
+            time.sleep(60)
+
 # RunPod 서버리스 실행
 if __name__ == "__main__":
     logger.info("🚀 RunPod vLLM Generation Worker 시작")
     logger.info(f"📋 기본 모델: {DEFAULT_MODEL}")
     
-    # 워커 시작 시 엔진 사전 초기화 (CPU 100% 방지)
-    logger.info("🔧 vLLM 엔진 사전 초기화 중...")
-    try:
-        initialize_engine(DEFAULT_MODEL)
-        logger.info("✅ 엔진 초기화 완료")
+    # 모델 사전 로드 설정 확인
+    if PRELOAD_MODEL:
+        logger.info("🔧 vLLM 엔진 사전 초기화 중...")
+        logger.info(f"📋 설정: PRELOAD_MODEL={PRELOAD_MODEL}, ENABLE_KEEP_ALIVE={ENABLE_KEEP_ALIVE}")
+        logger.info(f"⏱️ Keep-Alive 간격: 체크={KEEP_ALIVE_INTERVAL}초, 추론={KEEP_ALIVE_INFERENCE_INTERVAL}초")
         
-        # 웜업 테스트 실행
-        warmup_success = warmup_test()
-        
-        if warmup_success:
-            logger.info("🔥 워커 웜업 완료 - 최적의 성능으로 요청 대기 중")
-        else:
-            logger.warning("⚠️ 웜업 테스트 실패 - 첫 요청 시 약간의 지연이 있을 수 있습니다")
+        try:
+            initialize_engine(DEFAULT_MODEL)
+            logger.info("✅ 엔진 초기화 완료")
             
-    except Exception as e:
-        logger.error(f"❌ 초기화 실패: {e}")
-        logger.error(traceback.format_exc())
-        logger.info("⚠️ 첫 요청 시 초기화됩니다")
+            # 웜업 테스트 실행
+            warmup_success = warmup_test()
+            
+            if warmup_success:
+                logger.info("🔥 워커 웜업 완료 - 최적의 성능으로 요청 대기 중")
+            else:
+                logger.warning("⚠️ 웜업 테스트 실패 - 첫 요청 시 약간의 지연이 있을 수 있습니다")
+            
+            # Keep-Alive 스레드 시작 (활성화된 경우)
+            if ENABLE_KEEP_ALIVE:
+                keep_alive = threading.Thread(target=keep_alive_thread, daemon=True)
+                keep_alive.start()
+                logger.info("💓 Keep-Alive 스레드 시작 - 모델이 항상 메모리에 유지됩니다")
+            else:
+                logger.info("💤 Keep-Alive 비활성화 - 모델이 유휴 시간 후 언로드될 수 있습니다")
+                
+        except Exception as e:
+            logger.error(f"❌ 초기화 실패: {e}")
+            logger.error(traceback.format_exc())
+            logger.info("⚠️ 첫 요청 시 초기화됩니다")
+    else:
+        logger.info("💤 모델 사전 로드 비활성화 - 첫 요청 시 초기화됩니다")
+        logger.info("💡 빠른 콜드 스타트를 위해 PRELOAD_MODEL=true 설정을 권장합니다")
     
     # 멀티 vLLM 매니저 초기화
     logger.info("🔧 멀티 vLLM 매니저 초기화 중...")

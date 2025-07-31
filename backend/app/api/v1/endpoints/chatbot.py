@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.user import HFTokenManage
-from app.services.runpod_manager import get_vllm_manager
+from app.services.runpod_manager import get_vllm_manager, get_tts_manager
 from app.core.encryption import decrypt_sensitive_data
 from app.services.hf_token_resolver import get_token_by_group
 from app.services.chat_message_service import ChatMessageService
@@ -26,6 +26,126 @@ import httpx
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+async def _process_tts_async(websocket: WebSocket, text: str, influencer_id: str):
+    """비동기로 TTS 처리하고 완료되면 base64 오디오 데이터 전송"""
+    from app.models.influencer import AIInfluencer
+    from app.models.voice import VoiceBase
+    from sqlalchemy.orm import Session
+    from app.database import get_db
+    import httpx
+    import base64
+    
+    try:
+        # DB에서 influencer의 voice_base 정보 가져오기
+        db: Session = next(get_db())
+        try:
+            influencer = db.query(AIInfluencer).filter(
+                AIInfluencer.influencer_id == influencer_id
+            ).first()
+            
+            base_voice_id = None
+            if influencer and influencer.voice_base:
+                base_voice_id = str(influencer.voice_base.id)
+                logger.info(f"[WS] 인플루언서 {influencer_id}의 base_voice_id 찾음: {base_voice_id}")
+                logger.info(f"[WS] Base voice 정보 - ID: {base_voice_id}, URL: {influencer.voice_base.s3_url}")
+            else:
+                logger.warning(f"[WS] 인플루언서 {influencer_id}의 base_voice를 찾을 수 없음")
+        finally:
+            db.close()
+        
+        # TTS 매니저 가져오기
+        tts_manager = get_tts_manager()
+        
+        # TTS 생성 요청 (비동기) - base_voice_id 추가
+        logger.info(f"[WS] TTS 생성 요청: {text[:50]}...")
+        tts_params = {
+            "text": text,
+            "influencer_id": influencer_id,
+            "language": "ko"
+        }
+        
+        # base_voice_id가 있으면 추가
+        if base_voice_id:
+            tts_params["base_voice_id"] = base_voice_id
+            logger.info(f"[WS] Voice cloning 모드로 TTS 생성 - base_voice_id: {base_voice_id}")
+        
+        tts_result = await tts_manager.generate_voice(**tts_params)
+        
+        # task_id 확인
+        if not tts_result or not tts_result.get("id"):
+            logger.error("[WS] TTS task_id를 받지 못함")
+            return
+            
+        task_id = tts_result.get("id")
+        logger.info(f"[WS] TTS 작업 시작됨: task_id={task_id}")
+        
+        # 상태 확인 (최대 30초, 1초마다)
+        max_attempts = 30
+        for attempt in range(max_attempts):
+            await asyncio.sleep(1)  # 1초 대기
+            
+            # 상태 확인
+            status_result = await tts_manager.check_tts_status(task_id)
+            status = status_result.get("status")
+            
+            logger.info(f"[WS] TTS 상태 확인 [{attempt+1}/{max_attempts}]: {status}")
+            
+            if status == "COMPLETED":
+                # 완료된 경우 output에서 오디오 데이터 추출
+                output = status_result.get("output", {})
+                
+                # base64로 인코딩된 오디오 데이터 확인
+                audio_base64 = output.get("audio_base64") or output.get("audio_data")
+                
+                if audio_base64:
+                    # WebSocket으로 base64 오디오 데이터 전송
+                    await websocket.send_text(
+                        json.dumps({
+                            "type": "audio",
+                            "audio_base64": audio_base64,
+                            "duration": output.get("duration"),
+                            "format": output.get("format", "mp3"),
+                            "message": "음성이 생성되었습니다."
+                        })
+                    )
+                    logger.info(f"[WS] TTS base64 오디오 전송 완료 (크기: {len(audio_base64)} bytes)")
+                else:
+                    # base64가 없으면 URL 확인
+                    audio_url = output.get("audio_url") or output.get("s3_url")
+                    if audio_url:
+                        await websocket.send_text(
+                            json.dumps({
+                                "type": "audio",
+                                "audio_url": audio_url,
+                                "duration": output.get("duration"),
+                                "message": "음성이 생성되었습니다."
+                            })
+                        )
+                        logger.info(f"[WS] TTS URL 전송 완료: {audio_url}")
+                    else:
+                        logger.warning("[WS] TTS 완료했지만 오디오 데이터가 없음")
+                break
+                
+            elif status == "FAILED":
+                logger.error(f"[WS] TTS 생성 실패: {status_result.get('error')}")
+                break
+                
+            elif status == "IN_QUEUE" or status == "IN_PROGRESS":
+                # 계속 대기
+                continue
+            else:
+                # 알 수 없는 상태
+                logger.warning(f"[WS] 알 수 없는 TTS 상태: {status}")
+                
+        else:
+            # 타임아웃
+            logger.error(f"[WS] TTS 생성 타임아웃 (30초)")
+            
+    except Exception as e:
+        logger.error(f"[WS] TTS 처리 중 오류: {e}")
+        # TTS 오류는 무시하고 채팅은 계속 진행
 
 
 # 메모리 히스토리 클래스 제거 - 데이터베이스만 사용
@@ -87,15 +207,34 @@ async def chatbot(
         
         logger.info(f"[WS] 요청 파라미터: lora_repo={lora_repo}, group_id={group_id}, influencer_id={influencer_id}")
         
-        if not group_id:
-            logger.error(f"[WS] group_id 파라미터가 없음")
-            await websocket.close(code=1003, reason="Missing group_id parameter")
+        # influencer_id만 필수로 체크 (group_id는 선택적)
+        if not influencer_id:
+            logger.error(f"[WS] influencer_id 파라미터가 없음")
+            await websocket.close(code=1003, reason="Missing influencer_id parameter")
             return
             
         if not token:
             logger.error(f"[WS] token 파라미터가 없음")
             await websocket.close(code=1003, reason="Missing token parameter")
             return
+        
+        # group_id가 없으면 influencer_id로 조회
+        if not group_id:
+            from app.models.influencer import AIInfluencer
+            db_temp = next(get_db())
+            try:
+                influencer = db_temp.query(AIInfluencer).filter(
+                    AIInfluencer.influencer_id == influencer_id
+                ).first()
+                if influencer:
+                    group_id = str(influencer.group_id)
+                    logger.info(f"[WS] DB에서 group_id 조회 성공: {group_id}")
+                else:
+                    logger.error(f"[WS] 인플루언서 {influencer_id}를 찾을 수 없음")
+                    await websocket.close(code=1003, reason="Influencer not found")
+                    return
+            finally:
+                db_temp.close()
         
         try:
             group_id = int(group_id)
@@ -220,6 +359,25 @@ async def chatbot(
         logger.info(f"[WS] Model/LoRA repo: {lora_repo_decoded}")
         logger.info(f"[WS] Group ID: {group_id}")
         logger.info(f"[WS] Influencer ID: {influencer_id}")
+        
+        # 인플루언서 정보 조회 및 전송
+        if influencer_id:
+            from app.models.influencer import AIInfluencer
+            influencer_info = db.query(AIInfluencer).filter(
+                AIInfluencer.influencer_id == influencer_id
+            ).first()
+            
+            if influencer_info:
+                # 인플루언서 정보를 클라이언트에 전송
+                await websocket.send_text(json.dumps({
+                    "type": "influencer_info",
+                    "data": {
+                        "name": influencer_info.influencer_name,
+                        "description": influencer_info.influencer_description,
+                        "image_url": getattr(influencer_info, 'image_url', None)
+                    }
+                }))
+                logger.info(f"[WS] 인플루언서 정보 전송 완료: {influencer_info.influencer_name}")
         
         # 환경변수 확인 (settings 사용)
         from app.core.config import settings
@@ -488,6 +646,17 @@ async def chatbot(
                     await websocket.send_text(
                         json.dumps({"type": "complete", "content": ""})
                     )
+
+                    # TTS 생성 시작 (비동기로 처리)
+                    if full_response.strip():
+                        # 비동기 태스크로 TTS 처리
+                        asyncio.create_task(
+                            _process_tts_async(
+                                websocket, 
+                                full_response, 
+                                influencer_id if influencer_id else "default"
+                            )
+                        )
 
                     # 세션에 대화 저장 (메시지 타입 구분)
                     if full_response.strip():

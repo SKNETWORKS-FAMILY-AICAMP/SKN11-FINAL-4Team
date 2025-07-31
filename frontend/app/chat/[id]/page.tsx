@@ -8,8 +8,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent } from "@/components/ui/card"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { tokenUtils } from "@/lib/auth"
-import { ModelService } from "@/lib/services/model.service"
 import { useAuth } from "@/hooks/use-auth"
+import { useTTS } from "@/hooks/use-tts"
 import webSocketManager from "@/lib/websocket-manager"
 
 import {
@@ -23,6 +23,10 @@ import {
   MessageSquare,
   User,
   Bot,
+  Volume2,
+  VolumeX,
+  Pause,
+  Play,
 } from "lucide-react"
 
 interface Message {
@@ -49,6 +53,7 @@ export default function ChatPage() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const { user, isAuthenticated, isLoading: authLoading, logout } = useAuth()
+  const { speak, stop, pause, resume, status: ttsStatus, isSupported: ttsSupported } = useTTS()
   const [model, setModel] = useState<ChatModel | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
   const [inputMessage, setInputMessage] = useState("")
@@ -56,6 +61,7 @@ export default function ChatPage() {
   const [isModelLoading, setIsModelLoading] = useState(true)
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('connecting')
   const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false)
+  const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const timeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -67,43 +73,28 @@ export default function ChatPage() {
     }
   }, [authLoading, isAuthenticated, router])
 
-  // 모델 데이터 로드
+  // 모델 데이터 로드 (간소화 - influencer_id만 사용)
   const loadModelData = async () => {
     if (!isAuthenticated) return
     
     setIsModelLoading(true)
     try {
-      console.log(`🔍 모델 데이터 로드 시작: influencer_id=${params.id}`);
-      const data = await ModelService.getInfluencer(params.id as string)
-      console.log('📊 로드된 모델 데이터:', data);
+      // URL의 influencer_id를 직접 사용
+      const influencerId = params.id as string
+      console.log(`🔍 Influencer ID 사용: ${influencerId}`);
       
+      // 기본 모델 정보 설정 (백엔드에서 필요한 정보는 WebSocket 연결 시 처리)
       setModel({
-        id: data.influencer_id,
-        name: data.influencer_name,
-        description: data.influencer_description || '',
-        learning_status: data.learning_status,
-        chatbot_option: data.chatbot_option,
-        influencer_model_repo: data.influencer_model_repo || '',
-        group_id: String(data.group_id || ''),
-        image_url: data.image_url || undefined, // 올바른 필드명 사용
+        id: influencerId,
+        name: 'AI 인플루언서', // 기본 이름 (필요시 백엔드에서 받아올 수 있음)
+        description: '',
+        learning_status: 1, // 채팅 가능 상태로 가정
+        chatbot_option: true,
+        influencer_model_repo: '',
+        group_id: '1', // 기본값 (백엔드에서 처리)
+        image_url: undefined,
       })
-      console.log('✅ 모델 데이터 로드 성공');
-    } catch (error: any) {
-      console.error("Error loading model data:", error)
-      console.error('에러 상세:', {
-        status: error?.status,
-        message: error?.message,
-        response: error?.response,
-        data: error?.data
-      })
-      
-      // 토큰 검증 실패로 인한 401/403 에러 시 로그아웃
-      if (error?.status === 401 || error?.status === 403) {
-        console.log("토큰 검증 실패로 인한 로그아웃 처리")
-        logout()
-        router.push('/login')
-        return
-      }
+      console.log('✅ 모델 정보 설정 완료');
     } finally {
       setIsModelLoading(false)
     }
@@ -144,14 +135,13 @@ export default function ChatPage() {
     // influencer_id를 base64로 인코딩 (model_repo 대신 influencer_id 사용)
     const influencerIdEncoded = btoa(model.id);
 
-    const wsFullUrl = `${wsUrl}/api/v1/chatbot/chatbot/${influencerIdEncoded}?group_id=${model.group_id}&influencer_id=${model.id}&token=${accessToken}`;
+    const wsFullUrl = `${wsUrl}/api/v1/chatbot/chatbot/${influencerIdEncoded}?influencer_id=${model.id}&token=${accessToken}`;
     
     console.log('🔌 WebSocket 연결 시도');
     console.log(`- Backend URL: ${backendUrl}`);
     console.log(`- WS URL: ${wsUrl}`);
     console.log(`- Full URL: ${wsFullUrl}`);
-    console.log(`- Model ID: ${model.id}`);
-    console.log(`- Group ID: ${model.group_id}`);
+    console.log(`- Influencer ID: ${model.id}`);
     console.log(`- Influencer ID (encoded): ${influencerIdEncoded}`);
     console.log(`- Token 존재: ${accessToken ? 'Yes' : 'No'}`);
     console.log(`- Token 길이: ${accessToken?.length || 0}`);
@@ -253,6 +243,29 @@ export default function ChatPage() {
         } else if (data.type === "history_cleared") {
           // 히스토리 초기화 응답 처리 - 백그라운드에서만 관리
           console.log("✅ 히스토리 초기화 성공");
+        } else if (data.type === "audio") {
+          // 음성 데이터 응답 처리 - 채팅창에 표시하지 않음
+          console.log("🔊 음성 데이터 수신:", {
+            hasBase64: !!data.audio_base64,
+            hasUrl: !!data.audio_url,
+            duration: data.duration
+          });
+          setIsLoading(false);
+          // TODO: 필요시 여기서 음성 재생 로직 추가 가능
+        } else if (data.type === "influencer_info") {
+          // 인플루언서 정보 업데이트
+          console.log("👤 인플루언서 정보 수신:", data.data);
+          if (data.data) {
+            setModel(prev => {
+              if (!prev) return prev;
+              return {
+                ...prev,
+                name: data.data.name || prev.name,
+                description: data.data.description || prev.description,
+                image_url: data.data.image_url || prev.image_url
+              };
+            });
+          }
         } else {
           // 기존 일반 응답 처리 (하위 호환성)
           setIsLoading(false);
@@ -344,7 +357,7 @@ export default function ChatPage() {
 
     try {
       // WebSocket으로 메시지 전송 (백엔드에서 RAG, MCP 처리를 포함한 모든 로직 처리)
-      const wsKey = `chat-${model.id}`;
+      const wsKey = `chat-${model?.id}`;
       const ws = webSocketManager.getConnection(wsKey);
       
       if (connectionStatus === 'connected' && ws && ws.readyState === WebSocket.OPEN) {
@@ -409,6 +422,40 @@ export default function ChatPage() {
   useEffect(() => {
     scrollToBottom()
   }, [messages])
+
+  // TTS 제어 함수들
+  const handleSpeak = (messageId: string, text: string) => {
+    if (!ttsSupported) {
+      alert('이 브라우저는 음성 출력을 지원하지 않습니다.')
+      return
+    }
+
+    // 이미 재생 중인 경우
+    if (speakingMessageId === messageId) {
+      if (ttsStatus === 'speaking') {
+        pause()
+      } else if (ttsStatus === 'paused') {
+        resume()
+      }
+    } else {
+      // 다른 메시지 재생
+      stop()
+      setSpeakingMessageId(messageId)
+      speak(text)
+    }
+  }
+
+  const handleStopSpeaking = () => {
+    stop()
+    setSpeakingMessageId(null)
+  }
+
+  // TTS 상태가 idle로 변경되면 speakingMessageId 초기화
+  useEffect(() => {
+    if (ttsStatus === 'idle') {
+      setSpeakingMessageId(null)
+    }
+  }, [ttsStatus])
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -528,6 +575,19 @@ export default function ChatPage() {
                   </div>
                 </div>
                 <div className="flex items-center space-x-2 flex-shrink-0 ml-4">
+                  {/* TTS 전체 정지 버튼 */}
+                  {ttsSupported && ttsStatus !== 'idle' && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleStopSpeaking}
+                      className="p-1"
+                      title="음성 정지"
+                    >
+                      <VolumeX className="h-4 w-4" />
+                    </Button>
+                  )}
+                  
                   {/* 연결 상태 표시 */}
                   <div className="flex items-center space-x-2">
                     <div className={`w-2 h-2 rounded-full ${connectionStatus === 'connected' ? 'bg-green-500' :
@@ -576,6 +636,32 @@ export default function ChatPage() {
                           </div>
                         )}
                       </div>
+                      {/* TTS 버튼 - 봇 메시지에만 표시 */}
+                      {message.sender === "bot" && !message.isStreaming && ttsSupported && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleSpeak(message.id, message.content)}
+                          className="ml-2 p-1 h-7 w-7"
+                          title={
+                            speakingMessageId === message.id && ttsStatus === 'speaking' ? '일시정지' :
+                            speakingMessageId === message.id && ttsStatus === 'paused' ? '재개' :
+                            '읽어주기'
+                          }
+                        >
+                          {speakingMessageId === message.id ? (
+                            ttsStatus === 'speaking' ? (
+                              <Pause className="h-3.5 w-3.5" />
+                            ) : ttsStatus === 'paused' ? (
+                              <Play className="h-3.5 w-3.5" />
+                            ) : (
+                              <Volume2 className="h-3.5 w-3.5" />
+                            )
+                          ) : (
+                            <Volume2 className="h-3.5 w-3.5" />
+                          )}
+                        </Button>
+                      )}
                     </div>
                   </div>
                 </div>

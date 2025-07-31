@@ -61,6 +61,12 @@ ENV VLLM_CACHE_ROOT=/app/models
 RUN mkdir -p /app/lora_adapters
 ENV LORA_ADAPTERS_BASE_PATH=/app/lora_adapters
 
+# Idle 상태 유지 설정 (기본값)
+ENV PRELOAD_MODEL=true
+ENV ENABLE_KEEP_ALIVE=true
+ENV KEEP_ALIVE_INTERVAL=300
+ENV KEEP_ALIVE_INFERENCE_INTERVAL=3600
+
 # 헬스체크
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
     CMD python3 -c "import torch; import vllm; print('Health check passed')" || exit 1

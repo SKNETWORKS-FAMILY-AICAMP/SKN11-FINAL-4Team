@@ -416,6 +416,27 @@ class TTSRunPodManager(BaseRunPodManager):
             if voice_id:
                 payload["input"]["voice_id"] = voice_id
             
+            # base_voice_id 처리 (voice cloning을 위해)
+            base_voice_id = kwargs.pop("base_voice_id", None)
+            if base_voice_id:
+                payload["input"]["base_voice_id"] = base_voice_id
+                payload["input"]["use_voice_cloning"] = True
+                logger.info(f"🎤 Voice cloning 활성화 - base_voice_id: {base_voice_id}")
+            
+            # 기존 base_voice_data 처리 (하위 호환성)
+            base_voice_data = kwargs.pop("base_voice_data", None)
+            if base_voice_data and not base_voice_id:
+                payload["input"]["base_voice_data"] = base_voice_data
+                payload["input"]["use_voice_cloning"] = True
+                logger.info(f"🎤 Voice cloning 활성화 (base64 데이터 크기: {len(base_voice_data)} chars)")
+            
+            # 기존 base_voice_url 처리 (하위 호환성)
+            base_voice_url = kwargs.pop("base_voice_url", None)
+            if base_voice_url and not base_voice_id and not base_voice_data:
+                payload["input"]["base_voice_url"] = base_voice_url
+                payload["input"]["use_voice_cloning"] = True
+                logger.info(f"🎤 Voice cloning 활성화 (URL): {base_voice_url}")
+            
             # 추가 파라미터가 있으면 추가
             for key, value in kwargs.items():
                 if value is not None:
@@ -433,8 +454,8 @@ class TTSRunPodManager(BaseRunPodManager):
                 "Content-Type": "application/json"
             }
             
-            # 동기 호출 사용
-            url = f"{base_url}/{endpoint_id}/runsync"
+            # 비동기 호출 사용 (run)
+            url = f"{base_url}/{endpoint_id}/run"
             
             logger.info(f"🎵 TTS 음성 생성 요청: {url}")
             logger.info(f"📦 Payload: {json.dumps(payload, indent=2, ensure_ascii=False)}")
@@ -450,13 +471,56 @@ class TTSRunPodManager(BaseRunPodManager):
                     raise RunPodManagerError(error_msg)
                 
                 result = response.json()
-                logger.info(f"✅ TTS 음성 생성 성공")
+                logger.info(f"✅ TTS 음성 생성 요청 성공: {result}")
                 
                 return result
                     
         except Exception as e:
             logger.error(f"❌ TTS 음성 생성 실패: {e}")
             raise RunPodManagerError(f"TTS 음성 생성 실패: {e}")
+    
+    async def check_tts_status(self, task_id: str) -> Dict[str, Any]:
+        """TTS 작업 상태 확인"""
+        import httpx
+        
+        try:
+            # 엔드포인트 찾기
+            endpoint = await self.find_endpoint()
+            if not endpoint or not endpoint.get("id"):
+                raise RunPodManagerError("TTS 엔드포인트를 찾을 수 없습니다")
+            
+            endpoint_id = endpoint["id"]
+            
+            # RunPod API 호출
+            base_url = "https://api.runpod.ai/v2"
+            api_key = os.getenv("RUNPOD_API_KEY")
+            
+            if not api_key:
+                raise RunPodManagerError("RUNPOD_API_KEY가 설정되지 않았습니다")
+            
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json"
+            }
+            
+            # 상태 확인 URL
+            url = f"{base_url}/{endpoint_id}/status/{task_id}"
+            
+            async with httpx.AsyncClient(timeout=30) as client:
+                response = await client.get(url, headers=headers)
+                
+                if response.status_code != 200:
+                    logger.error(f"❌ TTS 상태 확인 실패: {response.status_code} - {response.text}")
+                    return {"status": "error", "error": response.text}
+                
+                result = response.json()
+                logger.info(f"📊 TTS 상태: {result.get('status')}")
+                
+                return result
+                
+        except Exception as e:
+            logger.error(f"❌ TTS 상태 확인 오류: {e}")
+            return {"status": "error", "error": str(e)}
     
     async def health_check(self) -> bool:
         """TTS 엔드포인트 상태 확인"""
