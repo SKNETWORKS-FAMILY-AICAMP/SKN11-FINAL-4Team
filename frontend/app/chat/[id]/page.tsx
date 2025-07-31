@@ -82,7 +82,7 @@ export default function ChatPage() {
   // 모델 데이터 로드 (간소화 - influencer_id만 사용)
   const loadModelData = async () => {
     if (!isAuthenticated) return
-    
+
     setIsModelLoading(true)
     try {
       // URL의 influencer_id를 직접 사용
@@ -231,7 +231,7 @@ export default function ChatPage() {
         } else if (data.error_code) {
           // 기존 에러 응답 처리 (하위 호환성)
           setIsLoading(false);
-          
+
           // 토큰 관련 오류 시 로그아웃 처리
           if (data.error_code === "INVALID_TOKEN" || data.error_code === "TOKEN_VERIFICATION_FAILED") {
             console.log("WebSocket 토큰 검증 실패로 인한 로그아웃 처리")
@@ -239,7 +239,7 @@ export default function ChatPage() {
             router.push('/login')
             return
           }
-          
+
           setMessages(prev => [...prev, {
             id: Date.now().toString(),
             content: `오류: ${data.message || '알 수 없는 오류가 발생했습니다.'}`,
@@ -740,8 +740,8 @@ export default function ChatPage() {
                     }`} />
                     <span className="text-xs text-gray-500">
                       {connectionStatus === 'connected' ? '연결됨' :
-                       connectionStatus === 'connecting' ? '연결 중' :
-                       connectionStatus === 'error' ? '오류' : '연결 끊김'}
+                        connectionStatus === 'connecting' ? '연결 중' :
+                          connectionStatus === 'error' ? '오류' : '연결 끊김'}
                     </span>
                   </div>
                 </div>

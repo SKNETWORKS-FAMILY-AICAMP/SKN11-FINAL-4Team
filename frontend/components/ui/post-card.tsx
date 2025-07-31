@@ -17,6 +17,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 
+
 // 게시글 타입 정의
 export interface Post {
   board_id?: string
@@ -65,6 +66,7 @@ export interface Post {
   instagram_link?: string
   influencerName?: string
   influencerDescription?: string
+  influencer_image_url?: string  // 인플루언서 프로필 이미지 URL 추가
 }
 
 interface PostCardProps {
