@@ -217,6 +217,17 @@ class MCPServerManager:
         """서버 설정을 새로고침합니다."""
         self.server_configs.clear()
         self._load_servers_from_database()
+
+        # MCP 클라이언트 캐시 정리
+        try:
+            from app.services.mcp_client import get_mcp_client
+
+            mcp_client_service = get_mcp_client()
+            mcp_client_service.clear_server_cache()
+            logger.info("🔄 MCP 클라이언트 캐시 정리 완료 (서버 설정 변경 시)")
+        except Exception as e:
+            logger.warning(f"❌ MCP 클라이언트 캐시 정리 실패: {e}")
+
         logger.info("🔄 MCP 서버 설정이 새로고침되었습니다.")
 
     async def start_all_servers(self):
@@ -659,6 +670,16 @@ class MCPServerManager:
                 "description": f"동적으로 추가된 서버: {server_name}",
             }
 
+            # MCP 클라이언트 캐시 정리
+            try:
+                from app.services.mcp_client import get_mcp_client
+
+                mcp_client_service = get_mcp_client()
+                mcp_client_service.clear_server_cache()
+                logger.info("🔄 MCP 클라이언트 캐시 정리 완료 (서버 추가 시)")
+            except Exception as e:
+                logger.warning(f"❌ MCP 클라이언트 캐시 정리 실패: {e}")
+
             logger.info(f"MCP 서버 '{server_name}' 추가됨: {server_url}")
 
         except Exception as e:
@@ -682,6 +703,16 @@ class MCPServerManager:
             # 설정 제거
             if server_name in self.server_configs:
                 del self.server_configs[server_name]
+
+            # MCP 클라이언트 캐시 정리
+            try:
+                from app.services.mcp_client import get_mcp_client
+
+                mcp_client_service = get_mcp_client()
+                mcp_client_service.clear_server_cache()
+                logger.info("🔄 MCP 클라이언트 캐시 정리 완료 (서버 제거 시)")
+            except Exception as e:
+                logger.warning(f"❌ MCP 클라이언트 캐시 정리 실패: {e}")
 
             logger.info(f"MCP 서버 '{server_name}' 제거됨")
 

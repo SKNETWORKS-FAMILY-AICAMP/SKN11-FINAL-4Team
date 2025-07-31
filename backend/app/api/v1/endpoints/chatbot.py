@@ -301,6 +301,61 @@ async def chatbot(
                         else "당신은 도움이 되는 AI 어시스턴트입니다."
                     )
 
+                    # MCP 도구 사용 여부 확인 및 처리
+                    mcp_response = None
+                    tools_used = []
+
+                    if influencer_id:
+                        try:
+                            from app.api.v1.endpoints.mcp import process_with_mcp_tools
+                            from app.services.mcp_server_service import MCPServerService
+
+                            # 인플루언서에게 할당된 MCP 서버들 가져오기
+                            mcp_service = MCPServerService(db)
+                            assigned_servers = mcp_service.get_influencer_mcp_servers(
+                                influencer_id
+                            )
+                            selected_servers = [
+                                server.mcp_name for server in assigned_servers
+                            ]
+
+                            # MCP 도구로 메시지 처리
+                            mcp_response, tools_used = await process_with_mcp_tools(
+                                user_message, selected_servers
+                            )
+
+                            if mcp_response:
+                                logger.info(f"[WS] MCP 도구 사용됨: {tools_used}")
+                                # MCP 응답을 사용자에게 전송
+                                await websocket.send_text(
+                                    json.dumps(
+                                        {
+                                            "type": "mcp_response",
+                                            "content": mcp_response,
+                                            "tools_used": tools_used,
+                                        }
+                                    )
+                                )
+
+                                # 세션에 MCP 응답 저장
+                                if mcp_response.strip():
+                                    chat_message_service.add_message_to_session(
+                                        session_id=current_session_id,
+                                        influencer_id=influencer_id or "default",
+                                        message_content=mcp_response,
+                                        message_type="ai",
+                                    )
+
+                                continue  # MCP 응답 후 VLLM 처리 건너뛰기
+                            else:
+                                logger.info(
+                                    f"[WS] MCP 도구 사용 안함, 일반 대화로 진행"
+                                )
+                        except Exception as e:
+                            logger.warning(
+                                f"[WS] MCP 도구 처리 실패, 일반 대화로 진행: {e}"
+                            )
+
                     # 스트리밍 응답 생성
                     token_count = 0
                     full_response = ""
@@ -380,10 +435,31 @@ async def chatbot(
                     chat_message_service.end_session(current_session_id)
                     logger.info(f"[WS] 세션 종료: session_id={current_session_id}")
 
+                # MCP 캐시 정리
+                try:
+                    from app.services.mcp_client import get_mcp_client
+
+                    mcp_client_service = get_mcp_client()
+                    mcp_client_service.reset_initialization()
+                    logger.info(f"[WS] MCP 캐시 정리 완료")
+                except Exception as e:
+                    logger.warning(f"[WS] MCP 캐시 정리 실패: {e}")
+
                 logger.info(f"[WS] WebSocket 연결 종료: lora_repo={lora_repo_decoded}")
                 break
             except Exception as e:
                 logger.error(f"[WS] WebSocket 처리 중 오류: {e}")
+
+                # MCP 캐시 정리
+                try:
+                    from app.services.mcp_client import get_mcp_client
+
+                    mcp_client_service = get_mcp_client()
+                    mcp_client_service.reset_initialization()
+                    logger.info(f"[WS] MCP 캐시 정리 완료 (오류 발생 시)")
+                except Exception as cache_e:
+                    logger.warning(f"[WS] MCP 캐시 정리 실패: {cache_e}")
+
                 await websocket.send_text(
                     json.dumps({"error_code": "WEBSOCKET_ERROR", "message": str(e)})
                 )

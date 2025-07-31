@@ -34,7 +34,7 @@ class MCPClientService:
         self.session_pool: Dict[str, Any] = {}  # 세션 풀 추가
         self.tools_cache: Dict[str, List] = {}
         self.cache_timestamp: Dict[str, float] = {}
-        self.cache_duration = 300  # 5분 캐시
+        self.cache_duration = 60  # 1분 캐시 (더 빠른 갱신)
         self._initialized = False
         self._init_lock = asyncio.Lock()
 
@@ -44,7 +44,30 @@ class MCPClientService:
         self.mcp_client = None
         self.tools_cache.clear()
         self.cache_timestamp.clear()
+        self.connection_pool.clear()
+        self.session_pool.clear()
         logger.info("🔄 MCP 클라이언트 초기화 상태 리셋 완료")
+
+    def clear_server_cache(self, server_name: str = None):
+        """특정 서버 또는 모든 서버의 캐시를 정리합니다."""
+        if server_name:
+            # 특정 서버 캐시만 정리
+            if server_name in self.tools_cache:
+                del self.tools_cache[server_name]
+            if server_name in self.cache_timestamp:
+                del self.cache_timestamp[server_name]
+            if server_name in self.connection_pool:
+                del self.connection_pool[server_name]
+            if server_name in self.session_pool:
+                del self.session_pool[server_name]
+            logger.info(f"🔄 서버 '{server_name}' 캐시 정리 완료")
+        else:
+            # 모든 캐시 정리
+            self.tools_cache.clear()
+            self.cache_timestamp.clear()
+            self.connection_pool.clear()
+            self.session_pool.clear()
+            logger.info("🔄 모든 MCP 서버 캐시 정리 완료")
 
     async def add_server_dynamically(self, server_name: str, config: dict):
         """새 서버를 추가하기 위해 MCP 클라이언트를 재초기화합니다."""
