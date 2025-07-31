@@ -44,7 +44,7 @@ RUN mkdir -p /app/models && \
     cd /app/models && \
     git clone --depth 1 https://huggingface.co/LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct && \
     cd EXAONE-3.5-2.4B-Instruct && \
-    git lfs pull --include="*.json,*.txt,tokenizer*" && \
+    git lfs pull && \
     echo "✅ 모델 메타데이터 다운로드 완료"
 
 # 모델 파일은 런타임에 필요시 다운로드 (빌드 시간 단축)
