@@ -134,14 +134,20 @@ class MCPToolProcessor:
                 ]
                 logger.info(f"📋 선택된 MCP 서버만 사용: {available_servers}")
             else:
-                available_servers = [
-                    name
-                    for name, status in server_status.items()
-                    if status.get("running", False)
-                ]
-                logger.info(f"📋 모든 실행 중인 MCP 서버 사용: {available_servers}")
+                # selected_servers가 None이면 빈 리스트 사용 (모든 서버 사용 금지)
+                available_servers = []
+                logger.info(
+                    f"📋 선택된 서버가 없어 도구 사용 안함: {available_servers}"
+                )
 
             # 동적으로 사용 가능한 서버 목록 사용
+            if not available_servers:
+                logger.info(
+                    "❌ 사용 가능한 MCP 서버가 없습니다. 일반 대화로 진행합니다."
+                )
+                logger.info("=" * 50)
+                return "", []  # MCP 사용하지 않고 빈 값 반환
+
             for server_name in available_servers:
                 try:
                     logger.info(f"📥 MCP 서버 '{server_name}'에서 도구 로드 시작...")
