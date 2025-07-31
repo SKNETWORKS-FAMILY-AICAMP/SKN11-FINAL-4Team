@@ -155,6 +155,36 @@ function PostListContent() {
     }
   }
 
+  // 인플루언서 정보를 가져오는 함수 (캐시 우선)
+  const getInfluencerInfo = async (influencerId: string) => {
+    // 캐시에서 먼저 확인
+    if (influencerCache[influencerId]) {
+      return influencerCache[influencerId]
+    }
+
+    // 캐시에 없으면 API 호출
+    try {
+      const influencerInfo = await apiClient.get<any>(`/api/v1/influencers/${influencerId}`)
+
+      // 캐시에 저장
+      setInfluencerCache(prev => ({
+        ...prev,
+        [influencerId]: influencerInfo
+      }))
+
+      return influencerInfo
+    } catch (error) {
+      console.error('Failed to fetch influencer info:', error)
+      return null
+    }
+  }
+
+  // 더 많은 게시글 로드
+  const loadMorePosts = async () => {
+    if (!hasMore || isLoadingMore) return
+    await fetchPosts(currentPage + 1, true)
+  }
+
   // 플랫폼 번호를 이름으로 변환
   const getPlatformName = (platformNumber: number) => {
     switch (platformNumber) {
@@ -427,14 +457,84 @@ function PostListContent() {
     setIsFilterModalOpen(true)
   }
 
+  // 상세보기 시 게시글 상세 정보 로드
+  const loadPostDetail = async (postId: string) => {
+    setIsDetailLoading(true); // 로딩 상태 시작
+    try {
+      console.log(`상세 정보 로드 시작: ${postId}`); // 디버깅 로그 추가
+      const boardDetail = await apiClient.get<any>(`/api/v1/boards/${postId}`)
+      console.log('받아온 상세 정보:', boardDetail); // 디버깅 로그 추가
+
+      // API 응답으로부터 완전한 Post 객체 생성
+      const detailedPost: Post = {
+        id: boardDetail.board_id,
+        board_id: boardDetail.board_id,
+        title: boardDetail.board_topic || '',
+        content: boardDetail.board_description || '',
+        influencerName: boardDetail.influencer_name || 'AI 인플루언서',
+        influencerDescription: boardDetail.influencer_description || '',
+        influencer_image_url: boardDetail.influencer_image_url || '',
+        engagement: {
+          likes: boardDetail.instagram_stats?.like_count || 0,
+          comments: boardDetail.instagram_stats?.comments_count || 0
+        },
+        instagram_stats: {
+          impressions: boardDetail.instagram_stats?.impressions || 0,
+          reach: boardDetail.instagram_stats?.reach || 0,
+          profile_views: boardDetail.instagram_stats?.profile_views || 0,
+          follower_count: boardDetail.instagram_stats?.follower_count || 0,
+          saved_count: boardDetail.instagram_stats?.saved_count || 0,
+          video_views: boardDetail.instagram_stats?.video_views || 0
+        },
+        instagram_link: boardDetail.instagram_link || null,
+        // 상세보기에서는 전체 이미지 정보 사용
+        media: {
+          type: boardDetail.image_url && boardDetail.image_url.split(",").length > 1 ? "carousel" as const : "image" as const,
+          urls: boardDetail.image_url ? boardDetail.image_url.split(",").map((url: string) => url.trim()).filter(Boolean) : ["/placeholder.svg?height=400&width=400"],
+          thumbnailUrl: boardDetail.image_url ? boardDetail.image_url.split(",")[0]?.trim() || "/placeholder.svg?height=400&width=400" : "/placeholder.svg?height=400&width=400"
+        },
+        // 기타 필드들
+        platform: boardDetail.board_platform === 0 ? "Instagram" : "Blog",
+        status: boardDetail.board_status === 3 ? "published" : boardDetail.board_status === 2 ? "scheduled" : "draft",
+        hashtags: boardDetail.board_hash_tag ? boardDetail.board_hash_tag.split(' ').filter((tag: string) => tag.trim()).map((tag: string) => tag.startsWith('#') ? tag : `#${tag}`) : [],
+        created_at: boardDetail.created_at,
+        updated_at: boardDetail.updated_at,
+        publishedAt: boardDetail.published_at,
+        scheduledAt: boardDetail.reservation_at
+      }
+
+      console.log('업데이트된 게시글 정보:', detailedPost); // 디버깅 로그 추가
+      setSelectedPost(detailedPost)
+    } catch (error) {
+      console.error('상세 정보 로드 실패:', error); // 상세 에러 로그 추가
+      toast({
+        title: "상세 정보 로드 실패",
+        description: error instanceof Error ? error.message : "상세 정보를 불러올 수 없습니다.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsDetailLoading(false); // 로딩 상태 종료
+    }
+  }
+
   const handleViewPost = (post: Post) => {
+    console.log('상세보기 클릭된 게시글:', post); // 디버깅 로그 추가
+    console.log('post.id:', post.id, 'post.board_id:', post.board_id); // ID 확인
+
+    // 먼저 selectedPost를 설정
     setSelectedPost(post)
     setIsViewModalOpen(true)
     setIsEditing(false)
-    setEditTitle(post.title || post.board_topic || "")
-    setEditContent(post.content || post.board_description || "")
-    setEditHashtags((post.hashtags || []).join(" "))
-    setEditScheduledAt(post.scheduledAt || "")
+
+    // 그 다음 상세 정보 로드
+    if (post.id) {
+      loadPostDetail(post.id)
+    } else if (post.board_id) {
+      loadPostDetail(post.board_id)
+    } else {
+      console.error('게시글 ID가 없습니다:', post); // 에러 로그 추가
+    }
+
   }
 
 
@@ -1057,29 +1157,38 @@ function PostListContent() {
                       ) : (
                         <span>임시저장</span>
                       )}
-                    </div>
-                  </div>
 
-                  {/* 오른쪽 상단에 배지들 배치 */}
-                  <div className="flex flex-col items-end space-y-2 ml-4">
-                    {selectedPost.platform && (
-                      <Badge className={
-                        selectedPost.platform === "Instagram" ? "bg-pink-100 text-pink-800 whitespace-nowrap" :
-                          selectedPost.platform === "Blog" ? "bg-orange-100 text-orange-800 whitespace-nowrap" :
-                            selectedPost.platform === "Facebook" ? "bg-blue-100 text-blue-800 whitespace-nowrap" :
-                              "bg-gray-100 text-gray-800 whitespace-nowrap"
-                      }>
-                        {selectedPost.platform}
-                      </Badge>
-                    )}
-                    <Badge className={
-                      selectedPost.status === "published" ? "bg-green-100 text-green-800 whitespace-nowrap" :
-                        selectedPost.status === "scheduled" ? "bg-blue-100 text-blue-800 whitespace-nowrap" :
-                          "bg-gray-100 text-gray-800 whitespace-nowrap"
-                    }>
-                      {selectedPost.status === "published" ? "발행됨" :
-                        selectedPost.status === "scheduled" ? "예약됨" : "임시저장"}
-                    </Badge>
+                    </Button>
+                  )}
+                  {isEditing && (
+                    <Button
+                      onClick={handleEditSave}
+                      size="sm"
+                      className="bg-blue-600 hover:bg-blue-700 text-white"
+                    >
+                      저장
+                    </Button>
+                  )}
+                  {selectedPost?.instagram_link && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => window.open(selectedPost.instagram_link, '_blank')}
+                      className="flex items-center space-x-1"
+                    >
+                      <ExternalLink className="h-4 w-4" />
+                      <span>인스타그램 보기</span>
+                    </Button>
+                  )}
+                </div>
+              </DialogHeader>
+
+              {isDetailLoading ? (
+                // 로딩 중일 때 표시
+                <div className="flex items-center justify-center py-12">
+                  <div className="flex flex-col items-center space-y-4">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                    <p className="text-gray-600">게시글 정보를 불러오는 중...</p>
                   </div>
                 </div>
 

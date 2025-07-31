@@ -17,6 +17,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 
+
 // 게시글 타입 정의
 export interface Post {
   board_id?: string
