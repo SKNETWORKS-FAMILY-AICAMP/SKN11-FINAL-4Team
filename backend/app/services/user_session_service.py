@@ -79,7 +79,7 @@ class UserSessionService:
             result = await db.execute(
                 select(User).where(User.user_id == user_id).with_for_update()
             )
-            user = result.scalar_one()
+            user = result.scalar_one_or_none()
             logger.info(f"데이터베이스 쿼리 결과: {user is not None}")
             
             if not user:

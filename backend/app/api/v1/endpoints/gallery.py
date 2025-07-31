@@ -82,7 +82,7 @@ async def get_gallery_images(
         count_result = await db.execute(
             select(func.count()).select_from(ImageStorage).where(ImageStorage.group_id == target_team_id)
         )
-        total_count = count_result.scalar_one()
+        total_count = count_result.scalar()
         
         return {
             "images": images,
