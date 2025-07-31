@@ -42,6 +42,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { tokenUtils } from "@/lib/auth";
 import { ModelService } from "@/lib/services/model.service";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
 import { Toaster } from "@/components/ui/toaster";
 import {
   ArrowLeft,
@@ -79,6 +80,8 @@ import {
   PauseCircle,
   Loader2,
   ImageIcon,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import type { AIModel } from "@/lib/types";
 import {
@@ -95,6 +98,7 @@ import {
 import { apiClient } from "@/lib/api";
 import { PostCard, Post } from "@/components/ui/post-card";
 import MCPService from "@/lib/services/mcp.service";
+import { galleryService } from "@/lib/services/gallery.service";
 
 // 샘플 모델 데이터
 const sampleModel: AIModel = {
@@ -162,6 +166,7 @@ function ModelDetailContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const { toast } = useToast();
+  const { user } = useAuth();
   const [model, setModel] = useState<any>(null);
   const [imgError, setImgError] = useState(false);
   const [isModelLoading, setIsModelLoading] = useState(true);
@@ -218,8 +223,11 @@ function ModelDetailContent() {
   const [hasBaseVoice, setHasBaseVoice] = useState(false);
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
   const [isGalleryModalOpen, setIsGalleryModalOpen] = useState(false);
-  const [galleryImages, setGalleryImages] = useState<string[]>([]);
+  const [galleryImages, setGalleryImages] = useState<any[]>([]);
   const [isLoadingGallery, setIsLoadingGallery] = useState(false);
+  const [galleryCurrentPage, setGalleryCurrentPage] = useState(1);
+  const [galleryTotalPages, setGalleryTotalPages] = useState(1);
+  const [galleryTotalImages, setGalleryTotalImages] = useState(0);
   const [hasImageChanges, setHasImageChanges] = useState(false);
   const [voiceToDelete, setVoiceToDelete] = useState<string | null>(null);
   const [instagramStatus, setInstagramStatus] = useState<{
@@ -738,40 +746,119 @@ function ModelDetailContent() {
 
   const openGalleryModal = async () => {
     setIsGalleryModalOpen(true);
-    await loadGalleryImages();
+    await loadGalleryImages(1);
   };
 
-  const loadGalleryImages = async () => {
-    setIsLoadingGallery(true);
+  const loadGalleryImages = async (page: number = 1) => {
     try {
-      // S3에서 이미지 목록을 가져오는 API 호출
-      const response = await apiClient.get("/api/v1/gallery/images");
-      setGalleryImages(Array.isArray(response) ? response : []);
+      setIsLoadingGallery(true);
+
+      // 팀 ID 가져오기 (사용자 정보에서)
+      const teamId = user?.teams?.[0]?.group_id;
+      if (!teamId) {
+        toast({
+          title: "팀 정보 없음",
+          description: '소속된 팀이 없습니다.',
+          variant: "destructive",
+          duration: 3000,
+        });
+        return;
+      }
+
+      const data = await galleryService.getImages({
+        page: page,
+        page_size: 12,
+        team_id: teamId
+      });
+
+      setGalleryImages(data.images);
+      setGalleryTotalPages(data.pagination.total_pages);
+      setGalleryTotalImages(data.pagination.total_count);
+      setGalleryCurrentPage(data.pagination.page);
     } catch (error) {
-      // console.error("갤러리 이미지 로드 실패:", error);
       toast({
         title: "갤러리 로드 실패",
         description: "이미지 목록을 불러오는데 실패했습니다.",
         variant: "destructive",
+        duration: 3000,
       });
     } finally {
       setIsLoadingGallery(false);
     }
   };
 
-  const selectGalleryImage = (imageUrl: string) => {
-    // 선택된 이미지를 프로필 이미지로 설정
-    setModel((prev: any) => ({
-      ...prev,
-      image_url: imageUrl,
-    }));
-    setHasImageChanges(true); // 이미지 변경 감지
-    setIsGalleryModalOpen(false);
-    toast({
-      title: "이미지 선택 완료",
-      description: "갤러리에서 이미지를 선택했습니다.",
-      variant: "default",
-    });
+  const handleGalleryPageChange = (newPage: number) => {
+    if (newPage >= 1 && newPage <= galleryTotalPages) {
+      setGalleryCurrentPage(newPage);
+      loadGalleryImages(newPage);
+    }
+  };
+
+  const selectGalleryImage = async (imageUrl: string) => {
+    try {
+      setIsUpdating(true);
+      
+      // 인플루언서 정보 업데이트 (이미지 URL만 변경)
+      const updateData: any = {
+        influencer_name: model.name,
+        influencer_description: model.description,
+        system_prompt: model.system_prompt,
+        image_url: imageUrl, // 갤러리에서 선택한 이미지 URL
+      };
+
+      const updatedData = await ModelService.updateInfluencer(
+        params.id?.toString() ?? "",
+        updateData,
+      );
+
+      // S3 키라면 전체 URL로 변환
+      let fullImageUrl = updatedData.image_url;
+      if (fullImageUrl && !fullImageUrl.startsWith("http")) {
+        fullImageUrl = `https://aimex-influencers.s3.ap-northeast-2.amazonaws.com/${fullImageUrl}`;
+      }
+      if (fullImageUrl) {
+        fullImageUrl += `?t=${Date.now()}`;
+      }
+
+      // 모델 상태 업데이트
+      setModel((prev: any) => ({
+        ...prev,
+        name: updatedData.influencer_name,
+        description: updatedData.influencer_description || "",
+        image_url: fullImageUrl || prev.image_url,
+      }));
+
+      setHasImageChanges(false);
+      setIsGalleryModalOpen(false);
+
+      // 모델 데이터 다시 로드하여 변경사항 반영
+      await loadModelData();
+
+      // 성공 토스트 표시
+      toast({
+        title: "이미지 변경 완료",
+        description: "갤러리에서 선택한 이미지로 프로필이 변경되었습니다.",
+        variant: "default",
+      });
+
+      // 현재 페이지로 리다이렉트 (새로고침)
+      let influencerId: string | undefined;
+      if (typeof params.id === "string") {
+        influencerId = params.id;
+      } else if (Array.isArray(params.id)) {
+        influencerId = params.id[0];
+      }
+      router.replace(influencerId ? `/model/${influencerId}` : "/dashboard");
+    } catch (error) {
+      // 실패 토스트 표시
+      toast({
+        title: "오류",
+        description: "이미지 변경에 실패했습니다. 다시 시도해주세요.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsUpdating(false);
+    }
   };
 
   const handleUpdateModel = async () => {
@@ -2634,6 +2721,8 @@ function ModelDetailContent() {
               uploadedImage={uploadedImage}
               imagePreview={imagePreview}
               openImageModal={openImageModal}
+              openGalleryModal={openGalleryModal}
+              handleImageUpload={handleImageUpload}
               handleUpdateModel={handleUpdateModel}
             />
           </TabsContent>
@@ -3208,6 +3297,126 @@ function ModelDetailContent() {
           </DialogContent>
         </Dialog>
       </div>
+
+      {/* 갤러리 모달 */}
+      <Dialog open={isGalleryModalOpen} onOpenChange={setIsGalleryModalOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>갤러리에서 이미지 선택</DialogTitle>
+            <DialogDescription>
+              생성된 이미지 중에서 프로필 이미지로 사용할 이미지를 선택하세요.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4">
+            {/* 이미지 그리드 */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              {galleryImages.map((image) => (
+                <div
+                  key={image.storage_id}
+                  className="relative cursor-pointer group"
+                  onClick={() => selectGalleryImage(image.s3_url)}
+                >
+                  <div className="aspect-square rounded-lg overflow-hidden border border-gray-200 hover:border-blue-500 transition-colors">
+                    <img
+                      src={image.s3_url}
+                      alt={image.prompt || 'Gallery image'}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                    />
+                  </div>
+                  <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-20 transition-all duration-200 rounded-lg flex items-center justify-center">
+                    <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                      <span className="text-white text-sm font-medium">선택</span>
+                    </div>
+                  </div>
+                  <div className="mt-2">
+                    <p className="text-sm text-gray-600 line-clamp-2">
+                      {image.prompt || '이미지 설명 없음'}
+                    </p>
+                    <div className="flex justify-between items-center text-xs text-gray-500 mt-1">
+                      <span>{image.width} × {image.height}</span>
+                      <span>{new Date(image.created_at).toLocaleDateString()}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            
+            {galleryImages.length === 0 && !isLoadingGallery && (
+              <div className="text-center py-12">
+                <ImageIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                <p className="text-lg font-medium text-gray-900 mb-2">생성된 이미지가 없습니다</p>
+                <p className="text-gray-600">먼저 이미지를 생성해보세요</p>
+              </div>
+            )}
+            
+            {isLoadingGallery && (
+              <div className="text-center py-12">
+                <Loader2 className="h-8 w-8 animate-spin text-gray-400 mx-auto mb-4" />
+                <p className="text-gray-600">이미지를 불러오는 중...</p>
+              </div>
+            )}
+            
+            {/* 페이지네이션 */}
+            {galleryTotalPages > 1 && (
+              <div className="flex justify-center items-center gap-2 mt-6 pt-4 border-t">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleGalleryPageChange(galleryCurrentPage - 1)}
+                  disabled={galleryCurrentPage <= 1}
+                  className="flex items-center gap-1"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                  이전
+                </Button>
+                
+                <div className="flex items-center gap-1">
+                  {Array.from({ length: Math.min(5, galleryTotalPages) }, (_, i) => {
+                    let pageNum
+                    if (galleryTotalPages <= 5) {
+                      pageNum = i + 1
+                    } else if (galleryCurrentPage <= 3) {
+                      pageNum = i + 1
+                    } else if (galleryCurrentPage >= galleryTotalPages - 2) {
+                      pageNum = galleryTotalPages - 4 + i
+                    } else {
+                      pageNum = galleryCurrentPage - 2 + i
+                    }
+                    
+                    return (
+                      <Button
+                        key={pageNum}
+                        variant={galleryCurrentPage === pageNum ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => handleGalleryPageChange(pageNum)}
+                        className="w-8 h-8 p-0"
+                      >
+                        {pageNum}
+                      </Button>
+                    )
+                  })}
+                </div>
+                
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleGalleryPageChange(galleryCurrentPage + 1)}
+                  disabled={galleryCurrentPage >= galleryTotalPages}
+                  className="flex items-center gap-1"
+                >
+                  다음
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+                
+                <span className="text-sm text-gray-500 ml-2">
+                  {galleryCurrentPage} / {galleryTotalPages} 페이지
+                </span>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* 토스트 알림 컴포넌트 */}
       <Toaster />
