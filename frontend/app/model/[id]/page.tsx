@@ -310,6 +310,7 @@ function ModelDetailContent() {
     // Instagram 상태 업데이트 처리
   }, [instagramStatus]);
 
+
   // 게시글 데이터 로드
   const loadPostsData = async () => {
     setIsPostsLoading(true);
@@ -1246,54 +1247,54 @@ function ModelDetailContent() {
   // SSE 연결을 통한 음성 상태 실시간 모니터링 (기존 폴링 보완)
   React.useEffect(() => {
     let eventSource: EventSource | null = null;
-    
+
     // pending 상태의 음성이 있고 voice 탭이 활성화되어 있을 때만 SSE 연결
     const hasPendingVoices = voiceHistory.some(voice => voice.status === "pending");
-    
+
     if (hasPendingVoices && activeTab === "voice") {
       const token = tokenUtils.getToken();
       if (!token) return;
-      
+
       try {
         // SSE 연결 생성 (토큰을 URL 파라미터로 전달)
         eventSource = new EventSource(
           `${process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000'}/api/v1/influencers/${params.id}/voices/status-stream?token=${token}`
         );
-        
+
         // 연결 성공
         eventSource.onopen = () => {
           console.log("✅ SSE 연결 성공: 음성 상태 모니터링 시작");
         };
-        
+
         // 메시지 수신
         eventSource.onmessage = (event) => {
           try {
             const data = JSON.parse(event.data);
-            
+
             switch (data.event) {
               case "voice_status_update":
                 // 음성 상태 업데이트
                 if (data.data && Array.isArray(data.data)) {
                   setVoiceHistory(prev => {
                     const updatedHistory = [...prev];
-                    
+
                     // 새로 완료된/실패한 음성 찾기 (알림용)
                     const newlyCompletedVoices: any[] = [];
                     const newlyFailedVoices: any[] = [];
-                    
+
                     data.data.forEach((updatedVoice: any) => {
                       const index = updatedHistory.findIndex(v => v.id === updatedVoice.id);
                       if (index !== -1) {
                         const previousStatus = updatedHistory[index].status;
                         const newStatus = updatedVoice.status;
-                        
+
                         // 상태 변화 감지
                         if (previousStatus === "pending" && newStatus === "completed") {
                           newlyCompletedVoices.push(updatedVoice);
                         } else if (previousStatus === "pending" && newStatus === "failed") {
                           newlyFailedVoices.push(updatedVoice);
                         }
-                        
+
                         updatedHistory[index] = {
                           ...updatedHistory[index],
                           ...updatedVoice,
@@ -1301,7 +1302,7 @@ function ModelDetailContent() {
                         };
                       }
                     });
-                    
+
                     // 기존 폴링 알림은 SSE가 활성화되면 비활성화
                     // 알림 표시는 SSE에서만 처리
                     if (newlyCompletedVoices.length > 0) {
@@ -1309,7 +1310,7 @@ function ModelDetailContent() {
                         title: "음성 생성 완료 (실시간)",
                         description: `${newlyCompletedVoices.length}개의 음성이 성공적으로 생성되었습니다.`,
                       });
-                      
+
                       // 첫 번째 완료된 음성 자동 재생 (선택사항)
                       if (newlyCompletedVoices[0]?.url) {
                         handlePlayVoice(newlyCompletedVoices[0].url);
@@ -1322,14 +1323,14 @@ function ModelDetailContent() {
                         variant: "destructive",
                       });
                     }
-                    
+
                     return updatedHistory;
                   });
-                  
+
                   console.log("🔄 SSE: 음성 상태 업데이트", data.data);
                 }
                 break;
-                
+
               case "all_completed":
                 // 모든 음성 생성 완료
                 console.log("✅ SSE: 모든 음성 생성 완료");
@@ -1338,7 +1339,7 @@ function ModelDetailContent() {
                   eventSource = null;
                 }
                 break;
-                
+
               case "error":
                 // 오류 발생
                 console.error("❌ SSE 오류:", data.data?.message);
@@ -1352,7 +1353,7 @@ function ModelDetailContent() {
             console.error("SSE 메시지 파싱 오류:", error);
           }
         };
-        
+
         // 연결 오류
         eventSource.onerror = (error) => {
           console.error("❌ SSE 연결 오류:", error);
@@ -1361,12 +1362,12 @@ function ModelDetailContent() {
             eventSource = null;
           }
         };
-        
+
       } catch (error) {
         console.error("SSE 연결 생성 실패:", error);
       }
     }
-    
+
     // 컴포넌트 언마운트 또는 탭 변경 시 SSE 연결 해제
     return () => {
       if (eventSource) {

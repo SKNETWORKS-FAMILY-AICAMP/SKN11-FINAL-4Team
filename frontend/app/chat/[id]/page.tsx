@@ -13,6 +13,7 @@ import MCPService, { MCPChatResponse } from '@/lib/services/mcp.service'
 import { RAGService, RAGChatRequest } from '@/lib/services/rag.service'
 import { useAuth } from "@/hooks/use-auth"
 
+
 import {
   Send,
   Loader2,
@@ -72,7 +73,7 @@ export default function ChatPage() {
   // 모델 데이터 로드
   const loadModelData = async () => {
     if (!isAuthenticated) return
-    
+
     setIsModelLoading(true)
     try {
       const data = await ModelService.getInfluencer(params.id as string)
@@ -88,7 +89,7 @@ export default function ChatPage() {
       })
     } catch (error: any) {
       console.error("Error loading model data:", error)
-      
+
       // 토큰 검증 실패로 인한 401/403 에러 시 로그아웃
       if (error?.status === 401 || error?.status === 403) {
         console.log("토큰 검증 실패로 인한 로그아웃 처리")
@@ -210,7 +211,7 @@ export default function ChatPage() {
         } else if (data.error_code) {
           // 기존 에러 응답 처리 (하위 호환성)
           setIsLoading(false);
-          
+
           // 토큰 관련 오류 시 로그아웃 처리
           if (data.error_code === "INVALID_TOKEN" || data.error_code === "TOKEN_VERIFICATION_FAILED") {
             console.log("WebSocket 토큰 검증 실패로 인한 로그아웃 처리")
@@ -218,7 +219,7 @@ export default function ChatPage() {
             router.push('/login')
             return
           }
-          
+
           setMessages(prev => [...prev, {
             id: Date.now().toString(),
             content: `오류: ${data.message || '알 수 없는 오류가 발생했습니다.'}`,
@@ -295,10 +296,10 @@ export default function ChatPage() {
         "답변을 작성하는 중..."
       ]
     };
-    
+
     const messages = stageMessages[stage];
     const randomMessage = messages[Math.floor(Math.random() * messages.length)];
-    
+
     // 인플루언서 이름이 있으면 맞춤 메시지
     if (model?.name) {
       const customMessages = {
@@ -315,16 +316,16 @@ export default function ChatPage() {
           `${model.name}이(가) 생각을 정리하는 중...`
         ]
       };
-      
+
       const customMessageList = customMessages[stage];
       const customMessage = customMessageList[Math.floor(Math.random() * customMessageList.length)];
-      
+
       // 50% 확률로 맞춤 메시지, 50% 확률로 일반 메시지
       if (Math.random() < 0.5) {
         return customMessage;
       }
     }
-    
+
     return randomMessage;
   };
 
@@ -361,18 +362,18 @@ export default function ChatPage() {
           message: currentMessage,  // query를 message로 변경
           include_sources: true
         };
-        
+
         const ragResponse = await RAGService.chat(ragRequest);
         if (ragResponse && ragResponse.response && ragResponse.response.trim()) {
           ragResult = ragResponse.response.trim();
           console.log("✅ RAG 처리 성공:", ragResult.substring(0, 100) + "...");
-          
+
           // RAG 결과가 있으면 SLLM으로 자연스러운 답변 생성
           if (connectionStatus === 'connected' && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
             try {
               const prompt = `사용자 질문: ${currentMessage}\n참고 문서 내용: ${ragResult}\n위 문서 내용을 바탕으로 답변해 주세요.`;
               wsRef.current.send(prompt);
-              
+
               // 타임아웃 설정 (30초)
               timeoutRef.current = setTimeout(() => {
                 setIsLoading(false);
@@ -406,7 +407,7 @@ export default function ChatPage() {
         }
       } catch (error: any) {
         console.log("❌ RAG 처리 중 오류:", error.message);
-        
+
         // 토큰 검증 실패로 인한 401/403 에러 시 로그아웃
         if (error?.status === 401 || error?.status === 403) {
           console.log("RAG 서비스 토큰 검증 실패로 인한 로그아웃 처리")
@@ -422,7 +423,7 @@ export default function ChatPage() {
         try {
           const prompt = `사용자 질문: ${currentMessage}\n참고 문서 내용: ${ragResult}\n위 문서 내용을 바탕으로 답변해 주세요.`;
           wsRef.current.send(prompt);
-          
+
           // 타임아웃 설정 (30초)
           timeoutRef.current = setTimeout(() => {
             setIsLoading(false);
@@ -446,20 +447,20 @@ export default function ChatPage() {
       // 3단계: MCP 분기처리 (도구 사용)
       let mcpResult: string | null = null;
       try {
-        const mcpResponse: MCPChatResponse = await MCPService.processMessage({ 
-          message: currentMessage, 
-          influencer_id: model?.id || '' 
+        const mcpResponse: MCPChatResponse = await MCPService.processMessage({
+          message: currentMessage,
+          influencer_id: model?.id || ''
         });
         if (mcpResponse && mcpResponse.response && mcpResponse.response.trim()) {
           mcpResult = mcpResponse.response.trim();
           console.log("✅ MCP 처리 성공:", mcpResult.substring(0, 100) + "...");
-          
+
           // MCP 결과가 있으면 SLLM으로 자연스러운 답변 생성
           if (connectionStatus === 'connected' && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
             try {
               const prompt = `사용자 질문: ${currentMessage}\n도구 결과: ${mcpResult}\n위 정보를 바탕으로 답변해 주세요.`;
               wsRef.current.send(prompt);
-              
+
               // 타임아웃 설정 (30초)
               timeoutRef.current = setTimeout(() => {
                 setIsLoading(false);
@@ -493,7 +494,7 @@ export default function ChatPage() {
         }
       } catch (error: any) {
         console.log("❌ MCP 처리 중 오류:", error.message);
-        
+
         // 토큰 검증 실패로 인한 401/403 에러 시 로그아웃
         if (error?.status === 401 || error?.status === 403) {
           console.log("MCP 서비스 토큰 검증 실패로 인한 로그아웃 처리")
@@ -509,7 +510,7 @@ export default function ChatPage() {
         try {
           const prompt = `사용자 질문: ${currentMessage}\n도구 결과: ${mcpResult}\n위 정보를 바탕으로 답변해 주세요.`;
           wsRef.current.send(prompt);
-          
+
           // 타임아웃 설정 (30초)
           timeoutRef.current = setTimeout(() => {
             setIsLoading(false);
@@ -534,7 +535,7 @@ export default function ChatPage() {
       if (connectionStatus === 'connected' && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         try {
           wsRef.current.send(currentMessage);
-          
+
           // 타임아웃 설정 (30초)
           timeoutRef.current = setTimeout(() => {
             setIsLoading(false);
@@ -687,13 +688,12 @@ export default function ChatPage() {
                     {model.image_url ? (
                       <AvatarImage src={model.image_url} alt={model.name} />
                     ) : (
-                      <AvatarFallback 
-                        className={`text-white font-semibold ${
-                          model.name.length % 4 === 0 ? 'bg-gradient-to-br from-purple-500 to-pink-500' :
-                          model.name.length % 4 === 1 ? 'bg-gradient-to-br from-blue-500 to-cyan-500' :
-                          model.name.length % 4 === 2 ? 'bg-gradient-to-br from-green-500 to-emerald-500' :
-                          'bg-gradient-to-br from-orange-500 to-red-500'
-                        }`}
+                      <AvatarFallback
+                        className={`text-white font-semibold ${model.name.length % 4 === 0 ? 'bg-gradient-to-br from-purple-500 to-pink-500' :
+                            model.name.length % 4 === 1 ? 'bg-gradient-to-br from-blue-500 to-cyan-500' :
+                              model.name.length % 4 === 2 ? 'bg-gradient-to-br from-green-500 to-emerald-500' :
+                                'bg-gradient-to-br from-orange-500 to-red-500'
+                          }`}
                       >
                         {model.name.charAt(0).toUpperCase()}
                       </AvatarFallback>
@@ -727,15 +727,14 @@ export default function ChatPage() {
                 <div className="flex items-center space-x-2 flex-shrink-0 ml-4">
                   {/* 연결 상태 표시 */}
                   <div className="flex items-center space-x-2">
-                    <div className={`w-2 h-2 rounded-full ${
-                      connectionStatus === 'connected' ? 'bg-green-500' :
-                      connectionStatus === 'connecting' ? 'bg-yellow-500' :
-                      connectionStatus === 'error' ? 'bg-red-500' : 'bg-gray-400'
-                    }`} />
+                    <div className={`w-2 h-2 rounded-full ${connectionStatus === 'connected' ? 'bg-green-500' :
+                        connectionStatus === 'connecting' ? 'bg-yellow-500' :
+                          connectionStatus === 'error' ? 'bg-red-500' : 'bg-gray-400'
+                      }`} />
                     <span className="text-xs text-gray-500">
                       {connectionStatus === 'connected' ? '연결됨' :
-                       connectionStatus === 'connecting' ? '연결 중' :
-                       connectionStatus === 'error' ? '오류' : '연결 끊김'}
+                        connectionStatus === 'connecting' ? '연결 중' :
+                          connectionStatus === 'error' ? '오류' : '연결 끊김'}
                     </span>
                   </div>
                 </div>
@@ -747,9 +746,8 @@ export default function ChatPage() {
               {messages.map((message) => (
                 <div
                   key={message.id}
-                  className={`flex ${
-                    message.sender === "user" ? "justify-end" : "justify-start"
-                  }`}
+                  className={`flex ${message.sender === "user" ? "justify-end" : "justify-start"
+                    }`}
                 >
                   {message.sender === "user" ? (
                     // 사용자 메시지: 오른쪽 정렬, 아이콘 없음
