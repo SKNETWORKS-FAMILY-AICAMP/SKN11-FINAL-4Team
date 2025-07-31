@@ -103,7 +103,7 @@ export const useInfluencerTTS = (options: InfluencerTTSOptions) => {
       
     } catch (err) {
       setStatus('error')
-      setError(err.message || '음성 생성 중 오류가 발생했습니다.')
+      setError(err instanceof Error ? err.message : '음성 생성 중 오류가 발생했습니다.')
       console.error('TTS Error:', err)
     } finally {
       setIsLoading(false)

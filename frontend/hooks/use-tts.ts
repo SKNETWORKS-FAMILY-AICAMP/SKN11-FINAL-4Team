@@ -107,7 +107,7 @@ export const useTTS = (defaultOptions?: TTSOptions) => {
       window.speechSynthesis.speak(utterance)
       
     } catch (err) {
-      setError(`TTS 실행 중 오류: ${err.message}`)
+      setError(`TTS 실행 중 오류: ${err instanceof Error ? err.message : '알 수 없는 오류'}`)
       setStatus('idle')
     }
   }, [isSupported])
