@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.user import HFTokenManage
 from app.services.runpod_manager import get_vllm_manager, get_tts_manager
+from app.services.s3_service import S3Service
 from app.core.encryption import decrypt_sensitive_data
 from app.services.hf_token_resolver import get_token_by_group
 from app.services.chat_message_service import ChatMessageService
@@ -31,11 +32,9 @@ logger = logging.getLogger(__name__)
 async def _process_tts_async(websocket: WebSocket, text: str, influencer_id: str):
     """비동기로 TTS 처리하고 완료되면 base64 오디오 데이터 전송"""
     from app.models.influencer import AIInfluencer
-    from app.models.voice import VoiceBase
     from sqlalchemy.orm import Session
     from app.database import get_db
-    import httpx
-    import base64
+    import asyncio
     
     try:
         # DB에서 influencer의 voice_base 정보 가져오기
@@ -46,10 +45,19 @@ async def _process_tts_async(websocket: WebSocket, text: str, influencer_id: str
             ).first()
             
             base_voice_id = None
+            presigned_url = None
             if influencer and influencer.voice_base:
                 base_voice_id = str(influencer.voice_base.id)
                 logger.info(f"[WS] 인플루언서 {influencer_id}의 base_voice_id 찾음: {base_voice_id}")
                 logger.info(f"[WS] Base voice 정보 - ID: {base_voice_id}, URL: {influencer.voice_base.s3_url}")
+                
+                # S3 presigned URL 생성
+                s3_service = S3Service()
+                if influencer.voice_base.s3_url:
+                    # S3 URL에서 키 추출 (s3://bucket-name/key 형식)
+                    s3_key = influencer.voice_base.s3_url.replace(f"s3://{s3_service.bucket_name}/", "")
+                    presigned_url = s3_service.generate_presigned_url(s3_key)
+                    logger.info(f"[WS] Base voice presigned URL 생성됨")
             else:
                 logger.warning(f"[WS] 인플루언서 {influencer_id}의 base_voice를 찾을 수 없음")
         finally:
@@ -63,12 +71,14 @@ async def _process_tts_async(websocket: WebSocket, text: str, influencer_id: str
         tts_params = {
             "text": text,
             "influencer_id": influencer_id,
-            "language": "ko"
+            "language": "ko",
+            "request_type":"sync"  # 동기 요청으로 설정
         }
         
-        # base_voice_id가 있으면 추가
-        if base_voice_id:
+        # base_voice_id와 presigned_url이 있으면 추가
+        if base_voice_id and presigned_url:
             tts_params["base_voice_id"] = base_voice_id
+            tts_params["base_voice_url"] = presigned_url
             logger.info(f"[WS] Voice cloning 모드로 TTS 생성 - base_voice_id: {base_voice_id}")
         
         tts_result = await tts_manager.generate_voice(**tts_params)
@@ -79,27 +89,23 @@ async def _process_tts_async(websocket: WebSocket, text: str, influencer_id: str
             return
             
         task_id = tts_result.get("id")
-        logger.info(f"[WS] TTS 작업 시작됨: task_id={task_id}")
+        logger.info(f"[WS] TTS 작업 생성됨: task_id={task_id}")
         
-        # 상태 확인 (최대 30초, 1초마다)
-        max_attempts = 30
-        for attempt in range(max_attempts):
-            await asyncio.sleep(1)  # 1초 대기
+        # RunPod 응답 구조 확인
+        logger.info(f"[WS] TTS 응답 전체 구조: {json.dumps(tts_result, indent=2)[:500]}...")  # 처음 500자만
+        
+        # RunPod sync 응답은 보통 다음과 같은 구조
+        # {"id": "xxx", "status": "COMPLETED", "output": {...}}
+        if tts_result.get("status") == "COMPLETED":
+            output = tts_result.get("output", {})
+            logger.info(f"[WS] TTS output 구조: {list(output.keys()) if output else 'None'}")
             
-            # 상태 확인
-            status_result = await tts_manager.check_tts_status(task_id)
-            status = status_result.get("status")
+            # audio_base64, audio_data, 또는 다른 필드 확인
+            audio_base64 = output.get("audio_base64") or output.get("audio_data") or output.get("audio")
             
-            logger.info(f"[WS] TTS 상태 확인 [{attempt+1}/{max_attempts}]: {status}")
-            
-            if status == "COMPLETED":
-                # 완료된 경우 output에서 오디오 데이터 추출
-                output = status_result.get("output", {})
-                
-                # base64로 인코딩된 오디오 데이터 확인
-                audio_base64 = output.get("audio_base64") or output.get("audio_data")
-                
-                if audio_base64:
+            if audio_base64:
+                # WebSocket 연결 상태 확인
+                try:
                     # WebSocket으로 base64 오디오 데이터 전송
                     await websocket.send_text(
                         json.dumps({
@@ -111,37 +117,56 @@ async def _process_tts_async(websocket: WebSocket, text: str, influencer_id: str
                         })
                     )
                     logger.info(f"[WS] TTS base64 오디오 전송 완료 (크기: {len(audio_base64)} bytes)")
-                else:
-                    # base64가 없으면 URL 확인
-                    audio_url = output.get("audio_url") or output.get("s3_url")
-                    if audio_url:
-                        await websocket.send_text(
-                            json.dumps({
-                                "type": "audio",
-                                "audio_url": audio_url,
-                                "duration": output.get("duration"),
-                                "message": "음성이 생성되었습니다."
-                            })
-                        )
-                        logger.info(f"[WS] TTS URL 전송 완료: {audio_url}")
-                    else:
-                        logger.warning("[WS] TTS 완료했지만 오디오 데이터가 없음")
-                break
-                
-            elif status == "FAILED":
-                logger.error(f"[WS] TTS 생성 실패: {status_result.get('error')}")
-                break
-                
-            elif status == "IN_QUEUE" or status == "IN_PROGRESS":
-                # 계속 대기
-                continue
+                except Exception as send_error:
+                    logger.error(f"[WS] TTS 오디오 전송 실패 (WebSocket 연결 끊김?): {send_error}")
             else:
-                # 알 수 없는 상태
-                logger.warning(f"[WS] 알 수 없는 TTS 상태: {status}")
-                
+                logger.warning(f"[WS] TTS output에서 오디오 데이터를 찾을 수 없음. 가능한 키: {list(output.keys())}")
         else:
-            # 타임아웃
-            logger.error(f"[WS] TTS 생성 타임아웃 (30초)")
+            # 비동기 작업인 경우 (run 사용 시)
+            if task_id:
+                logger.info(f"[WS] TTS 비동기 작업 시작됨. 상태 확인 중: task_id={task_id}")
+                
+                # 최대 30초 동안 상태 확인 (3초 간격으로 10번)
+                max_attempts = 10
+                for attempt in range(max_attempts):
+                    await asyncio.sleep(3)  # 3초 대기
+                    
+                    # TTS 상태 확인
+                    status_result = await tts_manager.check_tts_status(task_id)
+                    logger.info(f"[WS] TTS 상태 확인 (시도 {attempt+1}/{max_attempts}): {status_result.get('status')}")
+                    
+                    if status_result.get("status") == "COMPLETED":
+                        output = status_result.get("output", {})
+                        audio_base64 = output.get("audio_base64") or output.get("audio_data") or output.get("audio")
+                        
+                        if audio_base64:
+                            # WebSocket 연결 상태 확인
+                            try:
+                                # WebSocket으로 base64 오디오 데이터 전송
+                                await websocket.send_text(
+                                    json.dumps({
+                                        "type": "audio",
+                                        "audio_base64": audio_base64,
+                                        "duration": output.get("duration"),
+                                        "format": output.get("format", "mp3"),
+                                        "message": "음성이 생성되었습니다."
+                                    })
+                                )
+                                logger.info(f"[WS] TTS base64 오디오 전송 완료 (크기: {len(audio_base64)} bytes)")
+                                break
+                            except Exception as send_error:
+                                logger.error(f"[WS] TTS 오디오 전송 실패 (WebSocket 연결 끊김?): {send_error}")
+                                break
+                        else:
+                            logger.warning(f"[WS] 상태는 COMPLETED이지만 오디오 데이터가 없음")
+                    elif status_result.get("status") == "FAILED":
+                        logger.error(f"[WS] TTS 작업 실패: {status_result.get('error')}")
+                        break
+                else:
+                    logger.warning(f"[WS] TTS 작업 시간 초과: task_id={task_id}")
+            else:
+                logger.warning(f"[WS] TTS 상태가 COMPLETED가 아니고 task_id도 없음: {tts_result.get('status')}")
+
             
     except Exception as e:
         logger.error(f"[WS] TTS 처리 중 오류: {e}")
@@ -369,12 +394,20 @@ async def chatbot(
             
             if influencer_info:
                 # 인플루언서 정보를 클라이언트에 전송
+                logger.info(f"[WS] 인플루언서 정보 - 이름: {influencer_info.influencer_name}")
+                logger.info(f"[WS] 인플루언서 정보 - 설명: {influencer_info.influencer_description}")
+                logger.info(f"[WS] 인플루언서 정보 - 이미지 URL: {influencer_info.image_url}")
+                
+                # image_url 확인 및 전송
+                image_url_value = influencer_info.image_url if influencer_info.image_url else None
+                logger.info(f"[WS] 인플루언서 이미지 URL 값: {image_url_value}")
+                
                 await websocket.send_text(json.dumps({
                     "type": "influencer_info",
                     "data": {
                         "name": influencer_info.influencer_name,
                         "description": influencer_info.influencer_description,
-                        "image_url": getattr(influencer_info, 'image_url', None)
+                        "image_url": image_url_value  # 명시적으로 값 전달
                     }
                 }))
                 logger.info(f"[WS] 인플루언서 정보 전송 완료: {influencer_info.influencer_name}")

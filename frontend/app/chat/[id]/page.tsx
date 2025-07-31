@@ -35,6 +35,8 @@ interface Message {
   sender: "user" | "bot"
   timestamp: Date
   isStreaming?: boolean // 스트리밍 중인 메시지를 위한 속성
+  audioData?: string // base64 오디오 데이터
+  audioFormat?: string // 오디오 포맷 (mp3, wav 등)
 }
 
 interface ChatModel {
@@ -62,9 +64,13 @@ export default function ChatPage() {
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('connecting')
   const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false)
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null)
+  const [currentAudio, setCurrentAudio] = useState<HTMLAudioElement | null>(null)
+  const [isTTSEnabled, setIsTTSEnabled] = useState(true) // TTS 음소거 켜기/끄기
+  const [playingMessageId, setPlayingMessageId] = useState<string | null>(null) // 현재 재생 중인 메시지 ID
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const timeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const lastBotMessageIdRef = useRef<string | null>(null) // 마지막 봇 메시지 ID 추적
 
   // 인증 상태 확인
   useEffect(() => {
@@ -188,13 +194,16 @@ export default function ChatPage() {
               }
             } else {
               // 새로운 스트리밍 메시지 생성
+              const newMessageId = Date.now().toString();
               newMessages.push({
-                id: Date.now().toString(),
+                id: newMessageId,
                 content: data.content,
                 sender: "bot",
                 timestamp: new Date(),
                 isStreaming: true
               });
+              // 마지막 봇 메시지 ID 저장
+              lastBotMessageIdRef.current = newMessageId;
             }
 
             return newMessages;
@@ -244,26 +253,48 @@ export default function ChatPage() {
           // 히스토리 초기화 응답 처리 - 백그라운드에서만 관리
           console.log("✅ 히스토리 초기화 성공");
         } else if (data.type === "audio") {
-          // 음성 데이터 응답 처리 - 채팅창에 표시하지 않음
+          // 음성 데이터 응답 처리 - 메시지에 저장
           console.log("🔊 음성 데이터 수신:", {
             hasBase64: !!data.audio_base64,
             hasUrl: !!data.audio_url,
-            duration: data.duration
+            duration: data.duration,
+            format: data.format,
+            message: data.message,
+            base64Length: data.audio_base64 ? data.audio_base64.length : 0
           });
           setIsLoading(false);
-          // TODO: 필요시 여기서 음성 재생 로직 추가 가능
+          
+          // 마지막 봇 메시지에 오디오 데이터 추가
+          if (data.audio_base64 && lastBotMessageIdRef.current) {
+            setMessages(prev => {
+              return prev.map(msg => {
+                if (msg.id === lastBotMessageIdRef.current) {
+                  return {
+                    ...msg,
+                    audioData: data.audio_base64,
+                    audioFormat: data.format || 'mp3'
+                  };
+                }
+                return msg;
+              });
+            });
+            console.log("✅ 메시지에 TTS 음성 데이터 저장 완료");
+          }
         } else if (data.type === "influencer_info") {
           // 인플루언서 정보 업데이트
           console.log("👤 인플루언서 정보 수신:", data.data);
+          console.log("👤 이미지 URL:", data.data?.image_url);
           if (data.data) {
             setModel(prev => {
               if (!prev) return prev;
-              return {
+              const updatedModel = {
                 ...prev,
                 name: data.data.name || prev.name,
                 description: data.data.description || prev.description,
                 image_url: data.data.image_url || prev.image_url
               };
+              console.log("👤 모델 업데이트 완료:", updatedModel);
+              return updatedModel;
             });
           }
         } else {
@@ -423,7 +454,77 @@ export default function ChatPage() {
     scrollToBottom()
   }, [messages])
 
-  // TTS 제어 함수들
+  // 메시지에 저장된 오디오 재생
+  const playMessageAudio = (messageId: string, audioData: string, audioFormat: string) => {
+    // 음소거 상태면 재생하지 않음
+    if (!isTTSEnabled) {
+      console.log("음소거 상태입니다.");
+      return;
+    }
+
+    try {
+      // 이전 오디오가 재생 중이면 정지
+      if (currentAudio) {
+        currentAudio.pause();
+        currentAudio.src = '';
+        setCurrentAudio(null);
+        setPlayingMessageId(null);
+      }
+
+      // 같은 메시지를 다시 클릭하면 정지
+      if (playingMessageId === messageId) {
+        setPlayingMessageId(null);
+        return;
+      }
+
+      // Base64를 Blob으로 변환
+      const byteCharacters = atob(audioData);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      const blob = new Blob([byteArray], { type: `audio/${audioFormat}` });
+      
+      // Blob URL 생성
+      const audioUrl = URL.createObjectURL(blob);
+      
+      // Audio 객체 생성 및 재생
+      const audio = new Audio(audioUrl);
+      audio.volume = 0.8; // 볼륨 설정
+      
+      // 재생 완료 후 URL 정리
+      audio.onended = () => {
+        URL.revokeObjectURL(audioUrl);
+        setCurrentAudio(null);
+        setPlayingMessageId(null);
+      };
+
+      // 에러 처리
+      audio.onerror = () => {
+        console.error("오디오 재생 오류");
+        URL.revokeObjectURL(audioUrl);
+        setCurrentAudio(null);
+        setPlayingMessageId(null);
+      };
+      
+      // 현재 오디오 저장
+      setCurrentAudio(audio);
+      setPlayingMessageId(messageId);
+      
+      // 재생
+      audio.play().catch(err => {
+        console.error("음성 재생 실패:", err);
+        setCurrentAudio(null);
+        setPlayingMessageId(null);
+      });
+      
+    } catch (error) {
+      console.error("음성 데이터 처리 중 오류:", error);
+    }
+  };
+
+  // TTS 제어 함수들 (브라우저 TTS용)
   const handleSpeak = (messageId: string, text: string) => {
     if (!ttsSupported) {
       alert('이 브라우저는 음성 출력을 지원하지 않습니다.')
@@ -462,6 +563,16 @@ export default function ChatPage() {
       loadModelData()
     }
   }, [params.id, isAuthenticated])
+
+  // 컴포넌트 언마운트 시 오디오 정리
+  useEffect(() => {
+    return () => {
+      if (currentAudio) {
+        currentAudio.pause();
+        currentAudio.src = '';
+      }
+    };
+  }, [currentAudio])
 
   // 인증 상태 로딩 중
   if (authLoading) {
@@ -536,17 +647,23 @@ export default function ChatPage() {
                 <div className="flex items-center space-x-3 min-w-0 flex-1">
                   <Avatar className="h-10 w-10 flex-shrink-0">
                     {model.image_url ? (
-                      <AvatarImage src={model.image_url} alt={model.name} />
+                      <>
+                        {console.log("🖼️ Avatar 이미지 렌더링:", model.image_url)}
+                        <AvatarImage src={model.image_url} alt={model.name} />
+                      </>
                     ) : (
-                      <AvatarFallback 
-                          className={`text-white font-semibold ${model.name.length % 4 === 0 ? 'bg-gradient-to-br from-purple-500 to-pink-500' :
-                          model.name.length % 4 === 1 ? 'bg-gradient-to-br from-blue-500 to-cyan-500' :
-                          model.name.length % 4 === 2 ? 'bg-gradient-to-br from-green-500 to-emerald-500' :
-                          'bg-gradient-to-br from-orange-500 to-red-500'
-                        }`}
-                      >
-                        {model.name.charAt(0).toUpperCase()}
-                      </AvatarFallback>
+                      <>
+                        {console.log("🖼️ Avatar 폴백 렌더링, image_url:", model.image_url)}
+                        <AvatarFallback 
+                            className={`text-white font-semibold ${model.name.length % 4 === 0 ? 'bg-gradient-to-br from-purple-500 to-pink-500' :
+                            model.name.length % 4 === 1 ? 'bg-gradient-to-br from-blue-500 to-cyan-500' :
+                            model.name.length % 4 === 2 ? 'bg-gradient-to-br from-green-500 to-emerald-500' :
+                            'bg-gradient-to-br from-orange-500 to-red-500'
+                          }`}
+                        >
+                          {model.name.charAt(0).toUpperCase()}
+                        </AvatarFallback>
+                      </>
                     )}
                   </Avatar>
                   <div className="min-w-0 flex-1">
@@ -575,16 +692,43 @@ export default function ChatPage() {
                   </div>
                 </div>
                 <div className="flex items-center space-x-2 flex-shrink-0 ml-4">
-                  {/* TTS 전체 정지 버튼 */}
-                  {ttsSupported && ttsStatus !== 'idle' && (
+                  {/* 음소거 토글 */}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setIsTTSEnabled(!isTTSEnabled);
+                      // 음소거 시 현재 재생 중인 오디오 정지
+                      if (isTTSEnabled && currentAudio) {
+                        currentAudio.pause();
+                        currentAudio.src = '';
+                        setCurrentAudio(null);
+                        setPlayingMessageId(null);
+                      }
+                    }}
+                    className={`p-1 ${isTTSEnabled ? 'text-blue-600' : 'text-red-500'}`}
+                    title={isTTSEnabled ? "음성 켜짐" : "음소거"}
+                  >
+                    {isTTSEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
+                  </Button>
+                  
+                  {/* 현재 재생 중인 오디오 정지 버튼 */}
+                  {currentAudio && playingMessageId && (
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={handleStopSpeaking}
-                      className="p-1"
-                      title="음성 정지"
+                      onClick={() => {
+                        if (currentAudio) {
+                          currentAudio.pause();
+                          currentAudio.src = '';
+                          setCurrentAudio(null);
+                          setPlayingMessageId(null);
+                        }
+                      }}
+                      className="p-1 text-red-500"
+                      title="재생 정지"
                     >
-                      <VolumeX className="h-4 w-4" />
+                      <Pause className="h-4 w-4" />
                     </Button>
                   )}
                   
@@ -637,30 +781,55 @@ export default function ChatPage() {
                         )}
                       </div>
                       {/* TTS 버튼 - 봇 메시지에만 표시 */}
-                      {message.sender === "bot" && !message.isStreaming && ttsSupported && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleSpeak(message.id, message.content)}
-                          className="ml-2 p-1 h-7 w-7"
-                          title={
-                            speakingMessageId === message.id && ttsStatus === 'speaking' ? '일시정지' :
-                            speakingMessageId === message.id && ttsStatus === 'paused' ? '재개' :
-                            '읽어주기'
-                          }
-                        >
-                          {speakingMessageId === message.id ? (
-                            ttsStatus === 'speaking' ? (
-                              <Pause className="h-3.5 w-3.5" />
-                            ) : ttsStatus === 'paused' ? (
-                              <Play className="h-3.5 w-3.5" />
-                            ) : (
-                              <Volume2 className="h-3.5 w-3.5" />
-                            )
-                          ) : (
-                            <Volume2 className="h-3.5 w-3.5" />
+                      {message.sender === "bot" && !message.isStreaming && (
+                        <>
+                          {/* 서버에서 생성된 음성이 있는 경우 */}
+                          {message.audioData && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => playMessageAudio(message.id, message.audioData!, message.audioFormat!)}
+                              className={`ml-2 p-1 h-7 w-7 ${!isTTSEnabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                              disabled={!isTTSEnabled}
+                              title={
+                                !isTTSEnabled ? '음소거 상태입니다' :
+                                playingMessageId === message.id ? '정지' : '재생'
+                              }
+                            >
+                              {playingMessageId === message.id ? (
+                                <Pause className="h-3.5 w-3.5" />
+                              ) : (
+                                <Play className="h-3.5 w-3.5" />
+                              )}
+                            </Button>
                           )}
-                        </Button>
+                          {/* 브라우저 TTS 버튼 (서버 음성이 없는 경우) */}
+                          {!message.audioData && ttsSupported && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleSpeak(message.id, message.content)}
+                              className="ml-2 p-1 h-7 w-7"
+                              title={
+                                speakingMessageId === message.id && ttsStatus === 'speaking' ? '일시정지' :
+                                speakingMessageId === message.id && ttsStatus === 'paused' ? '재개' :
+                                '읽어주기'
+                              }
+                            >
+                              {speakingMessageId === message.id ? (
+                                ttsStatus === 'speaking' ? (
+                                  <Pause className="h-3.5 w-3.5" />
+                                ) : ttsStatus === 'paused' ? (
+                                  <Play className="h-3.5 w-3.5" />
+                                ) : (
+                                  <Volume2 className="h-3.5 w-3.5" />
+                                )
+                              ) : (
+                                <Volume2 className="h-3.5 w-3.5" />
+                              )}
+                            </Button>
+                          )}
+                        </>
                       )}
                     </div>
                   </div>

@@ -455,10 +455,13 @@ class TTSRunPodManager(BaseRunPodManager):
             }
             
             # 비동기 호출 사용 (run)
-            url = f"{base_url}/{endpoint_id}/run"
+            if kwargs.get("request_type") == "sync":
+                url = f"{base_url}/{endpoint_id}/runsync"
+            else:
+                url = f"{base_url}/{endpoint_id}/run"
             
             logger.info(f"🎵 TTS 음성 생성 요청: {url}")
-            logger.info(f"📦 Payload: {json.dumps(payload, indent=2, ensure_ascii=False)}")
+            
             
             async with httpx.AsyncClient(timeout=300) as client:
                 response = await client.post(url, headers=headers, json=payload)
@@ -471,7 +474,6 @@ class TTSRunPodManager(BaseRunPodManager):
                     raise RunPodManagerError(error_msg)
                 
                 result = response.json()
-                logger.info(f"✅ TTS 음성 생성 요청 성공: {result}")
                 
                 return result
                     
@@ -652,7 +654,6 @@ class VLLMRunPodManager(BaseRunPodManager):
                     # output 내부의 generated_text 추출
                     output = result.get("output", {})
                     generated_text = output.get("generated_text", "")
-                    
                     return {
                         "status": "completed",
                         "generated_text": generated_text,
@@ -755,7 +756,7 @@ class VLLMRunPodManager(BaseRunPodManager):
             stream_url = f"{base_url}/{endpoint_id}/stream"
             
             logger.info(f"🌊 vLLM 스트리밍 요청: {stream_url}")
-            logger.info(f"📦 Payload: {json.dumps(payload, indent=2, ensure_ascii=False)}")
+            
             
             try:
                 async with httpx.AsyncClient(timeout=300) as client:
@@ -836,6 +837,7 @@ class VLLMRunPodManager(BaseRunPodManager):
             
             # 응답에서 텍스트 추출
             generated_text = ""
+            print(result)
             if result.get("status") == "completed" and result.get("output"):
                 output = result["output"]
                 if output.get("status") == "success":

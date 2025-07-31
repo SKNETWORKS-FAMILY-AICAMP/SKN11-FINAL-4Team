@@ -113,7 +113,6 @@ async def generate_voice(
         # TTS 매니저로 음성 생성 요청
         logger.info(f"음성 생성 요청: text={request.text[:50]}..., influencer_id={request.influencer_id}")
         
-        tts_manager = get_tts_manager()
         result = await tts_manager.generate_voice(
             text=request.text,
             base_voice_url=presigned_url,  # presigned URL 사용
@@ -129,8 +128,8 @@ async def generate_voice(
             raise HTTPException(status_code=500, detail="음성 생성에 실패했습니다")
         
         # RunPod는 항상 비동기로 처리됨
-        if result.get("task_id"):
-            runpod_task_id = result["task_id"]
+        if result.get("id"):
+            runpod_task_id = result["id"]
             logger.info(f"TTS 생성 작업 시작됨: runpod_task_id={runpod_task_id}, voice_id={voice_id}")
             
             # RunPod task_id 업데이트
