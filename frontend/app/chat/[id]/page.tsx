@@ -177,6 +177,13 @@ export default function ChatPage() {
         const data = JSON.parse(event.data);
         console.log('📋 파싱된 메시지:', data);
 
+        // 내부 시스템 메시지 필터링 (사용자에게 표시하지 않음)
+        const internalMessageTypes = ['thinking', 'typing', 'processing', 'analyzing'];
+        if (internalMessageTypes.includes(data.type)) {
+          console.log(`🔒 내부 메시지 필터링: ${data.type} - ${data.message || data.content || ''}`);
+          return; // 사용자에게 표시하지 않음
+        }
+
         if (data.type === "token") {
           // 스트리밍 토큰 처리
           setMessages(prev => {

@@ -31,98 +31,22 @@ logger = logging.getLogger(__name__)
 
 # 전역 변수 및 엔진 상태 관리
 llm_engine = None
-async_llm_engine = None
 tokenizer = None
 loaded_adapters = {}
 _engine_initialized = False
-_async_engine_initialized = False
-_initialization_lock = None
-
-# 락 초기화는 실제 사용 시점에 수행
-def get_initialization_lock():
-    global _initialization_lock
-    if _initialization_lock is None:
-        _initialization_lock = asyncio.Lock()
-    return _initialization_lock
-
-# 스트리밍 모드 설정
-ENABLE_STREAMING = os.environ.get("ENABLE_STREAMING", "true").lower() == "true"
 
 # 기본 설정
 DEFAULT_MODEL = "LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct"
 DEFAULT_SYSTEM_MESSAGE = "당신은 도움이 되는 AI 어시스턴트입니다."
 PRELOAD_MODEL = os.environ.get("PRELOAD_MODEL", "true").lower() == "true"
 
-# vLLM AsyncLLMEngine을 위한 import 추가 필요
-try:
-    from vllm import AsyncLLMEngine
-    from vllm.engine.arg_utils import AsyncEngineArgs
-    from vllm.engine.async_llm_engine import AsyncLLMEngine
-    from vllm.utils import random_uuid
-except ImportError:
-    AsyncLLMEngine = None
-    logger.warning("AsyncLLMEngine 사용 불가 - 동기 엔진으로 대체됩니다")
-
-
-async def initialize_async_engine(model_name: str = DEFAULT_MODEL):
-    """vLLM AsyncLLMEngine 초기화 (싱글톤 패턴)"""
-    global async_llm_engine, tokenizer, _async_engine_initialized
-    
-    # 이미 초기화된 경우 반환
-    if _async_engine_initialized and async_llm_engine is not None:
-        logger.info("✅ 비동기 엔진이 이미 초기화되어 있습니다.")
-        return async_llm_engine
-    
-    # 초기화 중인 경우 대기 (동시 초기화 방지)
-    lock = get_initialization_lock()
-    async with lock:
-        # 락 획득 후 다시 확인
-        if _async_engine_initialized and async_llm_engine is not None:
-            return async_llm_engine
-    
-    logger.info(f"🔧 vLLM AsyncLLMEngine 초기화 시작: {model_name}")
-    
-    try:
-        # 토크나이저 로드
-        tokenizer = AutoTokenizer.from_pretrained(model_name)
-        
-        # AsyncEngine 설정
-        if AsyncLLMEngine is not None:
-            engine_args = AsyncEngineArgs(
-                model=model_name,
-                trust_remote_code=True,
-                dtype="bfloat16", 
-                enable_lora=True,
-                max_lora_rank=64,
-                max_loras=10,
-                gpu_memory_utilization=0.75,  # GPU 메모리 사용률 조정
-                max_model_len=4096,
-                enforce_eager=True,  # 메모리 안정성 향상
-            )
-            
-                # AsyncLLMEngine 초기화
-            async_llm_engine = AsyncLLMEngine.from_engine_args(engine_args)
-            _async_engine_initialized = True
-            logger.info("✅ vLLM AsyncLLMEngine 초기화 완룜")
-            log_gpu_memory()  # 초기화 후 메모리 상태 로그
-        else:
-            logger.warning("⚠ AsyncLLMEngine 사용 불가 - 동기 엔진으로 대체")
-            raise ImportError("AsyncLLMEngine not available")
-        
-        return async_llm_engine
-        
-    except Exception as e:
-        logger.error(f"❌ 비동기 엔진 초기화 실패: {str(e)}")
-        _async_engine_initialized = False
-        raise
-
 
 def initialize_engine(model_name: str = DEFAULT_MODEL):
     """vLLM 엔진 초기화 (동기, 싱글톤 패턴)"""
     global llm_engine, tokenizer, _engine_initialized
     
-    # 이미 초기화된 경우 반환
-    if _engine_initialized and llm_engine is not None:
+    # 이미 초기화된 경우 반환 (엔진 객체만 확인)
+    if llm_engine is not None:
         logger.info("✅ 엔진이 이미 초기화되어 있습니다.")
         return llm_engine
     
@@ -140,7 +64,7 @@ def initialize_engine(model_name: str = DEFAULT_MODEL):
             enable_lora=True,
             max_lora_rank=64,
             max_loras=10,
-            gpu_memory_utilization=0.75,  # GPU 메모리 사용률 조정
+            gpu_memory_utilization=0.2,  # GPU 메모리 사용률 조정 (10GB 가용시 약 9.5GB 사용)
             max_model_len=4096,
             enforce_eager=True,  # 메모리 안정성 향상
         )
@@ -318,21 +242,16 @@ def generate_response(payload: Dict[str, Any]) -> str:
 
 
 async def stream_handler(job):
-    """RunPod stream handler - 실시간 스트리밍"""
+    """RunPod stream handler - 실시간 스트리밍 (동기 엔진으로 처리)"""
     try:
         logger.info("📥 Stream 요청 수신")
         
-        # 스트리밍 모드에 따른 엔진 초기화 (싱글톤 보장)
-        if ENABLE_STREAMING and AsyncLLMEngine is not None:
-            if not _async_engine_initialized or async_llm_engine is None:
-                logger.info("🔧 비동기 엔진 초기화 필요 - 첫 스트림 요청")
-                await initialize_async_engine()
-            engine_to_use = async_llm_engine
+        # 동기 엔진이 없는 경우에만 초기화
+        if llm_engine is None:
+            logger.info("🔧 동기 엔진 초기화 필요 - 첫 스트림 요청")
+            initialize_engine()
         else:
-            if not _engine_initialized or llm_engine is None:
-                logger.info("🔧 동기 엔진 초기화 필요 - 첫 스트림 요청")
-                initialize_engine()
-            engine_to_use = llm_engine
+            logger.info("✅ 기존 동기 엔진 재사용")
         
         # 페이로드 검증
         payload = job["input"]
@@ -363,67 +282,38 @@ async def stream_handler(job):
         
         logger.info(f"🌊 스트리밍 생성 시작 - LoRA: {validated['hf_repo']}")
         
-        # AsyncLLMEngine 사용 가능한 경우 (실제 스트리밍)
-        if engine_to_use == async_llm_engine and AsyncLLMEngine is not None:
-            request_id = random_uuid()
-            
-            # 비동기 생성 요청 - 실제 스트리밍
-            accumulated_text = ""
-            async for request_output in async_llm_engine.generate(
-                prompt,
-                sampling_params,
-                request_id,
-                lora_request=lora_request
-            ):
-                if request_output.outputs:
-                    current_text = request_output.outputs[0].text
-                    # 새로 생성된 부분만 추출
-                    new_chunk = current_text[len(accumulated_text):]
-                    
-                    if new_chunk:
-                        yield {
-                            "chunk": new_chunk,
-                            "is_final": request_output.finished,
-                            "generated_text": current_text
-                        }
-                        accumulated_text = current_text
-                
-                if request_output.finished:
-                    break
+        # 동기 엔진을 사용한 스트리밍 - 별도 스레드에서 실행 후 청크로 분할
+        loop = asyncio.get_event_loop()
         
-        else:
-            # 동기 엔진의 경우 - 별도 스레드에서 실행 후 청크로 분할
-            loop = asyncio.get_event_loop()
+        def _generate():
+            return llm_engine.generate(
+                prompts=[prompt],
+                sampling_params=sampling_params,
+                lora_request=lora_request,
+                use_tqdm=False
+            )
+        
+        # 비동기로 실행
+        outputs = await loop.run_in_executor(None, _generate)
+        generated_text = outputs[0].outputs[0].text
+        
+        # 청크 단위로 스트리밍
+        chunk_size = 8  # 단어 단위
+        words = generated_text.split()
+        
+        for i in range(0, len(words), chunk_size):
+            chunk = ' '.join(words[i:i + chunk_size])
+            if i + chunk_size < len(words):
+                chunk += ' '
             
-            def _generate():
-                return llm_engine.generate(
-                    prompts=[prompt],
-                    sampling_params=sampling_params,
-                    lora_request=lora_request,
-                    use_tqdm=False
-                )
+            yield {
+                "chunk": chunk,
+                "is_final": i + chunk_size >= len(words),
+                "generated_text": ' '.join(words[:i + chunk_size])
+            }
             
-            # 비동기로 실행
-            outputs = await loop.run_in_executor(None, _generate)
-            generated_text = outputs[0].outputs[0].text
-            
-            # 청크 단위로 스트리밍
-            chunk_size = 8  # 단어 단위
-            words = generated_text.split()
-            
-            for i in range(0, len(words), chunk_size):
-                chunk = ' '.join(words[i:i + chunk_size])
-                if i + chunk_size < len(words):
-                    chunk += ' '
-                
-                yield {
-                    "chunk": chunk,
-                    "is_final": i + chunk_size >= len(words),
-                    "generated_text": ' '.join(words[:i + chunk_size])
-                }
-                
-                # 스트리밍 딜레이
-                await asyncio.sleep(0.05)
+            # 스트리밍 딜레이
+            await asyncio.sleep(0.05)
         
         logger.info("✅ 스트리밍 생성 완료")
         
@@ -442,9 +332,11 @@ def handler(job):
         logger.info("📥 Run 요청 수신")
         
         # 엔진 초기화 확인 (싱글톤 보장)
-        if not _engine_initialized or llm_engine is None:
+        if llm_engine is None:
             logger.info("🔧 엔진 초기화 필요 - 첫 요청")
             initialize_engine()
+        else:
+            logger.info("✅ 기존 엔진 재사용")
         
         # 페이로드
         payload = job["input"]
@@ -477,9 +369,11 @@ def sync_handler(job):
         logger.info("📥 RunSync 요청 수신")
         
         # 엔진 초기화 확인 (싱글톤 보장)
-        if not _engine_initialized or llm_engine is None:
-            logger.info("🔧 엔진 초기화 필요 - 첫 요청")
+        if llm_engine is None:
+            logger.info("🔧 엔진 초기화 확인 - 첫 요청")
             initialize_engine()
+        else:
+            logger.info("✅ 기존 엔진 재사용")
         
         # 페이로드
         payload = job["input"]
@@ -502,8 +396,6 @@ def sync_handler(job):
             "error": str(e),
             "traceback": traceback.format_exc()
         }
-
-
 
 
 def get_gpu_memory_info():
@@ -543,7 +435,7 @@ def log_gpu_memory():
 
 def cleanup_engines():
     """엔진 정리 및 메모리 해제"""
-    global llm_engine, async_llm_engine, _engine_initialized, _async_engine_initialized
+    global llm_engine, _engine_initialized
     
     try:
         logger.info("🧹 엔진 정리 시작...")
@@ -554,11 +446,6 @@ def cleanup_engines():
             # vLLM 엔진은 자동으로 GPU 메모리를 해제함
             llm_engine = None
             _engine_initialized = False
-            
-        if async_llm_engine is not None:
-            logger.info("🧹 비동기 엔진 정리 중...")
-            async_llm_engine = None
-            _async_engine_initialized = False
         
         # GPU 메모리 강제 정리 (선택적)
         if GPU_MONITORING_AVAILABLE and torch.cuda.is_available():
@@ -578,7 +465,7 @@ def warmup_test():
         logger.info("🔥 워커 웜업 시작...")
         
         # 현재 초기화된 엔진이 없으면 웜업 불가
-        if not _engine_initialized or llm_engine is None:
+        if llm_engine is None:
             logger.warning("⚠️ 웜업 대상 엔진이 없습니다")
             return False
         
@@ -625,32 +512,18 @@ if __name__ == "__main__":
     # 모델 사전 로드
     if PRELOAD_MODEL:
         logger.info("🔧 vLLM 엔진 사전 초기화 중...")
-        logger.info(f"📊 스트리밍 모드: {'활성화' if ENABLE_STREAMING else '비활성화'}")
         
         try:
-            # 스트리밍 모드에 따른 엔진 초기화
-            if ENABLE_STREAMING and AsyncLLMEngine is not None:
-                logger.info("🔧 AsyncLLMEngine으로 초기화 중...")
-                # 비동기 초기화를 위한 래퍼
-                async def _init_async():
-                    await initialize_async_engine(DEFAULT_MODEL)
-                
-                # 비동기 초기화 실행
-                asyncio.run(_init_async())
-                logger.info("✅ AsyncLLMEngine 초기화 완료")
-            else:
-                logger.info("🔧 동기 LLM 엔진으로 초기화 중...")
-                initialize_engine(DEFAULT_MODEL)
-                logger.info("✅ LLM 엔진 초기화 완료")
+            logger.info("🔧 동기 LLM 엔진으로 초기화 중...")
+            initialize_engine(DEFAULT_MODEL)
+            logger.info("✅ LLM 엔진 초기화 완료")
             
-            # 웜업 테스트 (동기 엔진이 있는 경우에만)
-            if _engine_initialized and llm_engine is not None:
+            # 웜업 테스트
+            if llm_engine is not None:
                 if warmup_test():
                     logger.info("🔥 워커 웜업 완료 - 최적의 성능으로 요청 대기 중")
                 else:
                     logger.warning("⚠️ 웜업 실패 - 첫 요청 시 지연 가능")
-            else:
-                logger.info("ℹ️ 비동기 엔진 모드 - 웜업 테스트 건너뛰기")
                 
         except Exception as e:
             logger.error(f"❌ 초기화 실패: {e}")
