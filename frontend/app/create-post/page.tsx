@@ -494,11 +494,11 @@ export default function CreatePostPage() {
       // 생성된 본문으로 바로 말투 변환 실행
       if (generatedContent.content && selectedInfluencer) {
         try {
-          const response = await apiClient.post('/api/v1/boards/influencer-style/convert', {
+          const response = await apiClient.post('/api/v1/content-enhancement/influencer-tone', {
             influencer_id: selectedInfluencer.influencer_id,
             text: generatedContent.content,
           });
-          setConverted((response as any).converted_text || "");
+          setConverted((response as any).transformed_content || "");
         } catch (convertErr) {
           // console.error("말투 변환 실패:", convertErr);
           // 말투 변환 실패해도 본문 생성은 성공으로 처리
