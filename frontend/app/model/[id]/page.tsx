@@ -1169,7 +1169,7 @@ function ModelDetailContent() {
     if (activeTab === "voice" && !isLoadingVoiceHistory && voiceHistory.length === 0) {
       loadVoiceHistory();
     }
-  }, [activeTab, isLoadingVoiceHistory]); // voiceHistory.length 조건 추가하여 중복 로드 방지
+  }, [activeTab, isLoadingVoiceHistory, voiceHistory.length]); // voiceHistory.length를 의존성 배열에 추가하여 중복 로드 방지
 
   // pending 상태의 음성이 있을 때 주기적으로 상태 확인 (3초마다)
   React.useEffect(() => {
