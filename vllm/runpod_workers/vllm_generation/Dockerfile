@@ -57,15 +57,11 @@ ENV HF_HOME=/app/models
 ENV TRANSFORMERS_CACHE=/app/models
 ENV VLLM_CACHE_ROOT=/app/models
 
-# LoRA 어댑터 디렉토리 생성 및 환경 변수 설정
-RUN mkdir -p /app/lora_adapters
-ENV LORA_ADAPTERS_BASE_PATH=/app/lora_adapters
+# LoRA 어댑터 캐시 디렉토리 생성
+RUN mkdir -p /app/lora_cache
 
-# Idle 상태 유지 설정 (기본값)
+# 모델 사전 로드 환경 변수 설정
 ENV PRELOAD_MODEL=true
-ENV ENABLE_KEEP_ALIVE=true
-ENV KEEP_ALIVE_INTERVAL=300
-ENV KEEP_ALIVE_INFERENCE_INTERVAL=3600
 
 # 헬스체크
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
