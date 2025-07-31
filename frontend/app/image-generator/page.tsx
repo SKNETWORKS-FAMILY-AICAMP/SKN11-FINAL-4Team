@@ -641,6 +641,13 @@ export default function ImageGeneratorPage() {
     }
   }, [activeTab, user])
 
+  // 갤러리 선택기 열릴 때 이미지 가져오기
+  useEffect(() => {
+    if (showGallerySelector && user?.teams?.[0]?.group_id) {
+      fetchGalleryImages(1)
+    }
+  }, [showGallerySelector, user])
+
   // 프롬프트 최적화 테스트 함수
   const handleTestPrompt = async () => {
     if (!prompt.trim() && !getCombinedPromptKeywords()) {
@@ -2358,14 +2365,21 @@ ${testData.message}
                           <div className="text-center mb-8">
                             <Button 
                               variant="outline" 
-                              onClick={() => setShowGallerySelector(true)}
-                              disabled={images.length === 0}
+                              onClick={() => {
+                                setShowGallerySelector(true)
+                                fetchGalleryImages(1) // 갤러리 선택기 열 때 이미지 로드
+                              }}
+                              disabled={galleryLoading}
                               className="px-8 py-3 text-base font-medium transition-all duration-300 hover:scale-105"
                             >
-                              <ImageIcon className="h-5 w-5 mr-2" />
-                              갤러리에서 선택
+                              {galleryLoading ? (
+                                <Loader2 className="h-5 w-5 mr-2 animate-spin" />
+                              ) : (
+                                <ImageIcon className="h-5 w-5 mr-2" />
+                              )}
+                              {galleryLoading ? '이미지 로딩 중...' : '갤러리에서 선택'}
                             </Button>
-                            {images.length === 0 && (
+                            {!galleryLoading && images.length === 0 && (
                               <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
                                 <p className="text-sm text-amber-700">
                                   💡 갤러리에 이미지가 없습니다. 먼저 이미지를 생성해보세요.
@@ -2446,13 +2460,20 @@ ${testData.message}
                                   </label>
                                   <Button 
                                     variant="outline" 
-                                    onClick={() => setShowGallerySelector(true)}
-                                    disabled={images.length === 0}
+                                    onClick={() => {
+                                      setShowGallerySelector(true)
+                                      fetchGalleryImages(1) // 갤러리 선택기 열 때 이미지 로드
+                                    }}
+                                    disabled={galleryLoading}
                                     size="sm"
                                     className="transition-all duration-300 hover:scale-105"
                                   >
-                                    <ImageIcon className="h-4 w-4 mr-2" />
-                                    갤러리에서 추가
+                                    {galleryLoading ? (
+                                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                    ) : (
+                                      <ImageIcon className="h-4 w-4 mr-2" />
+                                    )}
+                                    {galleryLoading ? '로딩 중...' : '갤러리에서 추가'}
                                   </Button>
                                 </div>
                               </div>
@@ -2903,89 +2924,91 @@ ${testData.message}
                 )}
               </div>
             </DialogHeader>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-              {images.map((image) => {
-                const isSelected = gallerySelectedImages.some(img => img.id === image.id)
-                return (
-                  <Card 
-                    key={image.id} 
-                    className={`overflow-hidden cursor-pointer transition-all duration-200 ${
-                      isSelected ? 'ring-2 ring-blue-500 bg-blue-50' : 'hover:shadow-md'
-                    }`} 
-                    onClick={() => handleGalleryImageToggle(image)}
-                  >
-                    <div className="aspect-square relative">
-                      <img
-                        src={image.image_url}
-                        alt={image.prompt}
-                        className="w-full h-full object-cover"
-                      />
-                      {/* 선택 표시 */}
-                      {isSelected && (
-                        <div className="absolute top-2 left-2 bg-blue-500 text-white rounded-full w-6 h-6 flex items-center justify-center">
-                          <span className="text-xs font-bold">✓</span>
+            <div className="space-y-4">
+              {/* 이미지 그리드 */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                {images.map((image) => {
+                  const isSelected = gallerySelectedImages.some(img => img.id === image.id)
+                  return (
+                    <Card 
+                      key={image.id} 
+                      className={`overflow-hidden cursor-pointer transition-all duration-200 ${
+                        isSelected ? 'ring-2 ring-blue-500 bg-blue-50' : 'hover:shadow-md'
+                      }`} 
+                      onClick={() => handleGalleryImageToggle(image)}
+                    >
+                      <div className="aspect-square relative">
+                        <img
+                          src={image.image_url}
+                          alt={image.prompt}
+                          className="w-full h-full object-cover"
+                        />
+                        {/* 선택 표시 */}
+                        {isSelected && (
+                          <div className="absolute top-2 left-2 bg-blue-500 text-white rounded-full w-6 h-6 flex items-center justify-center">
+                            <span className="text-xs font-bold">✓</span>
+                          </div>
+                        )}
+                        <div className="absolute top-2 right-2">
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleDeleteImage(image.id)
+                            }}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
                         </div>
-                      )}
-                      <div className="absolute top-2 right-2">
-                        <Button
-                          size="sm"
-                          variant="destructive"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            handleDeleteImage(image.id)
-                          }}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
                       </div>
-                    </div>
-                    <CardContent className="p-4">
-                      <p className="text-sm text-gray-600 line-clamp-2 mb-2">
-                        {image.prompt}
-                      </p>
-                      <div className="flex justify-between items-center text-xs text-gray-500 mb-3">
-                        <span>{image.width} × {image.height}</span>
-                        <span>{new Date(image.created_at).toLocaleDateString()}</span>
-                      </div>
-                      {/* 빠른 액션 버튼들 */}
-                      <div className="flex gap-1">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            
-                            // WebSocket 연결 확인
-                            if (!wsConnected) {
-                              toast({
-          title: "연결 오류",
-          description: 'WebSocket 연결이 끊어졌습니다. 페이지를 새로고침해주세요.',
-          variant: "destructive",
-          duration: 3000,
-        })
-                              return
-                            }
-                            
-                            const originalPrompt = image.prompt
-                            
-                            // 생성 탭으로 이동하고 모달 열기
-                            setActiveTab("generate")
-                            setPrompt(originalPrompt)
-                            setShowImageModal(true)
-                            setIsGenerating(true)
-                            setGenerationProgress({
-                              status: 'starting',
-                              progress: 0,
-                              message: '이미지 재생성 준비 중...'
-                            })
-                            
-                            // WebSocket으로 재생성 요청
-                            setTimeout(() => {
-                              const selectedSizeData = PRESET_SIZES.find(size => size.id === selectedSize)
+                      <CardContent className="p-4">
+                        <p className="text-sm text-gray-600 line-clamp-2 mb-2">
+                          {image.prompt}
+                        </p>
+                        <div className="flex justify-between items-center text-xs text-gray-500 mb-3">
+                          <span>{image.width} × {image.height}</span>
+                          <span>{new Date(image.created_at).toLocaleDateString()}</span>
+                        </div>
+                        {/* 빠른 액션 버튼들 */}
+                        <div className="flex gap-1">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={(e) => {
+                              e.stopPropagation()
                               
-                              wsSend({
-                                type: 'generate_image',
-                                data: {
+                              // WebSocket 연결 확인
+                              if (!wsConnected) {
+                                toast({
+        title: "연결 오류",
+        description: 'WebSocket 연결이 끊어졌습니다. 페이지를 새로고침해주세요.',
+        variant: "destructive",
+        duration: 3000,
+      })
+                                return
+                              }
+                              
+                              const originalPrompt = image.prompt
+                              
+                              // 생성 탭으로 이동하고 모달 열기
+                              setActiveTab("generate")
+                              setPrompt(originalPrompt)
+                              setShowImageModal(true)
+                              setIsGenerating(true)
+                              setGenerationProgress({
+                                status: 'starting',
+                                progress: 0,
+                                message: '이미지 재생성 준비 중...'
+                              })
+                              
+                              // WebSocket으로 재생성 요청
+                              setTimeout(() => {
+                                const selectedSizeData = PRESET_SIZES.find(size => size.id === selectedSize)
+                                
+                                wsSend({
+                                  type: 'generate_image',
+                                  data: {
                                   prompt: originalPrompt,
                                   selected_styles: getSelectedStylesForAPI(),
                                   width: selectedSizeData?.width || 1024,
@@ -3020,6 +3043,7 @@ ${testData.message}
                 )
               })}
             </div>
+            
             {images.length === 0 && (
               <div className="text-center py-12">
                 <ImageIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
@@ -3027,7 +3051,67 @@ ${testData.message}
                 <p className="text-gray-600">먼저 이미지를 생성해보세요</p>
               </div>
             )}
-            <div className="flex justify-between items-center mt-6 pt-4 border-t">
+            
+            {/* 페이지네이션 */}
+            {totalPages > 1 && (
+              <div className="flex justify-center items-center gap-2 mt-6 pt-4 border-t">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handlePageChange(currentPage - 1)}
+                  disabled={currentPage <= 1}
+                  className="flex items-center gap-1"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                  이전
+                </Button>
+                
+                <div className="flex items-center gap-1">
+                  {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                    let pageNum
+                    if (totalPages <= 5) {
+                      pageNum = i + 1
+                    } else if (currentPage <= 3) {
+                      pageNum = i + 1
+                    } else if (currentPage >= totalPages - 2) {
+                      pageNum = totalPages - 4 + i
+                    } else {
+                      pageNum = currentPage - 2 + i
+                    }
+                    
+                    return (
+                      <Button
+                        key={pageNum}
+                        variant={currentPage === pageNum ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => handlePageChange(pageNum)}
+                        className="w-8 h-8 p-0"
+                      >
+                        {pageNum}
+                      </Button>
+                    )
+                  })}
+                </div>
+                
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handlePageChange(currentPage + 1)}
+                  disabled={currentPage >= totalPages}
+                  className="flex items-center gap-1"
+                >
+                  다음
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+                
+                <span className="text-sm text-gray-500 ml-2">
+                  {currentPage} / {totalPages} 페이지
+                </span>
+              </div>
+            )}
+          </div>
+          
+          <div className="flex justify-between items-center mt-6 pt-4 border-t">
               <div className="text-sm text-gray-600">
                 {gallerySelectedImages.length > 0 && (
                   <span>선택된 이미지: {gallerySelectedImages.length}개</span>
