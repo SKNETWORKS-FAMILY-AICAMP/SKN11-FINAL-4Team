@@ -496,7 +496,7 @@ export default function CreatePostPage() {
         try {
           const response = await apiClient.post('/api/v1/content-enhancement/influencer-tone', {
             influencer_id: selectedInfluencer.influencer_id,
-            text: generatedContent.content,
+            content: generatedContent.content,
           });
           setConverted((response as any).transformed_content || "");
         } catch (convertErr) {
