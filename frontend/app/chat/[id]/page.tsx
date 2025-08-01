@@ -252,13 +252,23 @@ export default function ChatPage() {
         if (data.type === "token") {
           // 스트리밍 토큰 처리
           setMessages(prev => {
-            const newMessages = [...prev];
+            let newMessages = [...prev];
             const lastMessage = newMessages[newMessages.length - 1];
 
-            // 로딩 메시지인 경우 내용을 실제 응답으로 교체
-            if (lastMessage && lastMessage.sender === "bot" && lastMessage.isStreaming && loadingMessage && lastMessage.content === loadingMessage) {
-              // 로딩 메시지를 첫 토큰으로 교체
-              lastMessage.content = data.content;
+            // 로딩 메시지인 경우 메시지를 제거하고 새로운 스트리밍 메시지로 교체
+            if (lastMessage && lastMessage.sender === "bot" && lastMessage.isStreaming && lastMessage.content.includes('중...')) {
+              // 로딩 메시지 제거
+              newMessages = newMessages.slice(0, -1);
+              // 새로운 스트리밍 메시지 추가
+              const newMessageId = Date.now().toString();
+              newMessages.push({
+                id: newMessageId,
+                content: data.content,
+                sender: "bot",
+                timestamp: new Date(),
+                isStreaming: true
+              });
+              lastBotMessageIdRef.current = newMessageId;
               setLoadingMessage(""); // 로딩 메시지 초기화
             } else if (lastMessage && lastMessage.sender === "bot" && lastMessage.isStreaming) {
               // 기존 스트리밍 메시지에 토큰 추가 (중복 제거)
@@ -301,12 +311,22 @@ export default function ChatPage() {
           // 에러 처리
           setIsLoading(false);
           setLoadingMessage(""); // 로딩 메시지 초기화
-          setMessages(prev => [...prev, {
-            id: Date.now().toString(),
-            content: `오류: ${data.message || '알 수 없는 오류가 발생했습니다.'}`,
-            sender: "bot",
-            timestamp: new Date(),
-          }]);
+          setMessages(prev => {
+            // 마지막 메시지가 로딩 메시지인 경우 제거
+            let newMessages = [...prev];
+            const lastMessage = newMessages[newMessages.length - 1];
+            if (lastMessage && lastMessage.sender === "bot" && lastMessage.content.includes('중...')) {
+              newMessages = newMessages.slice(0, -1);
+            }
+            // 에러 메시지 추가
+            newMessages.push({
+              id: Date.now().toString(),
+              content: `오류: ${data.message || '알 수 없는 오류가 발생했습니다.'}`,
+              sender: "bot",
+              timestamp: new Date(),
+            });
+            return newMessages;
+          });
         } else if (data.error_code) {
           // 기존 에러 응답 처리 (하위 호환성)
           setIsLoading(false);
@@ -502,23 +522,43 @@ export default function ChatPage() {
           timeoutRef.current = setTimeout(() => {
             setIsLoading(false);
             setLoadingMessage(""); // 로딩 메시지 초기화
-            setMessages(prev => [...prev, {
-              id: (Date.now() + 1).toString(),
-              content: "응답 시간이 초과되었습니다. 다시 시도해주세요.",
-              sender: "bot",
-              timestamp: new Date(),
-            }]);
+            setMessages(prev => {
+              // 마지막 메시지가 로딩 메시지인 경우 제거
+              let newMessages = [...prev];
+              const lastMessage = newMessages[newMessages.length - 1];
+              if (lastMessage && lastMessage.sender === "bot" && lastMessage.content.includes('중...')) {
+                newMessages = newMessages.slice(0, -1);
+              }
+              // 타임아웃 메시지 추가
+              newMessages.push({
+                id: (Date.now() + 1).toString(),
+                content: "응답 시간이 초과되었습니다. 다시 시도해주세요.",
+                sender: "bot",
+                timestamp: new Date(),
+              });
+              return newMessages;
+            });
           }, 30000);
         } catch (error) {
           console.error("WebSocket 메시지 전송 중 오류:", error);
           setIsLoading(false);
           setLoadingMessage(""); // 로딩 메시지 초기화
-          setMessages(prev => [...prev, {
-            id: (Date.now() + 1).toString(),
-            content: "메시지 전송에 실패했습니다. 다시 시도해주세요.",
-            sender: "bot",
-            timestamp: new Date(),
-          }]);
+          setMessages(prev => {
+            // 마지막 메시지가 로딩 메시지인 경우 제거
+            let newMessages = [...prev];
+            const lastMessage = newMessages[newMessages.length - 1];
+            if (lastMessage && lastMessage.sender === "bot" && lastMessage.content.includes('중...')) {
+              newMessages = newMessages.slice(0, -1);
+            }
+            // 에러 메시지 추가
+            newMessages.push({
+              id: (Date.now() + 1).toString(),
+              content: "메시지 전송에 실패했습니다. 다시 시도해주세요.",
+              sender: "bot",
+              timestamp: new Date(),
+            });
+            return newMessages;
+          });
         }
         return;
       }
@@ -526,23 +566,43 @@ export default function ChatPage() {
       // WebSocket 연결 불가
       setIsLoading(false);
       setLoadingMessage(""); // 로딩 메시지 초기화
-      setMessages(prev => [...prev, {
-        id: (Date.now() + 1).toString(),
-        content: "서버와의 연결이 끊어졌습니다. 재연결 버튼을 눌러주세요.",
-        sender: "bot",
-        timestamp: new Date(),
-      }]);
+      setMessages(prev => {
+        // 마지막 메시지가 로딩 메시지인 경우 제거
+        let newMessages = [...prev];
+        const lastMessage = newMessages[newMessages.length - 1];
+        if (lastMessage && lastMessage.sender === "bot" && lastMessage.content.includes('중...')) {
+          newMessages = newMessages.slice(0, -1);
+        }
+        // 연결 실패 메시지 추가
+        newMessages.push({
+          id: (Date.now() + 1).toString(),
+          content: "서버와의 연결이 끊어졌습니다. 재연결 버튼을 눌러주세요.",
+          sender: "bot",
+          timestamp: new Date(),
+        });
+        return newMessages;
+      });
 
     } catch (error) {
       console.error("메시지 처리 중 오류:", error);
       setIsLoading(false);
       setLoadingMessage(""); // 로딩 메시지 초기화
-      setMessages(prev => [...prev, {
-        id: (Date.now() + 1).toString(),
-        content: "메시지 처리 중 오류가 발생했습니다. 다시 시도해주세요.",
-        sender: "bot",
-        timestamp: new Date(),
-      }]);
+      setMessages(prev => {
+        // 마지막 메시지가 로딩 메시지인 경우 제거
+        let newMessages = [...prev];
+        const lastMessage = newMessages[newMessages.length - 1];
+        if (lastMessage && lastMessage.sender === "bot" && lastMessage.content.includes('중...')) {
+          newMessages = newMessages.slice(0, -1);
+        }
+        // 에러 메시지 추가
+        newMessages.push({
+          id: (Date.now() + 1).toString(),
+          content: "메시지 처리 중 오류가 발생했습니다. 다시 시도해주세요.",
+          sender: "bot",
+          timestamp: new Date(),
+        });
+        return newMessages;
+      });
     }
   };
 
@@ -873,13 +933,13 @@ export default function ChatPage() {
                     >
                       {/* 로딩 메시지는 이탤릭체와 회색으로 표시 */}
                       <p className={`text-sm whitespace-pre-wrap break-words ${
-                        message.isStreaming && loadingMessage && message.content.includes('중...') 
+                        message.isStreaming && message.content.includes('중...') 
                           ? 'text-gray-600 italic' 
                           : ''
                       }`}>
                         {message.content}
                       </p>
-                      {message.isStreaming && loadingMessage && message.content.includes('중...') && (
+                      {message.isStreaming && message.content.includes('중...') && (
                         <div className="flex items-center mt-1">
                           <Loader2 className="h-3 w-3 animate-spin mr-1 text-gray-500" />
                           <span className="text-xs text-gray-500">잠시만 기다려주세요...</span>
