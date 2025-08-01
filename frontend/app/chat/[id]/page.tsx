@@ -817,48 +817,6 @@ export default function ChatPage() {
                   </div>
                 </div>
                 <div className="flex items-center space-x-2 flex-shrink-0 ml-4">
-                  {/* 음소거 토글 */}
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      setIsTTSEnabled(!isTTSEnabled);
-                      // 음소거 시 현재 재생 중인 오디오 정지
-                      if (isTTSEnabled && currentAudio) {
-                        currentAudio.pause();
-                        currentAudio.src = '';
-                        setCurrentAudio(null);
-                        setPlayingMessageId(null);
-                        setPausedMessageId(null);
-                      }
-                    }}
-                    className={`p-1 ${isTTSEnabled ? 'text-blue-600' : 'text-red-500'}`}
-                    title={isTTSEnabled ? "음성 켜짐" : "음소거"}
-                  >
-                    {isTTSEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
-                  </Button>
-                  
-                  {/* 현재 재생 중인 오디오 정지 버튼 */}
-                  {currentAudio && (playingMessageId || pausedMessageId) && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        if (currentAudio) {
-                          currentAudio.pause();
-                          currentAudio.src = '';
-                          setCurrentAudio(null);
-                          setPlayingMessageId(null);
-                          setPausedMessageId(null);
-                        }
-                      }}
-                      className="p-1 text-red-500"
-                      title="재생 정지"
-                    >
-                      <XCircle className="h-4 w-4" />
-                    </Button>
-                  )}
-                  
                   {/* 연결 상태 표시 */}
                   <div className="flex items-center space-x-2">
                     <div className={`w-2 h-2 rounded-full ${connectionStatus === 'connected' ? 'bg-green-500' :
