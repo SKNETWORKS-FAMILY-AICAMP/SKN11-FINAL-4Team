@@ -237,7 +237,17 @@ export default function ImageGeneratorPage() {
   // 웹소켓 훅 사용
   const { isConnected: wsConnected, send: wsSend } = useWebSocket({
     onSessionStatus: (status: SessionStatus) => {
-      setSessionStatus(status)
+      setSessionStatus(prev => {
+        // pod_ready로 이미 ready 상태인 경우, session_status로 starting으로 되돌리지 않음
+        if (prev?.pod_status === 'ready' && status.pod_status === 'starting') {
+          console.log('🔒 Pod ready 상태 보호: starting으로 되돌리지 않음')
+          return {
+            ...status,
+            pod_status: 'ready' // ready 상태 유지
+          }
+        }
+        return status
+      })
       if (status.session_remaining_seconds !== undefined) {
         setClientSessionTime(status.session_remaining_seconds)
       }
@@ -256,15 +266,16 @@ export default function ImageGeneratorPage() {
       switch (message.type) {
         case 'pod_ready':
           if (message.data) {
+            console.log('🎯 Pod ready 메시지 수신:', message.data)
             setSessionStatus(prev => ({
               ...prev,
               pod_status: 'ready',
               pod_id: message.data.pod_id || prev?.pod_id
             }))
             toast({
-              title: "Pod 준비 완료",
-              description: message.data.message || 'Pod가 준비되었습니다. 이미지 생성이 가능합니다.',
-              duration: 3000,
+              title: "🎨 RunPod 준비 완료!",
+              description: message.data.message || '🎨 RunPod가 준비 완료되었습니다! 이제 이미지 생성이 가능합니다.',
+              duration: 5000,
             })
           }
           break
