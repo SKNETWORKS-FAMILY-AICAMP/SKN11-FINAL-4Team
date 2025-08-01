@@ -494,10 +494,11 @@ export default function CreatePostPage() {
       // 생성된 본문으로 바로 말투 변환 실행
       if (generatedContent.content && selectedInfluencer) {
         try {
-          const response = await apiClient.post('/api/v1/content-enhancement/influencer-tone', {
-            influencer_id: selectedInfluencer.influencer_id,
-            text: generatedContent.content,
-          });
+          const response = await influencerToneAPI.transformWithInfluencerTone(
+            selectedInfluencer.influencer_id,
+            generatedContent.content,
+            "instagram"
+          );
           setConverted((response as any).transformed_content || "");
         } catch (convertErr) {
           // console.error("말투 변환 실패:", convertErr);
@@ -533,11 +534,11 @@ export default function CreatePostPage() {
     }
 
     try {
-      const response = await apiClient.post('/api/v1/content-enhancement/influencer-tone', {
-        influencer_id: selectedInfluencer.influencer_id,
-        content: generated.content,  // AI 생성 결과 사용
-        platform: "instagram"
-      });
+      const response = await influencerToneAPI.transformWithInfluencerTone(
+        selectedInfluencer.influencer_id,
+        generated.content,
+        "instagram"
+      );
       setConverted((response as any).transformed_content || "");
     } catch (err) {
       setError("인플루언서 말투 변환에 실패했습니다.");
